@@ -249,8 +249,10 @@ Diagnostic rules (stable identifiers; each is documented and tested):
 Rules gate on their own inputs the same way structural validation does: an
 `unknown-stage` node contributes no port, contract, parameter, or capability
 diagnostics of its own, so the report carries no cascade noise. Diagnostics
-appear in document order (nodes, then edges, then result slots, then
-capabilities), which makes the report deterministic. Format-version checking
+appear in document order in five phases — nodes, then edges, then result
+slots, then connectivity (node order; inputs before outputs, ports in
+specification order), then capabilities (ordinal token order) — which makes
+the report deterministic element for element. Format-version checking
 is not a compiler rule: a `GraphDocument` instance always carries the current
 version by construction, and byte-level version rejection belongs to the
 reader.

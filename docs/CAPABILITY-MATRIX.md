@@ -27,7 +27,7 @@ Every row starts at **Research**. Nothing in this matrix currently claims implem
 | Immutable typed source, flow, and sink blueprints | P0 | M0 | Research | Composition does not execute work; instances are thread-safe and reusable. |
 | Reusable `Flow<TIn,TOut>` composition | P0 | M0 | Research | Reusing one fragment creates independent node identities and runtime state. |
 | Closed runnable graphs | P0 | M0 | Research | Validation can distinguish open ports from a materializable graph. |
-| Named graph, stage, port, and revision identity | P0 | M0 | Research | Deterministic serialization, collision checks, and compatible revision rules. |
+| Named graph, stage, port, and revision identity | P0 | M0 | Implemented | Deterministic serialization, collision checks, and compatible revision rules. |
 | Runtime materialization | P0 | M2 | Research | Each run allocates independent runtime resources and exposes completion. |
 | Typed result slots | P1 | M2 | Research | Source, flow, sink, and lifecycle results are declared as typed named slots and resolved per run without persisting runtime objects; a run rejects slots from another graph identity, revision, or import scope. |
 | Named multiple results | P1 | M4 | Research | Results remain type-safe and versionable across distributed execution. |
@@ -171,7 +171,7 @@ C# names should follow .NET expectations where possible. If the Akka.NET behavio
 | Multi-silo placement/failover harness | P0 | M3 | Research |
 | OpenTelemetry metrics, traces, and context propagation | P1 | M5 | Research |
 | Stage/run monitor snapshots | P1 | M5 | Research |
-| Compatibility and golden serialization tests | P0 | M0 onward | Research |
+| Compatibility and golden serialization tests | P0 | M0 onward | Implemented |
 | Load, bounded-memory, and recovery benchmarks | P1 | M8 | Research |
 
 ## Primary references

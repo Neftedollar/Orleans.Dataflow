@@ -20,6 +20,16 @@ Akka.NET Streams is an important capability reference, not an implementation to 
 - Extensible source and sink adapters without coupling the core graph model to every integration.
 - Tests, documentation, fault semantics, and compatibility gates are part of the API contract.
 
+## Current state
+
+The definition core exists: stable identifiers, the immutable graph document
+with structural validation, canonical serialization with golden compatibility
+fixtures, graph fingerprints, stage catalog contracts, and a graph compiler
+with stable diagnostic rules. There is no public authoring API and no runtime
+yet; nothing here can execute a pipeline. The
+[capability matrix](docs/CAPABILITY-MATRIX.md) tracks honest per-capability
+status, and the [roadmap](docs/ROADMAP.md) orders the work ahead.
+
 ## Development policy before 1.0.0
 
 Until 1.0.0, development is intentionally performed through frequent, reviewed commits directly to `main`. Pull requests and package publication begin with the 1.0.0 release process. Repository documentation remains explicit about incomplete behavior and must not make production-readiness claims without qualification evidence.
