@@ -27,7 +27,7 @@ would exist to prevent (two `RunnableGraph<long>` values stay
 interchangeable).
 
 Factories live on non-generic companion classes: `Source.From(...)`,
-`Flow.For<T>()`, `Sink.Ignore<T>()`, `Sink.Fold(...)`. `Flow.For<T>()` and
+`Flow.For<T>()`, `Sink.Ignore<T>()`, `Sink.Aggregate(...)`. `Flow.For<T>()` and
 `Flow.Create<T>()` are inference-identical (the type argument is required
 either way, being return-position-only), so the name is chosen for
 readability next to `Source.From`.
@@ -43,7 +43,7 @@ result — one more reason everything is instance.
 
 ### 3. Result exposure: carrier plus mandatory slot name (the hybrid)
 
-`Sink.Fold` and every result-bearing sink factory return
+`Sink.Aggregate` and every result-bearing sink factory return
 `SinkWithResult<TIn, TResult>`, usable wherever `Sink<TIn>` is accepted only
 by explicit conversion that discards the result. `To` overloads:
 
@@ -66,12 +66,12 @@ RunnableGraph To<TResult>(SinkWithResult<T, TResult> sink, string slotName, out 
   tuple; the C# `ValueTuple` names do not survive into F#, so both forms
   earn their place.
 - Sink-factory lambda overloads fix the inference hole where
-  `Sink.Fold(0L, (count, _) => ...)` cannot infer its element type
+  `Sink.Aggregate(0L, (count, _) => ...)` cannot infer its element type
   (`CS0411`; partial type-argument lists remain unsupported, `CS0305`):
 
 ```csharp
 RunnableGraph To<TResult>(Func<SinkFactory<T>, SinkWithResult<T, TResult>> sink, string slotName, out ResultSlot<TResult> slot);
-// orders.Via(normalize).To(s => s.Fold(0L, (count, _) => count + 1), "processed", out var processed);
+// orders.Via(normalize).To(s => s.Aggregate(0L, (count, _) => count + 1), "processed", out var processed);
 ```
 
   compiles with zero type arguments and zero lambda annotations, because the
@@ -87,12 +87,21 @@ common local case: two anonymous graphs built by the same code share their
 identity, so a slot of one resolves against a run of the other silently.
 
 Amendment: a slot binds to the `GraphFingerprint` of the document that
-declared it, and a `RunHandle` accepts a slot exactly when the fingerprints
-are equal. Content-identical documents declare identical slots, so
-acceptance is semantically sound; any structural difference changes the
-fingerprint and the resolution fails loudly. Named deployable pipelines keep
-`GraphId` plus revision as their upgrade lineage; the fingerprint remains
-the per-document identity in both worlds.
+declared it, and any structural difference changes the fingerprint so the
+resolution fails loudly.
+
+Implementation of the first authoring slice exposed a second gap: the
+fingerprint identifies shape, not behavior. A lambda graph's document never
+records what its delegates compute, so two graphs of one shape share a
+fingerprint even when one counts and the other sums. A slot of a
+`nondeployable` graph therefore additionally binds to a per-instance
+authoring nonce allocated when the graph is closed; resolving a slot against
+a run of a different instance fails loudly even when the shapes agree. The
+nonce never enters the document and does not affect serialization or
+fingerprints. Registered stages carry their identity and parameters in the
+document, so slots of named deployable pipelines will bind by fingerprint
+and `GraphId`-plus-revision lineage without an instance nonce, once those
+exist.
 
 ### 5. Completion and shutdown are `RunHandle` intrinsics
 

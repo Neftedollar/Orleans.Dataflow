@@ -31,6 +31,9 @@ public readonly record struct CapabilityToken
     /// <summary>The text of the <see cref="Nondeployable"/> token.</summary>
     private const string NondeployableText = "nondeployable";
 
+    /// <summary>The text of the <see cref="EphemeralIdentity"/> token.</summary>
+    private const string EphemeralIdentityText = "ephemeral-identity";
+
     private readonly string? _value;
 
     private CapabilityToken(string value) => _value = value;
@@ -47,6 +50,18 @@ public readonly record struct CapabilityToken
     /// of whoever wrote it.
     /// </remarks>
     public static CapabilityToken Nondeployable { get; } = new(NondeployableText);
+
+    /// <summary>Gets the token marking a graph whose node identities are machine-generated.</summary>
+    /// <value>The token <c>ephemeral-identity</c>.</value>
+    /// <remarks>
+    /// Auto-allocated sequential node ids are deterministic for one authoring pass but not edit-stable:
+    /// inserting a stage renumbers everything after it. A graph that declares this token therefore has no
+    /// identities a durable pipeline could anchor checkpoints, upgrades, or resumes to, and deployability
+    /// validation rejects it for durable use (ADR 0004 section 6). The token is orthogonal to
+    /// <see cref="Nondeployable"/>: a fully named graph of lambdas is nondeployable but not ephemeral, and
+    /// a pipeline of registered stages with unnamed occurrences is the reverse.
+    /// </remarks>
+    public static CapabilityToken EphemeralIdentity { get; } = new(EphemeralIdentityText);
 
     /// <summary>
     /// Gets the validated token text.

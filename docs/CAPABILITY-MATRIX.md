@@ -24,8 +24,8 @@ Every row starts at **Research**. Nothing in this matrix currently claims implem
 
 | Capability | Tier | Target | Status | Required semantic proof |
 |---|---:|---:|---|---|
-| Immutable typed source, flow, and sink blueprints | P0 | M0 | Research | Composition does not execute work; instances are thread-safe and reusable. |
-| Reusable `Flow<TIn,TOut>` composition | P0 | M0 | Research | Reusing one fragment creates independent node identities and runtime state. |
+| Immutable typed source, flow, and sink blueprints | P0 | M0 | Implemented | Composition does not execute work; instances are thread-safe and reusable. |
+| Reusable `Flow<TIn,TOut>` composition | P0 | M0 | Implemented | Reusing one fragment creates independent node identities and runtime state. |
 | Closed runnable graphs | P0 | M0 | Research | Validation can distinguish open ports from a materializable graph. |
 | Named graph, stage, port, and revision identity | P0 | M0 | Implemented | Deterministic serialization, collision checks, and compatible revision rules. |
 | Runtime materialization | P0 | M2 | Research | Each run allocates independent runtime resources and exposes completion. |

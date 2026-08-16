@@ -41,19 +41,20 @@ Flow<OrderCreated, OrderDocument> normalize =
 
 RunnableGraph graph = orders
     .Via(normalize)
-    .To(s => s.Fold(0L, (count, _) => count + 1), "processed", out ResultSlot<long> processed);
+    .To(s => s.Aggregate(0L, (count, _) => count + 1), "processed", out ResultSlot<long> processed);
 
 await using RunHandle run = await host.MaterializeAsync(graph, cancellationToken);
 long count = await run.GetValueAsync(processed, cancellationToken);
 ```
 
-Counter-example, kept deliberately: `To(Sink.Fold(0L, (count, _) => count + 1), ...)`
+Counter-example, kept deliberately: `To(Sink.Aggregate(0L, (count, _) => count + 1), ...)`
 does not compile (`CS0411` — the element type appears only as an implicit
 lambda parameter, and C# does not flow the outer call's element type inward).
 The sink-factory lambda pins the element type from the source, which is why
-the `s => s.Fold(...)` form needs zero type arguments and zero annotations.
+the `s => s.Aggregate(...)` form needs zero type arguments and zero annotations.
 
-Reuse of one flow in two graphs (independent node identities per import):
+Reuse of one flow in two graphs (each closure numbers its own occurrences;
+the two documents are independent even where the generated ids coincide):
 
 ```csharp
 Flow<OrderCreated, OrderDocument> normalize = /* as above */;
@@ -96,18 +97,36 @@ Flow<OrderDocument, PricedOrder> price =
 
 Decided by [ADR 0004](../architecture/0004-csharp-api-baseline.md) on compile
 evidence: the hybrid of a typed carrier and a mandatory slot name.
-`Sink.Fold` and every result-bearing factory return
+`Sink.Aggregate` and every result-bearing factory return
 `SinkWithResult<TIn, TResult>`; `To` offers three instance overloads —
 `To(Sink<T>)`, the tuple form `To(sinkWithResult, "name")`, and the fluent
 form `To(sinkWithResult, "name", out ResultSlot<TResult> slot)` — plus
-sink-factory lambda variants (`To(s => s.Fold(...), "name", out var slot)`)
+sink-factory lambda variants (`To(s => s.Aggregate(...), "name", out var slot)`)
 that make inference total. The mandatory name separates overloads by arity
 (dropping a result is always explicit), and gives every slot an
 author-stable durable identity instead of a positional machine name.
 
 Attaching one sink value twice yields two distinct slots (two names), and a
-slot binds to the fingerprint of the document that declared it, never to the
-sink value itself.
+slot binds to the fingerprint of the document that declared it — plus, for
+nondeployable graphs, the built instance's authoring nonce (ADR 0004
+section 4) — never to the sink value itself.
+
+## Local stage vocabulary
+
+The lambda-first slice authors against five built-in `local` stages:
+`from-enumerable`, `select`, `where`, `fold`, `ignore`, all major version 1,
+registered in the public `LocalStageCatalog` so every authored document
+validates cleanly through `GraphCompiler`. Because local graphs are typed by
+C# generics and delegates never enter the document, every local port
+declares the single opaque element contract `local-opaque@v1`, parameters
+are the empty payload under `local-parameters@v1`, and the fold's result
+port carries `local-fold-result@v1`. The document stage id stays `fold` —
+the semantic name — while the C# surface spells it `Sink.Aggregate` per the
+naming rules and the F# frontend will spell it `Sink.fold`. Delegates and
+the aggregate seed live in an internal binding table on `RunnableGraph`,
+keyed by node id, for the local runtime to bind at materialization; that
+table is the concrete meaning of the `nondeployable` token every such
+document declares, and auto-named occurrences add `ephemeral-identity`.
 
 ## Delegates and deployability
 
@@ -123,10 +142,11 @@ common case.
 ## Run control
 
 `RunHandle` is the single control surface: result resolution
-(`GetValueAsync(slot)`), lifecycle observation (completion as a slot),
-shutdown/kill-switch controls (slots as well), and `IAsyncDisposable` for
-deterministic teardown. `host.MaterializeAsync(graph)` is the only way work
-starts; materializing the same graph twice yields independent runs.
+(`GetValueAsync(slot)`), completion awaiting and shutdown/kill-switch as
+intrinsics (ADR 0004 section 5 — they are properties of every run, not
+declared slots), and `IAsyncDisposable` for deterministic teardown.
+`host.MaterializeAsync(graph)` is the only way work starts; materializing
+the same graph twice yields independent runs.
 
 ## Open questions
 

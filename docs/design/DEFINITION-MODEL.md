@@ -80,8 +80,10 @@ ResultSlotDefinition
 
 Capability tokens mark facts validation and hosts must honor. The initial
 vocabulary: `nondeployable` (contains locally registered behavior and must
-never be persisted, resumed, or placed remotely). Further tokens are added
-with the features that need them.
+never be persisted, resumed, or placed remotely) and `ephemeral-identity`
+(node identities are machine-generated and not edit-stable, so nothing
+durable can anchor to them; ADR 0004 section 6). The tokens are orthogonal.
+Further tokens are added with the features that need them.
 
 ### Structural invariants (enforced at document construction)
 
