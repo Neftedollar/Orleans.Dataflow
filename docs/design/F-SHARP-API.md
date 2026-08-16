@@ -228,6 +228,21 @@ The phantom `'Actor` parameter must not be erased: it prevents a structurally si
 
 The F# package is optimized for F# callers. The main C# package remains the .NET-friendly surface. Do not contort F# functions into `System.Func`, tupled OO methods, or C# overload families merely to create a second C# facade.
 
+**Binding rule.** The F# frontend binds to the shared, language-neutral
+layers — the fragment algebra (`Orleans.Dataflow.Authoring.GraphFragment`
+and `GraphFragmentComposer`), the definition plane, and the shared value
+types (`RunnableGraph`, `ResultSlot<T>`, `GraphDocument`, fingerprints) —
+and NEVER to the C# fluent facade. `Source<T>.Via(...)` is one frontend's
+spelling over the algebra; wrapping it from F# would import every C#-ism
+(instance-method chaining, `Func<>` conversions, `out` parameters,
+overload families) into a package whose entire reason to exist is not
+having them. A C# fluent API can never be idiomatic F#; the algebra can
+serve both because it is functions over immutable values. Where a piece the
+F# facade needs is currently internal to the C# package (the local stage
+vocabulary and binding-table types), the answer is a public language-neutral
+seam added when M7 starts — never `InternalsVisibleTo` to the F# package
+and never a detour through the C# fluent types.
+
 Where types cross the shared graph core, use CLR-neutral opaque types and immutable descriptors. Keep F# records and discriminated unions inside the F# package unless their .NET representation and compatibility policy are deliberately public.
 
 ## Expensive mistakes to avoid
