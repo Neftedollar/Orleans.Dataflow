@@ -10,7 +10,7 @@ ADR 0001 deliberately left open whether materialized values thread through
 authoring types as an extra generic parameter (`Source<TOut, TMat>`,
 Akka-style) or live behind typed named slots resolved from a run handle. The
 product direction of 2026-08-16 resolves this in favor of slots. The frontend
-order is unchanged: C# is the first public frontend, and the F# frontend
+order is unchanged: C# is the first public frontend, and the equal F# frontend
 follows as a separate package over the same core.
 
 ## Decision

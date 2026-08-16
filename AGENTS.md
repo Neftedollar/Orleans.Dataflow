@@ -6,7 +6,7 @@ This file is the durable working agreement for automated contributors. It applie
 
 - Orleans.Dataflow is an independent project. Do not couple its architecture to Orleans.SearchableStorage or Orleans.FSharp.
 - Build an original Orleans-native dataflow system. Akka.NET Streams is a capability and semantics reference, not source code to port.
-- Design the C# API first, while preserving a language-neutral graph model which can support an idiomatic F# API later.
+- C# and F# are equal public frontends over one language-neutral graph model; the C# API is designed and built first, and no C# or core decision may make the idiomatic F# API impossible.
 - Keep source configuration, reusable flow configuration, and sink configuration distinct.
 - Treat flows and complete graph definitions as immutable, reusable, composable values.
 - Do not serialize delegates, closures, expression trees containing captured state, or language-specific function representations as durable topology.

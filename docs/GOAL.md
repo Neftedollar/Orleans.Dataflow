@@ -6,7 +6,7 @@ Build Orleans.Dataflow as a typed, composable, Orleans-native dataflow system fo
 
 The system must let an application describe an immutable graph from typed sources, through reusable typed flows, to typed sinks; validate that graph before execution; materialize it into an observable runtime; apply bounded backpressure across local and distributed boundaries; and expose precise lifecycle, ordering, failure, supervision, and durability behavior.
 
-The first public frontend is C#. The graph model and runtime contracts must remain language-neutral so that a later F# frontend can be idiomatic rather than an overload-heavy copy of the C# API.
+C# and F# are equal public frontends over one language-neutral graph model and runtime; C# is simply built first. The graph model and runtime contracts must remain language-neutral so that the F# frontend is idiomatic rather than an overload-heavy copy of the C# API, and the F# design constraints bind C# and core decisions from the start.
 
 Akka.NET Streams is the primary capability benchmark. The goal is logical capability parity where those capabilities make sense for Orleans, plus Orleans-native capabilities which follow from virtual actors, grains, reminders, Orleans Streams, placement, persistence, and cluster lifecycle. This is not a source or implementation port.
 
@@ -133,7 +133,7 @@ An optional future `Orleans.Dataflow.OrleansFSharp` package may integrate with t
 ## Constraints
 
 - Independent repository and package family.
-- C# API and runtime first; F# implementation begins after the C# API and its parity gate are substantially complete.
+- C# and F# are equal frontends; the C# API and runtime are built first, and the F# implementation begins once the C# API and its parity gate are substantially complete.
 - Public documentation and examples are in English.
 - No package publication, tag, or release before the explicit 1.0.0 decision.
 - Direct, frequent, reviewed commits to `main` are the temporary pre-1.0 workflow.
@@ -152,7 +152,7 @@ Version 1.0.0 is eligible for release only when all of these are true:
 6. Every shipped adapter states its delivery and idempotency boundary and has fault tests for it.
 7. Runtime resources are bounded by default and measured under representative load.
 8. OpenTelemetry metrics/traces and diagnostic graph inspection are documented and tested.
-9. The F# compatibility constraints are validated against a prototype frontend, even if the separate F# package is scheduled immediately after the C# release candidate.
+9. The F# frontend is implemented as an equal API over the same graph algebra and runtime, and F#/C# compatibility tests prove that both frontends produce compatible graph definitions with identical runtime semantics.
 10. API reference, conceptual documentation, migration/versioning policy, examples, and a clean-room getting-started verification are complete.
 11. Package contents, deterministic builds, dependency locks, signing/provenance, and release automation pass their gates.
 12. A separate explicit release decision authorizes the first tag and NuGet publication.

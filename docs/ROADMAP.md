@@ -110,12 +110,13 @@ Deliverables:
 
 Exit criteria:
 
-- every criterion in [GOAL.md](GOAL.md) is evidenced;
-- the user explicitly approves the 1.0 release operation.
+- every C#-scoped criterion in [GOAL.md](GOAL.md) is evidenced.
+
+The 1.0 release decision itself additionally requires the M6 F# frontend: the two frontends ship as equals.
 
 ## M6 — Idiomatic F# frontend
 
-This milestone may begin earlier as soon as the C# graph contract and parity surface are substantially complete. A compile-only prototype remains part of earlier milestones so C# decisions cannot make the F# surface impossible.
+The F# API is an equal public frontend, not an optional add-on; 1.0 requires it. This milestone may begin earlier as soon as the C# graph contract and parity surface are substantially complete. A compile-only prototype remains part of earlier milestones so C# decisions cannot make the F# surface impossible.
 
 Deliverables:
 
@@ -130,7 +131,9 @@ Exit criteria:
 
 - representative F# applications require no user-authored C# class;
 - public names follow current F# component design guidance;
-- the F# API does not depend on overload guessing, SRTP tricks, serialized closures, or mutable builders.
+- the F# API does not depend on overload guessing, SRTP tricks, serialized closures, or mutable builders;
+- F#/C# compatibility tests prove both frontends produce compatible graph definitions with identical runtime semantics;
+- every criterion in [GOAL.md](GOAL.md) is evidenced, and the user explicitly approves the 1.0 release operation.
 
 ## Work selection rule
 
