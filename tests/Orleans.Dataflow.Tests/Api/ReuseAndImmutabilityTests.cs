@@ -55,6 +55,13 @@ public sealed class ReuseAndImmutabilityTests
 
         _ = orders.Where(order => order.IsValid);
         _ = orders.Select(OrderDocument.FromEvent);
+        _ = orders.Buffer(new BufferOptions { Capacity = 4, OverflowPolicy = OverflowPolicy.DropOldest });
+        _ = orders.SelectAsync(
+            new ParallelismOptions { MaxConcurrency = 2 },
+            (order, _) => Task.FromResult(order.Total));
+        _ = orders.SelectAsyncUnordered(
+            new ParallelismOptions { MaxConcurrency = 2 },
+            (order, _) => Task.FromResult(order.Total));
         _ = orders.Via(Flow.For<OrderCreated>().Where(order => order.IsValid));
         _ = orders.To(s => s.Aggregate(0L, (count, _) => count + 1), "processed", out ResultSlot<long> _);
 
@@ -72,6 +79,13 @@ public sealed class ReuseAndImmutabilityTests
 
         _ = valid.Select(OrderDocument.FromEvent);
         _ = valid.Where(order => order.Total > 5m);
+        _ = valid.Buffer(new BufferOptions { Capacity = 4, OverflowPolicy = OverflowPolicy.Fail });
+        _ = valid.SelectAsync(
+            new ParallelismOptions { MaxConcurrency = 2 },
+            (order, _) => Task.FromResult(order.Total));
+        _ = valid.SelectAsyncUnordered(
+            new ParallelismOptions { MaxConcurrency = 2 },
+            (order, _) => Task.FromResult(order.Total));
         _ = valid.Via(Flow.For<OrderCreated>().Where(order => order.Total > 5m));
 
         Assert.Equal(before, Bytes(valid));

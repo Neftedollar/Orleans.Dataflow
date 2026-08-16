@@ -97,16 +97,30 @@ internal static class RuntimeFixtures
             edges,
             []);
 
-    /// <summary>Builds one node of the local vocabulary.</summary>
+    /// <summary>Builds one node of the local vocabulary whose behavior is only a delegate.</summary>
     /// <param name="id">The node identifier text, such as <c>stage-1</c>.</param>
     /// <param name="stage">The stage identifier text, such as <c>from-enumerable</c>.</param>
-    /// <returns>The node.</returns>
+    /// <returns>The node, carrying the empty payload under the delegate-only parameter contract.</returns>
     internal static StageNode Node(string id, string stage) =>
+        Node(id, stage, "local-parameters", "{}");
+
+    /// <summary>Builds one node of the local vocabulary with a parameter payload of its own.</summary>
+    /// <param name="id">The node identifier text, such as <c>stage-2</c>.</param>
+    /// <param name="stage">The stage identifier text, such as <c>buffer</c>.</param>
+    /// <param name="contract">The parameter contract identifier text.</param>
+    /// <param name="parameters">The parameter payload as JSON text.</param>
+    /// <returns>The node.</returns>
+    /// <remarks>
+    /// The contract and the payload are spelled out rather than derived, because the payloads worth
+    /// building by hand are the ones the authoring API cannot produce: a capacity of zero, a policy no
+    /// member declares, a member this vocabulary never wrote.
+    /// </remarks>
+    internal static StageNode Node(string id, string stage, string contract, string parameters) =>
         StageNode.Create(
             NodeId.Create(id),
             StageRef.Create(ProviderId.Create("local"), StageId.Create(stage), 1),
-            ContractReference.Create(ContractId.Create("local-parameters"), 1),
-            CanonicalJsonValue.Parse("{}"));
+            ContractReference.Create(ContractId.Create(contract), 1),
+            CanonicalJsonValue.Parse(parameters));
 
     /// <summary>Builds the edge from one node's output port to another's input port.</summary>
     /// <param name="from">The producing node's identifier text.</param>

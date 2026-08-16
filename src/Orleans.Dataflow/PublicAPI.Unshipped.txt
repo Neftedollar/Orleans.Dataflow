@@ -7,15 +7,42 @@ Orleans.Dataflow.Authoring.GraphFragment.Nodes.get -> System.Collections.Generic
 Orleans.Dataflow.Authoring.GraphFragment.OpenInputs.get -> System.Collections.Generic.IReadOnlyList<Orleans.Dataflow.Definition.PortAddress>!
 Orleans.Dataflow.Authoring.GraphFragment.OpenOutputs.get -> System.Collections.Generic.IReadOnlyList<Orleans.Dataflow.Definition.PortAddress>!
 Orleans.Dataflow.Authoring.GraphFragmentComposer
+Orleans.Dataflow.BufferOptions
+Orleans.Dataflow.BufferOptions.<Clone>$() -> Orleans.Dataflow.BufferOptions!
+Orleans.Dataflow.BufferOptions.BufferOptions() -> void
+Orleans.Dataflow.BufferOptions.Capacity.get -> int
+Orleans.Dataflow.BufferOptions.Capacity.init -> void
+Orleans.Dataflow.BufferOptions.Equals(Orleans.Dataflow.BufferOptions? other) -> bool
+Orleans.Dataflow.BufferOptions.OverflowPolicy.get -> Orleans.Dataflow.OverflowPolicy
+Orleans.Dataflow.BufferOptions.OverflowPolicy.init -> void
+Orleans.Dataflow.BufferOverflowException
+Orleans.Dataflow.BufferOverflowException.BufferOverflowException() -> void
+Orleans.Dataflow.BufferOverflowException.BufferOverflowException(string! message) -> void
+Orleans.Dataflow.BufferOverflowException.BufferOverflowException(string! message, System.Exception! innerException) -> void
 Orleans.Dataflow.Flow
 Orleans.Dataflow.Flow<TIn, TOut>
+Orleans.Dataflow.Flow<TIn, TOut>.Buffer(Orleans.Dataflow.BufferOptions! options) -> Orleans.Dataflow.Flow<TIn, TOut>!
 Orleans.Dataflow.Flow<TIn, TOut>.Select<TNext>(System.Func<TOut, TNext>! selector) -> Orleans.Dataflow.Flow<TIn, TNext>!
+Orleans.Dataflow.Flow<TIn, TOut>.SelectAsync<TNext>(Orleans.Dataflow.ParallelismOptions! options, System.Func<TOut, System.Threading.CancellationToken, System.Threading.Tasks.Task<TNext>!>! selector) -> Orleans.Dataflow.Flow<TIn, TNext>!
+Orleans.Dataflow.Flow<TIn, TOut>.SelectAsyncUnordered<TNext>(Orleans.Dataflow.ParallelismOptions! options, System.Func<TOut, System.Threading.CancellationToken, System.Threading.Tasks.Task<TNext>!>! selector) -> Orleans.Dataflow.Flow<TIn, TNext>!
 Orleans.Dataflow.Flow<TIn, TOut>.Via<TNext>(Orleans.Dataflow.Flow<TOut, TNext>! flow) -> Orleans.Dataflow.Flow<TIn, TNext>!
 Orleans.Dataflow.Flow<TIn, TOut>.Where(System.Func<TOut, bool>! predicate) -> Orleans.Dataflow.Flow<TIn, TOut>!
 Orleans.Dataflow.LocalDataflowHost
 Orleans.Dataflow.LocalDataflowHost.LocalDataflowHost() -> void
 Orleans.Dataflow.LocalDataflowHost.MaterializeAsync(Orleans.Dataflow.RunnableGraph! graph, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.ValueTask<Orleans.Dataflow.RunHandle!>
 Orleans.Dataflow.LocalStageCatalog
+Orleans.Dataflow.OverflowPolicy
+Orleans.Dataflow.OverflowPolicy.Backpressure = 0 -> Orleans.Dataflow.OverflowPolicy
+Orleans.Dataflow.OverflowPolicy.DropBuffer = 3 -> Orleans.Dataflow.OverflowPolicy
+Orleans.Dataflow.OverflowPolicy.DropNewest = 2 -> Orleans.Dataflow.OverflowPolicy
+Orleans.Dataflow.OverflowPolicy.DropOldest = 1 -> Orleans.Dataflow.OverflowPolicy
+Orleans.Dataflow.OverflowPolicy.Fail = 4 -> Orleans.Dataflow.OverflowPolicy
+Orleans.Dataflow.ParallelismOptions
+Orleans.Dataflow.ParallelismOptions.<Clone>$() -> Orleans.Dataflow.ParallelismOptions!
+Orleans.Dataflow.ParallelismOptions.Equals(Orleans.Dataflow.ParallelismOptions? other) -> bool
+Orleans.Dataflow.ParallelismOptions.MaxConcurrency.get -> int
+Orleans.Dataflow.ParallelismOptions.MaxConcurrency.init -> void
+Orleans.Dataflow.ParallelismOptions.ParallelismOptions() -> void
 Orleans.Dataflow.ResultSlot<TResult>
 Orleans.Dataflow.ResultSlot<TResult>.Equals(Orleans.Dataflow.ResultSlot<TResult> other) -> bool
 Orleans.Dataflow.ResultSlot<TResult>.Graph.get -> Orleans.Dataflow.Definition.GraphFingerprint
@@ -40,7 +67,10 @@ Orleans.Dataflow.SinkWithResult<TIn, TResult>
 Orleans.Dataflow.SinkWithResult<TIn, TResult>.ToSink() -> Orleans.Dataflow.Sink<TIn>!
 Orleans.Dataflow.Source
 Orleans.Dataflow.Source<T>
+Orleans.Dataflow.Source<T>.Buffer(Orleans.Dataflow.BufferOptions! options) -> Orleans.Dataflow.Source<T>!
 Orleans.Dataflow.Source<T>.Select<TOut>(System.Func<T, TOut>! selector) -> Orleans.Dataflow.Source<TOut>!
+Orleans.Dataflow.Source<T>.SelectAsync<TOut>(Orleans.Dataflow.ParallelismOptions! options, System.Func<T, System.Threading.CancellationToken, System.Threading.Tasks.Task<TOut>!>! selector) -> Orleans.Dataflow.Source<TOut>!
+Orleans.Dataflow.Source<T>.SelectAsyncUnordered<TOut>(Orleans.Dataflow.ParallelismOptions! options, System.Func<T, System.Threading.CancellationToken, System.Threading.Tasks.Task<TOut>!>! selector) -> Orleans.Dataflow.Source<TOut>!
 Orleans.Dataflow.Source<T>.To(Orleans.Dataflow.Sink<T>! sink) -> Orleans.Dataflow.RunnableGraph!
 Orleans.Dataflow.Source<T>.To(System.Func<Orleans.Dataflow.SinkFactory<T>!, Orleans.Dataflow.Sink<T>!>! sink) -> Orleans.Dataflow.RunnableGraph!
 Orleans.Dataflow.Source<T>.To<TResult>(Orleans.Dataflow.SinkWithResult<T, TResult>! sink) -> Orleans.Dataflow.RunnableGraph!
@@ -54,7 +84,13 @@ Orleans.Dataflow.Source<T>.Where(System.Func<T, bool>! predicate) -> Orleans.Dat
 override Orleans.Dataflow.Authoring.GraphFragment.Equals(object? obj) -> bool
 override Orleans.Dataflow.Authoring.GraphFragment.GetHashCode() -> int
 override Orleans.Dataflow.Authoring.GraphFragment.ToString() -> string!
+override Orleans.Dataflow.BufferOptions.Equals(object? obj) -> bool
+override Orleans.Dataflow.BufferOptions.GetHashCode() -> int
+override Orleans.Dataflow.BufferOptions.ToString() -> string!
 override Orleans.Dataflow.Flow<TIn, TOut>.ToString() -> string!
+override Orleans.Dataflow.ParallelismOptions.Equals(object? obj) -> bool
+override Orleans.Dataflow.ParallelismOptions.GetHashCode() -> int
+override Orleans.Dataflow.ParallelismOptions.ToString() -> string!
 override Orleans.Dataflow.ResultSlot<TResult>.GetHashCode() -> int
 override Orleans.Dataflow.ResultSlot<TResult>.ToString() -> string!
 override Orleans.Dataflow.RunHandle.ToString() -> string!
@@ -71,8 +107,12 @@ static Orleans.Dataflow.Authoring.GraphFragmentComposer.Append(Orleans.Dataflow.
 static Orleans.Dataflow.Authoring.GraphFragmentComposer.Close(Orleans.Dataflow.Authoring.GraphFragment! fragment, Orleans.Dataflow.Identity.GraphId id, Orleans.Dataflow.Identity.GraphRevision revision, System.Collections.Generic.IEnumerable<Orleans.Dataflow.Definition.CapabilityToken>! capabilities, System.Collections.Generic.IEnumerable<Orleans.Dataflow.Definition.ResultSlotDefinition!>! resultSlots) -> Orleans.Dataflow.Definition.GraphDocument!
 static Orleans.Dataflow.Authoring.GraphFragmentComposer.Connect(Orleans.Dataflow.Authoring.GraphFragment! upstream, Orleans.Dataflow.Definition.PortAddress upstreamOutput, Orleans.Dataflow.Authoring.GraphFragment! downstream, Orleans.Dataflow.Definition.PortAddress downstreamInput) -> Orleans.Dataflow.Authoring.GraphFragment!
 static Orleans.Dataflow.Authoring.GraphFragmentComposer.Import(Orleans.Dataflow.Authoring.GraphFragment! fragment, string! scopeSegment) -> Orleans.Dataflow.Authoring.GraphFragment!
+static Orleans.Dataflow.BufferOptions.operator !=(Orleans.Dataflow.BufferOptions? left, Orleans.Dataflow.BufferOptions? right) -> bool
+static Orleans.Dataflow.BufferOptions.operator ==(Orleans.Dataflow.BufferOptions? left, Orleans.Dataflow.BufferOptions? right) -> bool
 static Orleans.Dataflow.Flow.For<T>() -> Orleans.Dataflow.Flow<T, T>!
 static Orleans.Dataflow.LocalStageCatalog.Instance.get -> Orleans.Dataflow.Definition.IStageCatalog!
+static Orleans.Dataflow.ParallelismOptions.operator !=(Orleans.Dataflow.ParallelismOptions? left, Orleans.Dataflow.ParallelismOptions? right) -> bool
+static Orleans.Dataflow.ParallelismOptions.operator ==(Orleans.Dataflow.ParallelismOptions? left, Orleans.Dataflow.ParallelismOptions? right) -> bool
 static Orleans.Dataflow.ResultSlot<TResult>.operator !=(Orleans.Dataflow.ResultSlot<TResult> left, Orleans.Dataflow.ResultSlot<TResult> right) -> bool
 static Orleans.Dataflow.ResultSlot<TResult>.operator ==(Orleans.Dataflow.ResultSlot<TResult> left, Orleans.Dataflow.ResultSlot<TResult> right) -> bool
 static Orleans.Dataflow.Sink.Aggregate<T, TState>(TState seed, System.Func<TState, T, TState>! folder) -> Orleans.Dataflow.SinkWithResult<T, TState>!

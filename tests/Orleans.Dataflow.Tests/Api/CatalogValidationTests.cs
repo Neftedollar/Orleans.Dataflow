@@ -1,3 +1,4 @@
+using Orleans.Dataflow.Authoring;
 using Orleans.Dataflow.Compilation;
 using Orleans.Dataflow.Definition;
 using Xunit;
@@ -37,15 +38,27 @@ public sealed class CatalogValidationTests
     public void EveryChainLengthAndEveryTerminationValidates()
     {
         // The reachable shape space of this API is exactly one linear chain: a source, any number of
-        // mapping and filtering stages, and one of the two terminations. Sweeping it re-derives the claim
-        // that every expressible graph is valid, instead of restating a list of graphs already known to be.
+        // mappings, filters, buffers and asynchronous mappings, and one of the two terminations. Sweeping
+        // it re-derives the claim that every expressible graph is valid, instead of restating a list of
+        // graphs already known to be — including for the operators added after the list was written.
         for (int operators = 0; operators <= 12; operators++)
         {
             Source<long> source = Source.From<long>([1L, 2L, 3L]);
 
             for (int index = 0; index < operators; index++)
             {
-                source = index % 2 == 0 ? source.Select(value => value + 1) : source.Where(value => value > 0);
+                source = (index % 5) switch
+                {
+                    0 => source.Select(value => value + 1),
+                    1 => source.Where(value => value > 0),
+                    2 => source.Buffer(new BufferOptions { Capacity = index + 1 }),
+                    3 => source.SelectAsync(
+                        new ParallelismOptions { MaxConcurrency = index + 1 },
+                        (value, _) => Task.FromResult(value)),
+                    _ => source.SelectAsyncUnordered(
+                        new ParallelismOptions { MaxConcurrency = index + 1 },
+                        (value, _) => Task.FromResult(value)),
+                };
             }
 
             RunnableGraph discarded = source.To(Sink.Ignore<long>());
@@ -96,17 +109,41 @@ public sealed class CatalogValidationTests
     }
 
     [Fact]
-    public void TheCatalogDeclaresExactlyTheFiveLocalStages()
+    public void TheCatalogDeclaresExactlyTheEightLocalStages()
     {
         Assert.Equal(
             [
+                LocalStage("buffer"),
                 LocalStage("fold"),
                 LocalStage("from-enumerable"),
                 LocalStage("ignore"),
                 LocalStage("select"),
+                LocalStage("select-async"),
+                LocalStage("select-async-unordered"),
                 LocalStage("where"),
             ],
             LocalStageCatalog.Instance.Specifications.Select(specification => specification.Stage));
+    }
+
+    [Fact]
+    public void EveryStageShapeTheVocabularyDeclaresResolvesInTheCatalog()
+    {
+        // Derived from the enumeration rather than from a list written here, so that a shape added later
+        // without a stage reference, without a parameter contract, or without a specification fails this
+        // test instead of failing a run. A list would only ever catch a change to the shapes it named.
+        LocalStageKind[] kinds = Enum.GetValues<LocalStageKind>();
+
+        Assert.Equal(LocalStageCatalog.Instance.Specifications.Count, kinds.Length);
+
+        foreach (LocalStageKind kind in kinds)
+        {
+            Assert.True(
+                LocalStageCatalog.Instance.TryGetSpecification(
+                    LocalVocabulary.StageOf(kind),
+                    out StageSpecification? specification),
+                kind.ToString());
+            Assert.Equal(LocalVocabulary.ParameterContractOf(kind), specification!.ParameterContract);
+        }
     }
 
     [Fact]
@@ -115,7 +152,39 @@ public sealed class CatalogValidationTests
         foreach (StageSpecification specification in LocalStageCatalog.Instance.Specifications)
         {
             Assert.Equal([CapabilityToken.Nondeployable], specification.RequiredCapabilities);
-            Assert.Equal(Contract("local-parameters"), specification.ParameterContract);
+        }
+    }
+
+    [Fact]
+    public void OnlyTheParameterizedStagesDeclareAParameterContractOfTheirOwnAndAValidator()
+    {
+        // The split that decides which stages a document can describe completely. A capacity and a
+        // concurrency bound are numbers a document can state, so they have contracts and checks of their
+        // own; every other stage is a delegate, and a delegate is never durable topology.
+        Dictionary<string, string> contracts = LocalStageCatalog.Instance.Specifications.ToDictionary(
+            specification => specification.Stage.Stage.Value,
+            specification => specification.ParameterContract.Contract.Value,
+            StringComparer.Ordinal);
+
+        Assert.Equal(
+            new Dictionary<string, string>(StringComparer.Ordinal)
+            {
+                ["buffer"] = "local-buffer-parameters",
+                ["fold"] = "local-parameters",
+                ["from-enumerable"] = "local-parameters",
+                ["ignore"] = "local-parameters",
+                ["select"] = "local-parameters",
+                ["select-async"] = "local-parallelism-parameters",
+                ["select-async-unordered"] = "local-parallelism-parameters",
+                ["where"] = "local-parameters",
+            },
+            contracts);
+
+        foreach (StageSpecification specification in LocalStageCatalog.Instance.Specifications)
+        {
+            bool parameterized = specification.ParameterContract != Contract("local-parameters");
+
+            Assert.Equal(parameterized, specification.ParameterValidator is not null);
         }
     }
 
@@ -167,10 +236,13 @@ public sealed class CatalogValidationTests
         Assert.Equal(
             new Dictionary<string, int>(StringComparer.Ordinal)
             {
+                ["buffer"] = 0,
                 ["fold"] = 1,
                 ["from-enumerable"] = 0,
                 ["ignore"] = 0,
                 ["select"] = 0,
+                ["select-async"] = 0,
+                ["select-async-unordered"] = 0,
                 ["where"] = 0,
             },
             resultPorts);
@@ -235,6 +307,49 @@ public sealed class CatalogValidationTests
         yield return (
             "source to fold with the result discarded",
             Source.From(OrderEvents).To(Sink.Aggregate<OrderCreated, long>(0L, (count, _) => count + 1).ToSink()));
+
+        yield return (
+            "source buffered to ignore",
+            Source.From(OrderEvents)
+                .Buffer(new BufferOptions { Capacity = 4 })
+                .To(Sink.Ignore<OrderCreated>()));
+
+        yield return (
+            "source buffered under every overflow policy to ignore",
+            Source.From(OrderEvents)
+                .Buffer(new BufferOptions { Capacity = 1, OverflowPolicy = OverflowPolicy.DropOldest })
+                .Buffer(new BufferOptions { Capacity = 2, OverflowPolicy = OverflowPolicy.DropNewest })
+                .Buffer(new BufferOptions { Capacity = 3, OverflowPolicy = OverflowPolicy.DropBuffer })
+                .Buffer(new BufferOptions { Capacity = 4, OverflowPolicy = OverflowPolicy.Fail })
+                .Buffer(new BufferOptions { Capacity = 5, OverflowPolicy = OverflowPolicy.Backpressure })
+                .To(Sink.Ignore<OrderCreated>()));
+
+        yield return (
+            "source through an ordered asynchronous mapping to fold",
+            Source.From(OrderEvents)
+                .SelectAsync(
+                    new ParallelismOptions { MaxConcurrency = 2 },
+                    (order, _) => Task.FromResult(OrderDocument.FromEvent(order)))
+                .To(s => s.Aggregate(0m, (total, order) => total + order.Total), "total", out ResultSlot<decimal> _));
+
+        yield return (
+            "source through an unordered asynchronous mapping to ignore",
+            Source.From(OrderEvents)
+                .SelectAsyncUnordered(
+                    new ParallelismOptions { MaxConcurrency = 3 },
+                    (order, _) => Task.FromResult(order.OrderId))
+                .To(Sink.Ignore<string>()));
+
+        yield return (
+            "source through a buffered flow with both asynchronous mappings to fold",
+            Source.From(OrderEvents)
+                .Via(Flow.For<OrderCreated>()
+                    .Buffer(new BufferOptions { Capacity = 8, OverflowPolicy = OverflowPolicy.DropOldest })
+                    .SelectAsync(new ParallelismOptions { MaxConcurrency = 2 }, (order, _) => Task.FromResult(order.Total))
+                    .SelectAsyncUnordered(new ParallelismOptions { MaxConcurrency = 1 }, (total, _) => Task.FromResult(total * 2m))
+                    .Where(total => total > 0m)
+                    .Buffer(new BufferOptions { Capacity = 2 }))
+                .To(s => s.Aggregate(0m, (sum, total) => sum + total), "total", out ResultSlot<decimal> _));
 
         yield return ("twelve occurrences", LongChain());
     }

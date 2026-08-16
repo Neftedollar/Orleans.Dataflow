@@ -102,11 +102,27 @@ queue — the operator-fusion row of the capability matrix is this rule.
 
 **`Buffer(BufferOptions)`.** `Capacity >= 1` is required — there is no
 unbounded spelling. `OverflowPolicy` is one of: `Backpressure` (default:
-the upstream segment waits; this is prefetch, not loss), `DropOldest`,
-`DropNewest`, `DropBuffer`, `Fail`. Drop policies count and expose dropped
-elements (the count is a later monitor concern, but the contract states
-drops are observable, never silent). Policy semantics apply at the moment
-the upstream segment offers an element to a full buffer.
+the upstream segment waits; this is prefetch, not loss), `DropOldest`
+(evicts the oldest buffered element), `DropNewest` (drops the arriving
+element; the buffer keeps its contents), `DropBuffer`, `Fail` (faults the
+run with `BufferOverflowException`). Drop policies count dropped elements
+observably, never silently. Policy semantics apply at the moment the
+upstream segment offers an element to a full buffer.
+
+Implementation-refined rules, all tested: a `Buffer` immediately before an
+async stage becomes that stage's input channel — one channel, not two, so
+`Buffer(8).SelectAsync(...)` holds 8 and "total memory is the sum of
+declared capacities" stays literally true (two adjacent `Buffer`s do not
+merge; capacities add). Buffer capacity, overflow policy, and async
+concurrency are document payload — serializable configuration, not
+behavior — so two graphs differing only in capacity have different
+fingerprints, and the planner reads the payload, never the authoring
+descriptor: what the catalog validates is exactly what the runtime
+executes. Every segment runs on its own dedicated long-running thread,
+async segments included, because a segment's emission path runs fused
+synchronous author stages; one execution model, one terminal discipline.
+A failing terminal or callback releases a source parked in a full buffer's
+offer — failure reaches it as cancellation, never as silence.
 
 **`SelectAsync(ParallelismOptions, callback)`** — ordered: up to
 `MaxConcurrency` callbacks in flight; outputs emitted in input order (head

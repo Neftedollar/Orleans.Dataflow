@@ -59,6 +59,88 @@ public sealed class Source<T>
         return new Source<T>(LocalStageChain.Append(Stages, LocalStageDescriptor.Where(predicate)));
     }
 
+    /// <summary>Extends this source with a bounded buffer.</summary>
+    /// <param name="options">The capacity and the overflow policy.</param>
+    /// <returns>A new source; this one is unchanged.</returns>
+    /// <exception cref="ArgumentNullException"><paramref name="options"/> is <see langword="null"/>.</exception>
+    /// <exception cref="ArgumentOutOfRangeException">
+    /// <see cref="BufferOptions.Capacity"/> is below one, or
+    /// <see cref="BufferOptions.OverflowPolicy"/> is not a declared member of its enumeration.
+    /// </exception>
+    /// <remarks>
+    /// A buffer is where a graph stops being one loop. Everything upstream of it runs as one fused segment
+    /// and everything downstream as another, and the buffer is the one bounded queue between them; without
+    /// one, adjacent stages fuse and there is no queue anywhere. The elements the buffer holds are counted
+    /// against nothing else: total memory is the sum of the capacities the author declared.
+    /// </remarks>
+    public Source<T> Buffer(BufferOptions options)
+    {
+        ArgumentNullException.ThrowIfNull(options);
+
+        return new Source<T>(LocalStageChain.Append(
+            Stages,
+            LocalStageDescriptor.Buffer(LocalOptionGuard.Buffer(options, nameof(options)))));
+    }
+
+    /// <summary>Extends this source with an asynchronous mapping stage that preserves input order.</summary>
+    /// <typeparam name="TOut">The element type the mapping produces.</typeparam>
+    /// <param name="options">The greatest number of callbacks in flight at one time.</param>
+    /// <param name="selector">The callback applied to every element.</param>
+    /// <returns>A new source; this one is unchanged.</returns>
+    /// <exception cref="ArgumentNullException">
+    /// <paramref name="options"/> or <paramref name="selector"/> is <see langword="null"/>.
+    /// </exception>
+    /// <exception cref="ArgumentOutOfRangeException">
+    /// <see cref="ParallelismOptions.MaxConcurrency"/> is below one.
+    /// </exception>
+    /// <remarks>
+    /// Up to <see cref="ParallelismOptions.MaxConcurrency"/> callbacks run at once and their results are
+    /// emitted in the order their elements arrived, so a slow callback holds up emission but not admission.
+    /// The callback receives the run's own cancellation token, which is cancelled both when the run is
+    /// cancelled and when anything in the run fails.
+    /// </remarks>
+    public Source<TOut> SelectAsync<TOut>(
+        ParallelismOptions options,
+        Func<T, CancellationToken, Task<TOut>> selector)
+    {
+        ArgumentNullException.ThrowIfNull(options);
+        ArgumentNullException.ThrowIfNull(selector);
+
+        return new Source<TOut>(LocalStageChain.Append(
+            Stages,
+            LocalStageDescriptor.SelectAsync(LocalOptionGuard.Parallelism(options, nameof(options)), selector)));
+    }
+
+    /// <summary>Extends this source with an asynchronous mapping stage that emits in completion order.</summary>
+    /// <typeparam name="TOut">The element type the mapping produces.</typeparam>
+    /// <param name="options">The greatest number of callbacks in flight at one time.</param>
+    /// <param name="selector">The callback applied to every element.</param>
+    /// <returns>A new source; this one is unchanged.</returns>
+    /// <exception cref="ArgumentNullException">
+    /// <paramref name="options"/> or <paramref name="selector"/> is <see langword="null"/>.
+    /// </exception>
+    /// <exception cref="ArgumentOutOfRangeException">
+    /// <see cref="ParallelismOptions.MaxConcurrency"/> is below one.
+    /// </exception>
+    /// <remarks>
+    /// The same bounds as <see cref="SelectAsync"/> with one difference stated in the name: a result is
+    /// emitted as soon as its callback finishes, so the output order is the order the callbacks completed
+    /// in and not the order the elements arrived in.
+    /// </remarks>
+    public Source<TOut> SelectAsyncUnordered<TOut>(
+        ParallelismOptions options,
+        Func<T, CancellationToken, Task<TOut>> selector)
+    {
+        ArgumentNullException.ThrowIfNull(options);
+        ArgumentNullException.ThrowIfNull(selector);
+
+        return new Source<TOut>(LocalStageChain.Append(
+            Stages,
+            LocalStageDescriptor.SelectAsyncUnordered(
+                LocalOptionGuard.Parallelism(options, nameof(options)),
+                selector)));
+    }
+
     /// <summary>Extends this source with a reusable flow.</summary>
     /// <typeparam name="TOut">The element type the flow produces.</typeparam>
     /// <param name="flow">The flow to compose, which is not modified.</param>

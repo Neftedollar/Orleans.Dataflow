@@ -64,6 +64,16 @@ public sealed class RunHandle : IAsyncDisposable
     /// </remarks>
     public Task Completion => _run.Completion;
 
+    /// <summary>Gets the number of elements this run's buffers have discarded.</summary>
+    /// <value>The running count across every boundary of the graph.</value>
+    /// <remarks>
+    /// Internal for now, and deliberately so. The contract a drop policy carries is that dropping is
+    /// observable rather than silent, and this is what makes that true today; what an author will read it
+    /// through is a monitor, which is a later checkpoint with a shape of its own. Publishing a bare counter
+    /// now would fix that shape by accident.
+    /// </remarks>
+    internal long DroppedElements => _run.DroppedElements;
+
     /// <summary>Resolves one result this run's graph declares.</summary>
     /// <typeparam name="TResult">The type of the declared result.</typeparam>
     /// <param name="slot">The slot, as closing the graph produced it.</param>

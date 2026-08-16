@@ -460,7 +460,7 @@ public sealed class GraphDocumentTests
     [Fact]
     public void ToStringSummarizesTheDocument()
     {
-        Assert.Equal("orders-import@r3 (3 nodes, 2 edges, 1 slots)", Representative().ToString());
+        Assert.Equal("orders-import@r3 (3 nodes, 2 edges, 1 slot)", Representative().ToString());
     }
 
     [Fact]

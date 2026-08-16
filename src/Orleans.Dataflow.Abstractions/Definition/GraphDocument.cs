@@ -193,11 +193,7 @@ public sealed record class GraphDocument
         // permutation of the same elements.
         Array.Sort(capabilityArray);
         Array.Sort(nodeArray, static (left, right) => left.Id.CompareTo(right.Id));
-        Array.Sort(
-            edgeArray,
-            static (left, right) =>
-                (left.From.Node, left.From.Port, left.To.Node, left.To.Port)
-                    .CompareTo((right.From.Node, right.From.Port, right.To.Node, right.To.Port)));
+        Array.Sort(edgeArray);
         Array.Sort(slotArray, static (left, right) => left.Id.CompareTo(right.Id));
 
         return new GraphDocument(
@@ -267,16 +263,25 @@ public sealed record class GraphDocument
     /// <summary>
     /// Returns a one-line diagnostic summary of this document.
     /// </summary>
-    /// <returns>Text of the form <c>graph-id@r3 (2 nodes, 1 edges, 1 slots)</c>.</returns>
+    /// <returns>Text of the form <c>graph-id@r3 (2 nodes, 1 edge, 1 slot)</c>.</returns>
     /// <remarks>
     /// The counts are formatted with the invariant culture so that the text is identical under every
-    /// ambient culture. The summary is for logs and debugger display, not for serialization, and it never
-    /// throws.
+    /// ambient culture, and each noun agrees with its own count. The summary is for logs and debugger
+    /// display, not for serialization, and it never throws.
     /// </remarks>
     public override string ToString() =>
         string.Create(
             CultureInfo.InvariantCulture,
-            $"{Id}@r{Revision} ({Nodes.Count} nodes, {Edges.Count} edges, {ResultSlots.Count} slots)");
+            $"{Id}@r{Revision} ({Counted(Nodes.Count, "node")}, {Counted(Edges.Count, "edge")}, {Counted(ResultSlots.Count, "slot")})");
+
+    /// <summary>
+    /// Renders one count of one kind of element, with the noun agreeing with the count.
+    /// </summary>
+    /// <param name="count">The number of elements.</param>
+    /// <param name="noun">The singular noun, which is pluralized by a trailing <c>s</c>.</param>
+    /// <returns>Text of the form <c>2 nodes</c>, or <c>1 node</c> for exactly one.</returns>
+    private static string Counted(int count, string noun) =>
+        string.Create(CultureInfo.InvariantCulture, $"{count} {noun}{(count == 1 ? string.Empty : "s")}");
 
     /// <summary>
     /// Collects every structural invariant the candidate document breaks.

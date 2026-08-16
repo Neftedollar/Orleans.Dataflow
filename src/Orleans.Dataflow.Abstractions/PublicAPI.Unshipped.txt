@@ -43,6 +43,7 @@ Orleans.Dataflow.Definition.GraphDocument.Nodes.get -> System.Collections.Generi
 Orleans.Dataflow.Definition.GraphDocument.ResultSlots.get -> System.Collections.Generic.IReadOnlyList<Orleans.Dataflow.Definition.ResultSlotDefinition!>!
 Orleans.Dataflow.Definition.GraphDocument.Revision.get -> Orleans.Dataflow.Identity.GraphRevision
 Orleans.Dataflow.Definition.GraphEdge
+Orleans.Dataflow.Definition.GraphEdge.CompareTo(Orleans.Dataflow.Definition.GraphEdge other) -> int
 Orleans.Dataflow.Definition.GraphEdge.Equals(Orleans.Dataflow.Definition.GraphEdge other) -> bool
 Orleans.Dataflow.Definition.GraphEdge.From.get -> Orleans.Dataflow.Definition.PortAddress
 Orleans.Dataflow.Definition.GraphEdge.GraphEdge() -> void
@@ -74,6 +75,7 @@ Orleans.Dataflow.Definition.OutputPortSpecification.IsDefault.get -> bool
 Orleans.Dataflow.Definition.OutputPortSpecification.IsIgnorable.get -> bool
 Orleans.Dataflow.Definition.OutputPortSpecification.OutputPortSpecification() -> void
 Orleans.Dataflow.Definition.PortAddress
+Orleans.Dataflow.Definition.PortAddress.CompareTo(Orleans.Dataflow.Definition.PortAddress other) -> int
 Orleans.Dataflow.Definition.PortAddress.Equals(Orleans.Dataflow.Definition.PortAddress other) -> bool
 Orleans.Dataflow.Definition.PortAddress.IsDefault.get -> bool
 Orleans.Dataflow.Definition.PortAddress.Node.get -> Orleans.Dataflow.Identity.NodeId
@@ -292,7 +294,11 @@ static Orleans.Dataflow.Definition.GraphDocument.operator !=(Orleans.Dataflow.De
 static Orleans.Dataflow.Definition.GraphDocument.operator ==(Orleans.Dataflow.Definition.GraphDocument? left, Orleans.Dataflow.Definition.GraphDocument? right) -> bool
 static Orleans.Dataflow.Definition.GraphEdge.Create(Orleans.Dataflow.Definition.PortAddress from, Orleans.Dataflow.Definition.PortAddress to) -> Orleans.Dataflow.Definition.GraphEdge
 static Orleans.Dataflow.Definition.GraphEdge.operator !=(Orleans.Dataflow.Definition.GraphEdge left, Orleans.Dataflow.Definition.GraphEdge right) -> bool
+static Orleans.Dataflow.Definition.GraphEdge.operator <(Orleans.Dataflow.Definition.GraphEdge left, Orleans.Dataflow.Definition.GraphEdge right) -> bool
+static Orleans.Dataflow.Definition.GraphEdge.operator <=(Orleans.Dataflow.Definition.GraphEdge left, Orleans.Dataflow.Definition.GraphEdge right) -> bool
 static Orleans.Dataflow.Definition.GraphEdge.operator ==(Orleans.Dataflow.Definition.GraphEdge left, Orleans.Dataflow.Definition.GraphEdge right) -> bool
+static Orleans.Dataflow.Definition.GraphEdge.operator >(Orleans.Dataflow.Definition.GraphEdge left, Orleans.Dataflow.Definition.GraphEdge right) -> bool
+static Orleans.Dataflow.Definition.GraphEdge.operator >=(Orleans.Dataflow.Definition.GraphEdge left, Orleans.Dataflow.Definition.GraphEdge right) -> bool
 static Orleans.Dataflow.Definition.GraphFingerprint.OfSerialized(System.ReadOnlySpan<byte> canonicalEnvelope) -> Orleans.Dataflow.Definition.GraphFingerprint
 static Orleans.Dataflow.Definition.GraphFingerprint.operator !=(Orleans.Dataflow.Definition.GraphFingerprint left, Orleans.Dataflow.Definition.GraphFingerprint right) -> bool
 static Orleans.Dataflow.Definition.GraphFingerprint.operator <(Orleans.Dataflow.Definition.GraphFingerprint left, Orleans.Dataflow.Definition.GraphFingerprint right) -> bool
@@ -312,7 +318,11 @@ static Orleans.Dataflow.Definition.OutputPortSpecification.operator !=(Orleans.D
 static Orleans.Dataflow.Definition.OutputPortSpecification.operator ==(Orleans.Dataflow.Definition.OutputPortSpecification left, Orleans.Dataflow.Definition.OutputPortSpecification right) -> bool
 static Orleans.Dataflow.Definition.PortAddress.Create(Orleans.Dataflow.Identity.NodeId node, Orleans.Dataflow.Identity.PortId port) -> Orleans.Dataflow.Definition.PortAddress
 static Orleans.Dataflow.Definition.PortAddress.operator !=(Orleans.Dataflow.Definition.PortAddress left, Orleans.Dataflow.Definition.PortAddress right) -> bool
+static Orleans.Dataflow.Definition.PortAddress.operator <(Orleans.Dataflow.Definition.PortAddress left, Orleans.Dataflow.Definition.PortAddress right) -> bool
+static Orleans.Dataflow.Definition.PortAddress.operator <=(Orleans.Dataflow.Definition.PortAddress left, Orleans.Dataflow.Definition.PortAddress right) -> bool
 static Orleans.Dataflow.Definition.PortAddress.operator ==(Orleans.Dataflow.Definition.PortAddress left, Orleans.Dataflow.Definition.PortAddress right) -> bool
+static Orleans.Dataflow.Definition.PortAddress.operator >(Orleans.Dataflow.Definition.PortAddress left, Orleans.Dataflow.Definition.PortAddress right) -> bool
+static Orleans.Dataflow.Definition.PortAddress.operator >=(Orleans.Dataflow.Definition.PortAddress left, Orleans.Dataflow.Definition.PortAddress right) -> bool
 static Orleans.Dataflow.Definition.ResultPortSpecification.Create(Orleans.Dataflow.Identity.PortId id, Orleans.Dataflow.Identity.ContractReference resultContract) -> Orleans.Dataflow.Definition.ResultPortSpecification
 static Orleans.Dataflow.Definition.ResultPortSpecification.operator !=(Orleans.Dataflow.Definition.ResultPortSpecification left, Orleans.Dataflow.Definition.ResultPortSpecification right) -> bool
 static Orleans.Dataflow.Definition.ResultPortSpecification.operator ==(Orleans.Dataflow.Definition.ResultPortSpecification left, Orleans.Dataflow.Definition.ResultPortSpecification right) -> bool

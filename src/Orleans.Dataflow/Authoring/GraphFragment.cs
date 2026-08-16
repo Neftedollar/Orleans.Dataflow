@@ -169,11 +169,7 @@ public sealed record class GraphFragment
         // also breaking both edge multiplicity rules. The order is therefore total and an unstable sort
         // is still deterministic.
         Array.Sort(nodeArray, static (left, right) => left.Id.CompareTo(right.Id));
-        Array.Sort(
-            edgeArray,
-            static (left, right) =>
-                (left.From.Node, left.From.Port, left.To.Node, left.To.Port)
-                    .CompareTo((right.From.Node, right.From.Port, right.To.Node, right.To.Port)));
+        Array.Sort(edgeArray);
 
         return new GraphFragment(
             Array.AsReadOnly(nodeArray),
@@ -271,15 +267,25 @@ public sealed record class GraphFragment
     /// <summary>
     /// Returns a one-line diagnostic summary of this fragment.
     /// </summary>
-    /// <returns>Text of the form <c>fragment (2 nodes, 1 edges, 1 open inputs, 1 open outputs)</c>.</returns>
+    /// <returns>Text of the form <c>fragment (2 nodes, 1 edge, 1 open input, 1 open output)</c>.</returns>
     /// <remarks>
     /// The counts are formatted with the invariant culture so that the text is identical under every
-    /// ambient culture. The summary is for logs and debugger display, and it never throws.
+    /// ambient culture, and each noun agrees with its own count. The summary is for logs and debugger
+    /// display, and it never throws.
     /// </remarks>
     public override string ToString() =>
         string.Create(
             CultureInfo.InvariantCulture,
-            $"fragment ({Nodes.Count} nodes, {Edges.Count} edges, {OpenInputs.Count} open inputs, {OpenOutputs.Count} open outputs)");
+            $"fragment ({Counted(Nodes.Count, "node")}, {Counted(Edges.Count, "edge")}, {Counted(OpenInputs.Count, "open input")}, {Counted(OpenOutputs.Count, "open output")})");
+
+    /// <summary>
+    /// Renders one count of one kind of element, with the noun agreeing with the count.
+    /// </summary>
+    /// <param name="count">The number of elements.</param>
+    /// <param name="noun">The singular noun, which is pluralized by a trailing <c>s</c>.</param>
+    /// <returns>Text of the form <c>2 nodes</c>, or <c>1 node</c> for exactly one.</returns>
+    private static string Counted(int count, string noun) =>
+        string.Create(CultureInfo.InvariantCulture, $"{count} {noun}{(count == 1 ? string.Empty : "s")}");
 
     /// <summary>
     /// Collects every structural invariant the candidate fragment breaks.

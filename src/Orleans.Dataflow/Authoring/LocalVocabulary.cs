@@ -67,6 +67,18 @@ internal static class LocalVocabulary
     internal static readonly StageRef Where =
         StageRef.Create(Provider, StageId.Create("where"), StageRef.FirstMajorVersion);
 
+    /// <summary>The stage reference of a bounded buffer.</summary>
+    internal static readonly StageRef Buffer =
+        StageRef.Create(Provider, StageId.Create("buffer"), StageRef.FirstMajorVersion);
+
+    /// <summary>The stage reference of an order-preserving asynchronous mapping stage.</summary>
+    internal static readonly StageRef SelectAsync =
+        StageRef.Create(Provider, StageId.Create("select-async"), StageRef.FirstMajorVersion);
+
+    /// <summary>The stage reference of an asynchronous mapping stage that emits in completion order.</summary>
+    internal static readonly StageRef SelectAsyncUnordered =
+        StageRef.Create(Provider, StageId.Create("select-async-unordered"), StageRef.FirstMajorVersion);
+
     /// <summary>The stage reference of a folding sink.</summary>
     internal static readonly StageRef Fold =
         StageRef.Create(Provider, StageId.Create("fold"), StageRef.FirstMajorVersion);
@@ -85,13 +97,33 @@ internal static class LocalVocabulary
     internal static readonly ContractReference ElementContract =
         ContractReference.Create(ContractId.Create("local-opaque"), ContractReference.FirstMajorVersion);
 
-    /// <summary>The parameter contract every local stage declares.</summary>
+    /// <summary>The parameter contract a local stage whose whole behavior is a delegate declares.</summary>
     /// <remarks>
-    /// A local stage has no parameters that could be written down: its behavior is a delegate, and a
+    /// Such a stage has no parameters that could be written down: its behavior is a delegate, and a
     /// delegate is never durable topology. The payload is therefore always the empty object.
     /// </remarks>
     internal static readonly ContractReference ParameterContract =
         ContractReference.Create(ContractId.Create("local-parameters"), ContractReference.FirstMajorVersion);
+
+    /// <summary>The parameter contract a buffer declares.</summary>
+    /// <remarks>
+    /// A buffer's capacity and overflow policy are configuration rather than behavior, so unlike a
+    /// delegate they belong in the document. <see cref="LocalBufferParameters"/> owns the shape.
+    /// </remarks>
+    internal static readonly ContractReference BufferParameterContract =
+        ContractReference.Create(
+            ContractId.Create("local-buffer-parameters"),
+            ContractReference.FirstMajorVersion);
+
+    /// <summary>The parameter contract an asynchronous mapping stage declares.</summary>
+    /// <remarks>
+    /// The concurrency bound is configuration and is written down; the callback is behavior and is not.
+    /// <see cref="LocalParallelismParameters"/> owns the shape.
+    /// </remarks>
+    internal static readonly ContractReference ParallelismParameterContract =
+        ContractReference.Create(
+            ContractId.Create("local-parallelism-parameters"),
+            ContractReference.FirstMajorVersion);
 
     /// <summary>The result contract the <c>result</c> port of a local fold declares.</summary>
     internal static readonly ContractReference FoldResultContract =
@@ -106,7 +138,12 @@ internal static class LocalVocabulary
     /// <summary>The result port name of a local fold.</summary>
     internal static readonly PortId ResultPort = PortId.Create("result");
 
-    /// <summary>The parameter payload every local stage carries.</summary>
+    /// <summary>The parameter payload a local stage whose whole behavior is a delegate carries.</summary>
+    /// <remarks>
+    /// Empty because there is nothing to say, not because payloads are forbidden: the buffer and the two
+    /// asynchronous stages write real ones. <see cref="LocalStageDescriptor.Parameters"/> is what decides
+    /// which a given occurrence carries.
+    /// </remarks>
     internal static readonly CanonicalJsonValue EmptyParameters = CanonicalJsonValue.Parse("{}");
 
     /// <summary>The capability token a document with automatically named occurrences declares.</summary>
@@ -142,8 +179,32 @@ internal static class LocalVocabulary
         LocalStageKind.FromEnumerable => FromEnumerable,
         LocalStageKind.Select => Select,
         LocalStageKind.Where => Where,
+        LocalStageKind.Buffer => Buffer,
+        LocalStageKind.SelectAsync => SelectAsync,
+        LocalStageKind.SelectAsyncUnordered => SelectAsyncUnordered,
         LocalStageKind.Fold => Fold,
         LocalStageKind.Ignore => Ignore,
+        _ => throw new ArgumentOutOfRangeException(nameof(kind)),
+    };
+
+    /// <summary>Returns the parameter contract an occurrence of <paramref name="kind"/> declares.</summary>
+    /// <param name="kind">The stage shape.</param>
+    /// <returns>The contract reference.</returns>
+    /// <exception cref="ArgumentOutOfRangeException"><paramref name="kind"/> is not a declared member.</exception>
+    /// <remarks>
+    /// Three shapes carry parameters and the rest carry the empty payload. The distinction is not "which
+    /// stages happen to have options" but "which stages have options a document can state honestly": a
+    /// capacity is a number and a concurrency bound is a number, and neither is a delegate.
+    /// </remarks>
+    internal static ContractReference ParameterContractOf(LocalStageKind kind) => kind switch
+    {
+        LocalStageKind.Buffer => BufferParameterContract,
+        LocalStageKind.SelectAsync or LocalStageKind.SelectAsyncUnordered => ParallelismParameterContract,
+        LocalStageKind.FromEnumerable or
+            LocalStageKind.Select or
+            LocalStageKind.Where or
+            LocalStageKind.Fold or
+            LocalStageKind.Ignore => ParameterContract,
         _ => throw new ArgumentOutOfRangeException(nameof(kind)),
     };
 

@@ -43,6 +43,9 @@ internal static class LocalDelegateAdapter
     /// <summary>The template closed to wrap a folding delegate.</summary>
     private static readonly MethodInfo FolderTemplate = Template(nameof(BoxFolder));
 
+    /// <summary>The template closed to wrap an asynchronous mapping delegate.</summary>
+    private static readonly MethodInfo AsyncSelectorTemplate = Template(nameof(BoxAsyncSelector));
+
     /// <summary>Reads a source binding as a sequence the run loop can enumerate.</summary>
     /// <param name="behavior">The bound sequence, as the authoring value received it.</param>
     /// <returns>The sequence, viewed through the non-generic interface every sequence implements.</returns>
@@ -99,6 +102,40 @@ internal static class LocalDelegateAdapter
         }
 
         return (Func<object?, object?, object?>)Close(FolderTemplate, [arguments[0], arguments[1]], behavior);
+    }
+
+    /// <summary>Wraps an asynchronous mapping delegate into one over boxed elements.</summary>
+    /// <param name="behavior">The bound <c>Func&lt;TIn, CancellationToken, Task&lt;TOut&gt;&gt;</c>.</param>
+    /// <param name="kind">The stage shape, for the diagnostic.</param>
+    /// <returns>The wrapped mapping.</returns>
+    /// <exception cref="InvalidOperationException">
+    /// <paramref name="behavior"/> is not a two-argument function taking a
+    /// <see cref="CancellationToken"/> and returning a <see cref="Task{TResult}"/>.
+    /// </exception>
+    /// <remarks>
+    /// The token is part of the required shape rather than an optional convenience: an asynchronous stage
+    /// cancels its in-flight callbacks when the run is cancelled or when anything in the run fails, and a
+    /// callback with nowhere to receive a token could not be cancelled at all.
+    /// </remarks>
+    internal static Func<object?, CancellationToken, Task<object?>> AsyncSelector(
+        object? behavior,
+        LocalStageKind kind)
+    {
+        const string Expected = "Func<TIn, CancellationToken, Task<TOut>>";
+
+        Type[] arguments = Arguments(behavior, typeof(Func<,,>), kind, Expected);
+
+        if (arguments[1] != typeof(CancellationToken) ||
+            !arguments[2].IsGenericType ||
+            arguments[2].GetGenericTypeDefinition() != typeof(Task<>))
+        {
+            throw Mismatch(behavior, kind, Expected);
+        }
+
+        return (Func<object?, CancellationToken, Task<object?>>)Close(
+            AsyncSelectorTemplate,
+            [arguments[0], arguments[2].GetGenericArguments()[0]],
+            behavior);
     }
 
     /// <summary>Reads one of this type's private generic templates.</summary>
@@ -165,6 +202,35 @@ internal static class LocalDelegateAdapter
     /// <remarks>Invoked only by reflection, over the type arguments recovered from the delegate itself.</remarks>
     private static Func<object?, bool> BoxPredicate<TIn>(Func<TIn, bool> predicate) =>
         element => predicate((TIn)element!);
+
+    /// <summary>Wraps a typed asynchronous mapping into one over boxed elements.</summary>
+    /// <typeparam name="TIn">The element type the mapping consumes.</typeparam>
+    /// <typeparam name="TOut">The element type the mapping produces.</typeparam>
+    /// <param name="selector">The author's delegate.</param>
+    /// <returns>The wrapper.</returns>
+    /// <remarks>
+    /// <para>
+    /// Invoked only by reflection, over the type arguments recovered from the delegate itself. The wrapper
+    /// is an asynchronous method rather than a continuation, so a callback that throws before it returns a
+    /// task produces a faulted task exactly as one that throws afterwards does. The run therefore has one
+    /// way to observe a callback failure instead of two, and the exception it faults with is the author's
+    /// own instance either way.
+    /// </para>
+    /// <para>
+    /// A callback that returns no task at all is reported as a sentence rather than dereferenced, for the
+    /// same reason a sequence that produces no enumerator is.
+    /// </para>
+    /// </remarks>
+    private static Func<object?, CancellationToken, Task<object?>> BoxAsyncSelector<TIn, TOut>(
+        Func<TIn, CancellationToken, Task<TOut>> selector) =>
+        async (element, token) =>
+        {
+            Task<TOut> pending = selector((TIn)element!, token) ??
+                throw new InvalidOperationException(
+                    "The callback of an asynchronous stage returned no task. A callback a graph is bound to has to produce something to await.");
+
+            return await pending.ConfigureAwait(false);
+        };
 
     /// <summary>Wraps a typed folder into one over boxed state and boxed elements.</summary>
     /// <typeparam name="TState">The state type, which is also the result type.</typeparam>

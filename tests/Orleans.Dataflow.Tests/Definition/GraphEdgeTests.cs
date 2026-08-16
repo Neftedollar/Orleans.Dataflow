@@ -129,6 +129,98 @@ public sealed class GraphEdgeTests
         Assert.Equal("(default GraphEdge)", default(GraphEdge).ToString());
     }
 
+    [Fact]
+    public void EdgesSortByOriginNodeThenOriginPortThenTargetNodeThenTargetPort()
+    {
+        // The four keys in order, each pair differing in exactly one of them, so a comparison that read
+        // them in the wrong order would put at least one pair the wrong way round.
+        GraphEdge[] ordered =
+        [
+            GraphEdge.Create(Address("a", "one"), Address("x", "in")),
+            GraphEdge.Create(Address("a", "two"), Address("m", "in")),
+            GraphEdge.Create(Address("a", "two"), Address("n", "early")),
+            GraphEdge.Create(Address("a", "two"), Address("n", "late")),
+            GraphEdge.Create(Address("b", "one"), Address("a", "in")),
+        ];
+
+        for (int index = 1; index < ordered.Length; index++)
+        {
+            GraphEdge left = ordered[index - 1];
+            GraphEdge right = ordered[index];
+
+            Assert.True(left.CompareTo(right) < 0, $"'{left}' should sort before '{right}'");
+            Assert.True(right.CompareTo(left) > 0, $"'{right}' should sort after '{left}'");
+            Assert.True(left < right);
+            Assert.True(left <= right);
+            Assert.False(left > right);
+            Assert.False(left >= right);
+        }
+    }
+
+    [Fact]
+    public void SortingUsesTheSameOrderWhicheverWayTheInputArrived()
+    {
+        GraphEdge[] shuffled =
+        [
+            GraphEdge.Create(Address("b", "one"), Address("a", "in")),
+            GraphEdge.Create(Address("a", "two"), Address("n", "late")),
+            GraphEdge.Create(Address("a", "one"), Address("x", "in")),
+            GraphEdge.Create(Address("a", "two"), Address("m", "in")),
+        ];
+
+        Array.Sort(shuffled);
+
+        Assert.Equal(
+            [
+                "a#one -> x#in",
+                "a#two -> m#in",
+                "a#two -> n#late",
+                "b#one -> a#in",
+            ],
+            shuffled.Select(edge => edge.ToString()));
+    }
+
+    [Fact]
+    public void TheDefaultInstanceSortsBeforeEveryCreatedOne()
+    {
+        // A total order has to place the default somewhere, and a comparison that threw for it — as the
+        // endpoint properties do — would make the order partial.
+        GraphEdge created = GraphEdge.Create(SampleFrom, SampleTo);
+
+        Assert.True(default(GraphEdge).CompareTo(created) < 0);
+        Assert.True(created.CompareTo(default) > 0);
+        Assert.Equal(0, default(GraphEdge).CompareTo(default));
+        Assert.True(default(GraphEdge) < created);
+        Assert.True(created >= default(GraphEdge));
+    }
+
+    [Fact]
+    public void ComparisonIsConsistentWithEquality()
+    {
+        GraphEdge left = GraphEdge.Create(SampleFrom, SampleTo);
+        GraphEdge right = GraphEdge.Create(Address("reader", "out"), Address("writer", "in"));
+
+        Assert.Equal(0, left.CompareTo(right));
+        Assert.True(left == right);
+        Assert.True(left <= right);
+        Assert.True(left >= right);
+        Assert.False(left < right);
+        Assert.False(left > right);
+    }
+
+    [Fact]
+    public void TheNonGenericComparisonAgreesWithTheTypedOneAndRefusesForeignArguments()
+    {
+        // The non-generic interface exists because F#'s 'comparison' constraint is satisfied by
+        // System.IComparable and not by IComparable<'T>.
+        IComparable edge = GraphEdge.Create(SampleFrom, SampleTo);
+
+        Assert.Equal(0, edge.CompareTo(GraphEdge.Create(SampleFrom, SampleTo)));
+        Assert.True(edge.CompareTo(default(GraphEdge)) > 0);
+        Assert.True(edge.CompareTo(null) > 0);
+        Assert.Throws<ArgumentException>("obj", () => edge.CompareTo("reader#out -> writer#in"));
+    }
+
     private static PortAddress Address(string node, string port) =>
         PortAddress.Create(NodeId.Parse(node), PortId.Create(port));
 }

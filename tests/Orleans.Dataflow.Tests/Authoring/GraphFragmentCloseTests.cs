@@ -221,7 +221,7 @@ public sealed class GraphFragmentCloseTests
         Assert.Equal(
             ["enrich/normalize#out -> write-orders#in", "read-orders#out -> enrich/normalize#in"],
             document.Edges.Select(edge => edge.ToString()));
-        Assert.Equal("orders-import@r3 (3 nodes, 2 edges, 1 slots)", document.ToString());
+        Assert.Equal("orders-import@r3 (3 nodes, 2 edges, 1 slot)", document.ToString());
 
         byte[] bytes = GraphDocumentSerializer.Serialize(document);
 

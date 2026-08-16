@@ -80,8 +80,11 @@ public sealed class DocumentShapeTests
     }
 
     [Fact]
-    public void EveryNodeCarriesTheEmptyLocalParameterPayloadAndNoExecutionPolicy()
+    public void EveryDelegateOnlyNodeCarriesTheEmptyLocalParameterPayloadAndNoExecutionPolicy()
     {
+        // A stage whose whole behavior is a delegate has nothing it could write down. The three stages
+        // that do — the buffer and the two asynchronous mappings — carry real payloads under contracts of
+        // their own, which is BoundaryAuthoringTests' subject; no node of this chain is one of them.
         GraphDocument document = Counted().Document;
 
         foreach (StageNode node in document.Nodes)

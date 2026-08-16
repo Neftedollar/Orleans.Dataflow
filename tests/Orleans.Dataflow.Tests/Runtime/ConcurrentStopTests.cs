@@ -57,6 +57,43 @@ public sealed class ConcurrentStopTests
     }
 
     [Fact]
+    public async Task StoppingAMultiSegmentRunEveryWayAtOnceLeavesExactlyOneTerminalState()
+    {
+        // The same race across a graph that has boundaries in it, where the ways to get it wrong are
+        // different in kind: a segment that settled the run before another had released what it held, a
+        // drain that raced a cancellation into two answers, or a channel whose writer was completed twice.
+        // Which of the three requests wins is still not asserted; that every segment stopped and the run
+        // has one answer is.
+        for (int race = 0; race < Races; race++)
+        {
+            using CancellationTokenSource cancellation = new();
+            RecordingEnumerable<int> elements = new(1, 2, 3, 4, 5, 6, 7, 8);
+
+            RunnableGraph graph = Source.From(elements)
+                .Buffer(new BufferOptions { Capacity = 2 })
+                .SelectAsync(new ParallelismOptions { MaxConcurrency = 2 }, (value, _) => Task.FromResult((long)value))
+                .Buffer(new BufferOptions { Capacity = 2, OverflowPolicy = OverflowPolicy.DropOldest })
+                .To(s => s.Aggregate(0L, (sum, value) => sum + value), "total", out ResultSlot<long> total);
+
+            RunHandle run = await Host.MaterializeAsync(graph, cancellation.Token);
+
+            Task shutdown = Task.Run(async () => await run.ShutdownAsync(), TestToken);
+            Task cancelling = Task.Run(cancellation.Cancel, TestToken);
+            Task disposal = Task.Run(async () => await run.DisposeAsync(), TestToken);
+
+            await Task.WhenAll(shutdown, cancelling, disposal);
+
+            Assert.True(run.Completion.IsCompleted);
+            Assert.NotEqual(TaskStatus.Faulted, run.Completion.Status);
+            Assert.True(run.GetValueAsync(total, TestToken).IsCompleted);
+            Assert.Equal(elements.Enumerations, elements.Releases);
+
+            // Whatever a drop policy did or did not have time to do, it counted it.
+            Assert.InRange(run.DroppedElements, 0L, 8L);
+        }
+    }
+
+    [Fact]
     public async Task CancellingWhileARunIsAlreadyStoppingIsNeverAnError()
     {
         // The run releases its link to the caller's token when it ends, and the caller may cancel that

@@ -23,6 +23,7 @@ namespace Orleans.Dataflow.Tests.Runtime;
 internal sealed class RecordingEnumerable<T> : IEnumerable<T>
 {
     private readonly IReadOnlyList<T> _elements;
+    private readonly TaskCompletionSource _released = new(TaskCreationOptions.RunContinuationsAsynchronously);
     private int _enumerations;
     private int _pulls;
     private int _releases;
@@ -48,6 +49,39 @@ internal sealed class RecordingEnumerable<T> : IEnumerable<T>
     /// or <see langword="null"/> to produce it; <see langword="null"/> to never fail.
     /// </value>
     internal Func<int, Exception?>? PullFailure { get; set; }
+
+    /// <summary>Gets or sets the hold to apply before a pull, chosen per zero-based element position.</summary>
+    /// <value>
+    /// A function returning the task the pull blocks on before producing the element at that position, or
+    /// <see langword="null"/> to produce it at once; <see langword="null"/> to never hold.
+    /// </value>
+    /// <remarks>
+    /// This is how a test sequences a run that has more than one segment in it. A gate inside a stage says
+    /// "stop the run here"; this says "stop the source until something else has happened", which is what
+    /// makes a buffer's contents at a given moment a fact rather than a race. It is consulted for the pull
+    /// past the last element too, so a test can also observe the moment a sequence runs out — every
+    /// element before it has by then been handed to the run and offered onwards.
+    /// </remarks>
+    internal Func<int, Task?>? PullBarrier { get; set; }
+
+    /// <summary>Gets or sets the observer of every element handed out.</summary>
+    /// <value>
+    /// An action receiving the number of elements handed out so far, counting this one; or
+    /// <see langword="null"/> to observe nothing.
+    /// </value>
+    /// <remarks>
+    /// Called after the element is counted and before the pull returns, so a test can learn that a run has
+    /// reached a bound at the moment it reaches it rather than by asking afterwards.
+    /// </remarks>
+    internal Action<int>? Pulled { get; set; }
+
+    /// <summary>Gets the task that completes when an enumerator of this sequence is first released.</summary>
+    /// <remarks>
+    /// A run releases its enumerator on every terminal path, so this completing means the segment that
+    /// pulled from this sequence has stopped — which is how a test observes a source segment that failed
+    /// without being able to signal anything itself.
+    /// </remarks>
+    internal Task Released => _released.Task;
 
     /// <summary>Gets the number of times this sequence was enumerated.</summary>
     internal int Enumerations => Volatile.Read(ref _enumerations);
@@ -75,10 +109,10 @@ internal sealed class RecordingEnumerable<T> : IEnumerable<T>
     /// <inheritdoc/>
     IEnumerator IEnumerable.GetEnumerator() => GetEnumerator();
 
-    /// <summary>Records that one element was handed out.</summary>
+    /// <summary>Records that one element was handed out and tells the observer about it.</summary>
     private void Yielded()
     {
-        Interlocked.Increment(ref _pulls);
+        int pulls = Interlocked.Increment(ref _pulls);
 
         int inFlight = Interlocked.Increment(ref _inFlight);
 
@@ -86,12 +120,15 @@ internal sealed class RecordingEnumerable<T> : IEnumerable<T>
         {
             Volatile.Write(ref _peakInFlight, inFlight);
         }
+
+        Pulled?.Invoke(pulls);
     }
 
     /// <summary>Records that an enumerator was released, and fails if it was told to.</summary>
-    private void Released()
+    private void Release()
     {
         Interlocked.Increment(ref _releases);
+        _released.TrySetResult();
 
         if (ReleaseFailure is { } failure)
         {
@@ -121,6 +158,10 @@ internal sealed class RecordingEnumerable<T> : IEnumerable<T>
                 throw failure;
             }
 
+            // Blocking, because a source that takes a long time is a source that blocks its segment's own
+            // thread, and holding it any other way would be testing something the runtime does not do.
+            owner.PullBarrier?.Invoke(next)?.GetAwaiter().GetResult();
+
             if (next >= owner._elements.Count)
             {
                 return false;
@@ -136,6 +177,6 @@ internal sealed class RecordingEnumerable<T> : IEnumerable<T>
         public void Reset() => throw new NotSupportedException("A run enumerates a sequence once, forwards.");
 
         /// <inheritdoc/>
-        public void Dispose() => owner.Released();
+        public void Dispose() => owner.Release();
     }
 }

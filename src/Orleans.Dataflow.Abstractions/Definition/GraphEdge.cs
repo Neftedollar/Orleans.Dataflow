@@ -17,11 +17,16 @@ namespace Orleans.Dataflow.Definition;
 /// semantics, not a property of the wiring, so the wiring stays a plain one-to-one relation.
 /// </para>
 /// <para>
+/// Edges are ordered by origin node, origin port, target node, and target port, which is the canonical
+/// order a document writes its wiring in. The default value sorts before every created one, so the order
+/// is total over every instance instead of leaving a hole at the default.
+/// </para>
+/// <para>
 /// The default value connects nothing: <see cref="IsDefault"/> reports it, the endpoint properties throw
 /// for it, and <see cref="ToString"/> renders a diagnostic literal for it rather than throwing.
 /// </para>
 /// </remarks>
-public readonly record struct GraphEdge
+public readonly record struct GraphEdge : IComparable<GraphEdge>, IComparable
 {
     private readonly PortAddress _from;
     private readonly PortAddress _to;
@@ -100,6 +105,96 @@ public readonly record struct GraphEdge
 
         return new GraphEdge(from, to);
     }
+
+    /// <summary>
+    /// Determines whether one edge sorts before another in canonical order.
+    /// </summary>
+    /// <param name="left">The left operand.</param>
+    /// <param name="right">The right operand.</param>
+    /// <returns>
+    /// <see langword="true"/> when <paramref name="left"/> sorts before <paramref name="right"/>;
+    /// otherwise <see langword="false"/>.
+    /// </returns>
+    public static bool operator <(GraphEdge left, GraphEdge right) => left.CompareTo(right) < 0;
+
+    /// <summary>
+    /// Determines whether one edge sorts before another in canonical order, or is equal to it.
+    /// </summary>
+    /// <param name="left">The left operand.</param>
+    /// <param name="right">The right operand.</param>
+    /// <returns>
+    /// <see langword="true"/> when <paramref name="left"/> does not sort after <paramref name="right"/>;
+    /// otherwise <see langword="false"/>.
+    /// </returns>
+    public static bool operator <=(GraphEdge left, GraphEdge right) => left.CompareTo(right) <= 0;
+
+    /// <summary>
+    /// Determines whether one edge sorts after another in canonical order.
+    /// </summary>
+    /// <param name="left">The left operand.</param>
+    /// <param name="right">The right operand.</param>
+    /// <returns>
+    /// <see langword="true"/> when <paramref name="left"/> sorts after <paramref name="right"/>;
+    /// otherwise <see langword="false"/>.
+    /// </returns>
+    public static bool operator >(GraphEdge left, GraphEdge right) => left.CompareTo(right) > 0;
+
+    /// <summary>
+    /// Determines whether one edge sorts after another in canonical order, or is equal to it.
+    /// </summary>
+    /// <param name="left">The left operand.</param>
+    /// <param name="right">The right operand.</param>
+    /// <returns>
+    /// <see langword="true"/> when <paramref name="left"/> does not sort before <paramref name="right"/>;
+    /// otherwise <see langword="false"/>.
+    /// </returns>
+    public static bool operator >=(GraphEdge left, GraphEdge right) => left.CompareTo(right) >= 0;
+
+    /// <summary>
+    /// Compares this edge with another in canonical order.
+    /// </summary>
+    /// <param name="other">The edge to compare with.</param>
+    /// <returns>
+    /// A negative number when this instance sorts first, zero when the two are equal, and a positive
+    /// number when <paramref name="other"/> sorts first.
+    /// </returns>
+    /// <remarks>
+    /// The four keys are the origin node, the origin port, the target node, and the target port, in that
+    /// order, which is the order <see cref="GraphDocument"/> and <see cref="Serialization.GraphEnvelopeWriter"/>
+    /// write a document's wiring in. It is read off <see cref="PortAddress"/>'s own two-key order rather
+    /// than restated here, so the two cannot drift apart. The default value carries no endpoint and sorts
+    /// before every created edge; ordering is consistent with equality, because two edges compare equal
+    /// exactly when both endpoints do.
+    /// </remarks>
+    public int CompareTo(GraphEdge other)
+    {
+        int comparison = _from.CompareTo(other._from);
+
+        return comparison != 0 ? comparison : _to.CompareTo(other._to);
+    }
+
+    /// <summary>
+    /// Compares this instance with another object in canonical order.
+    /// </summary>
+    /// <param name="obj">The object to compare with, which may be <see langword="null"/>.</param>
+    /// <returns>
+    /// A negative number when this instance sorts first, zero when the two are equal, and a positive
+    /// number when <paramref name="obj"/> sorts first. A <see langword="null"/> always sorts first, which
+    /// is the convention every <see cref="IComparable"/> implementation in .NET follows.
+    /// </returns>
+    /// <exception cref="ArgumentException"><paramref name="obj"/> is not a <see cref="GraphEdge"/>.</exception>
+    /// <remarks>
+    /// The non-generic interface is implemented explicitly and exists for one reason: F#'s
+    /// <c>comparison</c> constraint is satisfied by <see cref="IComparable"/> and not by
+    /// <see cref="IComparable{T}"/>, so without it this type cannot key an F# <c>Set</c> or <c>Map</c>.
+    /// C# callers bind to <see cref="CompareTo(GraphEdge)"/> instead and box nothing.
+    /// </remarks>
+    int IComparable.CompareTo(object? obj) => obj switch
+    {
+        null => 1,
+        GraphEdge other => CompareTo(other),
+        _ => throw new ArgumentException($"The argument must be a {nameof(GraphEdge)}.", nameof(obj)),
+    };
 
     /// <summary>
     /// Returns the canonical text form of this edge, or a diagnostic literal when this instance is the

@@ -442,8 +442,8 @@ public sealed class GraphFragmentTests
     [Fact]
     public void ToStringSummarizesTheFragment()
     {
-        Assert.Equal("fragment (2 nodes, 1 edges, 1 open inputs, 1 open outputs)", Linear().ToString());
-        Assert.Equal("fragment (1 nodes, 0 edges, 0 open inputs, 1 open outputs)", Source("reader").ToString());
+        Assert.Equal("fragment (2 nodes, 1 edge, 1 open input, 1 open output)", Linear().ToString());
+        Assert.Equal("fragment (1 node, 0 edges, 0 open inputs, 1 open output)", Source("reader").ToString());
     }
 
     [Fact]

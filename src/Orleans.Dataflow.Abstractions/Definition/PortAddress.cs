@@ -17,11 +17,16 @@ namespace Orleans.Dataflow.Definition;
 /// endpoint without comparing text by hand.
 /// </para>
 /// <para>
+/// Addresses are also ordered, by node and then by port, which is the order the two keys are written in
+/// and the first two keys of <see cref="GraphEdge"/>'s own order. The default value sorts before every
+/// created one, so the order is total over every instance instead of leaving a hole at the default.
+/// </para>
+/// <para>
 /// The default value carries no address: <see cref="IsDefault"/> reports it, the component properties
 /// throw for it, and <see cref="ToString"/> renders a diagnostic literal for it rather than throwing.
 /// </para>
 /// </remarks>
-public readonly record struct PortAddress
+public readonly record struct PortAddress : IComparable<PortAddress>, IComparable
 {
     private readonly NodeId _node;
     private readonly PortId _port;
@@ -88,6 +93,94 @@ public readonly record struct PortAddress
 
         return new PortAddress(node, port);
     }
+
+    /// <summary>
+    /// Determines whether one address sorts before another in canonical order.
+    /// </summary>
+    /// <param name="left">The left operand.</param>
+    /// <param name="right">The right operand.</param>
+    /// <returns>
+    /// <see langword="true"/> when <paramref name="left"/> sorts before <paramref name="right"/>;
+    /// otherwise <see langword="false"/>.
+    /// </returns>
+    public static bool operator <(PortAddress left, PortAddress right) => left.CompareTo(right) < 0;
+
+    /// <summary>
+    /// Determines whether one address sorts before another in canonical order, or is equal to it.
+    /// </summary>
+    /// <param name="left">The left operand.</param>
+    /// <param name="right">The right operand.</param>
+    /// <returns>
+    /// <see langword="true"/> when <paramref name="left"/> does not sort after <paramref name="right"/>;
+    /// otherwise <see langword="false"/>.
+    /// </returns>
+    public static bool operator <=(PortAddress left, PortAddress right) => left.CompareTo(right) <= 0;
+
+    /// <summary>
+    /// Determines whether one address sorts after another in canonical order.
+    /// </summary>
+    /// <param name="left">The left operand.</param>
+    /// <param name="right">The right operand.</param>
+    /// <returns>
+    /// <see langword="true"/> when <paramref name="left"/> sorts after <paramref name="right"/>;
+    /// otherwise <see langword="false"/>.
+    /// </returns>
+    public static bool operator >(PortAddress left, PortAddress right) => left.CompareTo(right) > 0;
+
+    /// <summary>
+    /// Determines whether one address sorts after another in canonical order, or is equal to it.
+    /// </summary>
+    /// <param name="left">The left operand.</param>
+    /// <param name="right">The right operand.</param>
+    /// <returns>
+    /// <see langword="true"/> when <paramref name="left"/> does not sort before <paramref name="right"/>;
+    /// otherwise <see langword="false"/>.
+    /// </returns>
+    public static bool operator >=(PortAddress left, PortAddress right) => left.CompareTo(right) >= 0;
+
+    /// <summary>
+    /// Compares this address with another in canonical order.
+    /// </summary>
+    /// <param name="other">The address to compare with.</param>
+    /// <returns>
+    /// A negative number when this instance sorts first, zero when the two are equal, and a positive
+    /// number when <paramref name="other"/> sorts first.
+    /// </returns>
+    /// <remarks>
+    /// The order is the node identifier first and the port identifier second, each in its own ordinal
+    /// order, which is the order the text form writes the two components in. The default value carries
+    /// neither component and sorts before every created address, so the order is total; ordering is
+    /// consistent with equality, because two addresses compare equal exactly when both components do.
+    /// </remarks>
+    public int CompareTo(PortAddress other)
+    {
+        int comparison = _node.CompareTo(other._node);
+
+        return comparison != 0 ? comparison : _port.CompareTo(other._port);
+    }
+
+    /// <summary>
+    /// Compares this instance with another object in canonical order.
+    /// </summary>
+    /// <param name="obj">The object to compare with, which may be <see langword="null"/>.</param>
+    /// <returns>
+    /// A negative number when this instance sorts first, zero when the two are equal, and a positive
+    /// number when <paramref name="obj"/> sorts first. A <see langword="null"/> always sorts first, which
+    /// is the convention every <see cref="IComparable"/> implementation in .NET follows.
+    /// </returns>
+    /// <exception cref="ArgumentException"><paramref name="obj"/> is not a <see cref="PortAddress"/>.</exception>
+    /// <remarks>
+    /// The non-generic interface is implemented explicitly and exists for one reason: F#'s
+    /// <c>comparison</c> constraint is satisfied by <see cref="IComparable"/> and not by
+    /// <see cref="IComparable{T}"/>, so without it this type cannot key an F# <c>Set</c> or <c>Map</c>.
+    /// C# callers bind to <see cref="CompareTo(PortAddress)"/> instead and box nothing.
+    /// </remarks>
+    int IComparable.CompareTo(object? obj) => obj switch
+    {
+        null => 1,
+        PortAddress other => CompareTo(other),
+        _ => throw new ArgumentException($"The argument must be a {nameof(PortAddress)}.", nameof(obj)),
+    };
 
     /// <summary>
     /// Returns the canonical text form of this address, or a diagnostic literal when this instance is the

@@ -22,9 +22,11 @@ namespace Orleans.Dataflow;
 /// </para>
 /// <para>
 /// A graph built from lambda stages keeps its delegates beside the document, never inside it: the document
-/// names <c>local</c> stages with an empty parameter payload, and the delegates live in an internal table
-/// keyed by node identifier for the local runtime to bind at materialization. That is the concrete meaning
-/// of the <c>nondeployable</c> capability every such document declares.
+/// names <c>local</c> stages, and the delegates live in an internal table keyed by node identifier for the
+/// local runtime to bind at materialization. That is the concrete meaning of the <c>nondeployable</c>
+/// capability every such document declares. What a stage can say about itself in numbers rather than in
+/// code — a buffer's capacity and overflow policy, an asynchronous stage's concurrency bound — is in the
+/// document's parameter payloads, and every other stage carries the empty object there.
 /// </para>
 /// <para>
 /// Two graphs are the same graph exactly when their <see cref="Fingerprint"/> values are equal; the type

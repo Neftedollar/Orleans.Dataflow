@@ -126,16 +126,19 @@ internal static class LocalGraphBuilder
     /// <param name="id">The identifier allocated to it.</param>
     /// <returns>The fragment.</returns>
     /// <remarks>
+    /// <para>
     /// A result port is never an open port. Open ports are what a later connection consumes, and a result
     /// is exposed by declaring a slot against the closed graph, not by wiring an edge to it.
+    /// </para>
+    /// <para>
+    /// The parameter contract and payload come from the occurrence rather than from a constant here,
+    /// because they are not the same for every shape: a buffer and an asynchronous stage carry the options
+    /// the author chose, and every other shape carries the empty object under the delegate-only contract.
+    /// </para>
     /// </remarks>
     private static GraphFragment FragmentOf(LocalStageDescriptor stage, NodeId id)
     {
-        StageNode node = StageNode.Create(
-            id,
-            stage.Stage,
-            LocalVocabulary.ParameterContract,
-            LocalVocabulary.EmptyParameters);
+        StageNode node = StageNode.Create(id, stage.Stage, stage.ParameterContract, stage.Parameters);
 
         PortId[] openInputs = stage.HasInput ? [LocalVocabulary.InputPort] : [];
         PortId[] openOutputs = stage.HasOutput ? [LocalVocabulary.OutputPort] : [];

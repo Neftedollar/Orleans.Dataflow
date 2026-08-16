@@ -39,10 +39,10 @@ Every row starts at **Research**. Nothing in this matrix currently claims implem
 
 | Capability | Tier | Target | Status | Required semantic proof |
 |---|---:|---:|---|---|
-| Non-blocking demand/backpressure | P0 | M2 | Research | A producer never exceeds downstream credit at every bounded boundary. |
-| Bounded buffers by default | P0 | M2 | Research | Capacity and memory bounds are testable; no hidden unbounded mailbox is used as flow control. |
-| Overflow policies | P1 | M2 | Research | Backpressure, drop-oldest, drop-newest, drop-buffer, and fail report distinct outcomes. |
-| Operator fusion | P1 | M2 | Research | Compatible adjacent stages share an executor without changing element semantics. |
+| Non-blocking demand/backpressure | P0 | M2 | Implemented | A producer never exceeds downstream credit at every bounded boundary. |
+| Bounded buffers by default | P0 | M2 | Implemented | Capacity and memory bounds are testable; no hidden unbounded mailbox is used as flow control. |
+| Overflow policies | P1 | M2 | Implemented | Backpressure, drop-oldest, drop-newest, drop-buffer, and fail report distinct outcomes. |
+| Operator fusion | P1 | M2 | Implemented | Compatible adjacent stages share an executor without changing element semantics. |
 | Explicit async boundary | P1 | M2 | Research | Placement/concurrency changes are visible; ordering contract remains explicit. |
 | Credit protocol across Orleans boundaries | P0 | M3 | Research | Grain calls or stream publication are not mistaken for downstream demand. |
 | Partition-aware placement | P1 | M3 | Research | Partition ownership, rebalance, ordering, and failover are specified. |
@@ -70,7 +70,7 @@ Every row starts at **Research**. Nothing in this matrix currently claims implem
 | Group | Planned operators | Tier | Target | Status |
 |---|---|---:|---:|---|
 | Stateless mapping | map/select, filter/where, choose/collect, map-concat/select-many | P0 | M2 | Research |
-| Async mapping | ordered parallel map, unordered parallel map, sequential async map | P0 | M2 | Research |
+| Async mapping | ordered parallel map, unordered parallel map, sequential async map | P0 | M2 | Implemented |
 | Stateful mapping | stateful map-concat, scan, async scan | P1 | M2 | Research |
 | Reduction | fold/aggregate, async fold, reduce | P1 | M2 | Research |
 | Slicing | skip/drop, take, skip-while, take-while, take-through | P1 | M2 | Research |
