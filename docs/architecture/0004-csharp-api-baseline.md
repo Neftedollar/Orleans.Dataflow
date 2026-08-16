@@ -62,9 +62,19 @@ RunnableGraph To<TResult>(SinkWithResult<T, TResult> sink, string slotName, out 
   argument lists, switch arms, ternaries, initializers, LINQ, and async
   method bodies); the tuple overload is the composable form that survives
   `async` signatures, collections, and interfaces, where `out` is banned
-  (`CS1988`, `CS1623`, `CS8198`). F# consumes the `out` form as a natural
-  tuple; the C# `ValueTuple` names do not survive into F#, so both forms
-  earn their place.
+  (`CS1988`, `CS1623`, `CS8198`). Both forms are justified on C# grounds
+  alone. (An earlier revision also cited F# consumption of the `out` form;
+  the independent API review showed F# resolves this overload pair by
+  expected return type — an inference trick the F# constraints forbid — and
+  the committed binding rule keeps the F# frontend off the fluent facade
+  entirely, so the F# argument is void and withdrawn. The F# frontend
+  reaches result slots through the algebra, not through `Source<T>.To`.)
+- Guard overloads with `[Obsolete(error: true)]` cover the missing-name
+  mistake: without them, forgetting the slot name makes the compiler
+  suggest the one repair (a cast to `Sink<T>`) that compiles and silently
+  drops the result — the exact accident the mandatory name exists to
+  prevent. The guards give that call shape a real overload to bind to and a
+  diagnostic that names the two correct spellings.
 - Sink-factory lambda overloads fix the inference hole where
   `Sink.Aggregate(0L, (count, _) => ...)` cannot infer its element type
   (`CS0411`; partial type-argument lists remain unsupported, `CS0305`):
@@ -161,3 +171,9 @@ per-concern option records, never one options bag.
 - The prototypes modeled fragments as toys; nothing here validates the real
   fragment algebra's ergonomics, which the first real authoring checkpoint
   will.
+- `RunnableGraph` and `ResultSlot<T>` are constructible only inside the C#
+  package today. The F# frontend binds to them as shared value types, so
+  M7 needs a construction seam for closing a graph and declaring a result
+  from F# — a language-neutral factory or friend-assembly access, decided
+  then; the current internals are known to be insufficient for M7 and that
+  is recorded here rather than discovered there.

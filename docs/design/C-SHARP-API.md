@@ -165,6 +165,11 @@ Still open:
 2. Exact option-record set for M2 operators and their required members.
 3. Namespace layout: everything in `Orleans.Dataflow` versus splitting
    operator extensions into `Orleans.Dataflow.Operators`.
+4. LINQ query syntax: `from x in source where ... select ...` already binds
+   to `Select`/`Where` today. Whether query syntax is supported surface
+   (tested) or explicitly unsupported is decided with the M4 `SelectMany`
+   shape, because query syntax demands the three-parameter LINQ
+   `SelectMany` while a streaming flatten wants a different one.
 
 ## Constraints carried from the F# frontend
 
