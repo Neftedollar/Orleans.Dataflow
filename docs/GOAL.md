@@ -84,7 +84,7 @@ The architecture must be capable of supporting, through core primitives or optio
 - Orleans Streams subscriptions and publications;
 - timers and reminders;
 - individual grain calls, keyed grain stages, controlled groups of grains, and observer/notification bridges;
-- files and .NET streams;
+- files, .NET streams, and `PipeReader` pipelines;
 - HTTP polling, request/response and webhook ingress;
 - Reactive Streams, `IObservable<T>`, and .NET event bridges where bounded buffering is explicit;
 - messaging systems such as Kafka through optional provider packages;
@@ -98,7 +98,7 @@ The architecture must support, through core primitives or optional adapters:
 
 - ignore, collect, first/last, fold, asynchronous callbacks, and externally materialized consumers;
 - Orleans Streams and grain calls with an explicit acknowledgement/delivery boundary;
-- channels, queues, observables, files, and .NET streams;
+- channels, queues, observables, files, .NET streams, and `PipeWriter` pipelines;
 - databases, Kafka and other brokers;
 - HTTP APIs, serverless endpoints, webhooks, and SignalR;
 - custom sinks through a stable provider extension contract.
@@ -133,7 +133,7 @@ An optional future `Orleans.Dataflow.OrleansFSharp` package may integrate with t
 ## Constraints
 
 - Independent repository and package family.
-- C# and F# are equal frontends; the C# API and runtime are built first, and the F# implementation begins once the C# API and its parity gate are substantially complete.
+- C# and F# are equal frontends; the C# API and runtime are built first, and F# frontend work begins only after the C# completion gate (an independent review, roadmap M6) passes.
 - Public documentation and examples are in English.
 - No package publication, tag, or release before the explicit 1.0.0 decision.
 - Direct, frequent, reviewed commits to `main` are the temporary pre-1.0 workflow.
@@ -153,7 +153,7 @@ Version 1.0.0 is eligible for release only when all of these are true:
 7. Runtime resources are bounded by default and measured under representative load.
 8. OpenTelemetry metrics/traces and diagnostic graph inspection are documented and tested.
 9. The F# frontend is implemented as an equal API over the same graph algebra and runtime, and F#/C# compatibility tests prove that both frontends produce compatible graph definitions with identical runtime semantics.
-10. API reference, conceptual documentation, migration/versioning policy, examples, and a clean-room getting-started verification are complete.
+10. API reference, conceptual documentation, migration/versioning policy, examples, and a clean-room getting-started verification are complete, and a human-maintainability review confirms the codebase remains understandable to ordinary .NET developers without AI assistance.
 11. Package contents, deterministic builds, dependency locks, signing/provenance, and release automation pass their gates.
 12. A separate explicit release decision authorizes the first tag and NuGet publication.
 

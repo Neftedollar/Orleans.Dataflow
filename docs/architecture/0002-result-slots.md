@@ -83,9 +83,9 @@ Costs:
 
 - The exact C# surface by which linear composition exposes a sink's result
   slot (paired return value, typed result key on the sink descriptor, or a
-  carrier type) is an M0 API-baseline decision, to be settled with compile
+  carrier type) is an M1 API-baseline decision, to be settled with compile
   prototypes.
-- Checkpointing and durability of slot values across failover are M3
+- Checkpointing and durability of slot values across failover are M5
   concerns.
 - Whichever exposure shape wins, reusing one sink value twice in a graph must
   yield two distinguishable slots, and no shape may bind a slot to a sink

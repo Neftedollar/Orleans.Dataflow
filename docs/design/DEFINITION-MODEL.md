@@ -117,6 +117,28 @@ can still be semantically invalid against a catalog.
 Diagnostics carry the failing rule, the offending identity, and no CLR type
 names. Validation reports all violations it can find, not only the first.
 
+## Canonical envelope layout (format version 1)
+
+The fixed schema property order that ADR 0003 requires, with camelCase JSON
+names. Every property is always written in this order; an absent optional
+value is an explicit JSON `null`, never an omitted property.
+
+| Object | Property order |
+|---|---|
+| `GraphDocument` | `formatVersion`, `graphId`, `revision`, `capabilities`, `nodes`, `edges`, `resultSlots` |
+| `StageNode` | `nodeId`, `stageRef`, `parameterContract`, `parameters`, `executionPolicyContract`, `executionPolicy` |
+| `StageRef` | `providerId`, `stageId`, `majorVersion` |
+| `ContractReference` | `contractId`, `majorVersion` |
+| `PortAddress` | `nodeId`, `portId` |
+| `Edge` | `from`, `to` |
+| `ResultSlotDefinition` | `resultSlotId`, `resultContract`, `producer` |
+
+Identifiers serialize as their canonical text; revisions and major versions
+as integers; capabilities as an array of token strings in ordinal order;
+`parameters` and `executionPolicy` as embedded canonical JSON values.
+`executionPolicyContract` and `executionPolicy` are `null` together or
+present together.
+
 ## Stage catalog contracts
 
 Deployment code registers a closed set of catalogs at startup; graph data can
@@ -139,8 +161,8 @@ specifications) supports the later cross-silo compatibility checks; M0 only
 defines and tests the fingerprint's determinism.
 
 Runtime factories are part of the runtime plane and are intentionally absent
-from the M0 catalog contract; M1 adds them without changing the definition
-contracts above.
+from the M0 catalog contract; the local runtime milestone (M2) adds them
+without changing the definition contracts above.
 
 ## Not in M0
 
@@ -157,5 +179,5 @@ contracts above.
 3. Canonical writer/reader, `GraphFingerprint`, golden fixtures.
 4. Catalog contracts, catalog fingerprint, graph compiler with catalog
    invariants and diagnostics tests.
-5. Authoring fragments and deterministic composition/rebasing over the
-   document model.
+5. Language-neutral composition/rebasing helpers over the document model,
+   bridging into the M1 C# authoring API.

@@ -28,8 +28,8 @@ Every row starts at **Research** or **Planned**. Nothing in this matrix currentl
 | Reusable `Flow<TIn,TOut>` composition | P0 | M0 | Research | Reusing one fragment creates independent node identities and runtime state. |
 | Closed runnable graphs | P0 | M0 | Research | Validation can distinguish open ports from a materializable graph. |
 | Named graph, stage, port, and revision identity | P0 | M0 | Research | Deterministic serialization, collision checks, and compatible revision rules. |
-| Runtime materialization | P0 | M1 | Research | Each run allocates independent runtime resources and exposes completion. |
-| Typed result slots | P1 | M1 | Research | Source, flow, sink, and lifecycle results are declared as typed named slots and resolved per run without persisting runtime objects; a run rejects slots from another graph identity, revision, or import scope. |
+| Runtime materialization | P0 | M2 | Research | Each run allocates independent runtime resources and exposes completion. |
+| Typed result slots | P1 | M2 | Research | Source, flow, sink, and lifecycle results are declared as typed named slots and resolved per run without persisting runtime objects; a run rejects slots from another graph identity, revision, or import scope. |
 | Named multiple results | P1 | M4 | Research | Results remain type-safe and versionable across distributed execution. |
 | Explicit fan-in/fan-out graph construction | P1 | M4 | Research | All ports are connected exactly once unless a junction contract states otherwise. |
 | Cycles | P2 | M4+ | Research | Liveness validation requires an explicit buffer/delay boundary and has deadlock tests. |
@@ -39,45 +39,48 @@ Every row starts at **Research** or **Planned**. Nothing in this matrix currentl
 
 | Capability | Tier | Target | Status | Required semantic proof |
 |---|---:|---:|---|---|
-| Non-blocking demand/backpressure | P0 | M1 | Research | A producer never exceeds downstream credit at every bounded boundary. |
-| Bounded buffers by default | P0 | M1 | Research | Capacity and memory bounds are testable; no hidden unbounded mailbox is used as flow control. |
-| Overflow policies | P1 | M1 | Research | Backpressure, drop-oldest, drop-newest, drop-buffer, and fail report distinct outcomes. |
+| Non-blocking demand/backpressure | P0 | M2 | Research | A producer never exceeds downstream credit at every bounded boundary. |
+| Bounded buffers by default | P0 | M2 | Research | Capacity and memory bounds are testable; no hidden unbounded mailbox is used as flow control. |
+| Overflow policies | P1 | M2 | Research | Backpressure, drop-oldest, drop-newest, drop-buffer, and fail report distinct outcomes. |
 | Operator fusion | P1 | M2 | Research | Compatible adjacent stages share an executor without changing element semantics. |
 | Explicit async boundary | P1 | M2 | Research | Placement/concurrency changes are visible; ordering contract remains explicit. |
-| Credit protocol across Orleans boundaries | P0 | M2 | Research | Grain calls or stream publication are not mistaken for downstream demand. |
-| Partition-aware placement | P1 | M2 | Research | Partition ownership, rebalance, ordering, and failover are specified. |
+| Credit protocol across Orleans boundaries | P0 | M3 | Research | Grain calls or stream publication are not mistaken for downstream demand. |
+| Partition-aware placement | P1 | M3 | Research | Partition ownership, rebalance, ordering, and failover are specified. |
 | Pause, resume, drain, shutdown, and abort | P1 | M2 | Research | Each control has distinct state transitions and in-flight behavior. |
+| Kill switch and external shutdown control | P1 | M2 | Research | Single-run control resolves through a result slot; a switch shared across runs is a separate documented contract. |
 
 ## Lifecycle and failure
 
 | Capability | Tier | Target | Status | Required semantic proof |
 |---|---:|---:|---|---|
-| Completion propagation | P0 | M1 | Research | Downstream completion and upstream resource release are deterministic. |
-| Failure propagation | P0 | M1 | Research | Downstream receives failure; upstream receives cancellation unless recovery intercepts it. |
-| Downstream cancellation | P0 | M1 | Research | Early sinks cancel upstream and release resources. |
-| Cancellation of async work | P0 | M1 | Research | Stage cancellation reaches `Task`, `ValueTask`, and later F# `Async` adapters. |
-| Supervision: stop | P1 | M2 | Research | The failing stage fails the defined section or graph. |
-| Supervision: resume | P1 | M2 | Research | The failing element is dropped while compatible stage state is retained. |
-| Supervision: restart stage | P1 | M2 | Research | The failing element is dropped and declared local stage state resets. |
-| Retry element | P1 | M3 | Research | Attempt count, backoff, idempotency, and poison-element handling are explicit. |
-| Recover with element or alternate source | P1 | M3 | Research | Completion after fallback and source-switch boundaries are distinct. |
-| Restart source/flow/sink section with backoff | P1 | M3 | Research | Reset scope, jitter, restart budget, and in-flight loss window are documented. |
-| Durable resume after process/silo failure | P1 | M3 | Research | Checkpoint, source cursor, sink commit, and replay semantics are proven together. |
+| Completion propagation | P0 | M2 | Research | Downstream completion and upstream resource release are deterministic. |
+| Failure propagation | P0 | M2 | Research | Downstream receives failure; upstream receives cancellation unless recovery intercepts it. |
+| Downstream cancellation | P0 | M2 | Research | Early sinks cancel upstream and release resources. |
+| Cancellation of async work | P0 | M2 | Research | Stage cancellation reaches `Task`, `ValueTask`, and later F# `Async` adapters. |
+| Supervision: stop | P1 | M5 | Research | The failing stage fails the defined section or graph. |
+| Supervision: resume | P1 | M5 | Research | The failing element is dropped while compatible stage state is retained. |
+| Supervision: restart stage | P1 | M5 | Research | The failing element is dropped and declared local stage state resets. |
+| Retry element | P1 | M5 | Research | Attempt count, backoff, idempotency, and poison-element handling are explicit. |
+| Recover with element or alternate source | P1 | M5 | Research | Completion after fallback and source-switch boundaries are distinct. |
+| Restart source/flow/sink section with backoff | P1 | M5 | Research | Reset scope, jitter, restart budget, and in-flight loss window are documented. |
+| Durable resume after process/silo failure | P1 | M5 | Research | Checkpoint, source cursor, sink commit, and replay semantics are proven together. |
 
 ## Linear operators
 
 | Group | Planned operators | Tier | Target | Status |
 |---|---|---:|---:|---|
-| Stateless mapping | map/select, filter/where, choose/collect, map-concat/select-many | P0 | M1 | Research |
-| Async mapping | ordered parallel map, unordered parallel map, sequential async map | P0 | M1 | Research |
+| Stateless mapping | map/select, filter/where, choose/collect, map-concat/select-many | P0 | M2 | Research |
+| Async mapping | ordered parallel map, unordered parallel map, sequential async map | P0 | M2 | Research |
 | Stateful mapping | stateful map-concat, scan, async scan | P1 | M2 | Research |
 | Reduction | fold/aggregate, async fold, reduce | P1 | M2 | Research |
-| Slicing | skip/drop, take, skip-while, take-while, take-through | P1 | M1 | Research |
-| Batching | grouped, sliding, grouped-within, weighted grouped-within | P1 | M3 | Research |
-| Timing | delay, initial delay, take-within, skip-within, timeout, valve | P1 | M3 | Research |
-| Rate | throttle by element/cost, shaping versus enforcing mode | P1 | M3 | Research |
-| Observation | tap/also-to, termination watch, monitor, completion callback | P1 | M2 | Research |
-| Flattening | concat-map, merge-map with bounded parallelism | P1 | M3 | Research |
+| Slicing | skip/drop, take, skip-while, take-while, take-through | P1 | M2 | Research |
+| Batching | grouped, sliding, grouped-within, weighted grouped-within | P1 | M4 | Research |
+| Timing | delay, initial delay, take-within, skip-within, timeout, valve | P1 | M4 | Research |
+| Rate | throttle by element/cost, shaping versus enforcing mode | P1 | M4 | Research |
+| Observation | tap/also-to, termination watch, monitor, completion callback | P1 | M4 | Research |
+| Flattening | concat-map, merge-map with bounded parallelism | P1 | M4 | Research |
+| Deduplication | distinct, deduplicate with explicit bounded state policy | P2 | M4 | Research |
+| Sequence edits | prepend, append, divert-to side channel | P2 | M4 | Research |
 
 C# names should follow .NET expectations where possible. If the Akka.NET behavior differs from LINQ, Orleans.Dataflow uses an unambiguous additional name rather than silently surprising C# callers. For example, `TakeWhile` should follow the ordinary exclusive predicate boundary, while an inclusive variant can be named `TakeThrough`.
 
@@ -93,6 +96,8 @@ C# names should follow .NET expectations where possible. If the Akka.NET behavio
 | Balance | P1 | M4 | Research | Exactly one available output receives each element; fairness is specified. |
 | Partition | P1 | M4 | Research | Routing function and invalid partition behavior are explicit. |
 | Unzip/unzip-with | P1 | M4 | Research | Output backpressure interaction is explicit. |
+| Interleave | P2 | M4 | Research | Segment size, fairness, and per-input completion behavior are explicit. |
+| Combine latest | P2 | M4 | Research | Initial completeness, which-input-emits, and completion rules are deterministic. |
 | Group by key | P1 | M4+ | Research | Maximum active keys, eviction, cancellation, and idle cleanup are bounded. |
 | Split before/after | P2 | M4+ | Research | Unconsumed substream behavior cannot leak resources or deadlock silently. |
 | Prefix and tail | P2 | M4+ | Research | Tail ownership and single-consumption rules are explicit. |
@@ -102,54 +107,54 @@ C# names should follow .NET expectations where possible. If the Akka.NET behavio
 
 | Source family | Tier | Target | Status | Boundary |
 |---|---:|---:|---|---|
-| Empty, single, failed, never, repeat, cycle | P0 | M1 | Research | Pure lifecycle and constant sources. |
-| Enumerable and async enumerable | P0 | M1 | Research | Iterator ownership, cancellation, and disposal. |
-| Task and deferred factory | P0 | M1 | Research | Factory invocation occurs per materialization. |
-| Unfold and async unfold | P1 | M1 | Research | State is per materialization; completion is explicit. |
+| Empty, single, failed, never, repeat, cycle | P0 | M2 | Research | Pure lifecycle and constant sources. |
+| Enumerable and async enumerable | P0 | M2 | Research | Iterator ownership, cancellation, and disposal. |
+| Task and deferred factory | P0 | M2 | Research | Factory invocation occurs per materialization. |
+| Unfold and async unfold | P1 | M2 | Research | State is per materialization; completion is explicit. |
 | Resource unfold | P1 | M2 | Research | Resource closes on every terminal path. |
-| Bounded ingress queue | P0 | M1 | Research | Offer result distinguishes accepted, dropped, closed, and failed. |
-| Bounded channel | P1 | M1 | Research | Channel completion is not durability. |
+| Bounded ingress queue | P0 | M2 | Research | Offer result distinguishes accepted, dropped, closed, and failed. |
+| Bounded channel | P1 | M2 | Research | Channel completion is not durability. |
 | Tick/clock source | P1 | M2 | Research | Slow-consumer behavior and missed ticks are explicit. |
 
 ## Core sinks
 
 | Sink family | Tier | Target | Status | Boundary |
 |---|---:|---:|---|---|
-| Ignore and completion | P0 | M1 | Research | Materializes graph completion. |
-| First/last/optional first/last | P0 | M1 | Research | Early cancellation and empty behavior are explicit. |
-| Collect to bounded result | P1 | M1 | Research | Maximum element/byte bound is required. |
-| Fold/reduce/sum | P1 | M1 | Research | Final result and overflow behavior are specified. |
-| Sequential and bounded-parallel callback | P0 | M1 | Research | Ordering and exception behavior are explicit. |
+| Ignore and completion | P0 | M2 | Research | Materializes graph completion. |
+| First/last/optional first/last | P0 | M2 | Research | Early cancellation and empty behavior are explicit. |
+| Collect to bounded result | P1 | M2 | Research | Maximum element/byte bound is required. |
+| Fold/reduce/sum | P1 | M2 | Research | Final result and overflow behavior are specified. |
+| Sequential and bounded-parallel callback | P0 | M2 | Research | Ordering and exception behavior are explicit. |
 | Bounded channel/queue output | P1 | M2 | Research | Write acceptance and downstream consumption are distinct. |
 
 ## Orleans-native capabilities
 
 | Capability | Tier | Target | Status | Required contract |
 |---|---:|---:|---|---|
-| Orleans Stream source | P0 | M2 | Research | Provider-specific delivery, ordering, rewind token, subscription ownership, and resubscription. |
-| Orleans Stream sink | P0 | M2 | Research | Publication acknowledgement is not universal end-to-end processing. |
-| Awaited grain-call flow/sink | P0 | M2 | Research | Awaited reply is the acknowledgement boundary; timeout/retry/idempotency are explicit. |
-| Keyed grain-call flow | P1 | M2 | Research | Per-key ordering and parallelism bounds. |
-| Grain `IAsyncEnumerable<T>` source | P1 | M2 | Research | Call-scoped backpressure and cancellation; no implicit resume. |
-| Timer source | P1 | M2 | Research | Activation-scoped and non-durable. |
+| Orleans Stream source | P0 | M3 | Research | Provider-specific delivery, ordering, rewind token, subscription ownership, and resubscription. |
+| Orleans Stream sink | P0 | M3 | Research | Publication acknowledgement is not universal end-to-end processing. |
+| Awaited grain-call flow/sink | P0 | M3 | Research | Awaited reply is the acknowledgement boundary; timeout/retry/idempotency are explicit. |
+| Keyed grain-call flow | P1 | M3 | Research | Per-key ordering and parallelism bounds. |
+| Grain `IAsyncEnumerable<T>` source | P1 | M3 | Research | Call-scoped backpressure and cancellation; no implicit resume. |
+| Timer source | P1 | M3 | Research | Activation-scoped and non-durable. |
 | Reminder trigger source | P1 | M3 | Research | Definition survives restart, but missed ticks are not replayed. |
 | Observer bridge | P2 | M3 | Research | Best-effort, resubscription, randomized observer identity, no replay. |
 | Broadcast Channel bridge | P2 | M3 | Research | Best-effort and no history are surfaced in capability metadata. |
-| Durable graph coordinator | P0 | M2 | Research | Single logical ownership, failover fencing, and run state transitions. |
-| Checkpointed stage state | P1 | M3 | Research | Schema version, atomicity boundary, and migration policy. |
+| Durable graph coordinator | P0 | M3 | Research | Single logical ownership, failover fencing, and run state transitions. |
+| Checkpointed stage state | P1 | M5 | Research | Schema version, atomicity boundary, and migration policy. |
 | Rolling upgrade/catalog negotiation | P1 | M5 | Research | A run never executes an incompatible stage catalog silently. |
 
 ## Optional adapter families
 
 | Adapter | Tier | Earliest target | Status | Package direction |
 |---|---:|---:|---|---|
-| Files and .NET streams | P2 | M4 | Research | `Orleans.Dataflow.IO` |
+| Files, .NET streams, and pipelines (`PipeReader`/`PipeWriter`) | P2 | M4 | Research | `Orleans.Dataflow.IO` |
 | HTTP polling/SSE/webhook and HTTP sink | P2 | M4 | Research | `Orleans.Dataflow.Http` |
 | SignalR source/sink | P2 | M4 | Research | `Orleans.Dataflow.SignalR` |
 | Kafka source/sink | P1 | M4 | Research | Optional provider; partition/offset/commit contract required. |
 | Azure Queue/Event Hubs | P2 | M4 | Research | Prefer Orleans provider integration where it preserves semantics. |
 | Relational database/outbox/change feed | P1 | M4 | Research | Provider-specific optional package; no generic “database sink” promise. |
-| `IObservable<T>` and .NET events | P2 | M4 | Research | Explicit bounded buffer and overflow; source cannot create backpressure upstream. |
+| `IObservable<T>` and .NET events | P2 | M3 | Research | Explicit bounded buffer and overflow; source cannot create backpressure upstream. |
 | Reactive Streams interop | P2 | M4+ | Research | Protocol bridge and TCK expectations required. |
 
 ## Testing and observability
@@ -157,15 +162,15 @@ C# names should follow .NET expectations where possible. If the Akka.NET behavio
 | Capability | Tier | Target | Status |
 |---|---:|---:|---|
 | Deterministic graph inspection | P0 | M0 | Research |
-| Demand-aware test source and sink probes | P0 | M1 | Research |
+| Demand-aware test source and sink probes | P0 | M2 | Research |
 | Virtual/manual clock for time operators | P1 | M2 | Research |
-| Lifecycle and materialized-value assertions | P0 | M1 | Research |
-| Fault injection at source/stage/sink/boundary | P1 | M2-M3 | Research |
-| Multi-silo placement/failover harness | P0 | M2 | Research |
-| OpenTelemetry metrics, traces, and context propagation | P1 | M2 | Research |
-| Stage/run monitor snapshots | P1 | M2 | Research |
+| Lifecycle and materialized-value assertions | P0 | M2 | Research |
+| Fault injection at source/stage/sink/boundary | P1 | M3-M5 | Research |
+| Multi-silo placement/failover harness | P0 | M3 | Research |
+| OpenTelemetry metrics, traces, and context propagation | P1 | M5 | Research |
+| Stage/run monitor snapshots | P1 | M5 | Research |
 | Compatibility and golden serialization tests | P0 | M0 onward | Research |
-| Load, bounded-memory, and recovery benchmarks | P1 | M5 | Research |
+| Load, bounded-memory, and recovery benchmarks | P1 | M8 | Research |
 
 ## Primary references
 

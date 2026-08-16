@@ -2,18 +2,19 @@
 
 This roadmap orders the work by architectural risk. Dates are intentionally absent; milestone exit criteria determine progress.
 
-## M0 — Contract foundation
+C# is the primary frontend. The F# frontend is an equal API built over the same semantic core, and it starts only after the C# completion gate (M6) passes an independent review.
+
+## M0 — Definition core
 
 Deliverables:
 
 - language-neutral immutable graph document;
 - stable graph, node, port, stage, contract, and revision identifiers;
-- typed source/flow/sink authoring fragments over that graph;
-- deterministic fragment composition and identity rebasing;
+- canonical payload values and deterministic serialization with golden compatibility tests;
 - stage catalog contracts and provider registration;
 - graph compiler and validation diagnostics;
-- deterministic serialization with golden compatibility tests;
-- initial C# API examples and an F# compatibility compile prototype.
+- deterministic fragment composition and identity rebasing;
+- typed ports, result slots, execution policies, and capability declarations in the document model.
 
 Exit criteria:
 
@@ -22,16 +23,36 @@ Exit criteria:
 - invalid ports, types, duplicate IDs, missing registrations, invalid cycles, and incompatible versions fail before execution;
 - no delegate, closure, runtime service, CLR assembly-qualified type, task, grain reference, or channel enters the durable graph document.
 
-## M1 — Linear bounded runtime
+## M1 — C# authoring API
 
 Deliverables:
 
-- one-source/one-sink runtime;
-- bounded demand protocol and ingress queue;
+- `Source<T>`, `Flow<TIn, TOut>`, `Sink<T>`, graph shapes, `RunnableGraph`, `ResultSlot<T>` authoring types over the definition core;
+- an API ADR fixing names and generic shape after comparing variants on several real usage examples;
+- fluent composition with good type inference, nullable annotations, and no ambiguous overloads;
+- separate source, flow, sink, and run option types;
+- deterministic fragment reuse and import scoping at the API level;
+- compile tests, construction tests, and runnable examples;
+- an independent review of the public API surface;
+- an F# compatibility compile prototype so C# decisions cannot make the F# surface impossible.
+
+Exit criteria:
+
+- representative programs compose sources, flows, sinks, and fragments without touching the definition IR by hand;
+- authoring produces deterministic graph documents identical to core-built equivalents;
+- the API review finds no blocking naming, inference, or overload defects.
+
+## M2 — Local bounded runtime
+
+Deliverables:
+
+- reference execution engine for validated graphs;
+- bounded demand protocol, bounded buffers, and explicit overflow results;
 - core map, filter, choose, async map, scan, take/drop, fold, and callback stages;
-- bounded buffers and explicit overflow results;
-- completion, failure, cancellation, shutdown, and abort;
-- run handle and result-slot resolution for local runs;
+- completion, failure, cancellation, shutdown, and abort; pause, resume, and drain controls;
+- kill-switch/shutdown control and result-slot resolution through the run handle;
+- controllable time abstraction for deterministic tests;
+- core local sources and sinks (values, enumerables, tasks, unfold, bounded queues and channels, tick);
 - demand-aware test probes.
 
 Exit criteria:
@@ -41,7 +62,7 @@ Exit criteria:
 - every terminal path releases enumerators, resources, registrations, and in-flight work;
 - a graph can be materialized more than once without sharing accidental stage state.
 
-## M2 — Orleans distributed execution
+## M3 — Orleans runtime
 
 Deliverables:
 
@@ -49,29 +70,49 @@ Deliverables:
 - coordinator and executor grains with fenced run ownership;
 - credit-based flow control across grain boundaries;
 - catalog fingerprint/capability validation across eligible silos;
-- Orleans Stream source and sink;
-- awaited and keyed grain-call stages;
-- timer source and grain async-enumerable source;
+- Orleans Stream source and sink; awaited and keyed grain-call stages; grain async-enumerable source;
+- timer and reminder trigger sources with documented durability and missed-tick semantics;
+- observer and Broadcast Channel bridges with explicit best-effort semantics;
+- `IObservable<T>` and .NET event bridges with mandatory bounded buffering;
 - placement/partition ordering contract;
-- OpenTelemetry metrics, traces, and graph/run inspection.
+- multi-silo tests for placement, backpressure, cancellation, deactivation/reactivation, and failover.
 
 Exit criteria:
 
-- multi-silo tests prove placement, backpressure, cancellation, deactivation/reactivation, failover, and no split-brain run ownership;
+- multi-silo tests prove no split-brain run ownership;
 - provider-specific Orleans Stream guarantees are reported rather than generalized;
 - an actor mailbox is never used as an unbounded substitute for demand.
 
-## M3 — Supervision and durable recovery
+## M4 — Graph topology and operator breadth
 
 Deliverables:
 
-- stop/resume/restart-stage supervision;
-- retry, recover, and restart-section policies;
+- graph builder for typed multi-port shapes;
+- merge, concat, zip, broadcast, balance, partition, unzip, interleave, and combine-latest junctions;
+- bounded substreams, group-by, split, prefix-and-tail, and dynamic hubs;
+- full pipeline composition, including pipelines as branches and cycles behind explicit buffer/delay boundaries;
+- operator breadth: batching, windowing, timing, rate, flattening, distinct/deduplicate, prepend/append, divert-to, observation;
+- named multiple result slots;
+- provider SDK and conformance tests; optional external adapters (Kafka, database/outbox, HTTP, SignalR, files/streams/pipelines) follow the SDK and must not delay the core.
+
+Exit criteria:
+
+- topology liveness, fairness, cancellation, unconsumed-port, and resource-bound tests pass;
+- every adapter publishes an acknowledgement/delivery/checkpoint/idempotency table;
+- provider packages do not leak their configuration into core option types.
+
+## M5 — Supervision, durability, and compatibility
+
+Deliverables:
+
+- stop/resume/restart-stage supervision; retry, recover, and restart-section policies;
 - checkpoint model and storage provider contract;
 - source cursor ownership and sink commit/idempotency contract;
 - durable run resume and graph revision compatibility;
-- reminder-trigger source with documented missed-tick behavior;
-- failure injection harness.
+- rolling upgrade and catalog negotiation;
+- failure injection harness;
+- OpenTelemetry metrics/traces and stage/run monitor snapshots;
+- operational documentation.
 
 Exit criteria:
 
@@ -79,61 +120,55 @@ Exit criteria:
 - no global exactly-once claim exists; stronger guarantees are adapter-specific and evidenced;
 - state reset and durable-state survival are explicit for every restart form.
 
-## M4 — Graph topology and provider ecosystem
+## M6 — C# completion gate
+
+An independent review must confirm:
+
+- coherence of the public API;
+- no major logical parity gaps against the approved capability matrix;
+- backpressure correctness and no unbounded defaults;
+- cancellation and failure correctness;
+- a working Orleans runtime with multi-silo and recovery evidence;
+- documentation describing actual semantics;
+- a green Release build and CI.
+
+Only after this gate does F# frontend work begin.
+
+## M7 — Idiomatic F# frontend
 
 Deliverables:
 
-- graph builder for typed multi-port shapes;
-- merge, concat, zip, broadcast, balance, partition, and unzip junctions;
-- bounded substreams and dynamic hubs;
-- provider SDK and conformance tests;
-- optional Kafka, database/outbox, HTTP, SignalR, file/stream, and observable adapters according to priority and maintainer capacity;
-- named multiple result slots.
-
-Exit criteria:
-
-- topology liveness, fairness, cancellation, unconsumed-port, and resource-bound tests pass;
-- every adapter publishes an acknowledgement/delivery/checkpoint/idempotency table;
-- provider packages do not leak their configuration into core source/flow/sink option types.
-
-## M5 — C# parity and 1.0 hardening
-
-Deliverables:
-
-- all approved P0/P1 capability rows at Qualified or explicitly deferred with a release-blocking rationale;
-- API and binary compatibility review;
-- supported .NET and Orleans compatibility matrix;
-- load, bounded-memory, recovery, and rolling-upgrade evidence;
-- complete conceptual and API documentation;
-- clean-room getting-started verification;
-- deterministic package and provenance pipeline prepared but not published.
-
-Exit criteria:
-
-- every C#-scoped criterion in [GOAL.md](GOAL.md) is evidenced.
-
-The 1.0 release decision itself additionally requires the M6 F# frontend: the two frontends ship as equals.
-
-## M6 — Idiomatic F# frontend
-
-The F# API is an equal public frontend, not an optional add-on; 1.0 requires it. This milestone may begin earlier as soon as the C# graph contract and parity surface are substantially complete. A compile-only prototype remains part of earlier milestones so C# decisions cannot make the F# surface impossible.
-
-Deliverables:
-
-- `Orleans.Dataflow.FSharp` modules and pipeline-first functions;
-- clear source, flow, sink, run, and host option records;
-- distinct Task, ValueTask, and F# Async operator families;
+- `Orleans.Dataflow.FSharp` modules and pipeline-first functions over the same semantic core, with no runtime duplication;
+- clear source, flow, sink, run, and host option types;
+- distinct `Task`, `ValueTask`, and F# `Async` operator families;
 - natural reusable flow and graph composition;
-- optional `Orleans.Dataflow.OrleansFSharp` adapter for specification-003 functional grain contracts;
-- F# examples, tests, and documentation authored as F#, not transliterated C#.
+- F# examples, compile tests, and documentation authored as F#, not transliterated C#.
 
 Exit criteria:
 
 - representative F# applications require no user-authored C# class;
 - public names follow current F# component design guidance;
 - the F# API does not depend on overload guessing, SRTP tricks, serialized closures, or mutable builders;
-- F#/C# compatibility tests prove both frontends produce compatible graph definitions with identical runtime semantics;
-- every criterion in [GOAL.md](GOAL.md) is evidenced, and the user explicitly approves the 1.0 release operation.
+- F#/C# compatibility tests prove both frontends produce compatible graph definitions with identical runtime semantics.
+
+## M8 — 1.0 qualification
+
+Deliverables:
+
+- all approved P0/P1 capability rows at Qualified or explicitly deferred with a release-blocking rationale;
+- API and binary compatibility review for both frontends;
+- supported .NET and Orleans compatibility matrix;
+- load, bounded-memory, recovery, and rolling-upgrade evidence; throughput/latency benchmarks after correctness;
+- security and reliability review;
+- human-maintainability review: the codebase remains understandable to ordinary .NET developers without AI assistance;
+- complete conceptual and API documentation with a clean-room getting-started verification;
+- deterministic package and provenance pipeline prepared but not published;
+- a release readiness report.
+
+Exit criteria:
+
+- every criterion in [GOAL.md](GOAL.md) is evidenced;
+- the user explicitly approves the 1.0 release operation.
 
 ## Work selection rule
 

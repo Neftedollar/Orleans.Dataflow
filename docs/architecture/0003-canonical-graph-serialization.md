@@ -24,12 +24,14 @@ Graph documents serialize to **canonical JSON** with the following rules.
 - no Unicode normalization of user-provided strings: the bytes the author
   supplied are the bytes stored; determinism means same input, same output,
   not semantic string folding;
-- numbers are integers only, in minimal decimal form with no leading zeros,
-  no sign for zero, no fraction, no exponent. The document schema and all
-  parameter payloads must model fractional quantities explicitly (for
-  example, integer milliseconds or permille) rather than using floating
-  point. This rule can be relaxed by a future format version; it cannot be
-  tightened retroactively.
+- numbers are integers only, must fit in a signed 64-bit integer, and are
+  written in minimal decimal form with no leading zeros, no sign for zero
+  (`-0` in accepted input canonicalizes to `0`), no fraction, no exponent.
+  The document schema and all parameter payloads must model fractional
+  quantities explicitly (for example, integer milliseconds or permille)
+  rather than using floating point. This rule can be relaxed by a future
+  format version; it cannot be tightened retroactively;
+- no short escape sequences in output: a newline escapes as `\u000a`, never as `\n`.
 
 ### Structure
 
@@ -44,8 +46,13 @@ Graph documents serialize to **canonical JSON** with the following rules.
   `a/b` because `-` precedes `/` in code-point order, and that is fine —
   canonical order only has to be total, deterministic, and documented);
 - parameter and execution-policy payloads are embedded JSON values written by
-  the same canonical writer and constrained to the same rules (object keys in
-  ordinal order for payloads, since payload schemas are provider-defined);
+  the same canonical writer and constrained to the same rules. Payload object
+  keys sort in ordinal order over UTF-16 code units (the RFC 8785 choice; note
+  this differs from UTF-8 byte order for keys beyond the Basic Multilingual
+  Plane), since payload schemas are provider-defined and have no schema order;
+- payload inputs with duplicate object keys are rejected, nesting is limited
+  to 64 levels, and one canonical payload value is limited to 256 KiB, so
+  validating untrusted graph data stays bounded;
 - the document carries `formatVersion` (starting at 1) as its first property.
 
 ### Identity of bytes
