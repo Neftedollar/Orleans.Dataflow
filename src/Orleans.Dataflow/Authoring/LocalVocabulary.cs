@@ -32,11 +32,25 @@ internal static class LocalVocabulary
 {
     /// <summary>The prefix of every automatically allocated node identifier.</summary>
     /// <remarks>
-    /// ADR 0004 fixes the spelling: an unnamed occurrence is <c>stage-1</c>, <c>stage-2</c>, and so on in
-    /// authoring order. Positional identifiers are not edit-stable, which is why a document that contains
-    /// one declares <see cref="EphemeralIdentity"/>.
+    /// ADR 0004 fixes the spelling: an unnamed occurrence is <c>stage-0001</c>, <c>stage-0002</c>, and so
+    /// on in authoring order. Positional identifiers are not edit-stable, which is why a document that
+    /// contains one declares <see cref="EphemeralIdentity"/>.
     /// </remarks>
     internal const string AutoNamePrefix = "stage-";
+
+    /// <summary>The highest position an automatically allocated node identifier can name.</summary>
+    /// <remarks>
+    /// The invariant this bound buys is that a document's canonical node order — ordinal over identifier
+    /// text — is the authoring order of the occurrences it was built from, for every graph whose
+    /// occurrences are automatically named. Four digits sort correctly against each other and five do
+    /// not, so the numbering has to end somewhere; it ends here rather than silently becoming
+    /// <c>stage-10000</c>, which would sort between <c>stage-0001</c> and <c>stage-0002</c> and quietly
+    /// break the invariant for the one graph large enough to reach it.
+    /// </remarks>
+    internal const int MaxAutoNamedPosition = 9999;
+
+    /// <summary>The numeric format that pads a position to the four digits <see cref="MaxAutoNamedPosition"/> allows.</summary>
+    private const string AutoNameNumberFormat = "D4";
 
     /// <summary>The provider every local stage belongs to.</summary>
     internal static readonly ProviderId Provider = ProviderId.Create("local");
@@ -134,13 +148,18 @@ internal static class LocalVocabulary
     };
 
     /// <summary>Builds the node identifier of the occurrence at one position of an authoring chain.</summary>
-    /// <param name="position">The one-based position in authoring order.</param>
-    /// <returns>The identifier, such as <c>stage-1</c>.</returns>
+    /// <param name="position">
+    /// The one-based position in authoring order, which must not exceed
+    /// <see cref="MaxAutoNamedPosition"/>; the caller enforces that bound before allocating anything.
+    /// </param>
+    /// <returns>The identifier, such as <c>stage-0001</c>.</returns>
     /// <remarks>
-    /// The number is formatted with the invariant culture, so the identifier is the same text under every
-    /// ambient culture; a culture with non-ASCII digits would otherwise produce a value the identifier
-    /// grammar rejects.
+    /// The position is padded to four digits, so identifiers of one graph sort ordinally in the order they
+    /// were authored in: unpadded, <c>stage-10</c> sorts before <c>stage-2</c>, and a document's canonical
+    /// node order would stop being its authoring order at the tenth occurrence. The number is formatted
+    /// with the invariant culture, so the identifier is the same text under every ambient culture; a
+    /// culture with non-ASCII digits would otherwise produce a value the identifier grammar rejects.
     /// </remarks>
     internal static NodeId AutoName(int position) =>
-        NodeId.Create(AutoNamePrefix + position.ToString(CultureInfo.InvariantCulture));
+        NodeId.Create(AutoNamePrefix + position.ToString(AutoNameNumberFormat, CultureInfo.InvariantCulture));
 }

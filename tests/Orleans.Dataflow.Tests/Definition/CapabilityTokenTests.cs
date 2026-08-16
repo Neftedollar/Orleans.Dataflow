@@ -61,4 +61,17 @@ public sealed class CapabilityTokenTests : SimpleIdentifierContractTests<Capabil
 
     /// <inheritdoc/>
     protected override bool OperatorNotEquals(CapabilityToken left, CapabilityToken right) => left != right;
+
+    /// <inheritdoc/>
+    protected override bool OperatorLess(CapabilityToken left, CapabilityToken right) => left < right;
+
+    /// <inheritdoc/>
+    protected override bool OperatorLessOrEqual(CapabilityToken left, CapabilityToken right) => left <= right;
+
+    /// <inheritdoc/>
+    protected override bool OperatorGreater(CapabilityToken left, CapabilityToken right) => left > right;
+
+    /// <inheritdoc/>
+    protected override bool OperatorGreaterOrEqual(CapabilityToken left, CapabilityToken right) =>
+        left >= right;
 }

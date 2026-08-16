@@ -83,11 +83,17 @@ public sealed class ArgumentValidationTests
     }
 
     [Fact]
-    public void TheExplicitConversionRejectsANullSink()
+    public void TheExplicitConversionOfNullIsNull()
     {
+        // A conversion converts; it is not the place an argument is checked. Null in, null out, the way
+        // every conversion in .NET behaves, and the To overload that receives the result is what rejects
+        // it — with the parameter name of the argument the author actually wrote.
+        SinkWithResult<OrderCreated, long>? missing = null;
+
+        Assert.Null((Sink<OrderCreated>?)missing);
         Assert.Throws<ArgumentNullException>(
             "sink",
-            () => { _ = (Sink<OrderCreated>)(SinkWithResult<OrderCreated, long>)null!; });
+            () => { _ = Source.From(OrderEvents).To(((Sink<OrderCreated>?)missing)!); });
     }
 
     [Fact]
@@ -145,6 +151,46 @@ public sealed class ArgumentValidationTests
         Assert.Contains("is not a valid ResultSlotId", exception.Message, StringComparison.Ordinal);
         Assert.Contains($"'{candidate}'", exception.Message, StringComparison.Ordinal);
         Assert.IsType<ArgumentException>(exception.InnerException);
+    }
+
+    [Fact]
+    public void AnInvalidSlotNameIsRejectedBeforeTheSinkFactoryLambdaRuns()
+    {
+        // The lambda is the author's own code and may do anything. An argument the call was always going
+        // to reject must not cost them a side effect first, so the name is validated before the lambda is
+        // invoked and a rejected call leaves the program exactly as it found it.
+        int invocations = 0;
+
+        Assert.Throws<ArgumentException>(
+            "slotName",
+            () => { _ = Source.From(OrderEvents).To(Counting, "Processed"); });
+
+        Assert.Throws<ArgumentException>(
+            "slotName",
+            () => { _ = Source.From(OrderEvents).To(Counting, "Processed", out ResultSlot<long> _); });
+
+        Assert.Throws<ArgumentNullException>(
+            "slotName",
+            () => { _ = Source.From(OrderEvents).To(Counting, null!); });
+
+        Assert.Throws<ArgumentNullException>(
+            "slotName",
+            () => { _ = Source.From(OrderEvents).To(Counting, null!, out ResultSlot<long> _); });
+
+        Assert.Equal(0, invocations);
+
+        // The same lambda does run when the name is accepted, so the count above is a statement about the
+        // rejection and not about a lambda that is never called at all.
+        _ = Source.From(OrderEvents).To(Counting, "processed", out ResultSlot<long> _);
+
+        Assert.Equal(1, invocations);
+
+        SinkWithResult<OrderCreated, long> Counting(SinkFactory<OrderCreated> factory)
+        {
+            invocations++;
+
+            return factory.Aggregate(0L, (count, _) => count + 1);
+        }
     }
 
     [Fact]

@@ -1,0 +1,460 @@
+#nullable enable
+const Orleans.Dataflow.Definition.GraphDocument.CurrentFormatVersion = 1 -> int
+const Orleans.Dataflow.Identity.ContractReference.FirstMajorVersion = 1 -> int
+const Orleans.Dataflow.Identity.GraphRevision.FirstRevisionNumber = 1 -> int
+const Orleans.Dataflow.Identity.NodeId.MaxDepth = 16 -> int
+const Orleans.Dataflow.Identity.NodeId.MaxPathLength = 256 -> int
+const Orleans.Dataflow.Identity.NodeId.Separator = '/' -> char
+const Orleans.Dataflow.Identity.StageRef.FirstMajorVersion = 1 -> int
+const Orleans.Dataflow.Serialization.CanonicalJsonValue.MaxCanonicalBytes = 262144 -> int
+const Orleans.Dataflow.Serialization.CanonicalJsonValue.MaxDepth = 64 -> int
+const Orleans.Dataflow.Serialization.StageCatalogSerializer.CurrentFormatVersion = 1 -> int
+Orleans.Dataflow.Compilation.GraphCompiler
+Orleans.Dataflow.Compilation.GraphValidationDiagnostic
+Orleans.Dataflow.Compilation.GraphValidationDiagnostic.<Clone>$() -> Orleans.Dataflow.Compilation.GraphValidationDiagnostic!
+Orleans.Dataflow.Compilation.GraphValidationDiagnostic.Equals(Orleans.Dataflow.Compilation.GraphValidationDiagnostic? other) -> bool
+Orleans.Dataflow.Compilation.GraphValidationDiagnostic.Message.get -> string!
+Orleans.Dataflow.Compilation.GraphValidationDiagnostic.Rule.get -> string!
+Orleans.Dataflow.Compilation.GraphValidationDiagnostic.Subject.get -> string?
+Orleans.Dataflow.Compilation.GraphValidationReport
+Orleans.Dataflow.Compilation.GraphValidationReport.Diagnostics.get -> System.Collections.Generic.IReadOnlyList<Orleans.Dataflow.Compilation.GraphValidationDiagnostic!>!
+Orleans.Dataflow.Compilation.GraphValidationReport.Document.get -> Orleans.Dataflow.Definition.GraphDocument!
+Orleans.Dataflow.Compilation.GraphValidationReport.IsValid.get -> bool
+Orleans.Dataflow.Definition.CapabilityToken
+Orleans.Dataflow.Definition.CapabilityToken.CapabilityToken() -> void
+Orleans.Dataflow.Definition.CapabilityToken.CompareTo(Orleans.Dataflow.Definition.CapabilityToken other) -> int
+Orleans.Dataflow.Definition.CapabilityToken.Equals(Orleans.Dataflow.Definition.CapabilityToken other) -> bool
+Orleans.Dataflow.Definition.CapabilityToken.IsDefault.get -> bool
+Orleans.Dataflow.Definition.CapabilityToken.Value.get -> string!
+Orleans.Dataflow.Definition.CatalogFingerprint
+Orleans.Dataflow.Definition.CatalogFingerprint.CatalogFingerprint() -> void
+Orleans.Dataflow.Definition.CatalogFingerprint.CompareTo(Orleans.Dataflow.Definition.CatalogFingerprint other) -> int
+Orleans.Dataflow.Definition.CatalogFingerprint.Equals(Orleans.Dataflow.Definition.CatalogFingerprint other) -> bool
+Orleans.Dataflow.Definition.CatalogFingerprint.Hash.get -> System.ReadOnlyMemory<byte>
+Orleans.Dataflow.Definition.CatalogFingerprint.IsDefault.get -> bool
+Orleans.Dataflow.Definition.GraphDocument
+Orleans.Dataflow.Definition.GraphDocument.<Clone>$() -> Orleans.Dataflow.Definition.GraphDocument!
+Orleans.Dataflow.Definition.GraphDocument.Capabilities.get -> System.Collections.Generic.IReadOnlyList<Orleans.Dataflow.Definition.CapabilityToken>!
+Orleans.Dataflow.Definition.GraphDocument.Edges.get -> System.Collections.Generic.IReadOnlyList<Orleans.Dataflow.Definition.GraphEdge>!
+Orleans.Dataflow.Definition.GraphDocument.Equals(Orleans.Dataflow.Definition.GraphDocument? other) -> bool
+Orleans.Dataflow.Definition.GraphDocument.FormatVersion.get -> int
+Orleans.Dataflow.Definition.GraphDocument.Id.get -> Orleans.Dataflow.Identity.GraphId
+Orleans.Dataflow.Definition.GraphDocument.Nodes.get -> System.Collections.Generic.IReadOnlyList<Orleans.Dataflow.Definition.StageNode!>!
+Orleans.Dataflow.Definition.GraphDocument.ResultSlots.get -> System.Collections.Generic.IReadOnlyList<Orleans.Dataflow.Definition.ResultSlotDefinition!>!
+Orleans.Dataflow.Definition.GraphDocument.Revision.get -> Orleans.Dataflow.Identity.GraphRevision
+Orleans.Dataflow.Definition.GraphEdge
+Orleans.Dataflow.Definition.GraphEdge.Equals(Orleans.Dataflow.Definition.GraphEdge other) -> bool
+Orleans.Dataflow.Definition.GraphEdge.From.get -> Orleans.Dataflow.Definition.PortAddress
+Orleans.Dataflow.Definition.GraphEdge.GraphEdge() -> void
+Orleans.Dataflow.Definition.GraphEdge.IsDefault.get -> bool
+Orleans.Dataflow.Definition.GraphEdge.To.get -> Orleans.Dataflow.Definition.PortAddress
+Orleans.Dataflow.Definition.GraphFingerprint
+Orleans.Dataflow.Definition.GraphFingerprint.CompareTo(Orleans.Dataflow.Definition.GraphFingerprint other) -> int
+Orleans.Dataflow.Definition.GraphFingerprint.Equals(Orleans.Dataflow.Definition.GraphFingerprint other) -> bool
+Orleans.Dataflow.Definition.GraphFingerprint.GraphFingerprint() -> void
+Orleans.Dataflow.Definition.GraphFingerprint.Hash.get -> System.ReadOnlyMemory<byte>
+Orleans.Dataflow.Definition.GraphFingerprint.IsDefault.get -> bool
+Orleans.Dataflow.Definition.InputPortSpecification
+Orleans.Dataflow.Definition.InputPortSpecification.ElementContract.get -> Orleans.Dataflow.Identity.ContractReference
+Orleans.Dataflow.Definition.InputPortSpecification.Equals(Orleans.Dataflow.Definition.InputPortSpecification other) -> bool
+Orleans.Dataflow.Definition.InputPortSpecification.Id.get -> Orleans.Dataflow.Identity.PortId
+Orleans.Dataflow.Definition.InputPortSpecification.InputPortSpecification() -> void
+Orleans.Dataflow.Definition.InputPortSpecification.IsDefault.get -> bool
+Orleans.Dataflow.Definition.InputPortSpecification.IsOptional.get -> bool
+Orleans.Dataflow.Definition.IStageCatalog
+Orleans.Dataflow.Definition.IStageCatalog.Specifications.get -> System.Collections.Generic.IReadOnlyList<Orleans.Dataflow.Definition.StageSpecification!>!
+Orleans.Dataflow.Definition.IStageCatalog.TryGetSpecification(Orleans.Dataflow.Identity.StageRef stageRef, out Orleans.Dataflow.Definition.StageSpecification! specification) -> bool
+Orleans.Dataflow.Definition.IStageParameterValidator
+Orleans.Dataflow.Definition.IStageParameterValidator.Validate(Orleans.Dataflow.Serialization.CanonicalJsonValue parameters) -> System.Collections.Generic.IReadOnlyList<string!>!
+Orleans.Dataflow.Definition.OutputPortSpecification
+Orleans.Dataflow.Definition.OutputPortSpecification.ElementContract.get -> Orleans.Dataflow.Identity.ContractReference
+Orleans.Dataflow.Definition.OutputPortSpecification.Equals(Orleans.Dataflow.Definition.OutputPortSpecification other) -> bool
+Orleans.Dataflow.Definition.OutputPortSpecification.Id.get -> Orleans.Dataflow.Identity.PortId
+Orleans.Dataflow.Definition.OutputPortSpecification.IsDefault.get -> bool
+Orleans.Dataflow.Definition.OutputPortSpecification.IsIgnorable.get -> bool
+Orleans.Dataflow.Definition.OutputPortSpecification.OutputPortSpecification() -> void
+Orleans.Dataflow.Definition.PortAddress
+Orleans.Dataflow.Definition.PortAddress.Equals(Orleans.Dataflow.Definition.PortAddress other) -> bool
+Orleans.Dataflow.Definition.PortAddress.IsDefault.get -> bool
+Orleans.Dataflow.Definition.PortAddress.Node.get -> Orleans.Dataflow.Identity.NodeId
+Orleans.Dataflow.Definition.PortAddress.Port.get -> Orleans.Dataflow.Identity.PortId
+Orleans.Dataflow.Definition.PortAddress.PortAddress() -> void
+Orleans.Dataflow.Definition.ResultPortSpecification
+Orleans.Dataflow.Definition.ResultPortSpecification.Equals(Orleans.Dataflow.Definition.ResultPortSpecification other) -> bool
+Orleans.Dataflow.Definition.ResultPortSpecification.Id.get -> Orleans.Dataflow.Identity.PortId
+Orleans.Dataflow.Definition.ResultPortSpecification.IsDefault.get -> bool
+Orleans.Dataflow.Definition.ResultPortSpecification.ResultContract.get -> Orleans.Dataflow.Identity.ContractReference
+Orleans.Dataflow.Definition.ResultPortSpecification.ResultPortSpecification() -> void
+Orleans.Dataflow.Definition.ResultSlotDefinition
+Orleans.Dataflow.Definition.ResultSlotDefinition.<Clone>$() -> Orleans.Dataflow.Definition.ResultSlotDefinition!
+Orleans.Dataflow.Definition.ResultSlotDefinition.Equals(Orleans.Dataflow.Definition.ResultSlotDefinition? other) -> bool
+Orleans.Dataflow.Definition.ResultSlotDefinition.Id.get -> Orleans.Dataflow.Identity.ResultSlotId
+Orleans.Dataflow.Definition.ResultSlotDefinition.Producer.get -> Orleans.Dataflow.Definition.PortAddress
+Orleans.Dataflow.Definition.ResultSlotDefinition.ResultContract.get -> Orleans.Dataflow.Identity.ContractReference
+Orleans.Dataflow.Definition.StageCatalog
+Orleans.Dataflow.Definition.StageCatalog.Specifications.get -> System.Collections.Generic.IReadOnlyList<Orleans.Dataflow.Definition.StageSpecification!>!
+Orleans.Dataflow.Definition.StageCatalog.TryGetSpecification(Orleans.Dataflow.Identity.StageRef stageRef, out Orleans.Dataflow.Definition.StageSpecification! specification) -> bool
+Orleans.Dataflow.Definition.StageNode
+Orleans.Dataflow.Definition.StageNode.<Clone>$() -> Orleans.Dataflow.Definition.StageNode!
+Orleans.Dataflow.Definition.StageNode.Equals(Orleans.Dataflow.Definition.StageNode? other) -> bool
+Orleans.Dataflow.Definition.StageNode.ExecutionPolicy.get -> Orleans.Dataflow.Serialization.CanonicalJsonValue?
+Orleans.Dataflow.Definition.StageNode.ExecutionPolicyContract.get -> Orleans.Dataflow.Identity.ContractReference?
+Orleans.Dataflow.Definition.StageNode.Id.get -> Orleans.Dataflow.Identity.NodeId
+Orleans.Dataflow.Definition.StageNode.ParameterContract.get -> Orleans.Dataflow.Identity.ContractReference
+Orleans.Dataflow.Definition.StageNode.Parameters.get -> Orleans.Dataflow.Serialization.CanonicalJsonValue
+Orleans.Dataflow.Definition.StageNode.Stage.get -> Orleans.Dataflow.Identity.StageRef
+Orleans.Dataflow.Definition.StageSpecification
+Orleans.Dataflow.Definition.StageSpecification.<Clone>$() -> Orleans.Dataflow.Definition.StageSpecification!
+Orleans.Dataflow.Definition.StageSpecification.Equals(Orleans.Dataflow.Definition.StageSpecification? other) -> bool
+Orleans.Dataflow.Definition.StageSpecification.InputPorts.get -> System.Collections.Generic.IReadOnlyList<Orleans.Dataflow.Definition.InputPortSpecification>!
+Orleans.Dataflow.Definition.StageSpecification.OutputPorts.get -> System.Collections.Generic.IReadOnlyList<Orleans.Dataflow.Definition.OutputPortSpecification>!
+Orleans.Dataflow.Definition.StageSpecification.ParameterContract.get -> Orleans.Dataflow.Identity.ContractReference
+Orleans.Dataflow.Definition.StageSpecification.ParameterValidator.get -> Orleans.Dataflow.Definition.IStageParameterValidator?
+Orleans.Dataflow.Definition.StageSpecification.RequiredCapabilities.get -> System.Collections.Generic.IReadOnlyList<Orleans.Dataflow.Definition.CapabilityToken>!
+Orleans.Dataflow.Definition.StageSpecification.ResultPorts.get -> System.Collections.Generic.IReadOnlyList<Orleans.Dataflow.Definition.ResultPortSpecification>!
+Orleans.Dataflow.Definition.StageSpecification.Stage.get -> Orleans.Dataflow.Identity.StageRef
+Orleans.Dataflow.Identity.AttemptId
+Orleans.Dataflow.Identity.AttemptId.AttemptId() -> void
+Orleans.Dataflow.Identity.AttemptId.CompareTo(Orleans.Dataflow.Identity.AttemptId other) -> int
+Orleans.Dataflow.Identity.AttemptId.Equals(Orleans.Dataflow.Identity.AttemptId other) -> bool
+Orleans.Dataflow.Identity.AttemptId.IsDefault.get -> bool
+Orleans.Dataflow.Identity.AttemptId.Value.get -> string!
+Orleans.Dataflow.Identity.ContractId
+Orleans.Dataflow.Identity.ContractId.CompareTo(Orleans.Dataflow.Identity.ContractId other) -> int
+Orleans.Dataflow.Identity.ContractId.ContractId() -> void
+Orleans.Dataflow.Identity.ContractId.Equals(Orleans.Dataflow.Identity.ContractId other) -> bool
+Orleans.Dataflow.Identity.ContractId.IsDefault.get -> bool
+Orleans.Dataflow.Identity.ContractId.Value.get -> string!
+Orleans.Dataflow.Identity.ContractReference
+Orleans.Dataflow.Identity.ContractReference.CompareTo(Orleans.Dataflow.Identity.ContractReference other) -> int
+Orleans.Dataflow.Identity.ContractReference.Contract.get -> Orleans.Dataflow.Identity.ContractId
+Orleans.Dataflow.Identity.ContractReference.ContractReference() -> void
+Orleans.Dataflow.Identity.ContractReference.Equals(Orleans.Dataflow.Identity.ContractReference other) -> bool
+Orleans.Dataflow.Identity.ContractReference.IsDefault.get -> bool
+Orleans.Dataflow.Identity.ContractReference.MajorVersion.get -> int
+Orleans.Dataflow.Identity.GraphId
+Orleans.Dataflow.Identity.GraphId.CompareTo(Orleans.Dataflow.Identity.GraphId other) -> int
+Orleans.Dataflow.Identity.GraphId.Equals(Orleans.Dataflow.Identity.GraphId other) -> bool
+Orleans.Dataflow.Identity.GraphId.GraphId() -> void
+Orleans.Dataflow.Identity.GraphId.IsDefault.get -> bool
+Orleans.Dataflow.Identity.GraphId.Value.get -> string!
+Orleans.Dataflow.Identity.GraphRevision
+Orleans.Dataflow.Identity.GraphRevision.CompareTo(Orleans.Dataflow.Identity.GraphRevision other) -> int
+Orleans.Dataflow.Identity.GraphRevision.Equals(Orleans.Dataflow.Identity.GraphRevision other) -> bool
+Orleans.Dataflow.Identity.GraphRevision.GraphRevision() -> void
+Orleans.Dataflow.Identity.GraphRevision.IsDefault.get -> bool
+Orleans.Dataflow.Identity.GraphRevision.Value.get -> int
+Orleans.Dataflow.Identity.NodeId
+Orleans.Dataflow.Identity.NodeId.CompareTo(Orleans.Dataflow.Identity.NodeId other) -> int
+Orleans.Dataflow.Identity.NodeId.Depth.get -> int
+Orleans.Dataflow.Identity.NodeId.Equals(Orleans.Dataflow.Identity.NodeId other) -> bool
+Orleans.Dataflow.Identity.NodeId.GetSegments() -> System.Collections.Generic.IReadOnlyList<string!>!
+Orleans.Dataflow.Identity.NodeId.InScope(string! scopeSegment) -> Orleans.Dataflow.Identity.NodeId
+Orleans.Dataflow.Identity.NodeId.IsDefault.get -> bool
+Orleans.Dataflow.Identity.NodeId.NodeId() -> void
+Orleans.Dataflow.Identity.NodeId.Value.get -> string!
+Orleans.Dataflow.Identity.PortId
+Orleans.Dataflow.Identity.PortId.CompareTo(Orleans.Dataflow.Identity.PortId other) -> int
+Orleans.Dataflow.Identity.PortId.Equals(Orleans.Dataflow.Identity.PortId other) -> bool
+Orleans.Dataflow.Identity.PortId.IsDefault.get -> bool
+Orleans.Dataflow.Identity.PortId.PortId() -> void
+Orleans.Dataflow.Identity.PortId.Value.get -> string!
+Orleans.Dataflow.Identity.ProviderId
+Orleans.Dataflow.Identity.ProviderId.CompareTo(Orleans.Dataflow.Identity.ProviderId other) -> int
+Orleans.Dataflow.Identity.ProviderId.Equals(Orleans.Dataflow.Identity.ProviderId other) -> bool
+Orleans.Dataflow.Identity.ProviderId.IsDefault.get -> bool
+Orleans.Dataflow.Identity.ProviderId.ProviderId() -> void
+Orleans.Dataflow.Identity.ProviderId.Value.get -> string!
+Orleans.Dataflow.Identity.ResultSlotId
+Orleans.Dataflow.Identity.ResultSlotId.CompareTo(Orleans.Dataflow.Identity.ResultSlotId other) -> int
+Orleans.Dataflow.Identity.ResultSlotId.Equals(Orleans.Dataflow.Identity.ResultSlotId other) -> bool
+Orleans.Dataflow.Identity.ResultSlotId.IsDefault.get -> bool
+Orleans.Dataflow.Identity.ResultSlotId.ResultSlotId() -> void
+Orleans.Dataflow.Identity.ResultSlotId.Value.get -> string!
+Orleans.Dataflow.Identity.RunId
+Orleans.Dataflow.Identity.RunId.CompareTo(Orleans.Dataflow.Identity.RunId other) -> int
+Orleans.Dataflow.Identity.RunId.Equals(Orleans.Dataflow.Identity.RunId other) -> bool
+Orleans.Dataflow.Identity.RunId.IsDefault.get -> bool
+Orleans.Dataflow.Identity.RunId.RunId() -> void
+Orleans.Dataflow.Identity.RunId.Value.get -> string!
+Orleans.Dataflow.Identity.StageId
+Orleans.Dataflow.Identity.StageId.CompareTo(Orleans.Dataflow.Identity.StageId other) -> int
+Orleans.Dataflow.Identity.StageId.Equals(Orleans.Dataflow.Identity.StageId other) -> bool
+Orleans.Dataflow.Identity.StageId.IsDefault.get -> bool
+Orleans.Dataflow.Identity.StageId.StageId() -> void
+Orleans.Dataflow.Identity.StageId.Value.get -> string!
+Orleans.Dataflow.Identity.StageRef
+Orleans.Dataflow.Identity.StageRef.CompareTo(Orleans.Dataflow.Identity.StageRef other) -> int
+Orleans.Dataflow.Identity.StageRef.Equals(Orleans.Dataflow.Identity.StageRef other) -> bool
+Orleans.Dataflow.Identity.StageRef.IsDefault.get -> bool
+Orleans.Dataflow.Identity.StageRef.MajorVersion.get -> int
+Orleans.Dataflow.Identity.StageRef.Provider.get -> Orleans.Dataflow.Identity.ProviderId
+Orleans.Dataflow.Identity.StageRef.Stage.get -> Orleans.Dataflow.Identity.StageId
+Orleans.Dataflow.Identity.StageRef.StageRef() -> void
+Orleans.Dataflow.Serialization.CanonicalJsonValue
+Orleans.Dataflow.Serialization.CanonicalJsonValue.ByteLength.get -> int
+Orleans.Dataflow.Serialization.CanonicalJsonValue.CanonicalJsonValue() -> void
+Orleans.Dataflow.Serialization.CanonicalJsonValue.CanonicalUtf8Bytes.get -> System.ReadOnlyMemory<byte>
+Orleans.Dataflow.Serialization.CanonicalJsonValue.Equals(Orleans.Dataflow.Serialization.CanonicalJsonValue other) -> bool
+Orleans.Dataflow.Serialization.CanonicalJsonValue.IsDefault.get -> bool
+Orleans.Dataflow.Serialization.CanonicalJsonValue.ToElement() -> System.Text.Json.JsonElement
+Orleans.Dataflow.Serialization.GraphDocumentFormatException
+Orleans.Dataflow.Serialization.GraphDocumentFormatException.GraphDocumentFormatException() -> void
+Orleans.Dataflow.Serialization.GraphDocumentFormatException.GraphDocumentFormatException(string! message) -> void
+Orleans.Dataflow.Serialization.GraphDocumentFormatException.GraphDocumentFormatException(string! message, System.Exception! innerException) -> void
+Orleans.Dataflow.Serialization.GraphDocumentSerializer
+Orleans.Dataflow.Serialization.StageCatalogSerializer
+override Orleans.Dataflow.Compilation.GraphValidationDiagnostic.Equals(object? obj) -> bool
+override Orleans.Dataflow.Compilation.GraphValidationDiagnostic.GetHashCode() -> int
+override Orleans.Dataflow.Compilation.GraphValidationDiagnostic.ToString() -> string!
+override Orleans.Dataflow.Compilation.GraphValidationReport.ToString() -> string!
+override Orleans.Dataflow.Definition.CapabilityToken.GetHashCode() -> int
+override Orleans.Dataflow.Definition.CapabilityToken.ToString() -> string!
+override Orleans.Dataflow.Definition.CatalogFingerprint.GetHashCode() -> int
+override Orleans.Dataflow.Definition.CatalogFingerprint.ToString() -> string!
+override Orleans.Dataflow.Definition.GraphDocument.Equals(object? obj) -> bool
+override Orleans.Dataflow.Definition.GraphDocument.GetHashCode() -> int
+override Orleans.Dataflow.Definition.GraphDocument.ToString() -> string!
+override Orleans.Dataflow.Definition.GraphEdge.GetHashCode() -> int
+override Orleans.Dataflow.Definition.GraphEdge.ToString() -> string!
+override Orleans.Dataflow.Definition.GraphFingerprint.GetHashCode() -> int
+override Orleans.Dataflow.Definition.GraphFingerprint.ToString() -> string!
+override Orleans.Dataflow.Definition.InputPortSpecification.GetHashCode() -> int
+override Orleans.Dataflow.Definition.InputPortSpecification.ToString() -> string!
+override Orleans.Dataflow.Definition.OutputPortSpecification.GetHashCode() -> int
+override Orleans.Dataflow.Definition.OutputPortSpecification.ToString() -> string!
+override Orleans.Dataflow.Definition.PortAddress.GetHashCode() -> int
+override Orleans.Dataflow.Definition.PortAddress.ToString() -> string!
+override Orleans.Dataflow.Definition.ResultPortSpecification.GetHashCode() -> int
+override Orleans.Dataflow.Definition.ResultPortSpecification.ToString() -> string!
+override Orleans.Dataflow.Definition.ResultSlotDefinition.Equals(object? obj) -> bool
+override Orleans.Dataflow.Definition.ResultSlotDefinition.GetHashCode() -> int
+override Orleans.Dataflow.Definition.ResultSlotDefinition.ToString() -> string!
+override Orleans.Dataflow.Definition.StageCatalog.ToString() -> string!
+override Orleans.Dataflow.Definition.StageNode.Equals(object? obj) -> bool
+override Orleans.Dataflow.Definition.StageNode.GetHashCode() -> int
+override Orleans.Dataflow.Definition.StageNode.ToString() -> string!
+override Orleans.Dataflow.Definition.StageSpecification.Equals(object? obj) -> bool
+override Orleans.Dataflow.Definition.StageSpecification.GetHashCode() -> int
+override Orleans.Dataflow.Definition.StageSpecification.ToString() -> string!
+override Orleans.Dataflow.Identity.AttemptId.GetHashCode() -> int
+override Orleans.Dataflow.Identity.AttemptId.ToString() -> string!
+override Orleans.Dataflow.Identity.ContractId.GetHashCode() -> int
+override Orleans.Dataflow.Identity.ContractId.ToString() -> string!
+override Orleans.Dataflow.Identity.ContractReference.GetHashCode() -> int
+override Orleans.Dataflow.Identity.ContractReference.ToString() -> string!
+override Orleans.Dataflow.Identity.GraphId.GetHashCode() -> int
+override Orleans.Dataflow.Identity.GraphId.ToString() -> string!
+override Orleans.Dataflow.Identity.GraphRevision.GetHashCode() -> int
+override Orleans.Dataflow.Identity.GraphRevision.ToString() -> string!
+override Orleans.Dataflow.Identity.NodeId.GetHashCode() -> int
+override Orleans.Dataflow.Identity.NodeId.ToString() -> string!
+override Orleans.Dataflow.Identity.PortId.GetHashCode() -> int
+override Orleans.Dataflow.Identity.PortId.ToString() -> string!
+override Orleans.Dataflow.Identity.ProviderId.GetHashCode() -> int
+override Orleans.Dataflow.Identity.ProviderId.ToString() -> string!
+override Orleans.Dataflow.Identity.ResultSlotId.GetHashCode() -> int
+override Orleans.Dataflow.Identity.ResultSlotId.ToString() -> string!
+override Orleans.Dataflow.Identity.RunId.GetHashCode() -> int
+override Orleans.Dataflow.Identity.RunId.ToString() -> string!
+override Orleans.Dataflow.Identity.StageId.GetHashCode() -> int
+override Orleans.Dataflow.Identity.StageId.ToString() -> string!
+override Orleans.Dataflow.Identity.StageRef.GetHashCode() -> int
+override Orleans.Dataflow.Identity.StageRef.ToString() -> string!
+override Orleans.Dataflow.Serialization.CanonicalJsonValue.GetHashCode() -> int
+override Orleans.Dataflow.Serialization.CanonicalJsonValue.ToString() -> string!
+static Orleans.Dataflow.Compilation.GraphCompiler.Validate(Orleans.Dataflow.Definition.GraphDocument! document, Orleans.Dataflow.Definition.IStageCatalog! catalog) -> Orleans.Dataflow.Compilation.GraphValidationReport!
+static Orleans.Dataflow.Compilation.GraphValidationDiagnostic.Create(string! rule, string! message) -> Orleans.Dataflow.Compilation.GraphValidationDiagnostic!
+static Orleans.Dataflow.Compilation.GraphValidationDiagnostic.Create(string! rule, string! message, string! subject) -> Orleans.Dataflow.Compilation.GraphValidationDiagnostic!
+static Orleans.Dataflow.Compilation.GraphValidationDiagnostic.operator !=(Orleans.Dataflow.Compilation.GraphValidationDiagnostic? left, Orleans.Dataflow.Compilation.GraphValidationDiagnostic? right) -> bool
+static Orleans.Dataflow.Compilation.GraphValidationDiagnostic.operator ==(Orleans.Dataflow.Compilation.GraphValidationDiagnostic? left, Orleans.Dataflow.Compilation.GraphValidationDiagnostic? right) -> bool
+static Orleans.Dataflow.Definition.CapabilityToken.Create(string! value) -> Orleans.Dataflow.Definition.CapabilityToken
+static Orleans.Dataflow.Definition.CapabilityToken.EphemeralIdentity.get -> Orleans.Dataflow.Definition.CapabilityToken
+static Orleans.Dataflow.Definition.CapabilityToken.Nondeployable.get -> Orleans.Dataflow.Definition.CapabilityToken
+static Orleans.Dataflow.Definition.CapabilityToken.operator !=(Orleans.Dataflow.Definition.CapabilityToken left, Orleans.Dataflow.Definition.CapabilityToken right) -> bool
+static Orleans.Dataflow.Definition.CapabilityToken.operator <(Orleans.Dataflow.Definition.CapabilityToken left, Orleans.Dataflow.Definition.CapabilityToken right) -> bool
+static Orleans.Dataflow.Definition.CapabilityToken.operator <=(Orleans.Dataflow.Definition.CapabilityToken left, Orleans.Dataflow.Definition.CapabilityToken right) -> bool
+static Orleans.Dataflow.Definition.CapabilityToken.operator ==(Orleans.Dataflow.Definition.CapabilityToken left, Orleans.Dataflow.Definition.CapabilityToken right) -> bool
+static Orleans.Dataflow.Definition.CapabilityToken.operator >(Orleans.Dataflow.Definition.CapabilityToken left, Orleans.Dataflow.Definition.CapabilityToken right) -> bool
+static Orleans.Dataflow.Definition.CapabilityToken.operator >=(Orleans.Dataflow.Definition.CapabilityToken left, Orleans.Dataflow.Definition.CapabilityToken right) -> bool
+static Orleans.Dataflow.Definition.CapabilityToken.TryCreate(string? value, out Orleans.Dataflow.Definition.CapabilityToken token) -> bool
+static Orleans.Dataflow.Definition.CatalogFingerprint.OfSerialized(System.ReadOnlySpan<byte> canonicalEnvelope) -> Orleans.Dataflow.Definition.CatalogFingerprint
+static Orleans.Dataflow.Definition.CatalogFingerprint.operator !=(Orleans.Dataflow.Definition.CatalogFingerprint left, Orleans.Dataflow.Definition.CatalogFingerprint right) -> bool
+static Orleans.Dataflow.Definition.CatalogFingerprint.operator <(Orleans.Dataflow.Definition.CatalogFingerprint left, Orleans.Dataflow.Definition.CatalogFingerprint right) -> bool
+static Orleans.Dataflow.Definition.CatalogFingerprint.operator <=(Orleans.Dataflow.Definition.CatalogFingerprint left, Orleans.Dataflow.Definition.CatalogFingerprint right) -> bool
+static Orleans.Dataflow.Definition.CatalogFingerprint.operator ==(Orleans.Dataflow.Definition.CatalogFingerprint left, Orleans.Dataflow.Definition.CatalogFingerprint right) -> bool
+static Orleans.Dataflow.Definition.CatalogFingerprint.operator >(Orleans.Dataflow.Definition.CatalogFingerprint left, Orleans.Dataflow.Definition.CatalogFingerprint right) -> bool
+static Orleans.Dataflow.Definition.CatalogFingerprint.operator >=(Orleans.Dataflow.Definition.CatalogFingerprint left, Orleans.Dataflow.Definition.CatalogFingerprint right) -> bool
+static Orleans.Dataflow.Definition.CatalogFingerprint.Parse(string! text) -> Orleans.Dataflow.Definition.CatalogFingerprint
+static Orleans.Dataflow.Definition.CatalogFingerprint.TryParse(string? text, out Orleans.Dataflow.Definition.CatalogFingerprint fingerprint) -> bool
+static Orleans.Dataflow.Definition.GraphDocument.Create(Orleans.Dataflow.Identity.GraphId id, Orleans.Dataflow.Identity.GraphRevision revision, System.Collections.Generic.IEnumerable<Orleans.Dataflow.Definition.CapabilityToken>! capabilities, System.Collections.Generic.IEnumerable<Orleans.Dataflow.Definition.StageNode!>! nodes, System.Collections.Generic.IEnumerable<Orleans.Dataflow.Definition.GraphEdge>! edges, System.Collections.Generic.IEnumerable<Orleans.Dataflow.Definition.ResultSlotDefinition!>! resultSlots) -> Orleans.Dataflow.Definition.GraphDocument!
+static Orleans.Dataflow.Definition.GraphDocument.operator !=(Orleans.Dataflow.Definition.GraphDocument? left, Orleans.Dataflow.Definition.GraphDocument? right) -> bool
+static Orleans.Dataflow.Definition.GraphDocument.operator ==(Orleans.Dataflow.Definition.GraphDocument? left, Orleans.Dataflow.Definition.GraphDocument? right) -> bool
+static Orleans.Dataflow.Definition.GraphEdge.Create(Orleans.Dataflow.Definition.PortAddress from, Orleans.Dataflow.Definition.PortAddress to) -> Orleans.Dataflow.Definition.GraphEdge
+static Orleans.Dataflow.Definition.GraphEdge.operator !=(Orleans.Dataflow.Definition.GraphEdge left, Orleans.Dataflow.Definition.GraphEdge right) -> bool
+static Orleans.Dataflow.Definition.GraphEdge.operator ==(Orleans.Dataflow.Definition.GraphEdge left, Orleans.Dataflow.Definition.GraphEdge right) -> bool
+static Orleans.Dataflow.Definition.GraphFingerprint.OfSerialized(System.ReadOnlySpan<byte> canonicalEnvelope) -> Orleans.Dataflow.Definition.GraphFingerprint
+static Orleans.Dataflow.Definition.GraphFingerprint.operator !=(Orleans.Dataflow.Definition.GraphFingerprint left, Orleans.Dataflow.Definition.GraphFingerprint right) -> bool
+static Orleans.Dataflow.Definition.GraphFingerprint.operator <(Orleans.Dataflow.Definition.GraphFingerprint left, Orleans.Dataflow.Definition.GraphFingerprint right) -> bool
+static Orleans.Dataflow.Definition.GraphFingerprint.operator <=(Orleans.Dataflow.Definition.GraphFingerprint left, Orleans.Dataflow.Definition.GraphFingerprint right) -> bool
+static Orleans.Dataflow.Definition.GraphFingerprint.operator ==(Orleans.Dataflow.Definition.GraphFingerprint left, Orleans.Dataflow.Definition.GraphFingerprint right) -> bool
+static Orleans.Dataflow.Definition.GraphFingerprint.operator >(Orleans.Dataflow.Definition.GraphFingerprint left, Orleans.Dataflow.Definition.GraphFingerprint right) -> bool
+static Orleans.Dataflow.Definition.GraphFingerprint.operator >=(Orleans.Dataflow.Definition.GraphFingerprint left, Orleans.Dataflow.Definition.GraphFingerprint right) -> bool
+static Orleans.Dataflow.Definition.GraphFingerprint.Parse(string! text) -> Orleans.Dataflow.Definition.GraphFingerprint
+static Orleans.Dataflow.Definition.GraphFingerprint.TryParse(string? text, out Orleans.Dataflow.Definition.GraphFingerprint fingerprint) -> bool
+static Orleans.Dataflow.Definition.InputPortSpecification.Create(Orleans.Dataflow.Identity.PortId id, Orleans.Dataflow.Identity.ContractReference elementContract) -> Orleans.Dataflow.Definition.InputPortSpecification
+static Orleans.Dataflow.Definition.InputPortSpecification.Create(Orleans.Dataflow.Identity.PortId id, Orleans.Dataflow.Identity.ContractReference elementContract, bool isOptional) -> Orleans.Dataflow.Definition.InputPortSpecification
+static Orleans.Dataflow.Definition.InputPortSpecification.operator !=(Orleans.Dataflow.Definition.InputPortSpecification left, Orleans.Dataflow.Definition.InputPortSpecification right) -> bool
+static Orleans.Dataflow.Definition.InputPortSpecification.operator ==(Orleans.Dataflow.Definition.InputPortSpecification left, Orleans.Dataflow.Definition.InputPortSpecification right) -> bool
+static Orleans.Dataflow.Definition.OutputPortSpecification.Create(Orleans.Dataflow.Identity.PortId id, Orleans.Dataflow.Identity.ContractReference elementContract) -> Orleans.Dataflow.Definition.OutputPortSpecification
+static Orleans.Dataflow.Definition.OutputPortSpecification.Create(Orleans.Dataflow.Identity.PortId id, Orleans.Dataflow.Identity.ContractReference elementContract, bool isIgnorable) -> Orleans.Dataflow.Definition.OutputPortSpecification
+static Orleans.Dataflow.Definition.OutputPortSpecification.operator !=(Orleans.Dataflow.Definition.OutputPortSpecification left, Orleans.Dataflow.Definition.OutputPortSpecification right) -> bool
+static Orleans.Dataflow.Definition.OutputPortSpecification.operator ==(Orleans.Dataflow.Definition.OutputPortSpecification left, Orleans.Dataflow.Definition.OutputPortSpecification right) -> bool
+static Orleans.Dataflow.Definition.PortAddress.Create(Orleans.Dataflow.Identity.NodeId node, Orleans.Dataflow.Identity.PortId port) -> Orleans.Dataflow.Definition.PortAddress
+static Orleans.Dataflow.Definition.PortAddress.operator !=(Orleans.Dataflow.Definition.PortAddress left, Orleans.Dataflow.Definition.PortAddress right) -> bool
+static Orleans.Dataflow.Definition.PortAddress.operator ==(Orleans.Dataflow.Definition.PortAddress left, Orleans.Dataflow.Definition.PortAddress right) -> bool
+static Orleans.Dataflow.Definition.ResultPortSpecification.Create(Orleans.Dataflow.Identity.PortId id, Orleans.Dataflow.Identity.ContractReference resultContract) -> Orleans.Dataflow.Definition.ResultPortSpecification
+static Orleans.Dataflow.Definition.ResultPortSpecification.operator !=(Orleans.Dataflow.Definition.ResultPortSpecification left, Orleans.Dataflow.Definition.ResultPortSpecification right) -> bool
+static Orleans.Dataflow.Definition.ResultPortSpecification.operator ==(Orleans.Dataflow.Definition.ResultPortSpecification left, Orleans.Dataflow.Definition.ResultPortSpecification right) -> bool
+static Orleans.Dataflow.Definition.ResultSlotDefinition.Create(Orleans.Dataflow.Identity.ResultSlotId id, Orleans.Dataflow.Identity.ContractReference resultContract, Orleans.Dataflow.Definition.PortAddress producer) -> Orleans.Dataflow.Definition.ResultSlotDefinition!
+static Orleans.Dataflow.Definition.ResultSlotDefinition.operator !=(Orleans.Dataflow.Definition.ResultSlotDefinition? left, Orleans.Dataflow.Definition.ResultSlotDefinition? right) -> bool
+static Orleans.Dataflow.Definition.ResultSlotDefinition.operator ==(Orleans.Dataflow.Definition.ResultSlotDefinition? left, Orleans.Dataflow.Definition.ResultSlotDefinition? right) -> bool
+static Orleans.Dataflow.Definition.StageCatalog.Create(System.Collections.Generic.IEnumerable<Orleans.Dataflow.Definition.StageSpecification!>! specifications) -> Orleans.Dataflow.Definition.StageCatalog!
+static Orleans.Dataflow.Definition.StageNode.Create(Orleans.Dataflow.Identity.NodeId id, Orleans.Dataflow.Identity.StageRef stage, Orleans.Dataflow.Identity.ContractReference parameterContract, Orleans.Dataflow.Serialization.CanonicalJsonValue parameters) -> Orleans.Dataflow.Definition.StageNode!
+static Orleans.Dataflow.Definition.StageNode.Create(Orleans.Dataflow.Identity.NodeId id, Orleans.Dataflow.Identity.StageRef stage, Orleans.Dataflow.Identity.ContractReference parameterContract, Orleans.Dataflow.Serialization.CanonicalJsonValue parameters, Orleans.Dataflow.Identity.ContractReference executionPolicyContract, Orleans.Dataflow.Serialization.CanonicalJsonValue executionPolicy) -> Orleans.Dataflow.Definition.StageNode!
+static Orleans.Dataflow.Definition.StageNode.operator !=(Orleans.Dataflow.Definition.StageNode? left, Orleans.Dataflow.Definition.StageNode? right) -> bool
+static Orleans.Dataflow.Definition.StageNode.operator ==(Orleans.Dataflow.Definition.StageNode? left, Orleans.Dataflow.Definition.StageNode? right) -> bool
+static Orleans.Dataflow.Definition.StageSpecification.Create(Orleans.Dataflow.Identity.StageRef stage, System.Collections.Generic.IEnumerable<Orleans.Dataflow.Definition.InputPortSpecification>! inputPorts, System.Collections.Generic.IEnumerable<Orleans.Dataflow.Definition.OutputPortSpecification>! outputPorts, System.Collections.Generic.IEnumerable<Orleans.Dataflow.Definition.ResultPortSpecification>! resultPorts, Orleans.Dataflow.Identity.ContractReference parameterContract, System.Collections.Generic.IEnumerable<Orleans.Dataflow.Definition.CapabilityToken>! requiredCapabilities) -> Orleans.Dataflow.Definition.StageSpecification!
+static Orleans.Dataflow.Definition.StageSpecification.Create(Orleans.Dataflow.Identity.StageRef stage, System.Collections.Generic.IEnumerable<Orleans.Dataflow.Definition.InputPortSpecification>! inputPorts, System.Collections.Generic.IEnumerable<Orleans.Dataflow.Definition.OutputPortSpecification>! outputPorts, System.Collections.Generic.IEnumerable<Orleans.Dataflow.Definition.ResultPortSpecification>! resultPorts, Orleans.Dataflow.Identity.ContractReference parameterContract, System.Collections.Generic.IEnumerable<Orleans.Dataflow.Definition.CapabilityToken>! requiredCapabilities, Orleans.Dataflow.Definition.IStageParameterValidator! parameterValidator) -> Orleans.Dataflow.Definition.StageSpecification!
+static Orleans.Dataflow.Definition.StageSpecification.operator !=(Orleans.Dataflow.Definition.StageSpecification? left, Orleans.Dataflow.Definition.StageSpecification? right) -> bool
+static Orleans.Dataflow.Definition.StageSpecification.operator ==(Orleans.Dataflow.Definition.StageSpecification? left, Orleans.Dataflow.Definition.StageSpecification? right) -> bool
+static Orleans.Dataflow.Identity.AttemptId.Create(string! value) -> Orleans.Dataflow.Identity.AttemptId
+static Orleans.Dataflow.Identity.AttemptId.operator !=(Orleans.Dataflow.Identity.AttemptId left, Orleans.Dataflow.Identity.AttemptId right) -> bool
+static Orleans.Dataflow.Identity.AttemptId.operator <(Orleans.Dataflow.Identity.AttemptId left, Orleans.Dataflow.Identity.AttemptId right) -> bool
+static Orleans.Dataflow.Identity.AttemptId.operator <=(Orleans.Dataflow.Identity.AttemptId left, Orleans.Dataflow.Identity.AttemptId right) -> bool
+static Orleans.Dataflow.Identity.AttemptId.operator ==(Orleans.Dataflow.Identity.AttemptId left, Orleans.Dataflow.Identity.AttemptId right) -> bool
+static Orleans.Dataflow.Identity.AttemptId.operator >(Orleans.Dataflow.Identity.AttemptId left, Orleans.Dataflow.Identity.AttemptId right) -> bool
+static Orleans.Dataflow.Identity.AttemptId.operator >=(Orleans.Dataflow.Identity.AttemptId left, Orleans.Dataflow.Identity.AttemptId right) -> bool
+static Orleans.Dataflow.Identity.AttemptId.TryCreate(string? value, out Orleans.Dataflow.Identity.AttemptId identifier) -> bool
+static Orleans.Dataflow.Identity.ContractId.Create(string! value) -> Orleans.Dataflow.Identity.ContractId
+static Orleans.Dataflow.Identity.ContractId.operator !=(Orleans.Dataflow.Identity.ContractId left, Orleans.Dataflow.Identity.ContractId right) -> bool
+static Orleans.Dataflow.Identity.ContractId.operator <(Orleans.Dataflow.Identity.ContractId left, Orleans.Dataflow.Identity.ContractId right) -> bool
+static Orleans.Dataflow.Identity.ContractId.operator <=(Orleans.Dataflow.Identity.ContractId left, Orleans.Dataflow.Identity.ContractId right) -> bool
+static Orleans.Dataflow.Identity.ContractId.operator ==(Orleans.Dataflow.Identity.ContractId left, Orleans.Dataflow.Identity.ContractId right) -> bool
+static Orleans.Dataflow.Identity.ContractId.operator >(Orleans.Dataflow.Identity.ContractId left, Orleans.Dataflow.Identity.ContractId right) -> bool
+static Orleans.Dataflow.Identity.ContractId.operator >=(Orleans.Dataflow.Identity.ContractId left, Orleans.Dataflow.Identity.ContractId right) -> bool
+static Orleans.Dataflow.Identity.ContractId.TryCreate(string? value, out Orleans.Dataflow.Identity.ContractId identifier) -> bool
+static Orleans.Dataflow.Identity.ContractReference.Create(Orleans.Dataflow.Identity.ContractId contract, int majorVersion) -> Orleans.Dataflow.Identity.ContractReference
+static Orleans.Dataflow.Identity.ContractReference.operator !=(Orleans.Dataflow.Identity.ContractReference left, Orleans.Dataflow.Identity.ContractReference right) -> bool
+static Orleans.Dataflow.Identity.ContractReference.operator <(Orleans.Dataflow.Identity.ContractReference left, Orleans.Dataflow.Identity.ContractReference right) -> bool
+static Orleans.Dataflow.Identity.ContractReference.operator <=(Orleans.Dataflow.Identity.ContractReference left, Orleans.Dataflow.Identity.ContractReference right) -> bool
+static Orleans.Dataflow.Identity.ContractReference.operator ==(Orleans.Dataflow.Identity.ContractReference left, Orleans.Dataflow.Identity.ContractReference right) -> bool
+static Orleans.Dataflow.Identity.ContractReference.operator >(Orleans.Dataflow.Identity.ContractReference left, Orleans.Dataflow.Identity.ContractReference right) -> bool
+static Orleans.Dataflow.Identity.ContractReference.operator >=(Orleans.Dataflow.Identity.ContractReference left, Orleans.Dataflow.Identity.ContractReference right) -> bool
+static Orleans.Dataflow.Identity.ContractReference.TryCreate(Orleans.Dataflow.Identity.ContractId contract, int majorVersion, out Orleans.Dataflow.Identity.ContractReference reference) -> bool
+static Orleans.Dataflow.Identity.GraphId.Create(string! value) -> Orleans.Dataflow.Identity.GraphId
+static Orleans.Dataflow.Identity.GraphId.operator !=(Orleans.Dataflow.Identity.GraphId left, Orleans.Dataflow.Identity.GraphId right) -> bool
+static Orleans.Dataflow.Identity.GraphId.operator <(Orleans.Dataflow.Identity.GraphId left, Orleans.Dataflow.Identity.GraphId right) -> bool
+static Orleans.Dataflow.Identity.GraphId.operator <=(Orleans.Dataflow.Identity.GraphId left, Orleans.Dataflow.Identity.GraphId right) -> bool
+static Orleans.Dataflow.Identity.GraphId.operator ==(Orleans.Dataflow.Identity.GraphId left, Orleans.Dataflow.Identity.GraphId right) -> bool
+static Orleans.Dataflow.Identity.GraphId.operator >(Orleans.Dataflow.Identity.GraphId left, Orleans.Dataflow.Identity.GraphId right) -> bool
+static Orleans.Dataflow.Identity.GraphId.operator >=(Orleans.Dataflow.Identity.GraphId left, Orleans.Dataflow.Identity.GraphId right) -> bool
+static Orleans.Dataflow.Identity.GraphId.TryCreate(string? value, out Orleans.Dataflow.Identity.GraphId identifier) -> bool
+static Orleans.Dataflow.Identity.GraphRevision.Create(int value) -> Orleans.Dataflow.Identity.GraphRevision
+static Orleans.Dataflow.Identity.GraphRevision.operator !=(Orleans.Dataflow.Identity.GraphRevision left, Orleans.Dataflow.Identity.GraphRevision right) -> bool
+static Orleans.Dataflow.Identity.GraphRevision.operator <(Orleans.Dataflow.Identity.GraphRevision left, Orleans.Dataflow.Identity.GraphRevision right) -> bool
+static Orleans.Dataflow.Identity.GraphRevision.operator <=(Orleans.Dataflow.Identity.GraphRevision left, Orleans.Dataflow.Identity.GraphRevision right) -> bool
+static Orleans.Dataflow.Identity.GraphRevision.operator ==(Orleans.Dataflow.Identity.GraphRevision left, Orleans.Dataflow.Identity.GraphRevision right) -> bool
+static Orleans.Dataflow.Identity.GraphRevision.operator >(Orleans.Dataflow.Identity.GraphRevision left, Orleans.Dataflow.Identity.GraphRevision right) -> bool
+static Orleans.Dataflow.Identity.GraphRevision.operator >=(Orleans.Dataflow.Identity.GraphRevision left, Orleans.Dataflow.Identity.GraphRevision right) -> bool
+static Orleans.Dataflow.Identity.GraphRevision.TryCreate(int value, out Orleans.Dataflow.Identity.GraphRevision revision) -> bool
+static Orleans.Dataflow.Identity.NodeId.Create(string! segment) -> Orleans.Dataflow.Identity.NodeId
+static Orleans.Dataflow.Identity.NodeId.operator !=(Orleans.Dataflow.Identity.NodeId left, Orleans.Dataflow.Identity.NodeId right) -> bool
+static Orleans.Dataflow.Identity.NodeId.operator <(Orleans.Dataflow.Identity.NodeId left, Orleans.Dataflow.Identity.NodeId right) -> bool
+static Orleans.Dataflow.Identity.NodeId.operator <=(Orleans.Dataflow.Identity.NodeId left, Orleans.Dataflow.Identity.NodeId right) -> bool
+static Orleans.Dataflow.Identity.NodeId.operator ==(Orleans.Dataflow.Identity.NodeId left, Orleans.Dataflow.Identity.NodeId right) -> bool
+static Orleans.Dataflow.Identity.NodeId.operator >(Orleans.Dataflow.Identity.NodeId left, Orleans.Dataflow.Identity.NodeId right) -> bool
+static Orleans.Dataflow.Identity.NodeId.operator >=(Orleans.Dataflow.Identity.NodeId left, Orleans.Dataflow.Identity.NodeId right) -> bool
+static Orleans.Dataflow.Identity.NodeId.Parse(string! path) -> Orleans.Dataflow.Identity.NodeId
+static Orleans.Dataflow.Identity.NodeId.TryParse(string? path, out Orleans.Dataflow.Identity.NodeId nodeId) -> bool
+static Orleans.Dataflow.Identity.PortId.Create(string! value) -> Orleans.Dataflow.Identity.PortId
+static Orleans.Dataflow.Identity.PortId.operator !=(Orleans.Dataflow.Identity.PortId left, Orleans.Dataflow.Identity.PortId right) -> bool
+static Orleans.Dataflow.Identity.PortId.operator <(Orleans.Dataflow.Identity.PortId left, Orleans.Dataflow.Identity.PortId right) -> bool
+static Orleans.Dataflow.Identity.PortId.operator <=(Orleans.Dataflow.Identity.PortId left, Orleans.Dataflow.Identity.PortId right) -> bool
+static Orleans.Dataflow.Identity.PortId.operator ==(Orleans.Dataflow.Identity.PortId left, Orleans.Dataflow.Identity.PortId right) -> bool
+static Orleans.Dataflow.Identity.PortId.operator >(Orleans.Dataflow.Identity.PortId left, Orleans.Dataflow.Identity.PortId right) -> bool
+static Orleans.Dataflow.Identity.PortId.operator >=(Orleans.Dataflow.Identity.PortId left, Orleans.Dataflow.Identity.PortId right) -> bool
+static Orleans.Dataflow.Identity.PortId.TryCreate(string? value, out Orleans.Dataflow.Identity.PortId identifier) -> bool
+static Orleans.Dataflow.Identity.ProviderId.Create(string! value) -> Orleans.Dataflow.Identity.ProviderId
+static Orleans.Dataflow.Identity.ProviderId.operator !=(Orleans.Dataflow.Identity.ProviderId left, Orleans.Dataflow.Identity.ProviderId right) -> bool
+static Orleans.Dataflow.Identity.ProviderId.operator <(Orleans.Dataflow.Identity.ProviderId left, Orleans.Dataflow.Identity.ProviderId right) -> bool
+static Orleans.Dataflow.Identity.ProviderId.operator <=(Orleans.Dataflow.Identity.ProviderId left, Orleans.Dataflow.Identity.ProviderId right) -> bool
+static Orleans.Dataflow.Identity.ProviderId.operator ==(Orleans.Dataflow.Identity.ProviderId left, Orleans.Dataflow.Identity.ProviderId right) -> bool
+static Orleans.Dataflow.Identity.ProviderId.operator >(Orleans.Dataflow.Identity.ProviderId left, Orleans.Dataflow.Identity.ProviderId right) -> bool
+static Orleans.Dataflow.Identity.ProviderId.operator >=(Orleans.Dataflow.Identity.ProviderId left, Orleans.Dataflow.Identity.ProviderId right) -> bool
+static Orleans.Dataflow.Identity.ProviderId.TryCreate(string? value, out Orleans.Dataflow.Identity.ProviderId identifier) -> bool
+static Orleans.Dataflow.Identity.ResultSlotId.Create(string! value) -> Orleans.Dataflow.Identity.ResultSlotId
+static Orleans.Dataflow.Identity.ResultSlotId.operator !=(Orleans.Dataflow.Identity.ResultSlotId left, Orleans.Dataflow.Identity.ResultSlotId right) -> bool
+static Orleans.Dataflow.Identity.ResultSlotId.operator <(Orleans.Dataflow.Identity.ResultSlotId left, Orleans.Dataflow.Identity.ResultSlotId right) -> bool
+static Orleans.Dataflow.Identity.ResultSlotId.operator <=(Orleans.Dataflow.Identity.ResultSlotId left, Orleans.Dataflow.Identity.ResultSlotId right) -> bool
+static Orleans.Dataflow.Identity.ResultSlotId.operator ==(Orleans.Dataflow.Identity.ResultSlotId left, Orleans.Dataflow.Identity.ResultSlotId right) -> bool
+static Orleans.Dataflow.Identity.ResultSlotId.operator >(Orleans.Dataflow.Identity.ResultSlotId left, Orleans.Dataflow.Identity.ResultSlotId right) -> bool
+static Orleans.Dataflow.Identity.ResultSlotId.operator >=(Orleans.Dataflow.Identity.ResultSlotId left, Orleans.Dataflow.Identity.ResultSlotId right) -> bool
+static Orleans.Dataflow.Identity.ResultSlotId.TryCreate(string? value, out Orleans.Dataflow.Identity.ResultSlotId identifier) -> bool
+static Orleans.Dataflow.Identity.RunId.Create(string! value) -> Orleans.Dataflow.Identity.RunId
+static Orleans.Dataflow.Identity.RunId.operator !=(Orleans.Dataflow.Identity.RunId left, Orleans.Dataflow.Identity.RunId right) -> bool
+static Orleans.Dataflow.Identity.RunId.operator <(Orleans.Dataflow.Identity.RunId left, Orleans.Dataflow.Identity.RunId right) -> bool
+static Orleans.Dataflow.Identity.RunId.operator <=(Orleans.Dataflow.Identity.RunId left, Orleans.Dataflow.Identity.RunId right) -> bool
+static Orleans.Dataflow.Identity.RunId.operator ==(Orleans.Dataflow.Identity.RunId left, Orleans.Dataflow.Identity.RunId right) -> bool
+static Orleans.Dataflow.Identity.RunId.operator >(Orleans.Dataflow.Identity.RunId left, Orleans.Dataflow.Identity.RunId right) -> bool
+static Orleans.Dataflow.Identity.RunId.operator >=(Orleans.Dataflow.Identity.RunId left, Orleans.Dataflow.Identity.RunId right) -> bool
+static Orleans.Dataflow.Identity.RunId.TryCreate(string? value, out Orleans.Dataflow.Identity.RunId identifier) -> bool
+static Orleans.Dataflow.Identity.StageId.Create(string! value) -> Orleans.Dataflow.Identity.StageId
+static Orleans.Dataflow.Identity.StageId.operator !=(Orleans.Dataflow.Identity.StageId left, Orleans.Dataflow.Identity.StageId right) -> bool
+static Orleans.Dataflow.Identity.StageId.operator <(Orleans.Dataflow.Identity.StageId left, Orleans.Dataflow.Identity.StageId right) -> bool
+static Orleans.Dataflow.Identity.StageId.operator <=(Orleans.Dataflow.Identity.StageId left, Orleans.Dataflow.Identity.StageId right) -> bool
+static Orleans.Dataflow.Identity.StageId.operator ==(Orleans.Dataflow.Identity.StageId left, Orleans.Dataflow.Identity.StageId right) -> bool
+static Orleans.Dataflow.Identity.StageId.operator >(Orleans.Dataflow.Identity.StageId left, Orleans.Dataflow.Identity.StageId right) -> bool
+static Orleans.Dataflow.Identity.StageId.operator >=(Orleans.Dataflow.Identity.StageId left, Orleans.Dataflow.Identity.StageId right) -> bool
+static Orleans.Dataflow.Identity.StageId.TryCreate(string? value, out Orleans.Dataflow.Identity.StageId identifier) -> bool
+static Orleans.Dataflow.Identity.StageRef.Create(Orleans.Dataflow.Identity.ProviderId provider, Orleans.Dataflow.Identity.StageId stage, int majorVersion) -> Orleans.Dataflow.Identity.StageRef
+static Orleans.Dataflow.Identity.StageRef.operator !=(Orleans.Dataflow.Identity.StageRef left, Orleans.Dataflow.Identity.StageRef right) -> bool
+static Orleans.Dataflow.Identity.StageRef.operator <(Orleans.Dataflow.Identity.StageRef left, Orleans.Dataflow.Identity.StageRef right) -> bool
+static Orleans.Dataflow.Identity.StageRef.operator <=(Orleans.Dataflow.Identity.StageRef left, Orleans.Dataflow.Identity.StageRef right) -> bool
+static Orleans.Dataflow.Identity.StageRef.operator ==(Orleans.Dataflow.Identity.StageRef left, Orleans.Dataflow.Identity.StageRef right) -> bool
+static Orleans.Dataflow.Identity.StageRef.operator >(Orleans.Dataflow.Identity.StageRef left, Orleans.Dataflow.Identity.StageRef right) -> bool
+static Orleans.Dataflow.Identity.StageRef.operator >=(Orleans.Dataflow.Identity.StageRef left, Orleans.Dataflow.Identity.StageRef right) -> bool
+static Orleans.Dataflow.Identity.StageRef.TryCreate(Orleans.Dataflow.Identity.ProviderId provider, Orleans.Dataflow.Identity.StageId stage, int majorVersion, out Orleans.Dataflow.Identity.StageRef stageRef) -> bool
+static Orleans.Dataflow.Serialization.CanonicalJsonValue.FromElement(System.Text.Json.JsonElement element) -> Orleans.Dataflow.Serialization.CanonicalJsonValue
+static Orleans.Dataflow.Serialization.CanonicalJsonValue.operator !=(Orleans.Dataflow.Serialization.CanonicalJsonValue left, Orleans.Dataflow.Serialization.CanonicalJsonValue right) -> bool
+static Orleans.Dataflow.Serialization.CanonicalJsonValue.operator ==(Orleans.Dataflow.Serialization.CanonicalJsonValue left, Orleans.Dataflow.Serialization.CanonicalJsonValue right) -> bool
+static Orleans.Dataflow.Serialization.CanonicalJsonValue.Parse(string! json) -> Orleans.Dataflow.Serialization.CanonicalJsonValue
+static Orleans.Dataflow.Serialization.CanonicalJsonValue.Parse(System.ReadOnlySpan<byte> utf8Json) -> Orleans.Dataflow.Serialization.CanonicalJsonValue
+static Orleans.Dataflow.Serialization.CanonicalJsonValue.TryParse(string? json, out Orleans.Dataflow.Serialization.CanonicalJsonValue value) -> bool
+static Orleans.Dataflow.Serialization.CanonicalJsonValue.TryParse(System.ReadOnlySpan<byte> utf8Json, out Orleans.Dataflow.Serialization.CanonicalJsonValue value) -> bool
+static Orleans.Dataflow.Serialization.GraphDocumentSerializer.Deserialize(System.ReadOnlySpan<byte> canonicalEnvelope) -> Orleans.Dataflow.Definition.GraphDocument!
+static Orleans.Dataflow.Serialization.GraphDocumentSerializer.Fingerprint(Orleans.Dataflow.Definition.GraphDocument! document) -> Orleans.Dataflow.Definition.GraphFingerprint
+static Orleans.Dataflow.Serialization.GraphDocumentSerializer.Serialize(Orleans.Dataflow.Definition.GraphDocument! document) -> byte[]!
+static Orleans.Dataflow.Serialization.StageCatalogSerializer.Fingerprint(Orleans.Dataflow.Definition.StageCatalog! catalog) -> Orleans.Dataflow.Definition.CatalogFingerprint
+static Orleans.Dataflow.Serialization.StageCatalogSerializer.Serialize(Orleans.Dataflow.Definition.StageCatalog! catalog) -> byte[]!
+~override Orleans.Dataflow.Definition.CapabilityToken.Equals(object obj) -> bool
+~override Orleans.Dataflow.Definition.CatalogFingerprint.Equals(object obj) -> bool
+~override Orleans.Dataflow.Definition.GraphEdge.Equals(object obj) -> bool
+~override Orleans.Dataflow.Definition.GraphFingerprint.Equals(object obj) -> bool
+~override Orleans.Dataflow.Definition.InputPortSpecification.Equals(object obj) -> bool
+~override Orleans.Dataflow.Definition.OutputPortSpecification.Equals(object obj) -> bool
+~override Orleans.Dataflow.Definition.PortAddress.Equals(object obj) -> bool
+~override Orleans.Dataflow.Definition.ResultPortSpecification.Equals(object obj) -> bool
+~override Orleans.Dataflow.Identity.AttemptId.Equals(object obj) -> bool
+~override Orleans.Dataflow.Identity.ContractId.Equals(object obj) -> bool
+~override Orleans.Dataflow.Identity.ContractReference.Equals(object obj) -> bool
+~override Orleans.Dataflow.Identity.GraphId.Equals(object obj) -> bool
+~override Orleans.Dataflow.Identity.GraphRevision.Equals(object obj) -> bool
+~override Orleans.Dataflow.Identity.NodeId.Equals(object obj) -> bool
+~override Orleans.Dataflow.Identity.PortId.Equals(object obj) -> bool
+~override Orleans.Dataflow.Identity.ProviderId.Equals(object obj) -> bool
+~override Orleans.Dataflow.Identity.ResultSlotId.Equals(object obj) -> bool
+~override Orleans.Dataflow.Identity.RunId.Equals(object obj) -> bool
+~override Orleans.Dataflow.Identity.StageId.Equals(object obj) -> bool
+~override Orleans.Dataflow.Identity.StageRef.Equals(object obj) -> bool
+~override Orleans.Dataflow.Serialization.CanonicalJsonValue.Equals(object obj) -> bool

@@ -1,3 +1,4 @@
+using System.Globalization;
 using Orleans.Dataflow.Definition;
 using Orleans.Dataflow.Identity;
 
@@ -24,7 +25,16 @@ namespace Orleans.Dataflow;
 /// deployable pipelines will bind by fingerprint and lineage once those exist.
 /// </para>
 /// <para>
-/// The type is a readonly record struct for three reasons: equality over both components is the whole
+/// Equality is over three components, and each one is load-bearing: the slot <see cref="Id"/>, because a
+/// graph may declare several results; the declaring document's <see cref="Graph"/> fingerprint, because a
+/// name means nothing apart from the document that declared it; and the declaring instance's authoring
+/// nonce, because a fingerprint covers shape and not behavior, so without it two lambda graphs that merely
+/// look alike would resolve each other's results. The nonce is internal — nothing outside materialization
+/// has a use for it — but it is part of what makes two slots equal, which is why two slots of the same
+/// name on two runs of look-alike graphs are not.
+/// </para>
+/// <para>
+/// The type is a readonly record struct for three reasons: equality over those components is the whole
 /// contract and the synthesized equality is exactly it; the components are themselves readonly record
 /// structs whose value equality it composes; and it matches how every other small identity in this
 /// codebase is modeled. The default instance is meaningless and says so, the way
@@ -33,6 +43,9 @@ namespace Orleans.Dataflow;
 /// </remarks>
 public readonly record struct ResultSlot<TResult>
 {
+    /// <summary>The number of hexadecimal digits of the authoring nonce <see cref="ToString"/> renders.</summary>
+    private const int NonceDigits = 8;
+
     private readonly ResultSlotId _id;
     private readonly GraphFingerprint _graph;
     private readonly Guid _authoringNonce;
@@ -74,14 +87,27 @@ public readonly record struct ResultSlot<TResult>
 
     /// <summary>Returns the text form, or a diagnostic literal for the default value.</summary>
     /// <returns>
-    /// Text of the form <c>processed@sha256:9f86d081...</c>, or <c>"(default ResultSlot)"</c> when
-    /// <see cref="IsDefault"/> is <see langword="true"/>.
+    /// Text of the form <c>processed@sha256:9f86d081...#4f1c9a2b</c>, or <c>"(default ResultSlot)"</c>
+    /// when <see cref="IsDefault"/> is <see langword="true"/>.
     /// </returns>
     /// <remarks>
-    /// The separator is <c>@</c>, which is not a character of the identifier grammar, and the method never
-    /// throws, so logging stays safe for every instance including the default one.
+    /// <para>
+    /// All three components a slot is equal by are rendered, because a text form that showed only two of
+    /// them would print one line for two slots that are not equal — exactly the confusion the nonce
+    /// exists to prevent, reintroduced in the logs. The nonce is abbreviated to its first eight
+    /// hexadecimal digits: the text is a diagnostic label rather than a durable identity, and eight
+    /// digits are enough to tell apart the handful of graph instances one program builds.
+    /// </para>
+    /// <para>
+    /// The separators are <c>@</c> and <c>#</c>, neither of which is a character of the identifier
+    /// grammar, and the method never throws, so logging stays safe for every instance including the
+    /// default one.
+    /// </para>
     /// </remarks>
-    public override string ToString() => IsDefault ? "(default ResultSlot)" : $"{_id}@{_graph}";
+    public override string ToString() =>
+        IsDefault
+            ? "(default ResultSlot)"
+            : $"{_id}@{_graph}#{_authoringNonce.ToString("N", CultureInfo.InvariantCulture)[..NonceDigits]}";
 
     /// <summary>Creates a slot bound to the graph instance that declared it.</summary>
     /// <param name="id">The validated slot name.</param>

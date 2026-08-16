@@ -1,3 +1,4 @@
+using System.Globalization;
 using Orleans.Dataflow.Compilation;
 using Orleans.Dataflow.Definition;
 using Orleans.Dataflow.Serialization;
@@ -22,7 +23,7 @@ public sealed class DocumentShapeTests
     {
         GraphDocument document = Counted().Document;
 
-        Assert.Equal(["stage-1", "stage-2", "stage-3", "stage-4"], NodeIds(document));
+        Assert.Equal(["stage-0001", "stage-0002", "stage-0003", "stage-0004"], NodeIds(document));
         Assert.Equal(["from-enumerable", "select", "where", "fold"], StageIds(document));
     }
 
@@ -48,9 +49,9 @@ public sealed class DocumentShapeTests
 
         Assert.Equal(
             [
-                "stage-1#out -> stage-2#in",
-                "stage-2#out -> stage-3#in",
-                "stage-3#out -> stage-4#in",
+                "stage-0001#out -> stage-0002#in",
+                "stage-0002#out -> stage-0003#in",
+                "stage-0003#out -> stage-0004#in",
             ],
             Edges(document));
     }
@@ -64,7 +65,7 @@ public sealed class DocumentShapeTests
 
         Assert.Equal("processed", slot.Id.Value);
         Assert.Equal(Contract("local-fold-result"), slot.ResultContract);
-        Assert.Equal("stage-4", slot.Producer.Node.Value);
+        Assert.Equal("stage-0004", slot.Producer.Node.Value);
         Assert.Equal("result", slot.Producer.Port.Value);
     }
 
@@ -128,11 +129,12 @@ public sealed class DocumentShapeTests
     }
 
     [Fact]
-    public void TheResultStaysOnTheLastOccurrenceOnceAChainPassesNineStages()
+    public void ADocumentOfTwelveStagesOrdersItsNodesInAuthoringOrder()
     {
-        // Node identifiers sort ordinally, so 'stage-10' precedes 'stage-2' in the document. A closure that
-        // read its producer off the document's last node instead of the chain's last occurrence would
-        // silently point the slot at 'stage-9' here, and the catalog would reject the graph.
+        // The invariant zero padding buys, stated where it can be seen: a document's canonical node order
+        // is ordinal over identifier text, and past nine occurrences that is only the authoring order
+        // because the numbers are padded. Unpadded, 'stage-10' would sort between 'stage-1' and 'stage-2'
+        // and this list would read 1, 10, 11, 12, 2, 3 and so on.
         Flow<long, long> ten = Flow.For<long>();
 
         for (int index = 0; index < 10; index++)
@@ -145,13 +147,52 @@ public sealed class DocumentShapeTests
             .To(s => s.Aggregate(0L, (sum, value) => sum + value), "total", out ResultSlot<long> total);
 
         Assert.Equal(12, graph.Document.Nodes.Count);
-        Assert.Equal("stage-12", Assert.Single(graph.Document.ResultSlots).Producer.Node.Value);
-        Assert.Equal("stage-10", NodeIds(graph.Document)[1]);
+        Assert.Equal(
+            [
+                "stage-0001", "stage-0002", "stage-0003", "stage-0004", "stage-0005", "stage-0006",
+                "stage-0007", "stage-0008", "stage-0009", "stage-0010", "stage-0011", "stage-0012",
+            ],
+            NodeIds(graph.Document));
+
+        // The order is the authoring order and not merely a sorted list: the source was authored first,
+        // the fold last, and the document's first and last nodes are exactly those two occurrences.
+        Assert.Equal(
+            ["from-enumerable", .. Enumerable.Repeat("select", 10), "fold"],
+            StageIds(graph.Document));
+
+        Assert.Equal("stage-0012", Assert.Single(graph.Document.ResultSlots).Producer.Node.Value);
         Assert.Equal("total", total.Id.Value);
 
         GraphValidationReport report = GraphCompiler.Validate(graph.Document, LocalStageCatalog.Instance);
 
         Assert.True(report.IsValid, report.ToString());
+    }
+
+    [Fact]
+    public void AChainTooLongToNumberIsRejectedRatherThanNumberedOutOfOrder()
+    {
+        // Four digits is where the numbering stops, because a fifth would sort a chain out of the order it
+        // was authored in. The bound is therefore a rejection that names both numbers rather than an
+        // invariant that quietly stops holding for the one graph large enough to reach it.
+        Flow<long, long> chain = Flow.For<long>().Select(value => value + 1);
+        int occurrences = 1;
+
+        // Doubled rather than appended one at a time: composition copies, so appending 16384 stages one by
+        // one would cost this test a quadratic number of copies to reach the same chain.
+        while (occurrences <= 9999)
+        {
+            chain = chain.Via(chain);
+            occurrences *= 2;
+        }
+
+        InvalidOperationException rejected = Assert.Throws<InvalidOperationException>(
+            () => Source.From<long>([1L]).Via(chain).To(Sink.Ignore<long>()));
+
+        Assert.Contains("9999", rejected.Message, StringComparison.Ordinal);
+        Assert.Contains(
+            (occurrences + 2).ToString(CultureInfo.InvariantCulture),
+            rejected.Message,
+            StringComparison.Ordinal);
     }
 
     [Fact]

@@ -164,4 +164,93 @@ public sealed class CatalogFingerprintTests
     [Fact]
     public void TheDefaultInstanceRendersWithoutThrowing() =>
         Assert.Equal("(default CatalogFingerprint)", default(CatalogFingerprint).ToString());
+
+    [Fact]
+    public void ComparisonIsLexicographicOverTheDigestBytes()
+    {
+        // The ordering table: the first differing byte decides, most significant byte first. The text form
+        // sorts the same way, which is what lets an ordered list of fingerprints be read as either.
+        CatalogFingerprint[] ordered =
+        [
+            CatalogFingerprint.Parse("sha256:" + new string('0', 64)),
+            CatalogFingerprint.Parse("sha256:00" + new string('0', 61) + "1"),
+            CatalogFingerprint.Parse("sha256:01" + new string('0', 62)),
+            CatalogFingerprint.Parse("sha256:10" + new string('0', 62)),
+            CatalogFingerprint.Parse("sha256:" + new string('f', 64)),
+        ];
+
+        for (int index = 1; index < ordered.Length; index++)
+        {
+            Assert.True(
+                ordered[index - 1].CompareTo(ordered[index]) < 0,
+                $"'{ordered[index - 1]}' should sort before '{ordered[index]}'");
+
+            Assert.True(ordered[index].CompareTo(ordered[index - 1]) > 0);
+            Assert.True(ordered[index - 1] < ordered[index]);
+            Assert.True(ordered[index - 1] <= ordered[index]);
+            Assert.True(ordered[index] > ordered[index - 1]);
+            Assert.True(ordered[index] >= ordered[index - 1]);
+
+            // The byte order and the text order agree, so neither representation reorders a stored list.
+            Assert.True(
+                string.CompareOrdinal(ordered[index - 1].ToString(), ordered[index].ToString()) < 0);
+        }
+    }
+
+    [Fact]
+    public void SortingUsesTheSameOrderWhicheverWayTheInputArrived()
+    {
+        CatalogFingerprint[] shuffled =
+        [
+            CatalogFingerprint.OfSerialized("b"u8),
+            CatalogFingerprint.OfSerialized("a"u8),
+            CatalogFingerprint.OfSerialized([]),
+        ];
+
+        CatalogFingerprint[] expected = [.. shuffled.OrderBy(fingerprint => fingerprint.ToString(), StringComparer.Ordinal)];
+
+        Array.Sort(shuffled);
+
+        Assert.Equal(expected, shuffled);
+    }
+
+    [Fact]
+    public void TheDefaultInstanceSortsBeforeEveryComputedOne()
+    {
+        CatalogFingerprint computed = CatalogFingerprint.OfSerialized([]);
+
+        Assert.True(default(CatalogFingerprint).CompareTo(computed) < 0);
+        Assert.True(computed.CompareTo(default) > 0);
+        Assert.Equal(0, default(CatalogFingerprint).CompareTo(default));
+        Assert.True(default(CatalogFingerprint) < computed);
+        Assert.True(computed >= default(CatalogFingerprint));
+    }
+
+    [Fact]
+    public void ComparisonIsConsistentWithEquality()
+    {
+        CatalogFingerprint left = CatalogFingerprint.OfSerialized("abc"u8);
+        CatalogFingerprint right = CatalogFingerprint.Parse(left.ToString());
+
+        Assert.Equal(0, left.CompareTo(right));
+        Assert.Equal(left, right);
+        Assert.True(left <= right);
+        Assert.True(left >= right);
+        Assert.False(left < right);
+        Assert.False(left > right);
+    }
+
+    [Fact]
+    public void TheNonGenericComparisonAgreesWithTheTypedOne()
+    {
+        // F#'s 'comparison' constraint is satisfied by System.IComparable and not by IComparable<'T>, so
+        // this implementation is what lets the type key an F# Set or Map.
+        IComparable left = CatalogFingerprint.Parse("sha256:" + new string('0', 64));
+        CatalogFingerprint right = CatalogFingerprint.Parse("sha256:" + new string('f', 64));
+
+        Assert.True(typeof(IComparable).IsAssignableFrom(typeof(CatalogFingerprint)));
+        Assert.Equal(((CatalogFingerprint)left).CompareTo(right), left.CompareTo(right));
+        Assert.True(left.CompareTo(null) > 0);
+        Assert.Throws<ArgumentException>("obj", () => left.CompareTo("not a CatalogFingerprint"));
+    }
 }

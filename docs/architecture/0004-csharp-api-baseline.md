@@ -128,7 +128,9 @@ milestone implements them.
 - Explicitly named occurrences (`ResultSlotId` names, user-supplied stage
   ids) are the deployable path, per ADR 0001.
 - Unnamed occurrences get deterministic sequential local ids in authoring
-  order (`stage-1`, `stage-2`); the closed document then carries the
+  order (`stage-0001`, `stage-0002`, zero-padded so ordinal document order
+  equals authoring order; more than 9999 unnamed occurrences is rejected
+  rather than silently breaking that invariant); the closed document then carries the
   `ephemeral-identity` capability token automatically, because positional
   ids are not edit-stable. Deployability validation rejects
   `ephemeral-identity` documents for durable pipelines.

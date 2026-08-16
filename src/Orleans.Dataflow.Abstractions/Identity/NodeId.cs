@@ -23,10 +23,11 @@ namespace Orleans.Dataflow.Identity;
 /// The default value carries no path: <see cref="IsDefault"/> reports it, <see cref="Value"/>,
 /// <see cref="Depth"/>, and <see cref="GetSegments"/> throw for it, and <see cref="ToString"/> renders
 /// a diagnostic literal for it rather than throwing. Equality is ordinal equality of the canonical
-/// path text.
+/// path text, and <see cref="CompareTo"/> orders identifiers over that same full path text; the
+/// default value sorts before every created one.
 /// </para>
 /// </remarks>
-public readonly record struct NodeId
+public readonly record struct NodeId : IComparable<NodeId>, IComparable
 {
     /// <summary>
     /// The character that separates path segments in the canonical form.
@@ -218,6 +219,98 @@ public readonly record struct NodeId
     /// never shared with another call or with the identifier's own state.
     /// </remarks>
     public IReadOnlyList<string> GetSegments() => Value.Split(Separator);
+
+    /// <summary>
+    /// Determines whether one node identifier sorts before another in canonical order.
+    /// </summary>
+    /// <param name="left">The left operand.</param>
+    /// <param name="right">The right operand.</param>
+    /// <returns>
+    /// <see langword="true"/> when <paramref name="left"/> sorts before <paramref name="right"/>;
+    /// otherwise <see langword="false"/>.
+    /// </returns>
+    public static bool operator <(NodeId left, NodeId right) => left.CompareTo(right) < 0;
+
+    /// <summary>
+    /// Determines whether one node identifier sorts before another in canonical order, or is equal to it.
+    /// </summary>
+    /// <param name="left">The left operand.</param>
+    /// <param name="right">The right operand.</param>
+    /// <returns>
+    /// <see langword="true"/> when <paramref name="left"/> does not sort after
+    /// <paramref name="right"/>; otherwise <see langword="false"/>.
+    /// </returns>
+    public static bool operator <=(NodeId left, NodeId right) => left.CompareTo(right) <= 0;
+
+    /// <summary>
+    /// Determines whether one node identifier sorts after another in canonical order.
+    /// </summary>
+    /// <param name="left">The left operand.</param>
+    /// <param name="right">The right operand.</param>
+    /// <returns>
+    /// <see langword="true"/> when <paramref name="left"/> sorts after <paramref name="right"/>;
+    /// otherwise <see langword="false"/>.
+    /// </returns>
+    public static bool operator >(NodeId left, NodeId right) => left.CompareTo(right) > 0;
+
+    /// <summary>
+    /// Determines whether one node identifier sorts after another in canonical order, or is equal to it.
+    /// </summary>
+    /// <param name="left">The left operand.</param>
+    /// <param name="right">The right operand.</param>
+    /// <returns>
+    /// <see langword="true"/> when <paramref name="left"/> does not sort before
+    /// <paramref name="right"/>; otherwise <see langword="false"/>.
+    /// </returns>
+    public static bool operator >=(NodeId left, NodeId right) => left.CompareTo(right) >= 0;
+
+    /// <summary>
+    /// Compares this node identifier with another in canonical order.
+    /// </summary>
+    /// <param name="other">The node identifier to compare with.</param>
+    /// <returns>
+    /// A negative number when this instance sorts first, zero when the two are equal, and a positive
+    /// number when <paramref name="other"/> sorts first.
+    /// </returns>
+    /// <remarks>
+    /// <para>
+    /// The comparison is over the full <see cref="Separator"/>-joined path text, not segment by segment,
+    /// which is the order ADR 0003 fixes for a document's nodes: <c>a</c> sorts before <c>a-b</c>, and
+    /// <c>a-b</c> before <c>a/b</c>, because <c>-</c> precedes <c>/</c> in code-point order. A canonical
+    /// order only has to be total, deterministic, and documented, and comparing whole paths is the
+    /// cheapest rule that is all three.
+    /// </para>
+    /// <para>
+    /// The default value carries no path and sorts before every created one, so the order is total over
+    /// every instance instead of leaving a hole at the default. Ordering is consistent with equality,
+    /// because two identifiers compare equal exactly when their path texts are equal.
+    /// </para>
+    /// </remarks>
+    public int CompareTo(NodeId other) => string.CompareOrdinal(_value, other._value);
+
+    /// <summary>
+    /// Compares this instance with another object in canonical order.
+    /// </summary>
+    /// <param name="obj">The object to compare with, which may be <see langword="null"/>.</param>
+    /// <returns>
+    /// A negative number when this instance sorts first, zero when the two are equal, and a positive
+    /// number when <paramref name="obj"/> sorts first. A <see langword="null"/> always sorts first, which
+    /// is the convention every <see cref="IComparable"/> implementation in .NET follows.
+    /// </returns>
+    /// <exception cref="ArgumentException"><paramref name="obj"/> is not a <see cref="NodeId"/>.</exception>
+    /// <remarks>
+    /// The non-generic interface is implemented explicitly and exists for one reason: F#'s
+    /// <c>comparison</c> constraint is satisfied by <see cref="IComparable"/> and not by
+    /// <see cref="IComparable{T}"/>, so without it this type cannot key an F# <c>Set</c> or <c>Map</c> —
+    /// which is what the F# frontend needs of it. C# callers bind to
+    /// <see cref="CompareTo(NodeId)"/> instead and box nothing.
+    /// </remarks>
+    int IComparable.CompareTo(object? obj) => obj switch
+    {
+        null => 1,
+        NodeId other => CompareTo(other),
+        _ => throw new ArgumentException($"The argument must be a {nameof(NodeId)}.", nameof(obj)),
+    };
 
     /// <summary>
     /// Returns the canonical path text, or a diagnostic literal when this instance is the default value.

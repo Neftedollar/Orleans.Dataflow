@@ -357,6 +357,87 @@ public sealed class NodeIdTests
         Assert.Equal(2, identifiers.Count);
     }
 
+    [Fact]
+    public void ComparisonIsOrdinalOverTheWholePathText()
+    {
+        // The ordering table, and the pin ADR 0003 fixes for a document's canonical node order: comparison
+        // is over the whole '/'-joined path and not segment by segment, so 'a' precedes 'a-b' because it
+        // is a prefix of it, and 'a-b' precedes 'a/b' because '-' precedes '/' in code-point order. A
+        // segment-wise comparison would put 'a/b' second, and a document would sort differently.
+        string[] ordered = ["a", "a-b", "a/b", "a/b-c", "a/b/c", "ab", "b"];
+
+        for (int index = 1; index < ordered.Length; index++)
+        {
+            NodeId left = NodeId.Parse(ordered[index - 1]);
+            NodeId right = NodeId.Parse(ordered[index]);
+
+            Assert.True(left.CompareTo(right) < 0, $"'{ordered[index - 1]}' should sort before '{ordered[index]}'");
+            Assert.True(right.CompareTo(left) > 0, $"'{ordered[index]}' should sort after '{ordered[index - 1]}'");
+            Assert.True(left < right);
+            Assert.True(left <= right);
+            Assert.True(right > left);
+            Assert.True(right >= left);
+        }
+    }
+
+    [Fact]
+    public void SortingUsesTheSameOrderWhicheverWayTheInputArrived()
+    {
+        NodeId[] shuffled =
+        [
+            NodeId.Parse("b"),
+            NodeId.Parse("a/b"),
+            NodeId.Parse("a"),
+            NodeId.Parse("ab"),
+            NodeId.Parse("a-b"),
+        ];
+
+        Array.Sort(shuffled);
+
+        Assert.Equal(["a", "a-b", "a/b", "ab", "b"], shuffled.Select(id => id.Value));
+    }
+
+    [Fact]
+    public void TheDefaultInstanceSortsBeforeEveryCreatedOne()
+    {
+        NodeId created = NodeId.Create("a");
+
+        Assert.True(default(NodeId).CompareTo(created) < 0);
+        Assert.True(created.CompareTo(default) > 0);
+        Assert.Equal(0, default(NodeId).CompareTo(default));
+        Assert.True(default(NodeId) < created);
+        Assert.True(created >= default(NodeId));
+    }
+
+    [Fact]
+    public void ComparisonIsConsistentWithEquality()
+    {
+        NodeId left = NodeId.Parse("orders/import-a/normalize");
+        NodeId right = NodeId.Parse("orders/import-a/normalize");
+
+        Assert.Equal(0, left.CompareTo(right));
+        Assert.Equal(left, right);
+        Assert.True(left <= right);
+        Assert.True(left >= right);
+        Assert.False(left < right);
+        Assert.False(left > right);
+    }
+
+    [Fact]
+    public void AutomaticStageNumberingSortsInAuthoringOrderBecauseItIsPadded()
+    {
+        // The property the authoring API's zero padding buys, stated against the identifier type that
+        // provides the order rather than against the graph that depends on it.
+        NodeId[] padded = [NodeId.Create("stage-0010"), NodeId.Create("stage-0002")];
+        NodeId[] unpadded = [NodeId.Create("stage-10"), NodeId.Create("stage-2")];
+
+        Array.Sort(padded);
+        Array.Sort(unpadded);
+
+        Assert.Equal(["stage-0002", "stage-0010"], padded.Select(id => id.Value));
+        Assert.Equal(["stage-10", "stage-2"], unpadded.Select(id => id.Value));
+    }
+
     private static string PathOfDepth(int depth) =>
         string.Join(NodeId.Separator, Enumerable.Repeat("a", depth));
 
@@ -367,4 +448,18 @@ public sealed class NodeIdTests
             new string('b', 64),
             new string('c', 64),
             new string('d', totalLength - (3 * 64) - 3));
+
+    [Fact]
+    public void TheNonGenericComparisonAgreesWithTheTypedOne()
+    {
+        // F#'s 'comparison' constraint is satisfied by System.IComparable and not by IComparable<'T>, so
+        // this implementation is what lets the type key an F# Set or Map.
+        IComparable left = NodeId.Create("a");
+        NodeId right = NodeId.Parse("a/b");
+
+        Assert.True(typeof(IComparable).IsAssignableFrom(typeof(NodeId)));
+        Assert.Equal(((NodeId)left).CompareTo(right), left.CompareTo(right));
+        Assert.True(left.CompareTo(null) > 0);
+        Assert.Throws<ArgumentException>("obj", () => left.CompareTo("not a NodeId"));
+    }
 }

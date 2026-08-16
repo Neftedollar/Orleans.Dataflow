@@ -27,6 +27,18 @@ public sealed class ProviderIdTests : SimpleIdentifierContractTests<ProviderId>
 
     /// <inheritdoc/>
     protected override bool OperatorNotEquals(ProviderId left, ProviderId right) => left != right;
+
+    /// <inheritdoc/>
+    protected override bool OperatorLess(ProviderId left, ProviderId right) => left < right;
+
+    /// <inheritdoc/>
+    protected override bool OperatorLessOrEqual(ProviderId left, ProviderId right) => left <= right;
+
+    /// <inheritdoc/>
+    protected override bool OperatorGreater(ProviderId left, ProviderId right) => left > right;
+
+    /// <inheritdoc/>
+    protected override bool OperatorGreaterOrEqual(ProviderId left, ProviderId right) => left >= right;
 }
 
 /// <summary>
@@ -54,6 +66,18 @@ public sealed class StageIdTests : SimpleIdentifierContractTests<StageId>
 
     /// <inheritdoc/>
     protected override bool OperatorNotEquals(StageId left, StageId right) => left != right;
+
+    /// <inheritdoc/>
+    protected override bool OperatorLess(StageId left, StageId right) => left < right;
+
+    /// <inheritdoc/>
+    protected override bool OperatorLessOrEqual(StageId left, StageId right) => left <= right;
+
+    /// <inheritdoc/>
+    protected override bool OperatorGreater(StageId left, StageId right) => left > right;
+
+    /// <inheritdoc/>
+    protected override bool OperatorGreaterOrEqual(StageId left, StageId right) => left >= right;
 }
 
 /// <summary>
@@ -81,6 +105,18 @@ public sealed class GraphIdTests : SimpleIdentifierContractTests<GraphId>
 
     /// <inheritdoc/>
     protected override bool OperatorNotEquals(GraphId left, GraphId right) => left != right;
+
+    /// <inheritdoc/>
+    protected override bool OperatorLess(GraphId left, GraphId right) => left < right;
+
+    /// <inheritdoc/>
+    protected override bool OperatorLessOrEqual(GraphId left, GraphId right) => left <= right;
+
+    /// <inheritdoc/>
+    protected override bool OperatorGreater(GraphId left, GraphId right) => left > right;
+
+    /// <inheritdoc/>
+    protected override bool OperatorGreaterOrEqual(GraphId left, GraphId right) => left >= right;
 }
 
 /// <summary>
@@ -108,6 +144,18 @@ public sealed class PortIdTests : SimpleIdentifierContractTests<PortId>
 
     /// <inheritdoc/>
     protected override bool OperatorNotEquals(PortId left, PortId right) => left != right;
+
+    /// <inheritdoc/>
+    protected override bool OperatorLess(PortId left, PortId right) => left < right;
+
+    /// <inheritdoc/>
+    protected override bool OperatorLessOrEqual(PortId left, PortId right) => left <= right;
+
+    /// <inheritdoc/>
+    protected override bool OperatorGreater(PortId left, PortId right) => left > right;
+
+    /// <inheritdoc/>
+    protected override bool OperatorGreaterOrEqual(PortId left, PortId right) => left >= right;
 }
 
 /// <summary>
@@ -135,6 +183,18 @@ public sealed class ResultSlotIdTests : SimpleIdentifierContractTests<ResultSlot
 
     /// <inheritdoc/>
     protected override bool OperatorNotEquals(ResultSlotId left, ResultSlotId right) => left != right;
+
+    /// <inheritdoc/>
+    protected override bool OperatorLess(ResultSlotId left, ResultSlotId right) => left < right;
+
+    /// <inheritdoc/>
+    protected override bool OperatorLessOrEqual(ResultSlotId left, ResultSlotId right) => left <= right;
+
+    /// <inheritdoc/>
+    protected override bool OperatorGreater(ResultSlotId left, ResultSlotId right) => left > right;
+
+    /// <inheritdoc/>
+    protected override bool OperatorGreaterOrEqual(ResultSlotId left, ResultSlotId right) => left >= right;
 }
 
 /// <summary>
@@ -162,6 +222,18 @@ public sealed class ContractIdTests : SimpleIdentifierContractTests<ContractId>
 
     /// <inheritdoc/>
     protected override bool OperatorNotEquals(ContractId left, ContractId right) => left != right;
+
+    /// <inheritdoc/>
+    protected override bool OperatorLess(ContractId left, ContractId right) => left < right;
+
+    /// <inheritdoc/>
+    protected override bool OperatorLessOrEqual(ContractId left, ContractId right) => left <= right;
+
+    /// <inheritdoc/>
+    protected override bool OperatorGreater(ContractId left, ContractId right) => left > right;
+
+    /// <inheritdoc/>
+    protected override bool OperatorGreaterOrEqual(ContractId left, ContractId right) => left >= right;
 }
 
 /// <summary>
@@ -189,6 +261,18 @@ public sealed class RunIdTests : SimpleIdentifierContractTests<RunId>
 
     /// <inheritdoc/>
     protected override bool OperatorNotEquals(RunId left, RunId right) => left != right;
+
+    /// <inheritdoc/>
+    protected override bool OperatorLess(RunId left, RunId right) => left < right;
+
+    /// <inheritdoc/>
+    protected override bool OperatorLessOrEqual(RunId left, RunId right) => left <= right;
+
+    /// <inheritdoc/>
+    protected override bool OperatorGreater(RunId left, RunId right) => left > right;
+
+    /// <inheritdoc/>
+    protected override bool OperatorGreaterOrEqual(RunId left, RunId right) => left >= right;
 }
 
 /// <summary>
@@ -216,4 +300,16 @@ public sealed class AttemptIdTests : SimpleIdentifierContractTests<AttemptId>
 
     /// <inheritdoc/>
     protected override bool OperatorNotEquals(AttemptId left, AttemptId right) => left != right;
+
+    /// <inheritdoc/>
+    protected override bool OperatorLess(AttemptId left, AttemptId right) => left < right;
+
+    /// <inheritdoc/>
+    protected override bool OperatorLessOrEqual(AttemptId left, AttemptId right) => left <= right;
+
+    /// <inheritdoc/>
+    protected override bool OperatorGreater(AttemptId left, AttemptId right) => left > right;
+
+    /// <inheritdoc/>
+    protected override bool OperatorGreaterOrEqual(AttemptId left, AttemptId right) => left >= right;
 }

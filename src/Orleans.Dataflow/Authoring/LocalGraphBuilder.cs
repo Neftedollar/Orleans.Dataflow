@@ -1,3 +1,4 @@
+using System.Globalization;
 using Orleans.Dataflow.Definition;
 using Orleans.Dataflow.Identity;
 using Orleans.Dataflow.Serialization;
@@ -11,11 +12,18 @@ namespace Orleans.Dataflow.Authoring;
 /// <remarks>
 /// <para>
 /// Everything that needs a position happens here and nowhere else. Identifiers are allocated in authoring
-/// order (<c>stage-1</c>, <c>stage-2</c>, per ADR 0004 section 6), each occurrence becomes a one-node
-/// fragment through <see cref="GraphFragment.OfStage"/>, and the fragments are joined with
+/// order (<c>stage-0001</c>, <c>stage-0002</c>, per ADR 0004 section 6), each occurrence becomes a
+/// one-node fragment through <see cref="GraphFragment.OfStage"/>, and the fragments are joined with
 /// <see cref="GraphFragmentComposer.Append"/> and closed with
 /// <see cref="GraphFragmentComposer.Close"/>. The algebra is the substrate; this type never builds a
 /// document any other way.
+/// </para>
+/// <para>
+/// The zero padding buys one invariant, and it is worth stating as an invariant rather than as a detail
+/// of the spelling: for every graph this type closes, the document's canonical node order — ordinal over
+/// identifier text — is the authoring order of the occurrences it was built from. That holds up to
+/// <see cref="LocalVocabulary.MaxAutoNamedPosition"/> occurrences, and a chain longer than that is
+/// rejected rather than numbered into an order that would no longer say what it says.
 /// </para>
 /// <para>
 /// <see cref="GraphFragmentComposer.Import"/> is deliberately unused. Import exists to make two copies of
@@ -44,6 +52,10 @@ internal static class LocalGraphBuilder
     /// through the authoring types, whose shapes are enforced by the C# type system; the exception is the
     /// algebra's and it is deliberately not translated, because a defect here is a defect in this type.
     /// </exception>
+    /// <exception cref="InvalidOperationException">
+    /// The chain holds more than <see cref="LocalVocabulary.MaxAutoNamedPosition"/> occurrences, which is
+    /// more than automatic numbering can name while keeping document order equal to authoring order.
+    /// </exception>
     /// <remarks>
     /// <para>
     /// Every closed local graph declares both <see cref="CapabilityToken.Nondeployable"/> and
@@ -55,13 +67,21 @@ internal static class LocalGraphBuilder
     /// </para>
     /// <para>
     /// The result slot's producer is read from the allocated identifier of the last occurrence rather than
-    /// from the closed document's last node. The document orders nodes ordinally by identifier text, and
-    /// <c>stage-10</c> sorts before <c>stage-2</c>, so the last node of a document is not the last stage of
-    /// a chain once a chain passes nine occurrences.
+    /// from the closed document's last node. Zero-padded numbering makes the two the same node today, but
+    /// the producer of a slot is the occurrence the author closed the graph with, and reading it from the
+    /// chain says so without depending on how the document happens to sort.
     /// </para>
     /// </remarks>
     internal static RunnableGraph Close(IReadOnlyList<LocalStageDescriptor> stages, ResultSlotId? slotId)
     {
+        if (stages.Count > LocalVocabulary.MaxAutoNamedPosition)
+        {
+            throw new InvalidOperationException(
+                string.Create(
+                    CultureInfo.InvariantCulture,
+                    $"A locally authored graph holds at most {LocalVocabulary.MaxAutoNamedPosition} occurrences, and this one holds {stages.Count}. Automatic node identifiers are numbered '{LocalVocabulary.AutoNamePrefix}0001' upwards and zero-padded to four digits so that a document's node order is its authoring order; a longer chain cannot be numbered that way, and naming occurrences explicitly is the registered-stage authoring surface's concern."));
+        }
+
         NodeId[] ids = new NodeId[stages.Count];
         Dictionary<NodeId, LocalStageDescriptor> bindings = new(stages.Count);
 

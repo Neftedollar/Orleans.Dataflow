@@ -184,14 +184,21 @@ public sealed record class GraphDocument
             throw new ArgumentException(FormatViolations(violations));
         }
 
-        // Every sort key is unique on validated input: node identifiers, slot identifiers, and capability
-        // tokens are unique by rule, and two edges cannot share both endpoints without also sharing an
-        // output port and an input port. The order is therefore total, and an unstable sort still yields
-        // one deterministic result for every permutation of the same elements.
-        Array.Sort(capabilityArray, CompareCapabilities);
-        Array.Sort(nodeArray, CompareNodes);
-        Array.Sort(edgeArray, CompareEdges);
-        Array.Sort(slotArray, CompareResultSlots);
+        // Canonical order is the identity types' own order, never a comparator restated here: tokens,
+        // node identifiers, and slot identifiers sort ordinally over their text, and an edge sorts by
+        // origin node, origin port, target node, and target port. Every sort key is unique on validated
+        // input: node identifiers, slot identifiers, and capability tokens are unique by rule, and two
+        // edges cannot share both endpoints without also sharing an output port and an input port. The
+        // order is therefore total, and an unstable sort still yields one deterministic result for every
+        // permutation of the same elements.
+        Array.Sort(capabilityArray);
+        Array.Sort(nodeArray, static (left, right) => left.Id.CompareTo(right.Id));
+        Array.Sort(
+            edgeArray,
+            static (left, right) =>
+                (left.From.Node, left.From.Port, left.To.Node, left.To.Port)
+                    .CompareTo((right.From.Node, right.From.Port, right.To.Node, right.To.Port)));
+        Array.Sort(slotArray, static (left, right) => left.Id.CompareTo(right.Id));
 
         return new GraphDocument(
             id,
@@ -457,57 +464,6 @@ public sealed record class GraphDocument
 
         return message.ToString();
     }
-
-    /// <summary>Compares two capability tokens by their text, ordinally.</summary>
-    /// <param name="left">The left token.</param>
-    /// <param name="right">The right token.</param>
-    /// <returns>The ordinal comparison result.</returns>
-    private static int CompareCapabilities(CapabilityToken left, CapabilityToken right) =>
-        string.CompareOrdinal(left.Value, right.Value);
-
-    /// <summary>Compares two nodes by their node identifier text, ordinally.</summary>
-    /// <param name="left">The left node.</param>
-    /// <param name="right">The right node.</param>
-    /// <returns>The ordinal comparison result.</returns>
-    /// <remarks>
-    /// The comparison is over the full <c>/</c>-joined path text rather than segment by segment, which is
-    /// the order ADR 0003 fixes: <c>a-b</c> sorts before <c>a/b</c> because <c>-</c> precedes <c>/</c> in
-    /// code-point order. Canonical order only has to be total, deterministic, and documented.
-    /// </remarks>
-    private static int CompareNodes(StageNode left, StageNode right) =>
-        string.CompareOrdinal(left.Id.Value, right.Id.Value);
-
-    /// <summary>Compares two edges by origin node, origin port, target node, and target port, ordinally.</summary>
-    /// <param name="left">The left edge.</param>
-    /// <param name="right">The right edge.</param>
-    /// <returns>The ordinal comparison result.</returns>
-    private static int CompareEdges(GraphEdge left, GraphEdge right)
-    {
-        int comparison = string.CompareOrdinal(left.From.Node.Value, right.From.Node.Value);
-
-        if (comparison != 0)
-        {
-            return comparison;
-        }
-
-        comparison = string.CompareOrdinal(left.From.Port.Value, right.From.Port.Value);
-
-        if (comparison != 0)
-        {
-            return comparison;
-        }
-
-        comparison = string.CompareOrdinal(left.To.Node.Value, right.To.Node.Value);
-
-        return comparison != 0 ? comparison : string.CompareOrdinal(left.To.Port.Value, right.To.Port.Value);
-    }
-
-    /// <summary>Compares two result slot definitions by their slot identifier text, ordinally.</summary>
-    /// <param name="left">The left definition.</param>
-    /// <param name="right">The right definition.</param>
-    /// <returns>The ordinal comparison result.</returns>
-    private static int CompareResultSlots(ResultSlotDefinition left, ResultSlotDefinition right) =>
-        string.CompareOrdinal(left.Id.Value, right.Id.Value);
 
     /// <summary>Determines whether two lists hold equal elements in the same positions.</summary>
     /// <typeparam name="TElement">The element type.</typeparam>

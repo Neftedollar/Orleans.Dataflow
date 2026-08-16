@@ -179,13 +179,14 @@ public sealed class Source<T>
     /// <remarks>
     /// The factory form is what makes inference total: the element type is pinned by this source and the
     /// result type flows out of the lambda, so <c>s =&gt; s.Aggregate(0L, (count, _) =&gt; count + 1)</c> needs
-    /// no type argument and no lambda annotation.
+    /// no type argument and no lambda annotation. <paramref name="slotName"/> is validated before the
+    /// lambda is invoked, so a rejected name never costs the author a side effect.
     /// </remarks>
     public (RunnableGraph Graph, ResultSlot<TResult> Slot) To<TResult>(
         Func<SinkFactory<T>, SinkWithResult<T, TResult>> sink,
         string slotName)
     {
-        RunnableGraph graph = CloseWithResult(ResolveSink(sink), slotName, out ResultSlot<TResult> slot);
+        RunnableGraph graph = CloseWithFactory(sink, slotName, out ResultSlot<TResult> slot);
 
         return (graph, slot);
     }
@@ -206,35 +207,89 @@ public sealed class Source<T>
     /// <paramref name="sink"/> returned <see langword="null"/>, or <paramref name="slotName"/> is not a
     /// valid <see cref="ResultSlotId"/>.
     /// </exception>
-    /// <remarks>This is the spelling the flagship example uses; it produces the same document as the tuple overload.</remarks>
+    /// <remarks>
+    /// This is the spelling the flagship example uses; it produces the same document as the tuple
+    /// overload. <paramref name="slotName"/> is validated before the lambda is invoked, so a rejected name
+    /// never costs the author a side effect.
+    /// </remarks>
     public RunnableGraph To<TResult>(
         Func<SinkFactory<T>, SinkWithResult<T, TResult>> sink,
         string slotName,
         out ResultSlot<TResult> slot) =>
-        CloseWithResult(ResolveSink(sink), slotName, out slot);
+        CloseWithFactory(sink, slotName, out slot);
+
+    /// <summary>Closes this source with a result-bearing sink and no name for the result. Never valid.</summary>
+    /// <typeparam name="TResult">The type of the result the sink declares.</typeparam>
+    /// <param name="sink">The sink that would terminate the graph.</param>
+    /// <returns>Nothing; the call cannot compile, and cannot be reached if it somehow does.</returns>
+    /// <exception cref="NotSupportedException">Always.</exception>
+    /// <remarks>
+    /// <para>
+    /// This overload exists only to make the mistake it names a compile error with a useful message.
+    /// Without it, <c>To(countingSink)</c> is a wrong-type call whose one compiler-suggested repair is a
+    /// cast to <see cref="Sink{T}"/> — which compiles, and silently drops the result the author asked for.
+    /// A result-bearing close therefore has a real overload to bind to, and binding to it says what to
+    /// write instead (ADR 0004 section 3).
+    /// </para>
+    /// <para>
+    /// A guard is compile-time surface: it is never called, and nothing in a passing test suite can
+    /// invoke it. The body throws rather than returning, because reaching it at all — through reflection,
+    /// or through a compiler that stopped honoring the attribute — means the guarantee is already gone.
+    /// </para>
+    /// </remarks>
+    [Obsolete(
+        "A result-bearing sink needs a name for its result: write To(sink, \"name\") for the tuple form or To(sink, \"name\", out var slot) for the fluent form. To run the sink and deliberately discard its result, write To(sink.ToSink()).",
+        error: true)]
+    public RunnableGraph To<TResult>(SinkWithResult<T, TResult> sink) =>
+        throw new NotSupportedException(GuardOverload());
+
+    /// <summary>
+    /// Closes this source with a sink-factory lambda that chooses a result-bearing sink, and no name for
+    /// the result. Never valid.
+    /// </summary>
+    /// <typeparam name="TResult">The type of the result the chosen sink declares.</typeparam>
+    /// <param name="sink">The function that would choose the sink.</param>
+    /// <returns>Nothing; the call cannot compile, and cannot be reached if it somehow does.</returns>
+    /// <exception cref="NotSupportedException">Always.</exception>
+    /// <remarks>
+    /// The factory-lambda half of the same guard. <c>To(s =&gt; s.Aggregate(0L, (count, _) =&gt; count + 1))</c>
+    /// would otherwise be a wrong-type call the compiler repairs with a cast that drops the result, so the
+    /// shape binds here instead and names the two correct spellings.
+    /// </remarks>
+    [Obsolete(
+        "A result-bearing sink needs a name for its result: write To(s => s.Aggregate(seed, folder), \"name\") for the tuple form or To(s => s.Aggregate(seed, folder), \"name\", out var slot) for the fluent form. To run the sink and deliberately discard its result, write To(s => s.Aggregate(seed, folder).ToSink()).",
+        error: true)]
+    public RunnableGraph To<TResult>(Func<SinkFactory<T>, SinkWithResult<T, TResult>> sink) =>
+        throw new NotSupportedException(GuardOverload());
 
     /// <summary>Returns a one-line diagnostic summary of this source.</summary>
-    /// <returns>Text of the form <c>source (3 stages)</c>.</returns>
+    /// <returns>Text of the form <c>source (3 stages)</c>, singular for one (<c>source (1 stage)</c>).</returns>
     /// <remarks>The count is formatted with the invariant culture, and the method never throws.</remarks>
     public override string ToString() =>
-        string.Create(CultureInfo.InvariantCulture, $"source ({Stages.Count} stages)");
+        string.Create(
+            CultureInfo.InvariantCulture,
+            $"source ({Stages.Count} {(Stages.Count == 1 ? "stage" : "stages")})");
+
+    /// <summary>Builds the message a guard overload throws if it is ever reached.</summary>
+    /// <returns>The message.</returns>
+    /// <remarks>
+    /// Shared by both guards, because there is exactly one thing to say: this member exists to fail at
+    /// compile time and has no runtime behavior to fall back on.
+    /// </remarks>
+    private static string GuardOverload() =>
+        $"This {nameof(To)} overload exists only as a compile-time guard against closing a graph with a result-bearing sink and no name for its result. It is marked as an error and is never a legal call; nothing in this library invokes it.";
 
     /// <summary>Invokes a sink-factory lambda and rejects a <see langword="null"/> result.</summary>
     /// <typeparam name="TResult">The type of the declared result.</typeparam>
-    /// <param name="sink">The lambda to invoke.</param>
+    /// <param name="sink">The lambda to invoke, already known to be non-null.</param>
     /// <returns>The sink the lambda chose.</returns>
-    /// <exception cref="ArgumentNullException"><paramref name="sink"/> is <see langword="null"/>.</exception>
     /// <exception cref="ArgumentException"><paramref name="sink"/> returned <see langword="null"/>.</exception>
     private static SinkWithResult<T, TResult> ResolveSink<TResult>(
-        Func<SinkFactory<T>, SinkWithResult<T, TResult>> sink)
-    {
-        ArgumentNullException.ThrowIfNull(sink);
-
-        return sink(SinkFactory<T>.Instance) ??
-            throw new ArgumentException(
-                $"The sink factory returned null, and a graph is closed by a sink. Return a sink from the {nameof(SinkFactory<T>)} the lambda receives, such as 's => s.Aggregate(seed, folder)'.",
-                nameof(sink));
-    }
+        Func<SinkFactory<T>, SinkWithResult<T, TResult>> sink) =>
+        sink(SinkFactory<T>.Instance) ??
+        throw new ArgumentException(
+            $"The sink factory returned null, and a graph is closed by a sink. Return a sink from the {nameof(SinkFactory<T>)} the lambda receives, such as 's => s.Aggregate(seed, folder)'.",
+            nameof(sink));
 
     /// <summary>Validates a slot name as a <see cref="ResultSlotId"/>.</summary>
     /// <param name="slotName">The candidate name.</param>
@@ -261,7 +316,7 @@ public sealed class Source<T>
         }
     }
 
-    /// <summary>Closes this source with a result-bearing sink under a validated name.</summary>
+    /// <summary>Closes this source with a result-bearing sink under a candidate name.</summary>
     /// <typeparam name="TResult">The type of the declared result.</typeparam>
     /// <param name="sink">The sink terminating the graph.</param>
     /// <param name="slotName">The candidate slot name.</param>
@@ -271,10 +326,6 @@ public sealed class Source<T>
     /// <paramref name="sink"/> or <paramref name="slotName"/> is <see langword="null"/>.
     /// </exception>
     /// <exception cref="ArgumentException"><paramref name="slotName"/> is not a valid identifier segment.</exception>
-    /// <remarks>
-    /// Every result-bearing overload funnels through here, which is what makes the tuple form and the
-    /// <see langword="out"/> form produce byte-identical documents rather than merely similar ones.
-    /// </remarks>
     private RunnableGraph CloseWithResult<TResult>(
         SinkWithResult<T, TResult> sink,
         string slotName,
@@ -282,7 +333,54 @@ public sealed class Source<T>
     {
         ArgumentNullException.ThrowIfNull(sink);
 
+        return Close(sink, ParseSlotName(slotName), out slot);
+    }
+
+    /// <summary>Closes this source with a sink a factory lambda chooses, under a candidate name.</summary>
+    /// <typeparam name="TResult">The type of the declared result.</typeparam>
+    /// <param name="sink">The lambda choosing the sink.</param>
+    /// <param name="slotName">The candidate slot name.</param>
+    /// <param name="slot">When this method returns, the slot that resolves the result.</param>
+    /// <returns>The closed graph.</returns>
+    /// <exception cref="ArgumentNullException">
+    /// <paramref name="sink"/> or <paramref name="slotName"/> is <see langword="null"/>.
+    /// </exception>
+    /// <exception cref="ArgumentException">
+    /// <paramref name="slotName"/> is not a valid identifier segment, or <paramref name="sink"/> returned
+    /// <see langword="null"/>.
+    /// </exception>
+    /// <remarks>
+    /// The name is validated before the lambda runs. The lambda is the author's own code and may do
+    /// anything, so an argument this method was always going to reject must not cost them a side effect
+    /// first; a rejected call leaves the program exactly as it found it.
+    /// </remarks>
+    private RunnableGraph CloseWithFactory<TResult>(
+        Func<SinkFactory<T>, SinkWithResult<T, TResult>> sink,
+        string slotName,
+        out ResultSlot<TResult> slot)
+    {
+        ArgumentNullException.ThrowIfNull(sink);
+
         ResultSlotId slotId = ParseSlotName(slotName);
+
+        return Close(ResolveSink(sink), slotId, out slot);
+    }
+
+    /// <summary>Closes this source with a result-bearing sink under a validated name.</summary>
+    /// <typeparam name="TResult">The type of the declared result.</typeparam>
+    /// <param name="sink">The sink terminating the graph.</param>
+    /// <param name="slotId">The validated slot name.</param>
+    /// <param name="slot">When this method returns, the slot that resolves the result.</param>
+    /// <returns>The closed graph.</returns>
+    /// <remarks>
+    /// Every result-bearing overload funnels through here, which is what makes the tuple form and the
+    /// <see langword="out"/> form produce byte-identical documents rather than merely similar ones.
+    /// </remarks>
+    private RunnableGraph Close<TResult>(
+        SinkWithResult<T, TResult> sink,
+        ResultSlotId slotId,
+        out ResultSlot<TResult> slot)
+    {
         RunnableGraph graph = LocalGraphBuilder.Close(LocalStageChain.Concat(Stages, sink.Stages), slotId);
 
         slot = ResultSlot<TResult>.Create(slotId, graph.Fingerprint, graph.AuthoringNonce);

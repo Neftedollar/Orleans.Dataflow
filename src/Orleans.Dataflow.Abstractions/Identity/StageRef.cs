@@ -21,10 +21,11 @@ namespace Orleans.Dataflow.Identity;
 /// <para>
 /// The default value carries no reference: <see cref="IsDefault"/> reports it, the component
 /// properties throw for it, and <see cref="ToString"/> renders a diagnostic literal for it rather than
-/// throwing.
+/// throwing. <see cref="CompareTo"/> orders references by provider, then stage, then major version, and
+/// sorts the default value before every created one.
 /// </para>
 /// </remarks>
-public readonly record struct StageRef
+public readonly record struct StageRef : IComparable<StageRef>, IComparable
 {
     /// <summary>
     /// The lowest valid stage compatibility major version.
@@ -145,6 +146,104 @@ public readonly record struct StageRef
         stageRef = default;
         return false;
     }
+
+    /// <summary>
+    /// Determines whether one stage reference sorts before another in canonical order.
+    /// </summary>
+    /// <param name="left">The left operand.</param>
+    /// <param name="right">The right operand.</param>
+    /// <returns>
+    /// <see langword="true"/> when <paramref name="left"/> sorts before <paramref name="right"/>;
+    /// otherwise <see langword="false"/>.
+    /// </returns>
+    public static bool operator <(StageRef left, StageRef right) => left.CompareTo(right) < 0;
+
+    /// <summary>
+    /// Determines whether one stage reference sorts before another in canonical order, or is equal to it.
+    /// </summary>
+    /// <param name="left">The left operand.</param>
+    /// <param name="right">The right operand.</param>
+    /// <returns>
+    /// <see langword="true"/> when <paramref name="left"/> does not sort after
+    /// <paramref name="right"/>; otherwise <see langword="false"/>.
+    /// </returns>
+    public static bool operator <=(StageRef left, StageRef right) => left.CompareTo(right) <= 0;
+
+    /// <summary>
+    /// Determines whether one stage reference sorts after another in canonical order.
+    /// </summary>
+    /// <param name="left">The left operand.</param>
+    /// <param name="right">The right operand.</param>
+    /// <returns>
+    /// <see langword="true"/> when <paramref name="left"/> sorts after <paramref name="right"/>;
+    /// otherwise <see langword="false"/>.
+    /// </returns>
+    public static bool operator >(StageRef left, StageRef right) => left.CompareTo(right) > 0;
+
+    /// <summary>
+    /// Determines whether one stage reference sorts after another in canonical order, or is equal to it.
+    /// </summary>
+    /// <param name="left">The left operand.</param>
+    /// <param name="right">The right operand.</param>
+    /// <returns>
+    /// <see langword="true"/> when <paramref name="left"/> does not sort before
+    /// <paramref name="right"/>; otherwise <see langword="false"/>.
+    /// </returns>
+    public static bool operator >=(StageRef left, StageRef right) => left.CompareTo(right) >= 0;
+
+    /// <summary>
+    /// Compares this reference with another by provider, then stage, then major version.
+    /// </summary>
+    /// <param name="other">The reference to compare with.</param>
+    /// <returns>
+    /// A negative number when this instance sorts first, zero when the two are equal, and a positive
+    /// number when <paramref name="other"/> sorts first.
+    /// </returns>
+    /// <remarks>
+    /// The component order is the reading order of the text form <c>provider/stage@v1</c>: the two
+    /// identifier components compare ordinally over their text and the version compares numerically, so
+    /// <c>@v2</c> precedes <c>@v10</c> rather than following it. The default value carries no components
+    /// and sorts before every created one, so the order is total over every instance. Ordering is
+    /// consistent with equality, because two references compare equal exactly when all three components
+    /// are equal.
+    /// </remarks>
+    public int CompareTo(StageRef other)
+    {
+        int comparison = _provider.CompareTo(other._provider);
+
+        if (comparison != 0)
+        {
+            return comparison;
+        }
+
+        comparison = _stage.CompareTo(other._stage);
+
+        return comparison != 0 ? comparison : _majorVersion.CompareTo(other._majorVersion);
+    }
+
+    /// <summary>
+    /// Compares this instance with another object in canonical order.
+    /// </summary>
+    /// <param name="obj">The object to compare with, which may be <see langword="null"/>.</param>
+    /// <returns>
+    /// A negative number when this instance sorts first, zero when the two are equal, and a positive
+    /// number when <paramref name="obj"/> sorts first. A <see langword="null"/> always sorts first, which
+    /// is the convention every <see cref="IComparable"/> implementation in .NET follows.
+    /// </returns>
+    /// <exception cref="ArgumentException"><paramref name="obj"/> is not a <see cref="StageRef"/>.</exception>
+    /// <remarks>
+    /// The non-generic interface is implemented explicitly and exists for one reason: F#'s
+    /// <c>comparison</c> constraint is satisfied by <see cref="IComparable"/> and not by
+    /// <see cref="IComparable{T}"/>, so without it this type cannot key an F# <c>Set</c> or <c>Map</c> —
+    /// which is what the F# frontend needs of it. C# callers bind to
+    /// <see cref="CompareTo(StageRef)"/> instead and box nothing.
+    /// </remarks>
+    int IComparable.CompareTo(object? obj) => obj switch
+    {
+        null => 1,
+        StageRef other => CompareTo(other),
+        _ => throw new ArgumentException($"The argument must be a {nameof(StageRef)}.", nameof(obj)),
+    };
 
     /// <summary>
     /// Returns the canonical text form of this reference, or a diagnostic literal when this instance is

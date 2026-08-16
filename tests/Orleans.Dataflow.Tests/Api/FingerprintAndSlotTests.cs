@@ -1,3 +1,4 @@
+using System.Globalization;
 using Orleans.Dataflow.Definition;
 using Orleans.Dataflow.Serialization;
 using Xunit;
@@ -167,14 +168,32 @@ public sealed class FingerprintAndSlotTests
     }
 
     [Fact]
-    public void ASlotRendersItsNameAndItsGraph()
+    public void ASlotRendersAllThreeComponentsItIsEqualBy()
     {
         RunnableGraph graph = Source.From(OrderEvents)
             .To(s => s.Aggregate(0L, (count, _) => count + 1), "processed", out ResultSlot<long> processed);
 
-        Assert.Equal($"processed@{graph.Fingerprint}", processed.ToString());
+        string nonceDigits = graph.AuthoringNonce.ToString("N", CultureInfo.InvariantCulture)[..8];
+
+        Assert.Equal($"processed@{graph.Fingerprint}#{nonceDigits}", processed.ToString());
         Assert.StartsWith("graph sha256:", graph.ToString(), StringComparison.Ordinal);
-        Assert.EndsWith("(2 nodes, 1 result slots)", graph.ToString(), StringComparison.Ordinal);
+        Assert.EndsWith("(2 nodes, 1 result slot)", graph.ToString(), StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void TwoSlotsOfLookAlikeGraphsRenderDifferentlyBecauseTheNonceIsPartOfTheText()
+    {
+        // A text form that showed only the name and the fingerprint would print one line for two slots
+        // that are not equal, which is the confusion the nonce exists to prevent, reappearing in the logs.
+        (RunnableGraph Graph, ResultSlot<long> Slot) first = Build();
+        (RunnableGraph Graph, ResultSlot<long> Slot) second = Build();
+
+        Assert.Equal(first.Graph.Fingerprint, second.Graph.Fingerprint);
+        Assert.NotEqual(first.Slot.ToString(), second.Slot.ToString());
+        Assert.StartsWith($"processed@{first.Graph.Fingerprint}#", first.Slot.ToString(), StringComparison.Ordinal);
+
+        static (RunnableGraph Graph, ResultSlot<long> Slot) Build() =>
+            Source.From(OrderEvents).To(s => s.Aggregate(0L, (count, _) => count + 1), "processed");
     }
 
     /// <summary>Builds the representative counting graph under one slot name.</summary>

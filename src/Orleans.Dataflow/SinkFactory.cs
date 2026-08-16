@@ -15,8 +15,9 @@ namespace Orleans.Dataflow;
 /// </para>
 /// <para>
 /// The factory is stateless and is never constructed by an author: it arrives as the argument of the
-/// lambda, and its methods are the same ones on <see cref="Sink"/> with <typeparamref name="T"/> already
-/// supplied.
+/// lambda, or by name from <see cref="Sink.For{T}"/>, and its methods are the same ones on
+/// <see cref="Sink"/> with <typeparamref name="T"/> already supplied. Both ways reach one instance per
+/// closed generic type, so a sink built either way is the same sink.
 /// </para>
 /// </remarks>
 public sealed class SinkFactory<T>
@@ -27,7 +28,11 @@ public sealed class SinkFactory<T>
     }
 
     /// <summary>Gets the one instance handed to every sink-factory lambda of this element type.</summary>
-    /// <remarks>The type is stateless, so one instance per closed generic type is all there is to have.</remarks>
+    /// <remarks>
+    /// The type is stateless, so one instance per closed generic type is all there is to have. This is
+    /// also what <see cref="Sink.For{T}"/> returns, which is why the named spelling and the lambda's
+    /// argument are the same object rather than two objects that behave alike.
+    /// </remarks>
     internal static SinkFactory<T> Instance { get; } = new();
 
     /// <summary>Creates a sink that consumes every element and produces nothing.</summary>

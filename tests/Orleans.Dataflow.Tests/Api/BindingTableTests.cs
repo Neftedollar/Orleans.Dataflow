@@ -36,15 +36,15 @@ public sealed class BindingTableTests
             .Select(selector)
             .To(Sink.Aggregate(7L, folder), "processed", out ResultSlot<long> _);
 
-        Assert.Same(elements, Binding(graph, "stage-1").Behavior);
-        Assert.Same(predicate, Binding(graph, "stage-2").Behavior);
-        Assert.Same(selector, Binding(graph, "stage-3").Behavior);
-        Assert.Same(folder, Binding(graph, "stage-4").Behavior);
+        Assert.Same(elements, Binding(graph, "stage-0001").Behavior);
+        Assert.Same(predicate, Binding(graph, "stage-0002").Behavior);
+        Assert.Same(selector, Binding(graph, "stage-0003").Behavior);
+        Assert.Same(folder, Binding(graph, "stage-0004").Behavior);
 
-        Assert.Equal(LocalStageKind.FromEnumerable, Binding(graph, "stage-1").Kind);
-        Assert.Equal(LocalStageKind.Where, Binding(graph, "stage-2").Kind);
-        Assert.Equal(LocalStageKind.Select, Binding(graph, "stage-3").Kind);
-        Assert.Equal(LocalStageKind.Fold, Binding(graph, "stage-4").Kind);
+        Assert.Equal(LocalStageKind.FromEnumerable, Binding(graph, "stage-0001").Kind);
+        Assert.Equal(LocalStageKind.Where, Binding(graph, "stage-0002").Kind);
+        Assert.Equal(LocalStageKind.Select, Binding(graph, "stage-0003").Kind);
+        Assert.Equal(LocalStageKind.Fold, Binding(graph, "stage-0004").Kind);
     }
 
     [Fact]
@@ -56,8 +56,8 @@ public sealed class BindingTableTests
         RunnableGraph unseeded = Source.From(OrderEvents)
             .To(s => s.Aggregate(0L, (count, _) => count + 1), "processed", out ResultSlot<long> _);
 
-        Assert.Equal(41L, Assert.IsType<long>(Binding(seeded, "stage-2").Seed));
-        Assert.Equal(0L, Assert.IsType<long>(Binding(unseeded, "stage-2").Seed));
+        Assert.Equal(41L, Assert.IsType<long>(Binding(seeded, "stage-0002").Seed));
+        Assert.Equal(0L, Assert.IsType<long>(Binding(unseeded, "stage-0002").Seed));
 
         // A runtime value is not topology, so the two graphs are the same document.
         Assert.Equal(seeded.Fingerprint, unseeded.Fingerprint);
@@ -81,7 +81,7 @@ public sealed class BindingTableTests
     {
         RunnableGraph graph = Source.From(OrderEvents).To(Sink.Ignore<OrderCreated>());
 
-        LocalStageDescriptor ignore = Binding(graph, "stage-2");
+        LocalStageDescriptor ignore = Binding(graph, "stage-0002");
 
         Assert.Equal(LocalStageKind.Ignore, ignore.Kind);
         Assert.Null(ignore.Behavior);
@@ -100,9 +100,9 @@ public sealed class BindingTableTests
 
         RunnableGraph graph = Source.From(OrderEvents).Via(valid).Via(valid).To(Sink.Ignore<OrderCreated>());
 
-        Assert.Same(predicate, Binding(graph, "stage-2").Behavior);
-        Assert.Same(predicate, Binding(graph, "stage-3").Behavior);
-        Assert.Same(Binding(graph, "stage-2"), Binding(graph, "stage-3"));
+        Assert.Same(predicate, Binding(graph, "stage-0002").Behavior);
+        Assert.Same(predicate, Binding(graph, "stage-0003").Behavior);
+        Assert.Same(Binding(graph, "stage-0002"), Binding(graph, "stage-0003"));
         Assert.Equal(4, graph.LocalBindings.Count);
     }
 

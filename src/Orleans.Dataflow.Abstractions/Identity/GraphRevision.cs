@@ -15,8 +15,14 @@ namespace Orleans.Dataflow.Identity;
 /// The default value carries no revision: <see cref="IsDefault"/> reports it, <see cref="Value"/>
 /// throws for it, and <see cref="ToString"/> renders a diagnostic literal for it rather than throwing.
 /// </para>
+/// <para>
+/// <see cref="CompareTo"/> orders revisions numerically, which is what makes "later revision" a
+/// comparison rather than a convention. Because the default value is revision zero and a created
+/// revision starts at <see cref="FirstRevisionNumber"/>, the default sorts before every created one and
+/// the order is total.
+/// </para>
 /// </remarks>
-public readonly record struct GraphRevision
+public readonly record struct GraphRevision : IComparable<GraphRevision>, IComparable
 {
     /// <summary>
     /// The number of the first revision of any graph.
@@ -86,6 +92,90 @@ public readonly record struct GraphRevision
         revision = default;
         return false;
     }
+
+    /// <summary>
+    /// Determines whether one revision precedes another.
+    /// </summary>
+    /// <param name="left">The left operand.</param>
+    /// <param name="right">The right operand.</param>
+    /// <returns>
+    /// <see langword="true"/> when <paramref name="left"/> is the earlier revision; otherwise
+    /// <see langword="false"/>.
+    /// </returns>
+    public static bool operator <(GraphRevision left, GraphRevision right) => left.CompareTo(right) < 0;
+
+    /// <summary>
+    /// Determines whether one revision precedes another or is the same revision.
+    /// </summary>
+    /// <param name="left">The left operand.</param>
+    /// <param name="right">The right operand.</param>
+    /// <returns>
+    /// <see langword="true"/> when <paramref name="left"/> is not the later revision; otherwise
+    /// <see langword="false"/>.
+    /// </returns>
+    public static bool operator <=(GraphRevision left, GraphRevision right) => left.CompareTo(right) <= 0;
+
+    /// <summary>
+    /// Determines whether one revision follows another.
+    /// </summary>
+    /// <param name="left">The left operand.</param>
+    /// <param name="right">The right operand.</param>
+    /// <returns>
+    /// <see langword="true"/> when <paramref name="left"/> is the later revision; otherwise
+    /// <see langword="false"/>.
+    /// </returns>
+    public static bool operator >(GraphRevision left, GraphRevision right) => left.CompareTo(right) > 0;
+
+    /// <summary>
+    /// Determines whether one revision follows another or is the same revision.
+    /// </summary>
+    /// <param name="left">The left operand.</param>
+    /// <param name="right">The right operand.</param>
+    /// <returns>
+    /// <see langword="true"/> when <paramref name="left"/> is not the earlier revision; otherwise
+    /// <see langword="false"/>.
+    /// </returns>
+    public static bool operator >=(GraphRevision left, GraphRevision right) => left.CompareTo(right) >= 0;
+
+    /// <summary>
+    /// Compares this revision with another by revision number.
+    /// </summary>
+    /// <param name="other">The revision to compare with.</param>
+    /// <returns>
+    /// A negative number when this revision is the earlier one, zero when the two are the same
+    /// revision, and a positive number when <paramref name="other"/> is the earlier one.
+    /// </returns>
+    /// <remarks>
+    /// The order is numeric rather than textual, so <c>r2</c> precedes <c>r10</c> as a reader of a
+    /// lineage expects. The default value is revision zero, which no created revision can be, so it
+    /// sorts before every created one and the order is total over every instance. Ordering is consistent
+    /// with equality, because two revisions compare equal exactly when their numbers are equal.
+    /// </remarks>
+    public int CompareTo(GraphRevision other) => _value.CompareTo(other._value);
+
+    /// <summary>
+    /// Compares this instance with another object in canonical order.
+    /// </summary>
+    /// <param name="obj">The object to compare with, which may be <see langword="null"/>.</param>
+    /// <returns>
+    /// A negative number when this instance sorts first, zero when the two are equal, and a positive
+    /// number when <paramref name="obj"/> sorts first. A <see langword="null"/> always sorts first, which
+    /// is the convention every <see cref="IComparable"/> implementation in .NET follows.
+    /// </returns>
+    /// <exception cref="ArgumentException"><paramref name="obj"/> is not a <see cref="GraphRevision"/>.</exception>
+    /// <remarks>
+    /// The non-generic interface is implemented explicitly and exists for one reason: F#'s
+    /// <c>comparison</c> constraint is satisfied by <see cref="IComparable"/> and not by
+    /// <see cref="IComparable{T}"/>, so without it this type cannot key an F# <c>Set</c> or <c>Map</c> —
+    /// which is what the F# frontend needs of it. C# callers bind to
+    /// <see cref="CompareTo(GraphRevision)"/> instead and box nothing.
+    /// </remarks>
+    int IComparable.CompareTo(object? obj) => obj switch
+    {
+        null => 1,
+        GraphRevision other => CompareTo(other),
+        _ => throw new ArgumentException($"The argument must be a {nameof(GraphRevision)}.", nameof(obj)),
+    };
 
     /// <summary>
     /// Returns the revision number, or a diagnostic literal when this instance is the default value.

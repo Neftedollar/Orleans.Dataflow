@@ -73,7 +73,8 @@ Stage occurrences need `NodeId`s at authoring time. Two modes:
 - **explicit**: the author names the occurrence (required for durable,
   stateful, or side-effecting stages per ADR 0001);
 - **ephemeral**: the frontend allocates deterministic sequential local IDs
-  (for example `stage-1`, `stage-2` in authoring order). Positional IDs are
+  (for example `stage-0001`, `stage-0002` in authoring order, zero-padded so
+  ordinal document order equals authoring order). Positional IDs are
   not edit-stable, so a graph containing any ephemeral occurrence is not
   deployable as a durable pipeline.
 

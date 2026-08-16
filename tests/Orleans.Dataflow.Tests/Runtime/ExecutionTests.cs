@@ -1,4 +1,5 @@
 using System.Globalization;
+using Orleans.Dataflow.Authoring;
 using Xunit;
 using static Orleans.Dataflow.Tests.Runtime.RuntimeFixtures;
 
@@ -245,11 +246,11 @@ public sealed class ExecutionTests
     }
 
     [Fact]
-    public async Task AChainLongerThanNineStagesRunsInFlowOrderAndNotInNodeOrder()
+    public async Task AChainLongerThanNineStagesRunsInAuthoringOrder()
     {
-        // A document orders its nodes ordinally by identifier text, where stage-10 sorts before stage-2. A
-        // runtime that walked that list instead of following the edges would apply these in the wrong
-        // order, and the letters would come out scrambled.
+        // Zero-padded numbering makes a document's node order the authoring order past nine occurrences,
+        // where 'stage-10' would otherwise have sorted before 'stage-2'. The letters would come out
+        // scrambled if either half of that had gone wrong, so this is the end-to-end statement of it.
         RunnableGraph graph = Source.From(new RecordingEnumerable<string>(string.Empty))
             .Select(text => text + "a")
             .Select(text => text + "b")
@@ -262,14 +263,45 @@ public sealed class ExecutionTests
             .Select(text => text + "i")
             .To(s => s.Aggregate(string.Empty, (all, text) => all + text), "spelled", out ResultSlot<string> spelled);
 
-        // The document really does carry the misleading order, so the claim above is not vacuous.
         Assert.Equal(11, graph.Document.Nodes.Count);
-        Assert.Equal("stage-10", graph.Document.Nodes[1].Id.Value);
+        Assert.Equal("stage-0002", graph.Document.Nodes[1].Id.Value);
+        Assert.Equal("stage-0010", graph.Document.Nodes[9].Id.Value);
 
         await using RunHandle run = await Host.MaterializeAsync(graph, TestToken);
         await run.Completion;
 
         Assert.Equal("abcdefghi", await run.GetValueAsync(spelled, TestToken));
+    }
+
+    [Fact]
+    public async Task ARunFollowsTheEdgesRatherThanTheNodeOrder()
+    {
+        // The authoring API's numbering now makes node order and flow order agree, so the claim that a run
+        // follows the edges needs a document where the two disagree — which only a hand-built document can
+        // be. Ordinally the nodes are 'a', 'b', 'c'; the edges make the flow 'c' to 'b' to 'a', and a
+        // runtime reading the node list would apply the mappings in the opposite order.
+        List<string> applied = [];
+
+        RunnableGraph graph = Graph(
+            Document(
+                [Node("c", "from-enumerable"), Node("b", "select"), Node("a", "ignore")],
+                [Edge("c", "b"), Edge("b", "a")]),
+            Bindings(
+                ("c", LocalStageDescriptor.FromEnumerable(new RecordingEnumerable<string>("x"))),
+                ("b", LocalStageDescriptor.Select((Func<string, string>)(text =>
+                {
+                    applied.Add(text);
+
+                    return text;
+                }))),
+                ("a", LocalStageDescriptor.Ignore())));
+
+        Assert.Equal(["a", "b", "c"], graph.Document.Nodes.Select(node => node.Id.Value));
+
+        await using RunHandle run = await Host.MaterializeAsync(graph, TestToken);
+        await run.Completion;
+
+        Assert.Equal(["x"], applied);
     }
 
     [Fact]

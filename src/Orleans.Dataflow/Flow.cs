@@ -85,10 +85,12 @@ public sealed class Flow<TIn, TOut>
     }
 
     /// <summary>Returns a one-line diagnostic summary of this flow.</summary>
-    /// <returns>Text of the form <c>flow (2 stages)</c>.</returns>
+    /// <returns>Text of the form <c>flow (2 stages)</c>, singular for one (<c>flow (1 stage)</c>).</returns>
     /// <remarks>The count is formatted with the invariant culture, and the method never throws.</remarks>
     public override string ToString() =>
-        string.Create(CultureInfo.InvariantCulture, $"flow ({Stages.Count} stages)");
+        string.Create(
+            CultureInfo.InvariantCulture,
+            $"flow ({Stages.Count} {(Stages.Count == 1 ? "stage" : "stages")})");
 }
 
 /// <summary>

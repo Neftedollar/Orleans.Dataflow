@@ -19,9 +19,12 @@ namespace Orleans.Dataflow.Runtime;
 /// </para>
 /// <para>
 /// The order is derived from edges rather than from node order, because a document orders its nodes
-/// ordinally by identifier text and <c>stage-10</c> sorts before <c>stage-2</c>. Following edges is also
-/// what makes the linearity check real: every shape that is not one chain from one source to one terminal
-/// is rejected here, which is the defense that keeps the run loop free of cases it cannot execute.
+/// ordinally by identifier text and nothing obliges that order to be the flow. The authoring API's
+/// zero-padded numbering happens to make the two agree for the graphs it closes, but a document this type
+/// is handed by anything else has no such property, and a runtime that read the node list would execute
+/// such a document in the wrong order rather than reject it. Following edges is also what makes the
+/// linearity check real: every shape that is not one chain from one source to one terminal is rejected
+/// here, which is the defense that keeps the run loop free of cases it cannot execute.
 /// </para>
 /// <para>
 /// None of these rejections is reachable through the authoring API. Its generic signatures make the shapes

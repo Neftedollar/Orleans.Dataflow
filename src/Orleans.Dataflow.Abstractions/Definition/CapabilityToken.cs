@@ -19,14 +19,15 @@ namespace Orleans.Dataflow.Definition;
 /// The value is a single identifier segment: <c>[a-z0-9]+(-[a-z0-9]+)*</c>, 1 to 64 characters of
 /// lowercase ASCII letters, ASCII digits, and single interior hyphens, compared ordinally. Tokens share
 /// the identifier grammar so that they sort and serialize by exactly the same rules as every other
-/// identifier in a document.
+/// identifier in a document, and <see cref="CompareTo"/> is that sort order made callable: it is what a
+/// document's canonical capability order is built from rather than a comparator restated beside it.
 /// </para>
 /// <para>
 /// The default value carries no token: <see cref="IsDefault"/> reports it, <see cref="Value"/> throws
 /// for it, and <see cref="ToString"/> renders a diagnostic literal for it rather than throwing.
 /// </para>
 /// </remarks>
-public readonly record struct CapabilityToken
+public readonly record struct CapabilityToken : IComparable<CapabilityToken>, IComparable
 {
     /// <summary>The text of the <see cref="Nondeployable"/> token.</summary>
     private const string NondeployableText = "nondeployable";
@@ -122,6 +123,91 @@ public readonly record struct CapabilityToken
         token = default;
         return false;
     }
+
+    /// <summary>
+    /// Determines whether one token sorts before another in canonical order.
+    /// </summary>
+    /// <param name="left">The left operand.</param>
+    /// <param name="right">The right operand.</param>
+    /// <returns>
+    /// <see langword="true"/> when <paramref name="left"/> sorts before <paramref name="right"/>;
+    /// otherwise <see langword="false"/>.
+    /// </returns>
+    public static bool operator <(CapabilityToken left, CapabilityToken right) => left.CompareTo(right) < 0;
+
+    /// <summary>
+    /// Determines whether one token sorts before another in canonical order, or is equal to it.
+    /// </summary>
+    /// <param name="left">The left operand.</param>
+    /// <param name="right">The right operand.</param>
+    /// <returns>
+    /// <see langword="true"/> when <paramref name="left"/> does not sort after
+    /// <paramref name="right"/>; otherwise <see langword="false"/>.
+    /// </returns>
+    public static bool operator <=(CapabilityToken left, CapabilityToken right) => left.CompareTo(right) <= 0;
+
+    /// <summary>
+    /// Determines whether one token sorts after another in canonical order.
+    /// </summary>
+    /// <param name="left">The left operand.</param>
+    /// <param name="right">The right operand.</param>
+    /// <returns>
+    /// <see langword="true"/> when <paramref name="left"/> sorts after <paramref name="right"/>;
+    /// otherwise <see langword="false"/>.
+    /// </returns>
+    public static bool operator >(CapabilityToken left, CapabilityToken right) => left.CompareTo(right) > 0;
+
+    /// <summary>
+    /// Determines whether one token sorts after another in canonical order, or is equal to it.
+    /// </summary>
+    /// <param name="left">The left operand.</param>
+    /// <param name="right">The right operand.</param>
+    /// <returns>
+    /// <see langword="true"/> when <paramref name="left"/> does not sort before
+    /// <paramref name="right"/>; otherwise <see langword="false"/>.
+    /// </returns>
+    public static bool operator >=(CapabilityToken left, CapabilityToken right) => left.CompareTo(right) >= 0;
+
+    /// <summary>
+    /// Compares this token with another in canonical order.
+    /// </summary>
+    /// <param name="other">The token to compare with.</param>
+    /// <returns>
+    /// A negative number when this instance sorts first, zero when the two are equal, and a positive
+    /// number when <paramref name="other"/> sorts first.
+    /// </returns>
+    /// <remarks>
+    /// The order is ordinal over the token text, which is the canonical order a document is written in:
+    /// it depends on no ambient culture, and it is the same order the serializer emits and the strict
+    /// reader enforces. The default value carries no text and sorts before every created one, so the
+    /// order is total over every instance instead of leaving a hole at the default; ordering is
+    /// consistent with equality, because two values compare equal exactly when they are equal.
+    /// </remarks>
+    public int CompareTo(CapabilityToken other) => string.CompareOrdinal(_value, other._value);
+
+    /// <summary>
+    /// Compares this instance with another object in canonical order.
+    /// </summary>
+    /// <param name="obj">The object to compare with, which may be <see langword="null"/>.</param>
+    /// <returns>
+    /// A negative number when this instance sorts first, zero when the two are equal, and a positive
+    /// number when <paramref name="obj"/> sorts first. A <see langword="null"/> always sorts first, which
+    /// is the convention every <see cref="IComparable"/> implementation in .NET follows.
+    /// </returns>
+    /// <exception cref="ArgumentException"><paramref name="obj"/> is not a <see cref="CapabilityToken"/>.</exception>
+    /// <remarks>
+    /// The non-generic interface is implemented explicitly and exists for one reason: F#'s
+    /// <c>comparison</c> constraint is satisfied by <see cref="IComparable"/> and not by
+    /// <see cref="IComparable{T}"/>, so without it this type cannot key an F# <c>Set</c> or <c>Map</c> —
+    /// which is what the F# frontend needs of it. C# callers bind to
+    /// <see cref="CompareTo(CapabilityToken)"/> instead and box nothing.
+    /// </remarks>
+    int IComparable.CompareTo(object? obj) => obj switch
+    {
+        null => 1,
+        CapabilityToken other => CompareTo(other),
+        _ => throw new ArgumentException($"The argument must be a {nameof(CapabilityToken)}.", nameof(obj)),
+    };
 
     /// <summary>
     /// Returns the token text, or a diagnostic literal when this instance is the default value.

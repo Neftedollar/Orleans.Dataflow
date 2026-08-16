@@ -119,4 +119,81 @@ public sealed class GraphRevisionTests
     {
         Assert.Equal("1234567", GraphRevision.Create(1234567).ToString());
     }
+
+    [Fact]
+    public void ComparisonIsNumericAndNotTextual()
+    {
+        // The ordering table. Revision 2 precedes revision 10, which is the whole reason the order is
+        // numeric: as text it would not, and "later revision" would stop being a comparison.
+        int[] ordered = [1, 2, 9, 10, 11, 1234567];
+
+        for (int index = 1; index < ordered.Length; index++)
+        {
+            GraphRevision left = GraphRevision.Create(ordered[index - 1]);
+            GraphRevision right = GraphRevision.Create(ordered[index]);
+
+            Assert.True(left.CompareTo(right) < 0);
+            Assert.True(right.CompareTo(left) > 0);
+            Assert.True(left < right);
+            Assert.True(left <= right);
+            Assert.True(right > left);
+            Assert.True(right >= left);
+        }
+    }
+
+    [Fact]
+    public void SortingUsesTheSameOrderWhicheverWayTheInputArrived()
+    {
+        GraphRevision[] shuffled =
+        [
+            GraphRevision.Create(10),
+            GraphRevision.Create(2),
+            GraphRevision.Create(1),
+            GraphRevision.Create(11),
+        ];
+
+        Array.Sort(shuffled);
+
+        Assert.Equal([1, 2, 10, 11], shuffled.Select(revision => revision.Value));
+    }
+
+    [Fact]
+    public void TheDefaultInstanceSortsBeforeEveryCreatedOne()
+    {
+        GraphRevision first = GraphRevision.Create(GraphRevision.FirstRevisionNumber);
+
+        Assert.True(default(GraphRevision).CompareTo(first) < 0);
+        Assert.True(first.CompareTo(default) > 0);
+        Assert.Equal(0, default(GraphRevision).CompareTo(default));
+        Assert.True(default(GraphRevision) < first);
+        Assert.True(first >= default(GraphRevision));
+    }
+
+    [Fact]
+    public void ComparisonIsConsistentWithEquality()
+    {
+        GraphRevision left = GraphRevision.Create(7);
+        GraphRevision right = GraphRevision.Create(7);
+
+        Assert.Equal(0, left.CompareTo(right));
+        Assert.Equal(left, right);
+        Assert.True(left <= right);
+        Assert.True(left >= right);
+        Assert.False(left < right);
+        Assert.False(left > right);
+    }
+
+    [Fact]
+    public void TheNonGenericComparisonAgreesWithTheTypedOne()
+    {
+        // F#'s 'comparison' constraint is satisfied by System.IComparable and not by IComparable<'T>, so
+        // this implementation is what lets the type key an F# Set or Map.
+        IComparable left = GraphRevision.Create(2);
+        GraphRevision right = GraphRevision.Create(10);
+
+        Assert.True(typeof(IComparable).IsAssignableFrom(typeof(GraphRevision)));
+        Assert.Equal(((GraphRevision)left).CompareTo(right), left.CompareTo(right));
+        Assert.True(left.CompareTo(null) > 0);
+        Assert.Throws<ArgumentException>("obj", () => left.CompareTo("not a GraphRevision"));
+    }
 }

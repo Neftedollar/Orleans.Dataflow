@@ -142,4 +142,89 @@ public sealed class ContractReferenceTests
 
         Assert.Equal(2, references.Count);
     }
+
+    [Fact]
+    public void ComparisonRunsContractThenMajorVersion()
+    {
+        // The ordering table, in the reading order of 'contract@v1': the contract decides first, and the
+        // version only then — numerically, so v2 precedes v10.
+        ContractReference[] ordered =
+        [
+            ContractReference.Create(ContractId.Create("order"), 1),
+            ContractReference.Create(ContractId.Create("order"), 2),
+            ContractReference.Create(ContractId.Create("order"), 10),
+            ContractReference.Create(ContractId.Create("order-line"), 1),
+            ContractReference.Create(ContractId.Create("orders"), 1),
+        ];
+
+        for (int index = 1; index < ordered.Length; index++)
+        {
+            Assert.True(
+                ordered[index - 1].CompareTo(ordered[index]) < 0,
+                $"'{ordered[index - 1]}' should sort before '{ordered[index]}'");
+
+            Assert.True(ordered[index].CompareTo(ordered[index - 1]) > 0);
+            Assert.True(ordered[index - 1] < ordered[index]);
+            Assert.True(ordered[index - 1] <= ordered[index]);
+            Assert.True(ordered[index] > ordered[index - 1]);
+            Assert.True(ordered[index] >= ordered[index - 1]);
+        }
+    }
+
+    [Fact]
+    public void SortingUsesTheSameOrderWhicheverWayTheInputArrived()
+    {
+        ContractReference[] shuffled =
+        [
+            ContractReference.Create(SampleContract, 10),
+            ContractReference.Create(ContractId.Create("counter-result"), 1),
+            ContractReference.Create(SampleContract, 2),
+        ];
+
+        Array.Sort(shuffled);
+
+        Assert.Equal(
+            ["counter-result@v1", "order-line@v2", "order-line@v10"],
+            shuffled.Select(reference => reference.ToString()));
+    }
+
+    [Fact]
+    public void TheDefaultInstanceSortsBeforeEveryCreatedOne()
+    {
+        ContractReference created = ContractReference.Create(SampleContract, 1);
+
+        Assert.True(default(ContractReference).CompareTo(created) < 0);
+        Assert.True(created.CompareTo(default) > 0);
+        Assert.Equal(0, default(ContractReference).CompareTo(default));
+        Assert.True(default(ContractReference) < created);
+        Assert.True(created >= default(ContractReference));
+    }
+
+    [Fact]
+    public void ComparisonIsConsistentWithEquality()
+    {
+        ContractReference left = ContractReference.Create(SampleContract, 3);
+        ContractReference right = ContractReference.Create(SampleContract, 3);
+
+        Assert.Equal(0, left.CompareTo(right));
+        Assert.Equal(left, right);
+        Assert.True(left <= right);
+        Assert.True(left >= right);
+        Assert.False(left < right);
+        Assert.False(left > right);
+    }
+
+    [Fact]
+    public void TheNonGenericComparisonAgreesWithTheTypedOne()
+    {
+        // F#'s 'comparison' constraint is satisfied by System.IComparable and not by IComparable<'T>, so
+        // this implementation is what lets the type key an F# Set or Map.
+        IComparable left = ContractReference.Create(SampleContract, 2);
+        ContractReference right = ContractReference.Create(SampleContract, 10);
+
+        Assert.True(typeof(IComparable).IsAssignableFrom(typeof(ContractReference)));
+        Assert.Equal(((ContractReference)left).CompareTo(right), left.CompareTo(right));
+        Assert.True(left.CompareTo(null) > 0);
+        Assert.Throws<ArgumentException>("obj", () => left.CompareTo("not a ContractReference"));
+    }
 }

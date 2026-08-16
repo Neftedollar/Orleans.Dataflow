@@ -32,10 +32,12 @@ public sealed class Sink<T>
     internal IReadOnlyList<LocalStageDescriptor> Stages { get; }
 
     /// <summary>Returns a one-line diagnostic summary of this sink.</summary>
-    /// <returns>Text of the form <c>sink (1 stages)</c>.</returns>
+    /// <returns>Text of the form <c>sink (1 stage)</c>, plural for any other count.</returns>
     /// <remarks>The count is formatted with the invariant culture, and the method never throws.</remarks>
     public override string ToString() =>
-        string.Create(CultureInfo.InvariantCulture, $"sink ({Stages.Count} stages)");
+        string.Create(
+            CultureInfo.InvariantCulture,
+            $"sink ({Stages.Count} {(Stages.Count == 1 ? "stage" : "stages")})");
 }
 
 /// <summary>
@@ -46,10 +48,24 @@ public sealed class Sink<T>
 /// where it cannot be inferred, per ADR 0004 section 1. Where even that is not enough — a fold whose
 /// element type appears only as an implicit lambda parameter — the sink-factory lambda overloads of
 /// <see cref="Source{T}.To{TResult}(Func{SinkFactory{T}, SinkWithResult{T, TResult}}, string, out ResultSlot{TResult})"/>
-/// pin the element type from the source instead.
+/// pin the element type from the source instead, and <see cref="For{T}"/> pins it by hand for a sink built
+/// away from the source it will close.
 /// </remarks>
 public static class Sink
 {
+    /// <summary>Starts from the sink vocabulary of one element type.</summary>
+    /// <typeparam name="T">The element type the sinks will consume.</typeparam>
+    /// <returns>The factory whose methods are the ones on this class with <typeparamref name="T"/> supplied.</returns>
+    /// <remarks>
+    /// The named counterpart of the factory a sink-factory lambda receives, spelled to read next to
+    /// <see cref="Flow.For{T}"/>: <c>Sink.For&lt;OrderCreated&gt;().Aggregate(0L, (count, _) =&gt; count + 1)</c>
+    /// pins the element type once and lets both lambda parameters be inferred, where
+    /// <see cref="Aggregate{T, TState}"/> makes the author write both type arguments. It returns the same
+    /// stateless instance the lambda overloads of <c>To</c> hand out, so the two spellings build the same
+    /// sink and close the same document.
+    /// </remarks>
+    public static SinkFactory<T> For<T>() => SinkFactory<T>.Instance;
+
     /// <summary>Creates a sink that consumes every element and produces nothing.</summary>
     /// <typeparam name="T">The element type to consume.</typeparam>
     /// <returns>The sink.</returns>

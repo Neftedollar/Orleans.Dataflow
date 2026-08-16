@@ -107,10 +107,18 @@ public sealed class RunnableGraph
     internal Guid AuthoringNonce { get; }
 
     /// <summary>Returns a one-line diagnostic summary of this graph.</summary>
-    /// <returns>Text of the form <c>graph sha256:9f86d081... (4 nodes, 1 result slots)</c>.</returns>
+    /// <returns>
+    /// Text of the form <c>graph sha256:9f86d081... (4 nodes, 1 result slot)</c>, with each count
+    /// singular or plural as it reads.
+    /// </returns>
     /// <remarks>The counts are formatted with the invariant culture, and the method never throws.</remarks>
-    public override string ToString() =>
-        string.Create(
+    public override string ToString()
+    {
+        int nodes = Document.Nodes.Count;
+        int slots = ResultSlots.Count;
+
+        return string.Create(
             CultureInfo.InvariantCulture,
-            $"graph {Fingerprint} ({Document.Nodes.Count} nodes, {ResultSlots.Count} result slots)");
+            $"graph {Fingerprint} ({nodes} {(nodes == 1 ? "node" : "nodes")}, {slots} {(slots == 1 ? "result slot" : "result slots")})");
+    }
 }

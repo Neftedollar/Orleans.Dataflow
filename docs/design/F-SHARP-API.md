@@ -278,7 +278,10 @@ facade uses one named function per operation, never overload families
 (overloads are what degrade F# diagnostics to an FS0041 candidate dump);
 the camelCase module-function convention is load-bearing, because an F#
 module binding silently shadows a same-named C# static method; identity
-structs need `IComparable<'T>` for F# `Set`/`Map` keying; and samples must
+structs need non-generic `System.IComparable` for F# `Set`/`Map` keying —
+the F# `comparison` constraint requires exactly that interface, not
+`IComparable<'T>` (proven by an FS0001 probe; both are now implemented,
+explicitly, so no public member is added); and samples must
 write `string value`, never `.ToString()`, on the readonly structs
 (`FS0052` defensive-copy warning under warnings-as-errors).
 

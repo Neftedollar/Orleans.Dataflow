@@ -40,7 +40,7 @@ public sealed class FlagshipExampleTests
             .To(s => s.Aggregate(0L, (count, _) => count + 1), "processed", out ResultSlot<long> processed);
         // End verbatim quotation.
 
-        Assert.Equal(["stage-1", "stage-2", "stage-3", "stage-4"], NodeIds(graph.Document));
+        Assert.Equal(["stage-0001", "stage-0002", "stage-0003", "stage-0004"], NodeIds(graph.Document));
         Assert.Equal(["from-enumerable", "where", "select", "fold"], StageIds(graph.Document));
         Assert.Equal(["processed"], graph.ResultSlots.Select(slot => slot.Value));
         Assert.Equal("processed", processed.Id.Value);

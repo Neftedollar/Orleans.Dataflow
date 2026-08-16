@@ -16,7 +16,7 @@ namespace Orleans.Dataflow.Tests.Api;
 /// documents after being composed into three graphs was not modified by any of them.
 /// </para>
 /// <para>
-/// Two graphs built from the same reusable flow number their occurrences from <c>stage-1</c> independently,
+/// Two graphs built from the same reusable flow number their occurrences from <c>stage-0001</c> independently,
 /// so their node identifiers overlap. They are different documents and nothing relates them, so that is not
 /// a collision; the fragment algebra's import scoping exists for the case where two copies of one fragment
 /// meet inside a single graph, which flat numbering at closure never produces.
@@ -42,8 +42,8 @@ public sealed class ReuseAndImmutabilityTests
 
         // The node identifiers overlap across the two documents, which is what flat numbering means. The
         // two documents are unrelated, so nothing is ambiguous about it.
-        Assert.Equal(["stage-1", "stage-2", "stage-3", "stage-4"], NodeIds(discarded.Document));
-        Assert.Equal(["stage-1", "stage-2", "stage-3", "stage-4"], NodeIds(counted.Document));
+        Assert.Equal(["stage-0001", "stage-0002", "stage-0003", "stage-0004"], NodeIds(discarded.Document));
+        Assert.Equal(["stage-0001", "stage-0002", "stage-0003", "stage-0004"], NodeIds(counted.Document));
     }
 
     [Fact]
@@ -107,13 +107,13 @@ public sealed class ReuseAndImmutabilityTests
             .Via(valid)
             .To(Sink.Ignore<OrderCreated>());
 
-        Assert.Equal(["stage-1", "stage-2", "stage-3", "stage-4"], NodeIds(graph.Document));
+        Assert.Equal(["stage-0001", "stage-0002", "stage-0003", "stage-0004"], NodeIds(graph.Document));
         Assert.Equal(["from-enumerable", "where", "where", "ignore"], StageIds(graph.Document));
         Assert.Equal(
             [
-                "stage-1#out -> stage-2#in",
-                "stage-2#out -> stage-3#in",
-                "stage-3#out -> stage-4#in",
+                "stage-0001#out -> stage-0002#in",
+                "stage-0002#out -> stage-0003#in",
+                "stage-0003#out -> stage-0004#in",
             ],
             Edges(graph.Document));
     }

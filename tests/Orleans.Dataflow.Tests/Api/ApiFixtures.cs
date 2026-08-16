@@ -54,7 +54,7 @@ internal static class ApiFixtures
 
     /// <summary>Reads the edges of a document as text, in its canonical order.</summary>
     /// <param name="document">The document to read.</param>
-    /// <returns>Texts of the form <c>stage-1#out -> stage-2#in</c>.</returns>
+    /// <returns>Texts of the form <c>stage-0001#out -> stage-0002#in</c>.</returns>
     internal static IReadOnlyList<string> Edges(GraphDocument document) =>
         [.. document.Edges.Select(edge => $"{edge.From} -> {edge.To}")];
 

@@ -159,4 +159,96 @@ public sealed class StageRefTests
 
         Assert.Equal(2, references.Count);
     }
+
+    [Fact]
+    public void ComparisonRunsProviderThenStageThenMajorVersion()
+    {
+        // The ordering table, in the reading order of 'provider/stage@v1': the provider decides first, the
+        // stage next, and only then the version — numerically, so v2 precedes v10.
+        StageRef[] ordered =
+        [
+            StageRef.Create(ProviderId.Create("alpha"), StageId.Create("zulu"), 9),
+            StageRef.Create(ProviderId.Create("beta"), StageId.Create("alpha"), 1),
+            StageRef.Create(ProviderId.Create("beta"), StageId.Create("map"), 1),
+            StageRef.Create(ProviderId.Create("beta"), StageId.Create("map"), 2),
+            StageRef.Create(ProviderId.Create("beta"), StageId.Create("map"), 10),
+            StageRef.Create(ProviderId.Create("beta"), StageId.Create("map-async"), 1),
+        ];
+
+        for (int index = 1; index < ordered.Length; index++)
+        {
+            Assert.True(
+                ordered[index - 1].CompareTo(ordered[index]) < 0,
+                $"'{ordered[index - 1]}' should sort before '{ordered[index]}'");
+
+            Assert.True(ordered[index].CompareTo(ordered[index - 1]) > 0);
+            Assert.True(ordered[index - 1] < ordered[index]);
+            Assert.True(ordered[index - 1] <= ordered[index]);
+            Assert.True(ordered[index] > ordered[index - 1]);
+            Assert.True(ordered[index] >= ordered[index - 1]);
+        }
+    }
+
+    [Fact]
+    public void SortingUsesTheSameOrderWhicheverWayTheInputArrived()
+    {
+        StageRef[] shuffled =
+        [
+            StageRef.Create(SampleProvider, SampleStage, 10),
+            StageRef.Create(ProviderId.Create("contoso-sinks"), SampleStage, 1),
+            StageRef.Create(SampleProvider, SampleStage, 2),
+            StageRef.Create(SampleProvider, StageId.Create("from-source"), 1),
+        ];
+
+        Array.Sort(shuffled);
+
+        Assert.Equal(
+            [
+                "contoso-sinks/map-async@v1",
+                "orleans-core/from-source@v1",
+                "orleans-core/map-async@v2",
+                "orleans-core/map-async@v10",
+            ],
+            shuffled.Select(reference => reference.ToString()));
+    }
+
+    [Fact]
+    public void TheDefaultInstanceSortsBeforeEveryCreatedOne()
+    {
+        StageRef created = StageRef.Create(SampleProvider, SampleStage, 1);
+
+        Assert.True(default(StageRef).CompareTo(created) < 0);
+        Assert.True(created.CompareTo(default) > 0);
+        Assert.Equal(0, default(StageRef).CompareTo(default));
+        Assert.True(default(StageRef) < created);
+        Assert.True(created >= default(StageRef));
+    }
+
+    [Fact]
+    public void ComparisonIsConsistentWithEquality()
+    {
+        StageRef left = StageRef.Create(SampleProvider, SampleStage, 3);
+        StageRef right = StageRef.Create(SampleProvider, SampleStage, 3);
+
+        Assert.Equal(0, left.CompareTo(right));
+        Assert.Equal(left, right);
+        Assert.True(left <= right);
+        Assert.True(left >= right);
+        Assert.False(left < right);
+        Assert.False(left > right);
+    }
+
+    [Fact]
+    public void TheNonGenericComparisonAgreesWithTheTypedOne()
+    {
+        // F#'s 'comparison' constraint is satisfied by System.IComparable and not by IComparable<'T>, so
+        // this implementation is what lets the type key an F# Set or Map.
+        IComparable left = StageRef.Create(SampleProvider, SampleStage, 2);
+        StageRef right = StageRef.Create(SampleProvider, SampleStage, 10);
+
+        Assert.True(typeof(IComparable).IsAssignableFrom(typeof(StageRef)));
+        Assert.Equal(((StageRef)left).CompareTo(right), left.CompareTo(right));
+        Assert.True(left.CompareTo(null) > 0);
+        Assert.Throws<ArgumentException>("obj", () => left.CompareTo("not a StageRef"));
+    }
 }

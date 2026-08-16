@@ -162,12 +162,18 @@ public sealed record class GraphFragment
             throw new ArgumentException(FormatViolations(violations));
         }
 
-        // The same sort keys and the same comparators as GraphDocument, so that closing a fragment is a
-        // rewrapping rather than a reordering. Both keys are unique on validated input: node identifiers
-        // are unique by rule, and two edges cannot share all four keys without also breaking both edge
-        // multiplicity rules. The order is therefore total and an unstable sort is still deterministic.
-        Array.Sort(nodeArray, CompareNodes);
-        Array.Sort(edgeArray, CompareEdges);
+        // The same sort keys as GraphDocument, so that closing a fragment is a rewrapping rather than a
+        // reordering. Neither site restates the order any more: both read it off the identity types
+        // themselves, so there is nothing left that could drift apart. Both keys are unique on validated
+        // input: node identifiers are unique by rule, and two edges cannot share all four keys without
+        // also breaking both edge multiplicity rules. The order is therefore total and an unstable sort
+        // is still deterministic.
+        Array.Sort(nodeArray, static (left, right) => left.Id.CompareTo(right.Id));
+        Array.Sort(
+            edgeArray,
+            static (left, right) =>
+                (left.From.Node, left.From.Port, left.To.Node, left.To.Port)
+                    .CompareTo((right.From.Node, right.From.Port, right.To.Node, right.To.Port)));
 
         return new GraphFragment(
             Array.AsReadOnly(nodeArray),
@@ -517,44 +523,6 @@ public sealed record class GraphFragment
         }
 
         return addresses;
-    }
-
-    /// <summary>Compares two nodes by their node identifier text, ordinally.</summary>
-    /// <param name="left">The left node.</param>
-    /// <param name="right">The right node.</param>
-    /// <returns>The ordinal comparison result.</returns>
-    /// <remarks>
-    /// This is the comparator <see cref="GraphDocument"/> uses, restated because it is private there. The
-    /// two must stay in step: a fragment that sorted differently would be resorted when it is closed, and
-    /// the canonical order of a document is the one ADR 0003 fixes.
-    /// </remarks>
-    private static int CompareNodes(StageNode left, StageNode right) =>
-        string.CompareOrdinal(left.Id.Value, right.Id.Value);
-
-    /// <summary>Compares two edges by origin node, origin port, target node, and target port, ordinally.</summary>
-    /// <param name="left">The left edge.</param>
-    /// <param name="right">The right edge.</param>
-    /// <returns>The ordinal comparison result.</returns>
-    /// <remarks>This is the comparator <see cref="GraphDocument"/> uses, restated because it is private there.</remarks>
-    private static int CompareEdges(GraphEdge left, GraphEdge right)
-    {
-        int comparison = string.CompareOrdinal(left.From.Node.Value, right.From.Node.Value);
-
-        if (comparison != 0)
-        {
-            return comparison;
-        }
-
-        comparison = string.CompareOrdinal(left.From.Port.Value, right.From.Port.Value);
-
-        if (comparison != 0)
-        {
-            return comparison;
-        }
-
-        comparison = string.CompareOrdinal(left.To.Node.Value, right.To.Node.Value);
-
-        return comparison != 0 ? comparison : string.CompareOrdinal(left.To.Port.Value, right.To.Port.Value);
     }
 
     /// <summary>Determines whether two lists hold equal elements in the same positions.</summary>

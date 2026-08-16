@@ -35,10 +35,11 @@ namespace Orleans.Dataflow.Definition;
 /// </para>
 /// <para>
 /// The default value carries no digest: <see cref="IsDefault"/> reports it, <see cref="Hash"/> throws for
-/// it, and <see cref="ToString"/> renders a diagnostic literal for it rather than throwing.
+/// it, and <see cref="ToString"/> renders a diagnostic literal for it rather than throwing, and
+/// <see cref="CompareTo"/> sorts it before every computed fingerprint.
 /// </para>
 /// </remarks>
-public readonly record struct CatalogFingerprint
+public readonly record struct CatalogFingerprint : IComparable<CatalogFingerprint>, IComparable
 {
     /// <summary>The prefix that names the digest algorithm in the text form.</summary>
     private const string AlgorithmPrefix = "sha256:";
@@ -147,6 +148,101 @@ public readonly record struct CatalogFingerprint
         fingerprint = default;
         return false;
     }
+
+    /// <summary>
+    /// Determines whether one fingerprint sorts before another in digest order.
+    /// </summary>
+    /// <param name="left">The left operand.</param>
+    /// <param name="right">The right operand.</param>
+    /// <returns>
+    /// <see langword="true"/> when <paramref name="left"/> sorts before <paramref name="right"/>;
+    /// otherwise <see langword="false"/>.
+    /// </returns>
+    public static bool operator <(CatalogFingerprint left, CatalogFingerprint right) => left.CompareTo(right) < 0;
+
+    /// <summary>
+    /// Determines whether one fingerprint sorts before another in digest order, or is equal to it.
+    /// </summary>
+    /// <param name="left">The left operand.</param>
+    /// <param name="right">The right operand.</param>
+    /// <returns>
+    /// <see langword="true"/> when <paramref name="left"/> does not sort after
+    /// <paramref name="right"/>; otherwise <see langword="false"/>.
+    /// </returns>
+    public static bool operator <=(CatalogFingerprint left, CatalogFingerprint right) => left.CompareTo(right) <= 0;
+
+    /// <summary>
+    /// Determines whether one fingerprint sorts after another in digest order.
+    /// </summary>
+    /// <param name="left">The left operand.</param>
+    /// <param name="right">The right operand.</param>
+    /// <returns>
+    /// <see langword="true"/> when <paramref name="left"/> sorts after <paramref name="right"/>;
+    /// otherwise <see langword="false"/>.
+    /// </returns>
+    public static bool operator >(CatalogFingerprint left, CatalogFingerprint right) => left.CompareTo(right) > 0;
+
+    /// <summary>
+    /// Determines whether one fingerprint sorts after another in digest order, or is equal to it.
+    /// </summary>
+    /// <param name="left">The left operand.</param>
+    /// <param name="right">The right operand.</param>
+    /// <returns>
+    /// <see langword="true"/> when <paramref name="left"/> does not sort before
+    /// <paramref name="right"/>; otherwise <see langword="false"/>.
+    /// </returns>
+    public static bool operator >=(CatalogFingerprint left, CatalogFingerprint right) => left.CompareTo(right) >= 0;
+
+    /// <summary>
+    /// Compares this fingerprint with another by digest bytes.
+    /// </summary>
+    /// <param name="other">The fingerprint to compare with.</param>
+    /// <returns>
+    /// A negative number when this instance sorts first, zero when the digests are equal, and a positive
+    /// number when <paramref name="other"/> sorts first.
+    /// </returns>
+    /// <remarks>
+    /// The order is lexicographic over the digest bytes, most significant byte first, which is the same
+    /// order the lowercase hexadecimal text form sorts in: an ordered list of fingerprints reads the same
+    /// whether it was ordered as bytes or as text. A digest carries no meaning of its own, so this order
+    /// exists to make a set of fingerprints storable and printable in one deterministic sequence, never
+    /// to say that one catalog came before another. The default value carries no digest and sorts before
+    /// every computed one, so the order is total over every instance, and it is consistent with
+    /// equality, because two fingerprints compare equal exactly when their digests are equal.
+    /// </remarks>
+    public int CompareTo(CatalogFingerprint other)
+    {
+        if (_hash is null)
+        {
+            return other._hash is null ? 0 : -1;
+        }
+
+        return other._hash is null ? 1 : _hash.AsSpan().SequenceCompareTo(other._hash);
+    }
+
+    /// <summary>
+    /// Compares this instance with another object in canonical order.
+    /// </summary>
+    /// <param name="obj">The object to compare with, which may be <see langword="null"/>.</param>
+    /// <returns>
+    /// A negative number when this instance sorts first, zero when the two are equal, and a positive
+    /// number when <paramref name="obj"/> sorts first. A <see langword="null"/> always sorts first, which
+    /// is the convention every <see cref="IComparable"/> implementation in .NET follows.
+    /// </returns>
+    /// <exception cref="ArgumentException"><paramref name="obj"/> is not a <see cref="CatalogFingerprint"/>.</exception>
+    /// <remarks>
+    /// The non-generic interface is implemented explicitly and exists for one reason: F#'s
+    /// <c>comparison</c> constraint is satisfied by <see cref="IComparable"/> and not by
+    /// <see cref="IComparable{T}"/>, so without it this type cannot key an F# <c>Set</c> or <c>Map</c> —
+    /// which is what the F# frontend needs of it. C# callers bind to
+    /// <see cref="CompareTo(CatalogFingerprint)"/> instead and box nothing.
+    /// </remarks>
+    int IComparable.CompareTo(object? obj) => obj switch
+    {
+        null => 1,
+        CatalogFingerprint other => CompareTo(other),
+        _ => throw new ArgumentException($"The argument must be a {nameof(CatalogFingerprint)}.", nameof(obj)),
+    };
 
     /// <summary>
     /// Determines whether this fingerprint has the same digest bytes as <paramref name="other"/>.
