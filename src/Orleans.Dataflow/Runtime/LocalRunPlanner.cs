@@ -73,8 +73,8 @@ internal static class LocalRunPlanner
 
         for (int index = 0; index < order.Count; index++)
         {
-            LocalStageDescriptor descriptor = Binding(graph, order[index]);
             StageNode declaration = declarations[order[index]];
+            LocalStageDescriptor descriptor = Binding(graph, declaration);
             bool first = index == 0;
             bool last = index == order.Count - 1;
 
@@ -151,13 +151,22 @@ internal static class LocalRunPlanner
 
     /// <summary>Reads the behavior bound to one node.</summary>
     /// <param name="graph">The graph being compiled.</param>
-    /// <param name="node">The node identifier.</param>
+    /// <param name="node">The node as the document declares it.</param>
     /// <returns>The occurrence's descriptor.</returns>
     /// <exception cref="InvalidOperationException">The node has no binding.</exception>
-    private static LocalStageDescriptor Binding(RunnableGraph graph, NodeId node) =>
-        graph.LocalBindings.TryGetValue(node, out LocalStageDescriptor? descriptor)
+    /// <remarks>
+    /// The message names the stage rather than only the node, because there are two ways to reach it and
+    /// the stage is what tells them apart: a document from somewhere else naming stages this process never
+    /// bound anything to, and a registered occurrence, whose behavior is deliberately not in the binding
+    /// table at all. The second is the runtime-factory seam: resolving a registered stage into something
+    /// executable needs a factory registered beside the catalog, which this runtime does not yet have, so
+    /// a graph holding one is rejected here rather than half-executed.
+    /// </remarks>
+    private static LocalStageDescriptor Binding(RunnableGraph graph, StageNode node) =>
+        graph.LocalBindings.TryGetValue(node.Id, out LocalStageDescriptor? descriptor)
             ? descriptor
-            : throw Foreign($"the node '{node}' has no bound behavior");
+            : throw Foreign(
+                $"the node '{node.Id}' is an occurrence of the stage '{node.Stage}', and no local behavior is bound to it; a registered stage resolves through a runtime factory this runtime does not have");
 
     /// <summary>Indexes a document's nodes by identifier.</summary>
     /// <param name="document">The document being compiled.</param>

@@ -71,10 +71,29 @@ specification's parameter contract by the graph compiler (and by the
 specification's validator when it has one). Typed parameter builders are
 provider-SDK sugar (M4); the M1 surface is honest raw payloads.
 
-Mixing is legal: a chain may hold registered and lambda stages. The closed
-document then carries `nondeployable` (and `ephemeral-identity` if anything
-is unnamed) and stays local — useful for testing a registered stage inside
-a lambda harness.
+Mixing is legal at authoring: a chain may hold registered and lambda
+stages, and closure works. But the implementation proved a limit worth
+stating precisely: every local port declares the opaque `local-opaque@v1`
+contract while a registered port declares a real one, so every
+lambda-to-registered seam edge is a correct `element-contract-mismatch`
+under the graph compiler — against any catalog, merged or not. Weakening
+the contract rule to treat the opaque contract as a wildcard was considered
+and rejected: it would blunt contract checking for every document to buy an
+authoring convenience. Mixing is therefore an authoring and (future)
+materialization affordance, not a definition-plane one; the
+lambda-harness-around-a-registered-stage scenario becomes real when the
+runtime-factory seam lets the local host execute registered stages.
+
+Capability tokens are conditional and causal: `nondeployable` appears
+exactly when a local-provider stage is present (local stages as a class are
+nondeployable — a buffer carries no delegate, but `local/buffer@v1`
+resolves in this process's provider and nowhere else), `ephemeral-identity`
+exactly when an occurrence is auto-named, and the document's capabilities
+are the union of every occurrence's declared requirements — so a registered
+stage requiring `durable-state` closes into a document that declares it.
+Through this API the two local tokens co-occur (lambdas cannot be named,
+registered stages must be); they remain orthogonal in the model, where a
+document carrying only one is hand-writable.
 
 ## PipelineDefinition
 
@@ -98,17 +117,16 @@ Materialization of pipelines is the M3 Orleans host's concern; the local
 host may execute a pipeline's document when every stage resolves in a local
 catalog with runtime factories — which is exactly the M2/M3 seam.
 
-## Open questions for the implementation checkpoint
+## Settled by the implementation
 
-1. Whether `RegisteredStage.*` handles carry the catalog or only the
-   specification (carrying the catalog enables cross-stage checks at
-   authoring; carrying the specification keeps handles serializable-ish and
-   host-agnostic).
-2. The runtime-factory seam: M2's local runtime binds lambdas through the
-   internal binding table; registered stages need
-   `IStageRuntimeFactory`-shaped contracts (planned by DEFINITION-MODEL as
-   the M2 addition) before a registered pipeline can execute locally.
-3. Whether `Source.FromRegistered`/`Via(handle, ...)` overloads live on the
-   existing types (keeping one chain) or a parallel `Pipeline`-flavored
-   builder — current lean: same chain, one vocabulary, per the mixing rule
-   above.
+1. **Handles carry the specification, not the catalog.** Everything an
+   attachment needs is on the specification; adjacency compatibility is
+   contract equality already pinned by the `ElementContract<T>` values, and
+   validation is the compiler's question against the host's catalog — a
+   question no handle could answer.
+2. **The runtime-factory seam was deliberately not invented here.** A
+   registered occurrence carries no binding; the local host refuses a
+   registered graph with `unknown-stage` before planning. The factory
+   contract arrives with the milestone that can execute one.
+3. **Same chain, one vocabulary** — the registered overloads live on
+   `Source`/`Flow`/`Sink`, separated from the lambda forms by arity.

@@ -26,10 +26,10 @@ public sealed class Sink<T>
 {
     /// <summary>Initializes a new instance of the <see cref="Sink{T}"/> class.</summary>
     /// <param name="stages">The occurrences this sink contributes, in authoring order.</param>
-    internal Sink(IReadOnlyList<LocalStageDescriptor> stages) => Stages = stages;
+    internal Sink(IReadOnlyList<StageOccurrence> stages) => Stages = stages;
 
     /// <summary>Gets the occurrences this sink contributes to a graph, in authoring order.</summary>
-    internal IReadOnlyList<LocalStageDescriptor> Stages { get; }
+    internal IReadOnlyList<StageOccurrence> Stages { get; }
 
     /// <summary>Returns a one-line diagnostic summary of this sink.</summary>
     /// <returns>Text of the form <c>sink (1 stage)</c>, plural for any other count.</returns>

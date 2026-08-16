@@ -1,3 +1,4 @@
+using Orleans.Dataflow.Definition;
 using Orleans.Dataflow.Identity;
 using Orleans.Dataflow.Serialization;
 
@@ -12,9 +13,15 @@ namespace Orleans.Dataflow.Authoring;
 /// A descriptor is not yet a node. It has no <see cref="NodeId"/>, because ADR 0004 allocates identifiers
 /// at graph closure and not at value creation: a reusable <see cref="Orleans.Dataflow.Flow{TIn, TOut}"/>
 /// occupies a different position in every graph it is composed into, so a position fixed at creation would
-/// be wrong in all but one of them. An authoring value therefore holds an ordered list of descriptors and
+/// be wrong in all but one of them. An authoring value therefore holds an ordered list of occurrences and
 /// composes by concatenation; <see cref="LocalGraphBuilder"/> turns that list into fragments, nodes, and a
 /// document exactly once, at <c>To</c>.
+/// </para>
+/// <para>
+/// <see cref="Name"/> is therefore always <see langword="null"/> here, and that is not an omission: a name
+/// on a lambda stage would promise an edit-stable identity the delegate behind it cannot honor, so a graph
+/// holding one declares <see cref="CapabilityToken.EphemeralIdentity"/>. Explicit names are the
+/// registered surface's, where the behavior is in the catalog and the identity means something.
 /// </para>
 /// <para>
 /// <see cref="Behavior"/> and <see cref="Seed"/> are the two halves of the authoring-side binding, and
@@ -30,7 +37,7 @@ namespace Orleans.Dataflow.Authoring;
 /// delegate is all it has and a delegate is never durable topology.
 /// </para>
 /// </remarks>
-internal sealed class LocalStageDescriptor
+internal sealed class LocalStageDescriptor : StageOccurrence
 {
     /// <summary>Initializes a new instance of the <see cref="LocalStageDescriptor"/> class.</summary>
     /// <param name="kind">The stage shape.</param>
@@ -69,24 +76,58 @@ internal sealed class LocalStageDescriptor
     /// </value>
     internal object? Seed { get; }
 
-    /// <summary>Gets the parameter payload this occurrence writes into its node.</summary>
+    /// <inheritdoc/>
     /// <value>
     /// The buffer's capacity and policy, the asynchronous stage's concurrency bound, or the empty object
     /// for every shape whose behavior is only a delegate.
     /// </value>
-    internal CanonicalJsonValue Parameters { get; }
+    internal override CanonicalJsonValue Parameters { get; }
 
-    /// <summary>Gets the stage reference this occurrence declares in a document.</summary>
-    internal StageRef Stage => LocalVocabulary.StageOf(Kind);
+    /// <inheritdoc/>
+    /// <value>
+    /// Always <see langword="null"/>: this surface has no spelling for naming a lambda occurrence, and
+    /// deliberately so.
+    /// </value>
+    internal override NodeId? Name => null;
 
-    /// <summary>Gets the parameter contract this occurrence declares in a document.</summary>
-    internal ContractReference ParameterContract => LocalVocabulary.ParameterContractOf(Kind);
+    /// <inheritdoc/>
+    internal override StageRef Stage => LocalVocabulary.StageOf(Kind);
 
-    /// <summary>Gets a value indicating whether this occurrence declares an input port.</summary>
-    internal bool HasInput => Kind is not LocalStageKind.FromEnumerable;
+    /// <inheritdoc/>
+    internal override ContractReference ParameterContract => LocalVocabulary.ParameterContractOf(Kind);
 
-    /// <summary>Gets a value indicating whether this occurrence declares an output port.</summary>
-    internal bool HasOutput => Kind is not (LocalStageKind.Fold or LocalStageKind.Ignore);
+    /// <inheritdoc/>
+    /// <value>
+    /// The one local input port name for every shape that consumes elements; <see langword="null"/> for
+    /// the source, which consumes none.
+    /// </value>
+    internal override PortId? InputPort =>
+        Kind is LocalStageKind.FromEnumerable ? null : LocalVocabulary.InputPort;
+
+    /// <inheritdoc/>
+    /// <value>
+    /// The one local output port name for every shape that produces elements; <see langword="null"/> for
+    /// the two terminating shapes.
+    /// </value>
+    internal override PortId? OutputPort =>
+        Kind is LocalStageKind.Fold or LocalStageKind.Ignore ? null : LocalVocabulary.OutputPort;
+
+    /// <inheritdoc/>
+    /// <value>The fold's result port; <see langword="null"/> for every other shape.</value>
+    internal override ResultPortSpecification? ResultPort =>
+        Kind is LocalStageKind.Fold
+            ? ResultPortSpecification.Create(LocalVocabulary.ResultPort, LocalVocabulary.FoldResultContract)
+            : null;
+
+    /// <inheritdoc/>
+    /// <value>
+    /// <see cref="CapabilityToken.Nondeployable"/>, for every local shape without exception. A delegate is
+    /// not durable topology, and neither is a buffer whose only implementation lives in this process'
+    /// local provider: the token is a statement about where the stage can run, not about whether the
+    /// author happened to write a lambda for it.
+    /// </value>
+    internal override IReadOnlyList<CapabilityToken> RequiredCapabilities =>
+        LocalVocabulary.RequiredCapabilities;
 
     /// <summary>Creates a source over an in-memory sequence.</summary>
     /// <param name="elements">The sequence, as the authoring value received it.</param>

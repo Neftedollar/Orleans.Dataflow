@@ -1,6 +1,7 @@
 using System.Globalization;
 using Orleans.Dataflow.Authoring;
 using Orleans.Dataflow.Identity;
+using Orleans.Dataflow.Serialization;
 
 namespace Orleans.Dataflow;
 
@@ -20,21 +21,22 @@ namespace Orleans.Dataflow;
 /// document is fingerprinted. Nothing before that point has a position or an identity.
 /// </para>
 /// <para>
-/// Every occurrence this slice of the API creates is automatically named, so every document it closes
-/// declares <c>ephemeral-identity</c> as well as <c>nondeployable</c>, and is therefore rejected for
-/// durable pipelines by design (ADR 0004 section 6). Naming an occurrence explicitly is the
-/// registered-stage authoring surface's concern and deliberately has no spelling here: a name on a lambda
-/// stage would promise an edit-stable identity that the delegate behind it cannot honor.
+/// Every lambda occurrence is automatically named, so a graph built only from lambdas declares
+/// <c>ephemeral-identity</c> as well as <c>nondeployable</c>, and is therefore rejected for durable
+/// pipelines by design (ADR 0004 section 6). A lambda occurrence has no spelling for a name at all: a name
+/// on a delegate would promise an edit-stable identity the delegate behind it cannot honor. The registered
+/// overloads take one and require it, so what a closed document declares is a fact about what the chain
+/// actually holds.
 /// </para>
 /// </remarks>
 public sealed class Source<T>
 {
     /// <summary>Initializes a new instance of the <see cref="Source{T}"/> class.</summary>
     /// <param name="stages">The occurrences this source contributes, in authoring order.</param>
-    internal Source(IReadOnlyList<LocalStageDescriptor> stages) => Stages = stages;
+    internal Source(IReadOnlyList<StageOccurrence> stages) => Stages = stages;
 
     /// <summary>Gets the occurrences this source contributes to a graph, in authoring order.</summary>
-    internal IReadOnlyList<LocalStageDescriptor> Stages { get; }
+    internal IReadOnlyList<StageOccurrence> Stages { get; }
 
     /// <summary>Extends this source with a mapping stage.</summary>
     /// <typeparam name="TOut">The element type the mapping produces.</typeparam>
@@ -159,6 +161,44 @@ public sealed class Source<T>
         return new Source<TOut>(LocalStageChain.Concat(Stages, flow.Stages));
     }
 
+    /// <summary>Extends this source with one named occurrence of a registered stage.</summary>
+    /// <typeparam name="TOut">The element type the registered stage produces.</typeparam>
+    /// <param name="flow">The typed handle of the registered stage.</param>
+    /// <param name="occurrenceName">The author-stable name of this occurrence.</param>
+    /// <param name="parameters">The configuration this occurrence carries, in canonical form.</param>
+    /// <returns>A new source; this one is unchanged.</returns>
+    /// <exception cref="ArgumentNullException">
+    /// <paramref name="flow"/> or <paramref name="occurrenceName"/> is <see langword="null"/>.
+    /// </exception>
+    /// <exception cref="ArgumentException">
+    /// <paramref name="occurrenceName"/> is not a valid single-segment node identifier, or
+    /// <paramref name="parameters"/> is the default value or the JSON null value.
+    /// </exception>
+    /// <remarks>
+    /// <para>
+    /// The name is required, because a registered occurrence exists to be addressed across an edit, a
+    /// checkpoint, and an upgrade, and a positional identifier anchors none of those (ADR 0004 section 6).
+    /// Two occurrences of one graph may not share a name; that is reported when the chain is closed, which
+    /// is where the whole chain is first visible.
+    /// </para>
+    /// <para>
+    /// The payload is the raw canonical value the stage's parameter contract describes, and it is checked
+    /// against that contract by the graph compiler rather than here. Typed parameter builders are
+    /// provider-SDK sugar and are deliberately not part of this surface.
+    /// </para>
+    /// </remarks>
+    public Source<TOut> Via<TOut>(
+        RegisteredFlow<T, TOut> flow,
+        string occurrenceName,
+        CanonicalJsonValue parameters)
+    {
+        ArgumentNullException.ThrowIfNull(flow);
+
+        return new Source<TOut>(LocalStageChain.Append(
+            Stages,
+            RegisteredAttachment.Occurrence(flow.Specification, occurrenceName, parameters)));
+    }
+
     /// <summary>Closes this source with a sink that declares no result.</summary>
     /// <param name="sink">The sink terminating the graph.</param>
     /// <returns>The closed graph.</returns>
@@ -195,6 +235,108 @@ public sealed class Source<T>
 
         return To(resolved);
     }
+
+    /// <summary>Closes this source with one named occurrence of a registered stage that declares no result.</summary>
+    /// <param name="sink">The typed handle of the registered stage terminating the graph.</param>
+    /// <param name="occurrenceName">The author-stable name of this occurrence.</param>
+    /// <param name="parameters">The configuration this occurrence carries, in canonical form.</param>
+    /// <returns>The closed graph.</returns>
+    /// <exception cref="ArgumentNullException">
+    /// <paramref name="sink"/> or <paramref name="occurrenceName"/> is <see langword="null"/>.
+    /// </exception>
+    /// <exception cref="ArgumentException">
+    /// <paramref name="occurrenceName"/> is not a valid single-segment node identifier, or
+    /// <paramref name="parameters"/> is the default value or the JSON null value.
+    /// </exception>
+    /// <remarks>
+    /// A registered stage that does declare a result port is a
+    /// <see cref="RegisteredSinkWithResult{TIn, TResult}"/> and does not convert to a
+    /// <see cref="RegisteredSink{TIn}"/> at all, so this overload cannot drop a result: the mistake is a
+    /// conversion error naming both types rather than a graph that silently produces nothing readable.
+    /// </remarks>
+    public RunnableGraph To(RegisteredSink<T> sink, string occurrenceName, CanonicalJsonValue parameters)
+    {
+        ArgumentNullException.ThrowIfNull(sink);
+
+        return LocalGraphBuilder.Close(
+            LocalStageChain.Append(
+                Stages,
+                RegisteredAttachment.Occurrence(sink.Specification, occurrenceName, parameters)),
+            slotId: null);
+    }
+
+    /// <summary>
+    /// Closes this source with one named occurrence of a registered result-bearing stage, returning the
+    /// graph and its slot together.
+    /// </summary>
+    /// <typeparam name="TResult">The type of the declared result.</typeparam>
+    /// <param name="sink">The typed handle of the registered stage terminating the graph.</param>
+    /// <param name="occurrenceName">The author-stable name of this occurrence.</param>
+    /// <param name="parameters">The configuration this occurrence carries, in canonical form.</param>
+    /// <param name="slotName">The author-stable name to expose the result under.</param>
+    /// <returns>The closed graph and the slot that resolves its result.</returns>
+    /// <exception cref="ArgumentNullException">
+    /// <paramref name="sink"/>, <paramref name="occurrenceName"/>, or <paramref name="slotName"/> is
+    /// <see langword="null"/>.
+    /// </exception>
+    /// <exception cref="ArgumentException">
+    /// <paramref name="occurrenceName"/> is not a valid single-segment node identifier,
+    /// <paramref name="slotName"/> is not a valid <see cref="ResultSlotId"/>, or
+    /// <paramref name="parameters"/> is the default value or the JSON null value.
+    /// </exception>
+    /// <remarks>
+    /// The two names mean different things and neither is derivable from the other: the occurrence name is
+    /// the node's durable identity in the graph, and the slot name is what a run handle resolves the
+    /// result under. This is the composable form, for the reason ADR 0004 section 3 gives — a tuple
+    /// survives <c>async</c> signatures, collections, and interface members.
+    /// </remarks>
+    public (RunnableGraph Graph, ResultSlot<TResult> Slot) To<TResult>(
+        RegisteredSinkWithResult<T, TResult> sink,
+        string occurrenceName,
+        CanonicalJsonValue parameters,
+        string slotName)
+    {
+        RunnableGraph graph = CloseWithRegisteredResult(
+            sink,
+            occurrenceName,
+            parameters,
+            slotName,
+            out ResultSlot<TResult> slot);
+
+        return (graph, slot);
+    }
+
+    /// <summary>
+    /// Closes this source with one named occurrence of a registered result-bearing stage, handing back the
+    /// slot as an output.
+    /// </summary>
+    /// <typeparam name="TResult">The type of the declared result.</typeparam>
+    /// <param name="sink">The typed handle of the registered stage terminating the graph.</param>
+    /// <param name="occurrenceName">The author-stable name of this occurrence.</param>
+    /// <param name="parameters">The configuration this occurrence carries, in canonical form.</param>
+    /// <param name="slotName">The author-stable name to expose the result under.</param>
+    /// <param name="slot">When this method returns, the slot that resolves the result.</param>
+    /// <returns>The closed graph.</returns>
+    /// <exception cref="ArgumentNullException">
+    /// <paramref name="sink"/>, <paramref name="occurrenceName"/>, or <paramref name="slotName"/> is
+    /// <see langword="null"/>.
+    /// </exception>
+    /// <exception cref="ArgumentException">
+    /// <paramref name="occurrenceName"/> is not a valid single-segment node identifier,
+    /// <paramref name="slotName"/> is not a valid <see cref="ResultSlotId"/>, or
+    /// <paramref name="parameters"/> is the default value or the JSON null value.
+    /// </exception>
+    /// <remarks>
+    /// The fluent form, which produces the same document as the tuple overload because both funnel through
+    /// one closure.
+    /// </remarks>
+    public RunnableGraph To<TResult>(
+        RegisteredSinkWithResult<T, TResult> sink,
+        string occurrenceName,
+        CanonicalJsonValue parameters,
+        string slotName,
+        out ResultSlot<TResult> slot) =>
+        CloseWithRegisteredResult(sink, occurrenceName, parameters, slotName, out slot);
 
     /// <summary>Closes this source with a result-bearing sink, returning the graph and its slot together.</summary>
     /// <typeparam name="TResult">The type of the declared result.</typeparam>
@@ -469,6 +611,49 @@ public sealed class Source<T>
 
         return graph;
     }
+
+    /// <summary>Closes this source with a named occurrence of a registered result-bearing stage.</summary>
+    /// <typeparam name="TResult">The type of the declared result.</typeparam>
+    /// <param name="sink">The typed handle terminating the graph.</param>
+    /// <param name="occurrenceName">The candidate occurrence name.</param>
+    /// <param name="parameters">The occurrence's payload.</param>
+    /// <param name="slotName">The candidate slot name.</param>
+    /// <param name="slot">When this method returns, the slot that resolves the result.</param>
+    /// <returns>The closed graph.</returns>
+    /// <remarks>
+    /// <para>
+    /// Both result-bearing registered overloads funnel through here, which is what makes the tuple form
+    /// and the <see langword="out"/> form produce byte-identical documents rather than merely similar ones.
+    /// </para>
+    /// <para>
+    /// The slot binds to the graph's authoring nonce exactly as a lambda graph's does, because this is
+    /// still a <see cref="RunnableGraph"/>: it is a pipeline that binds slots by fingerprint and lineage
+    /// without a nonce, and turning this graph into one is <see cref="RunnableGraph.AsPipeline"/>'s
+    /// business. Carrying the nonce here costs a fully registered graph nothing and keeps one rule for
+    /// every runnable graph.
+    /// </para>
+    /// </remarks>
+    private RunnableGraph CloseWithRegisteredResult<TResult>(
+        RegisteredSinkWithResult<T, TResult> sink,
+        string occurrenceName,
+        CanonicalJsonValue parameters,
+        string slotName,
+        out ResultSlot<TResult> slot)
+    {
+        ArgumentNullException.ThrowIfNull(sink);
+
+        ResultSlotId slotId = ParseSlotName(slotName);
+
+        RunnableGraph graph = LocalGraphBuilder.Close(
+            LocalStageChain.Append(
+                Stages,
+                RegisteredAttachment.Occurrence(sink.Specification, occurrenceName, parameters)),
+            slotId);
+
+        slot = ResultSlot<TResult>.Create(slotId, graph.Fingerprint, graph.AuthoringNonce);
+
+        return graph;
+    }
 }
 
 /// <summary>
@@ -495,5 +680,34 @@ public static class Source
         ArgumentNullException.ThrowIfNull(elements);
 
         return new Source<T>(LocalStageChain.Of(LocalStageDescriptor.FromEnumerable(elements)));
+    }
+
+    /// <summary>Starts a source at one named occurrence of a registered stage.</summary>
+    /// <typeparam name="T">The element type the registered stage produces.</typeparam>
+    /// <param name="source">The typed handle of the registered stage.</param>
+    /// <param name="occurrenceName">The author-stable name of this occurrence.</param>
+    /// <param name="parameters">The configuration this occurrence carries, in canonical form.</param>
+    /// <returns>The source, ready to be extended with operators.</returns>
+    /// <exception cref="ArgumentNullException">
+    /// <paramref name="source"/> or <paramref name="occurrenceName"/> is <see langword="null"/>.
+    /// </exception>
+    /// <exception cref="ArgumentException">
+    /// <paramref name="occurrenceName"/> is not a valid single-segment node identifier, or
+    /// <paramref name="parameters"/> is the default value or the JSON null value.
+    /// </exception>
+    /// <remarks>
+    /// The deployable counterpart of <see cref="From{T}(IEnumerable{T})"/>: where that one captures a
+    /// sequence this process happens to hold, this one names a stage a catalog resolves, so the document
+    /// says everything about where the elements come from. Building a graph still starts no work.
+    /// </remarks>
+    public static Source<T> FromRegistered<T>(
+        RegisteredSource<T> source,
+        string occurrenceName,
+        CanonicalJsonValue parameters)
+    {
+        ArgumentNullException.ThrowIfNull(source);
+
+        return new Source<T>(LocalStageChain.Of(
+            RegisteredAttachment.Occurrence(source.Specification, occurrenceName, parameters)));
     }
 }

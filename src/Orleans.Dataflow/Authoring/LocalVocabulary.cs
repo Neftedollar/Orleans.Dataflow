@@ -154,6 +154,20 @@ internal static class LocalVocabulary
     /// </remarks>
     internal static readonly CapabilityToken EphemeralIdentity = CapabilityToken.EphemeralIdentity;
 
+    /// <summary>The capabilities every local stage requires of the document that contains it.</summary>
+    /// <remarks>
+    /// One list, read both by <see cref="Orleans.Dataflow.LocalStageCatalog"/> when it declares what each
+    /// local stage requires and by <see cref="LocalStageDescriptor"/> when an occurrence states what its
+    /// document must declare. They have to agree exactly — the graph compiler's
+    /// <c>undeclared-capability</c> rule rejects a document that declares less than its stages require —
+    /// and one list is how they agree by construction rather than by two constants that happen to match.
+    /// This is also the whole of "nondeployable if and only if the graph holds a lambda stage": every
+    /// local stage requires the token and no registered one does, so the closed document's tokens are a
+    /// fact derived from its occurrences.
+    /// </remarks>
+    internal static readonly IReadOnlyList<CapabilityToken> RequiredCapabilities =
+        Array.AsReadOnly<CapabilityToken>([CapabilityToken.Nondeployable]);
+
     /// <summary>The graph identity every locally authored, unnamed graph carries.</summary>
     /// <remarks>
     /// A <see cref="GraphDocument"/> always has an identity, and a graph built from lambdas has no author

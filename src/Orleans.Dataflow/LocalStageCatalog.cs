@@ -100,7 +100,7 @@ public static class LocalStageCatalog
                 [output],
                 [],
                 parameters,
-                [CapabilityToken.Nondeployable],
+                LocalVocabulary.RequiredCapabilities,
                 validator);
     }
 
@@ -127,5 +127,5 @@ public static class LocalStageCatalog
             outputPorts,
             resultPorts,
             LocalVocabulary.ParameterContract,
-            [CapabilityToken.Nondeployable]);
+            LocalVocabulary.RequiredCapabilities);
 }

@@ -32,10 +32,10 @@ public sealed class SinkWithResult<TIn, TResult>
 {
     /// <summary>Initializes a new instance of the <see cref="SinkWithResult{TIn, TResult}"/> class.</summary>
     /// <param name="stages">The occurrences this sink contributes, in authoring order.</param>
-    internal SinkWithResult(IReadOnlyList<LocalStageDescriptor> stages) => Stages = stages;
+    internal SinkWithResult(IReadOnlyList<StageOccurrence> stages) => Stages = stages;
 
     /// <summary>Gets the occurrences this sink contributes to a graph, in authoring order.</summary>
-    internal IReadOnlyList<LocalStageDescriptor> Stages { get; }
+    internal IReadOnlyList<StageOccurrence> Stages { get; }
 
     /// <summary>Converts a result-bearing sink into a plain one, discarding the result declaration.</summary>
     /// <param name="sink">The sink to convert, which may be <see langword="null"/>.</param>

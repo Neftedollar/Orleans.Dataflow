@@ -108,7 +108,12 @@ public sealed class MaterializationTests
         InvalidOperationException rejected =
             await Assert.ThrowsAsync<InvalidOperationException>(async () => await Host.MaterializeAsync(graph, TestToken));
 
-        Assert.Contains("'stage-2' has no bound behavior", rejected.Message, StringComparison.Ordinal);
+        // The message names the stage as well as the node, because there are two ways to reach it: a
+        // document from somewhere else, as here, and a registered occurrence, whose behavior is
+        // deliberately never in the binding table. The stage is what tells a reader which one they have.
+        Assert.Contains("the node 'stage-2'", rejected.Message, StringComparison.Ordinal);
+        Assert.Contains("'local/ignore@v1'", rejected.Message, StringComparison.Ordinal);
+        Assert.Contains("no local behavior is bound to it", rejected.Message, StringComparison.Ordinal);
     }
 
     [Fact]

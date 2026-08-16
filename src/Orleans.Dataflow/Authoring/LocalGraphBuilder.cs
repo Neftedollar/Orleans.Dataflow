@@ -11,32 +11,40 @@ namespace Orleans.Dataflow.Authoring;
 /// </summary>
 /// <remarks>
 /// <para>
-/// Everything that needs a position happens here and nowhere else. Identifiers are allocated in authoring
-/// order (<c>stage-0001</c>, <c>stage-0002</c>, per ADR 0004 section 6), each occurrence becomes a
-/// one-node fragment through <see cref="GraphFragment.OfStage"/>, and the fragments are joined with
+/// Everything that needs a position happens here and nowhere else. An occurrence the author named keeps
+/// its name; an unnamed one is numbered by its position in authoring order (<c>stage-0001</c>,
+/// <c>stage-0002</c>, per ADR 0004 section 6). Each occurrence becomes a one-node fragment through
+/// <see cref="GraphFragment.OfStage"/>, and the fragments are joined with
 /// <see cref="GraphFragmentComposer.Append"/> and closed with
 /// <see cref="GraphFragmentComposer.Close"/>. The algebra is the substrate; this type never builds a
 /// document any other way.
 /// </para>
 /// <para>
 /// The zero padding buys one invariant, and it is worth stating as an invariant rather than as a detail
-/// of the spelling: for every graph this type closes, the document's canonical node order — ordinal over
-/// identifier text — is the authoring order of the occurrences it was built from. That holds up to
-/// <see cref="LocalVocabulary.MaxAutoNamedPosition"/> occurrences, and a chain longer than that is
-/// rejected rather than numbered into an order that would no longer say what it says.
+/// of the spelling: for every graph whose occurrences are all automatically named, the document's
+/// canonical node order — ordinal over identifier text — is the authoring order of the occurrences it was
+/// built from. An explicit name sorts wherever its text sorts, which is the price of an identity that
+/// survives an edit and is exactly why the two kinds of name are two kinds.
+/// </para>
+/// <para>
+/// A registered occurrence numbers nothing, but it does occupy a position: the automatic numbers are the
+/// positions in the whole chain rather than a separate count of the unnamed ones. That keeps a
+/// lambda-only graph numbered exactly as it was before registered stages existed, and it keeps
+/// <c>stage-0003</c> meaning "the third occurrence" in a mixed chain instead of "the third lambda".
 /// </para>
 /// <para>
 /// <see cref="GraphFragmentComposer.Import"/> is deliberately unused. Import exists to make two copies of
 /// one reusable fragment disjoint, and no fragment exists before closure here: identifiers are allocated
-/// once, over the whole chain, so every one-node fragment is already disjoint from every other. A reused
-/// <see cref="Orleans.Dataflow.Flow{TIn, TOut}"/> contributes its occurrences twice and they are numbered
-/// twice, which is the flat numbering ADR 0004 asks for rather than a nested scope.
+/// once, over the whole chain, so every one-node fragment is already disjoint from every other — unless
+/// the author gave two occurrences one name, which the composer reports naming the collision. A reused
+/// <see cref="Orleans.Dataflow.Flow{TIn, TOut}"/> of lambdas contributes its occurrences twice and they
+/// are numbered twice, which is the flat numbering ADR 0004 asks for rather than a nested scope.
 /// </para>
 /// </remarks>
 internal static class LocalGraphBuilder
 {
     /// <summary>
-    /// Closes a chain of local stage occurrences into a runnable graph.
+    /// Closes a chain of stage occurrences into a runnable graph.
     /// </summary>
     /// <param name="stages">
     /// The occurrences in authoring order. The chain is linear and complete: the first occurrence declares
@@ -48,49 +56,40 @@ internal static class LocalGraphBuilder
     /// </param>
     /// <returns>The closed, fingerprinted graph with its authoring-side binding table.</returns>
     /// <exception cref="ArgumentException">
-    /// The document the chain describes is not structurally valid. That is unreachable for a chain built
-    /// through the authoring types, whose shapes are enforced by the C# type system; the exception is the
-    /// algebra's and it is deliberately not translated, because a defect here is a defect in this type.
+    /// Two occurrences carry the same explicit name, which the fragment algebra reports naming every
+    /// collision; or the document the chain describes is not structurally valid, which is unreachable for
+    /// a chain built through the authoring types, whose shapes are enforced by the C# type system. Both
+    /// exceptions are the algebra's and are deliberately not translated.
     /// </exception>
     /// <exception cref="InvalidOperationException">
-    /// The chain holds more than <see cref="LocalVocabulary.MaxAutoNamedPosition"/> occurrences, which is
-    /// more than automatic numbering can name while keeping document order equal to authoring order.
+    /// An automatically numbered occurrence stands past <see cref="LocalVocabulary.MaxAutoNamedPosition"/>,
+    /// which is further than automatic numbering can name while keeping document order equal to authoring
+    /// order.
     /// </exception>
     /// <remarks>
     /// <para>
-    /// Every closed local graph declares both <see cref="CapabilityToken.Nondeployable"/> and
-    /// <see cref="LocalVocabulary.EphemeralIdentity"/>. The first is required by every local stage
-    /// specification: a delegate is not durable topology. The second follows from the numbering above,
-    /// because this slice of the API has no way to name an occurrence explicitly at all, so every
-    /// occurrence of every graph it builds is positional. Explicit stage naming is the registered-stage
-    /// surface's concern, and when it arrives this is the line that stops being unconditional.
+    /// The capability tokens are derived from the occurrences rather than fixed here.
+    /// <see cref="CapabilityToken.Nondeployable"/> appears exactly when the chain holds a local stage,
+    /// because every local stage specification requires it and no registered one does;
+    /// <see cref="CapabilityToken.EphemeralIdentity"/> appears exactly when some occurrence had no name to
+    /// keep. A fully registered, fully named chain therefore declares neither and is a pipeline candidate,
+    /// and a chain that mixes the two declares what it actually contains.
+    /// </para>
+    /// <para>
+    /// The binding table is built after composition rather than during identifier allocation, so that two
+    /// occurrences sharing a name are reported by the composer — which names the collision — instead of by
+    /// a dictionary complaining about a duplicate key.
     /// </para>
     /// <para>
     /// The result slot's producer is read from the allocated identifier of the last occurrence rather than
-    /// from the closed document's last node. Zero-padded numbering makes the two the same node today, but
-    /// the producer of a slot is the occurrence the author closed the graph with, and reading it from the
-    /// chain says so without depending on how the document happens to sort.
+    /// from the closed document's last node. The producer of a slot is the occurrence the author closed
+    /// the graph with, and reading it from the chain says so without depending on how the document happens
+    /// to sort — which, once explicit names exist, is no longer the authoring order at all.
     /// </para>
     /// </remarks>
-    internal static RunnableGraph Close(IReadOnlyList<LocalStageDescriptor> stages, ResultSlotId? slotId)
+    internal static RunnableGraph Close(IReadOnlyList<StageOccurrence> stages, ResultSlotId? slotId)
     {
-        if (stages.Count > LocalVocabulary.MaxAutoNamedPosition)
-        {
-            throw new InvalidOperationException(
-                string.Create(
-                    CultureInfo.InvariantCulture,
-                    $"A locally authored graph holds at most {LocalVocabulary.MaxAutoNamedPosition} occurrences, and this one holds {stages.Count}. Automatic node identifiers are numbered '{LocalVocabulary.AutoNamePrefix}0001' upwards and zero-padded to four digits so that a document's node order is its authoring order; a longer chain cannot be numbered that way, and naming occurrences explicitly is the registered-stage authoring surface's concern."));
-        }
-
-        NodeId[] ids = new NodeId[stages.Count];
-        Dictionary<NodeId, LocalStageDescriptor> bindings = new(stages.Count);
-
-        for (int index = 0; index < stages.Count; index++)
-        {
-            ids[index] = LocalVocabulary.AutoName(index + 1);
-            bindings.Add(ids[index], stages[index]);
-        }
-
+        NodeId[] ids = Allocate(stages);
         GraphFragment composed = FragmentOf(stages[0], ids[0]);
 
         for (int index = 1; index < stages.Count; index++)
@@ -98,24 +97,129 @@ internal static class LocalGraphBuilder
             composed = GraphFragmentComposer.Append(composed, FragmentOf(stages[index], ids[index]));
         }
 
-        ResultSlotDefinition[] slots = slotId is { } declared
-            ?
-            [
-                ResultSlotDefinition.Create(
-                    declared,
-                    LocalVocabulary.FoldResultContract,
-                    PortAddress.Create(ids[^1], LocalVocabulary.ResultPort)),
-            ]
-            : [];
+        Dictionary<NodeId, LocalStageDescriptor> bindings = new(stages.Count);
+
+        for (int index = 0; index < stages.Count; index++)
+        {
+            if (stages[index] is LocalStageDescriptor descriptor)
+            {
+                bindings.Add(ids[index], descriptor);
+            }
+        }
 
         GraphDocument document = GraphFragmentComposer.Close(
             composed,
             LocalVocabulary.AnonymousGraph,
             LocalVocabulary.FirstRevision,
-            [CapabilityToken.Nondeployable, LocalVocabulary.EphemeralIdentity],
-            slots);
+            Capabilities(stages),
+            Slots(stages[^1], ids[^1], slotId));
 
         return new RunnableGraph(document, GraphDocumentSerializer.Fingerprint(document), bindings);
+    }
+
+    /// <summary>Allocates the node identifier of every occurrence of a chain.</summary>
+    /// <param name="stages">The occurrences in authoring order.</param>
+    /// <returns>The identifiers, in the same positions.</returns>
+    /// <exception cref="InvalidOperationException">
+    /// An occurrence with no name of its own stands past <see cref="LocalVocabulary.MaxAutoNamedPosition"/>.
+    /// </exception>
+    /// <remarks>
+    /// The bound is checked per occurrence rather than over the whole chain, because it is a statement
+    /// about automatic numbering and not about length: a chain of ten thousand named occurrences numbers
+    /// nothing and breaks nothing.
+    /// </remarks>
+    private static NodeId[] Allocate(IReadOnlyList<StageOccurrence> stages)
+    {
+        NodeId[] ids = new NodeId[stages.Count];
+
+        for (int index = 0; index < stages.Count; index++)
+        {
+            if (stages[index].Name is { } declared)
+            {
+                ids[index] = declared;
+
+                continue;
+            }
+
+            int position = index + 1;
+
+            if (position > LocalVocabulary.MaxAutoNamedPosition)
+            {
+                throw new InvalidOperationException(
+                    string.Create(
+                        CultureInfo.InvariantCulture,
+                        $"An occurrence with no name of its own stands at position {position} of {stages.Count} in this chain, and automatic node identifiers reach position {LocalVocabulary.MaxAutoNamedPosition} at most. They are numbered '{LocalVocabulary.AutoNamePrefix}0001' upwards and zero-padded to four digits so that a document's node order is its authoring order; a longer chain cannot be numbered that way. Name the occurrences past that position explicitly, which the registered-stage authoring surface does."));
+            }
+
+            ids[index] = LocalVocabulary.AutoName(position);
+        }
+
+        return ids;
+    }
+
+    /// <summary>Collects the capability tokens the closed document declares.</summary>
+    /// <param name="stages">The occurrences in authoring order.</param>
+    /// <returns>The distinct tokens, in no particular order.</returns>
+    /// <remarks>
+    /// Two sources, and only two. A stage requires what its specification says it requires, which the
+    /// graph compiler's <c>undeclared-capability</c> rule makes mandatory rather than optional: a document
+    /// that declared less than its stages require would not validate against the catalog those stages came
+    /// from. An unnamed occurrence adds <see cref="CapabilityToken.EphemeralIdentity"/>, which is a fact
+    /// about the identifiers this closure just allocated and about nothing else. The order is the
+    /// document's to fix, so none is imposed here.
+    /// </remarks>
+    private static CapabilityToken[] Capabilities(IReadOnlyList<StageOccurrence> stages)
+    {
+        HashSet<CapabilityToken> declared = [];
+
+        for (int index = 0; index < stages.Count; index++)
+        {
+            StageOccurrence stage = stages[index];
+
+            for (int token = 0; token < stage.RequiredCapabilities.Count; token++)
+            {
+                declared.Add(stage.RequiredCapabilities[token]);
+            }
+
+            if (stage.Name is null)
+            {
+                declared.Add(LocalVocabulary.EphemeralIdentity);
+            }
+        }
+
+        return [.. declared];
+    }
+
+    /// <summary>Builds the result slot a closed graph declares, when it declares one.</summary>
+    /// <param name="terminal">The occurrence the author closed the graph with.</param>
+    /// <param name="id">The identifier allocated to it.</param>
+    /// <param name="slotId">The slot name, or <see langword="null"/> when the graph declares no result.</param>
+    /// <returns>The one slot, or an empty list.</returns>
+    /// <exception cref="InvalidOperationException">
+    /// A slot name was supplied for a terminal that declares no result port. That is unreachable through
+    /// the authoring types, whose result-bearing overloads accept only a result-bearing sink, and it is a
+    /// defect in this assembly rather than a mistake the author could make.
+    /// </exception>
+    /// <remarks>
+    /// The port and the contract come from the terminal's own declaration rather than from a constant,
+    /// because a registered stage names its result port and its result contract whatever it likes, and a
+    /// slot whose contract did not match the port's would be a <c>result-contract-mismatch</c> the moment
+    /// the document met the catalog.
+    /// </remarks>
+    private static ResultSlotDefinition[] Slots(StageOccurrence terminal, NodeId id, ResultSlotId? slotId)
+    {
+        if (slotId is not { } declared)
+        {
+            return [];
+        }
+
+        if (terminal.ResultPort is not { } port)
+        {
+            throw new InvalidOperationException(
+                $"The graph was closed under the result name '{declared}' by an occurrence of '{terminal.Stage}', which declares no result port to expose.");
+        }
+
+        return [ResultSlotDefinition.Create(declared, port.ResultContract, PortAddress.Create(id, port.Id))];
     }
 
     /// <summary>
@@ -131,17 +235,18 @@ internal static class LocalGraphBuilder
     /// is exposed by declaring a slot against the closed graph, not by wiring an edge to it.
     /// </para>
     /// <para>
-    /// The parameter contract and payload come from the occurrence rather than from a constant here,
-    /// because they are not the same for every shape: a buffer and an asynchronous stage carry the options
-    /// the author chose, and every other shape carries the empty object under the delegate-only contract.
+    /// The port names, the parameter contract, and the payload all come from the occurrence rather than
+    /// from constants here, because none of them is the same for every shape: a local buffer and a local
+    /// asynchronous stage carry the options the author chose under contracts of their own, and a
+    /// registered stage carries whatever its specification declares, under whatever names it declares them.
     /// </para>
     /// </remarks>
-    private static GraphFragment FragmentOf(LocalStageDescriptor stage, NodeId id)
+    private static GraphFragment FragmentOf(StageOccurrence stage, NodeId id)
     {
         StageNode node = StageNode.Create(id, stage.Stage, stage.ParameterContract, stage.Parameters);
 
-        PortId[] openInputs = stage.HasInput ? [LocalVocabulary.InputPort] : [];
-        PortId[] openOutputs = stage.HasOutput ? [LocalVocabulary.OutputPort] : [];
+        PortId[] openInputs = stage.InputPort is { } input ? [input] : [];
+        PortId[] openOutputs = stage.OutputPort is { } output ? [output] : [];
 
         return GraphFragment.OfStage(node, openInputs, openOutputs);
     }

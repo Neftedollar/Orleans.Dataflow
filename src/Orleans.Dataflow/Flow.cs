@@ -1,5 +1,6 @@
 using System.Globalization;
 using Orleans.Dataflow.Authoring;
+using Orleans.Dataflow.Serialization;
 
 namespace Orleans.Dataflow;
 
@@ -16,9 +17,11 @@ namespace Orleans.Dataflow;
 /// cannot disturb the first graph.
 /// </para>
 /// <para>
-/// A flow has no position and no identity. Node identifiers are allocated when a graph is closed, in
-/// authoring order, so the same flow becomes different occurrences in every graph it appears in — and,
-/// used twice in one graph, two disjoint sets of occurrences in that one.
+/// A flow has no position. Identifiers for its lambda occurrences are allocated when a graph is closed, in
+/// authoring order, so a flow of lambdas becomes different occurrences in every graph it appears in — and,
+/// used twice in one graph, two disjoint sets of occurrences in that one. A flow that carries a registered
+/// occurrence carries its name too, and a name is an identity rather than a position: such a flow composes
+/// into any number of graphs, but twice into one graph is a collision reported at closure.
 /// </para>
 /// <para>
 /// Operators are instance methods, per ADR 0004 section 2: an element-type mistake then reads as a
@@ -30,14 +33,14 @@ public sealed class Flow<TIn, TOut>
 {
     /// <summary>Initializes a new instance of the <see cref="Flow{TIn, TOut}"/> class.</summary>
     /// <param name="stages">The occurrences this flow contributes, in authoring order.</param>
-    internal Flow(IReadOnlyList<LocalStageDescriptor> stages) => Stages = stages;
+    internal Flow(IReadOnlyList<StageOccurrence> stages) => Stages = stages;
 
     /// <summary>Gets the occurrences this flow contributes to a graph, in authoring order.</summary>
     /// <value>
     /// An empty list for the identity flow <see cref="Flow.For{T}"/> returns, which contributes no
     /// occurrence to a graph because it does nothing to the elements.
     /// </value>
-    internal IReadOnlyList<LocalStageDescriptor> Stages { get; }
+    internal IReadOnlyList<StageOccurrence> Stages { get; }
 
     /// <summary>Extends this flow with a mapping stage.</summary>
     /// <typeparam name="TNext">The element type the mapping produces.</typeparam>
@@ -163,6 +166,37 @@ public sealed class Flow<TIn, TOut>
         ArgumentNullException.ThrowIfNull(flow);
 
         return new Flow<TIn, TNext>(LocalStageChain.Concat(Stages, flow.Stages));
+    }
+
+    /// <summary>Extends this flow with one named occurrence of a registered stage.</summary>
+    /// <typeparam name="TNext">The element type the registered stage produces.</typeparam>
+    /// <param name="flow">The typed handle of the registered stage.</param>
+    /// <param name="occurrenceName">The author-stable name of this occurrence.</param>
+    /// <param name="parameters">The configuration this occurrence carries, in canonical form.</param>
+    /// <returns>A new flow; this one is unchanged.</returns>
+    /// <exception cref="ArgumentNullException">
+    /// <paramref name="flow"/> or <paramref name="occurrenceName"/> is <see langword="null"/>.
+    /// </exception>
+    /// <exception cref="ArgumentException">
+    /// <paramref name="occurrenceName"/> is not a valid single-segment node identifier, or
+    /// <paramref name="parameters"/> is the default value or the JSON null value.
+    /// </exception>
+    /// <remarks>
+    /// A flow holding a named occurrence is reusable in the same sense every flow is, with one consequence
+    /// worth stating: composing it twice into one graph contributes the name twice, and two occurrences of
+    /// one graph may not share a name. An explicit name is an identity rather than a position, so the
+    /// second use is a collision reported at closure rather than a second numbering.
+    /// </remarks>
+    public Flow<TIn, TNext> Via<TNext>(
+        RegisteredFlow<TOut, TNext> flow,
+        string occurrenceName,
+        CanonicalJsonValue parameters)
+    {
+        ArgumentNullException.ThrowIfNull(flow);
+
+        return new Flow<TIn, TNext>(LocalStageChain.Append(
+            Stages,
+            RegisteredAttachment.Occurrence(flow.Specification, occurrenceName, parameters)));
     }
 
     /// <summary>Returns a one-line diagnostic summary of this flow.</summary>

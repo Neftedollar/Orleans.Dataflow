@@ -29,6 +29,20 @@ public sealed class FingerprintAndSlotTests
     }
 
     [Fact]
+    public void TheRepresentativeLambdaGraphHasThePinnedFingerprint()
+    {
+        // Every other fingerprint claim in this suite is relative: two graphs agree, or they differ. That
+        // catches a change of shape and cannot catch a change of encoding — a different capability set, a
+        // different numbering, a different port name would move every authored fingerprint at once and
+        // every relative assertion would still pass. This is the absolute pin, and it is meant to be
+        // updated deliberately rather than silently: a slot binds to this value, so moving it invalidates
+        // every slot any caller is holding across the change.
+        Assert.Equal(
+            "sha256:3e947c06b0c47f3380e0f79ab896a46ab2d0e1b4e3679edeecd2016f98cd71b6",
+            Counted("processed").Fingerprint.ToString());
+    }
+
+    [Fact]
     public void ADocumentRoundTripsThroughItsCanonicalBytes()
     {
         RunnableGraph graph = Counted("processed");
