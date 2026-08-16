@@ -4,7 +4,7 @@ This roadmap orders the work by architectural risk. Dates are intentionally abse
 
 C# is the primary frontend. The F# frontend is an equal API built over the same semantic core, and it starts only after the C# completion gate (M6) passes an independent review.
 
-## M0 — Definition core
+## M0 — Definition core (closed 2026-08-16)
 
 Deliverables:
 
@@ -23,7 +23,7 @@ Exit criteria:
 - invalid ports, types, duplicate IDs, missing registrations, invalid cycles, and incompatible versions fail before execution;
 - no delegate, closure, runtime service, CLR assembly-qualified type, task, grain reference, or channel enters the durable graph document.
 
-## M1 — C# authoring API
+## M1 — C# authoring API (closed 2026-08-17)
 
 Deliverables:
 
