@@ -301,6 +301,46 @@ public sealed class StageNodeTests
     }
 
     [Fact]
+    public void ANullParameterPayloadIsRejected()
+    {
+        ArgumentException exception = Assert.Throws<ArgumentException>(
+            "parameters",
+            () => StageNode.Create(SampleId, SampleStage, SampleParameterContract, CanonicalJsonValue.Parse("null")));
+
+        Assert.Contains("JSON null value", exception.Message, StringComparison.Ordinal);
+        Assert.Contains("parameter payload", exception.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void ANullExecutionPolicyPayloadIsRejected()
+    {
+        ArgumentException exception = Assert.Throws<ArgumentException>(
+            "executionPolicy",
+            () => StageNode.Create(
+                SampleId,
+                SampleStage,
+                SampleParameterContract,
+                SampleParameters,
+                ContractReference.Create(ContractId.Create("policy"), 1),
+                CanonicalJsonValue.Parse("null")));
+
+        Assert.Contains("JSON null value", exception.Message, StringComparison.Ordinal);
+        Assert.Contains("execution policy payload", exception.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void ANullValueInsideAPayloadIsAccepted()
+    {
+        StageNode node = StageNode.Create(
+            SampleId,
+            SampleStage,
+            SampleParameterContract,
+            CanonicalJsonValue.Parse("""{"a":null}"""));
+
+        Assert.Equal("""{"a":null}""", node.Parameters.ToString());
+    }
+
+    [Fact]
     public void ToStringOmitsTheParameterPayload()
     {
         StageNode node = StageNode.Create(SampleId, SampleStage, SampleParameterContract, SampleParameters);

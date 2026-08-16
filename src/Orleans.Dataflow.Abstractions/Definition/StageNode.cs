@@ -175,6 +175,13 @@ public sealed record class StageNode
                 nameof(executionPolicy));
         }
 
+        if (IsJsonNull(executionPolicy))
+        {
+            throw new ArgumentException(
+                DescribeNullPayload("execution policy payload"),
+                nameof(executionPolicy));
+        }
+
         return new StageNode(id, stage, parameterContract, parameters, executionPolicyContract, executionPolicy);
     }
 
@@ -215,7 +222,32 @@ public sealed record class StageNode
                 DescribeDefaultMember(nameof(CanonicalJsonValue), "parameter payload"),
                 nameof(parameters));
         }
+
+        if (IsJsonNull(parameters))
+        {
+            throw new ArgumentException(DescribeNullPayload("parameter payload"), nameof(parameters));
+        }
     }
+
+    /// <summary>
+    /// Determines whether a payload is the JSON null value.
+    /// </summary>
+    /// <param name="payload">A created payload.</param>
+    /// <returns><see langword="true"/> when the canonical form is the literal <c>null</c>.</returns>
+    private static bool IsJsonNull(CanonicalJsonValue payload) =>
+        payload.CanonicalUtf8Bytes.Span.SequenceEqual("null"u8);
+
+    /// <summary>Builds the message for a payload that is the JSON null value.</summary>
+    /// <param name="role">The payload's role in the node, in prose.</param>
+    /// <returns>A message naming the rule and the modeling alternative.</returns>
+    /// <remarks>
+    /// The rule lives in the model rather than only in the serializer because format version 1 encodes an
+    /// absent execution policy as the literal <c>null</c> at a payload position: a node whose payload is
+    /// itself the JSON null value would be a document with no byte form of its own, and a document either
+    /// has exactly one byte form or it is not a document.
+    /// </remarks>
+    private static string DescribeNullPayload(string role) =>
+        $"A {nameof(StageNode)} {role} must not be the JSON null value: the format has no byte form for it, because the literal null at a payload position encodes an absent execution policy. Model the empty case inside the payload schema, as an empty object or an explicit member.";
 
     /// <summary>
     /// Returns a one-line diagnostic summary of this node.

@@ -97,7 +97,12 @@ with the features that need them.
    a junction stage, not edge multiplicity).
 7. Execution policy contract and payload are present together or absent
    together on a node.
-8. The document is closed under its own references; nothing points outside.
+8. No payload is the JSON `null` value: format version 1 encodes an absent
+   execution policy as the literal `null` at a payload position, so a node
+   whose payload is itself JSON `null` would have no byte form of its own.
+   Empty cases are modeled inside the payload schema (an empty object or an
+   explicit member).
+9. The document is closed under its own references; nothing points outside.
 
 Structural invariants do not require a catalog. A structurally valid document
 can still be semantically invalid against a catalog.
@@ -143,30 +148,116 @@ as integers; capabilities as an array of token strings in ordinal order;
 `executionPolicyContract` and `executionPolicy` are `null` together or
 present together.
 
+The envelope uses fixed schema property order; embedded payloads use ordinal
+key order (ADR 0003). The envelope bytes are therefore not themselves a
+`CanonicalJsonValue`, and the two canonical disciplines never mix.
+
+Readers are strict: only canonical bytes are accepted. Unknown format
+versions fail before any other rule; unexpected, missing, or misordered
+properties, non-canonical payloads, whitespace, and a byte order mark are
+all rejected with a diagnostic naming the violated rule. One document has
+exactly one byte form, so the SHA-256 `GraphFingerprint` over those bytes is
+an identity, not merely a checksum.
+
 ## Stage catalog contracts
 
 Deployment code registers a closed set of catalogs at startup; graph data can
 never cause code loading.
 
-```text
-StageSpecification
-  StageRef
-  InputPorts    list of PortSpecification { PortId, ElementContract, Optional }
-  OutputPorts   list of PortSpecification { PortId, ElementContract, Ignorable }
-  ResultPorts   list of ResultPortSpecification { PortId, ResultContract }
-  ParameterContract   ContractReference
-  RequiredCapabilities  set of capability tokens
-  Validator     parameter-payload validation hook
-```
+Types (namespace `Orleans.Dataflow.Definition`):
 
-A catalog exposes lookup by `StageRef` and enumeration for fingerprinting.
-The catalog fingerprint (SHA-256 over the canonical serialization of all
-specifications) supports the later cross-silo compatibility checks; M0 only
-defines and tests the fingerprint's determinism.
+- `InputPortSpecification`: `PortId Id`, `ContractReference ElementContract`,
+  `bool IsOptional`.
+- `OutputPortSpecification`: `PortId Id`, `ContractReference ElementContract`,
+  `bool IsIgnorable`.
+- `ResultPortSpecification`: `PortId Id`, `ContractReference ResultContract`.
+- `StageSpecification` (sealed, factory-validated): `StageRef Stage`, the
+  three port lists, `ContractReference ParameterContract`,
+  `IReadOnlyList<CapabilityToken> RequiredCapabilities`, and an optional
+  `IStageParameterValidator`. Port identifiers are unique across the whole
+  stage (inputs, outputs, and result ports share one namespace, so a
+  diagnostic can name a port without qualifying its direction). Lists are
+  canonically ordered by construction (ordinal by port id / token);
+  capabilities are distinct.
+- `IStageParameterValidator`: one method
+  `IReadOnlyList<string> Validate(CanonicalJsonValue parameters)` returning
+  violation fragments (empty means valid). Implementations must be pure and
+  fast; they see only the payload.
+- `IStageCatalog`:
+  `bool TryGetSpecification(StageRef stageRef, out StageSpecification s)`
+  plus `IReadOnlyList<StageSpecification> Specifications` in canonical order
+  (ordinal by provider, stage, major version).
+- `StageCatalog` (sealed): `Create(IEnumerable<StageSpecification>)`,
+  duplicate `StageRef` rejected, canonical order by construction.
+- `CatalogFingerprint`: SHA-256 over the catalog's canonical serialization; a
+  distinct type from `GraphFingerprint` so the two identity domains cannot be
+  confused.
+
+### Catalog envelope (format version 1)
+
+Same encoding rules as the document envelope (ADR 0003; fixed schema order,
+camelCase names). Serialization and fingerprinting only in M0; a catalog
+reader arrives with cross-silo negotiation (M3+).
+
+| Object | Property order |
+|---|---|
+| Catalog | `formatVersion`, `specifications` |
+| `StageSpecification` | `stageRef`, `inputPorts`, `outputPorts`, `resultPorts`, `parameterContract`, `requiredCapabilities` |
+| `InputPortSpecification` | `portId`, `elementContract`, `isOptional` |
+| `OutputPortSpecification` | `portId`, `elementContract`, `isIgnorable` |
+| `ResultPortSpecification` | `portId`, `resultContract` |
+
+The parameter validator is behavior and is never serialized: the fingerprint
+covers the declared shape only. Two catalogs whose specifications agree but
+whose validators differ share a fingerprint; validator behavior is a
+deployment concern, and this limit is stated rather than hidden.
 
 Runtime factories are part of the runtime plane and are intentionally absent
 from the M0 catalog contract; the local runtime milestone (M2) adds them
 without changing the definition contracts above.
+
+## Graph compiler
+
+Namespace `Orleans.Dataflow.Compilation`. M0 scope is validation only;
+runtime compilation output arrives with the local runtime.
+
+- `GraphValidationDiagnostic` (sealed record): `string Rule` (stable kebab-case
+  identifier), `string Message`, `string? Subject` (the offending identity's
+  text form, when one exists).
+- `GraphValidationReport` (sealed): `bool IsValid`,
+  `IReadOnlyList<GraphValidationDiagnostic> Diagnostics`, and the validated
+  `GraphDocument`.
+- `GraphCompiler.Validate(GraphDocument, IStageCatalog)` returns the report;
+  it never throws for semantic problems.
+
+Diagnostic rules (stable identifiers; each is documented and tested):
+
+| Rule | Meaning |
+|---|---|
+| `unknown-stage` | A node's `StageRef` resolves to nothing in the catalog. |
+| `unknown-output-port` | An edge origin names a port the specification does not declare as an output. |
+| `unknown-input-port` | An edge target names a port the specification does not declare as an input. |
+| `unknown-result-port` | A slot producer names a port the specification does not declare as a result port. |
+| `element-contract-mismatch` | An edge connects an output and an input whose element contracts differ. |
+| `result-contract-mismatch` | A slot's declared contract differs from the specification's result-port contract. |
+| `parameter-contract-mismatch` | A node's declared parameter contract differs from the specification's. |
+| `invalid-parameters` | The specification's validator rejected the payload (one diagnostic per fragment). |
+| `unconnected-input-port` | A non-optional input port has no edge. |
+| `unconnected-output-port` | A non-ignorable output port has no edge. |
+| `undeclared-capability` | A required capability of a used stage is not declared by the document. |
+
+Rules gate on their own inputs the same way structural validation does: an
+`unknown-stage` node contributes no port, contract, parameter, or capability
+diagnostics of its own, so the report carries no cascade noise. Diagnostics
+appear in document order (nodes, then edges, then result slots, then
+capabilities), which makes the report deterministic. Format-version checking
+is not a compiler rule: a `GraphDocument` instance always carries the current
+version by construction, and byte-level version rejection belongs to the
+reader.
+
+Execution-policy contracts are not validated against specifications in M0;
+the specification does not yet declare policy contracts. This is recorded in
+"Not in M0".
 
 ## Not in M0
 
@@ -174,6 +265,8 @@ without changing the definition contracts above.
 - cycle liveness rules;
 - checkpoint/durability metadata in the document;
 - heterogeneous catalog placement;
+- execution-policy contract validation against stage specifications;
+- a catalog envelope reader (serialization and fingerprinting only);
 - any runtime execution.
 
 ## Implementation checkpoints

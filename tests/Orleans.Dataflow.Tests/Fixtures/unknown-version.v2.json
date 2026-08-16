@@ -1,0 +1,1 @@
+{"formatVersion":2,"graphId":"minimal-graph","revision":1,"capabilities":[],"nodes":[{"nodeId":"source","stageRef":{"providerId":"orleans-core","stageId":"from-source","majorVersion":1},"parameterContract":{"contractId":"source-parameters","majorVersion":1},"parameters":{"capacity":16},"executionPolicyContract":null,"executionPolicy":null}],"edges":[],"resultSlots":[]}
