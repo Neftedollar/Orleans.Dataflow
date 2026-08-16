@@ -17,7 +17,9 @@ Graph documents serialize to **canonical JSON** with the following rules.
 
 ### Encoding
 
-- UTF-8 without BOM, minified (no insignificant whitespace);
+- UTF-8 without BOM, minified (no insignificant whitespace); an input byte
+  order mark is rejected, not stripped, and text with no UTF-8 encoding (an
+  unpaired surrogate) is rejected, never replacement-substituted;
 - strings use minimal JSON escaping with a fixed escape table: `"` `\` and
   control characters only, control characters as lowercase `\u00xx`; no
   escaping of non-ASCII (raw UTF-8 bytes);
