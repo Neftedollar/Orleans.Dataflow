@@ -93,7 +93,11 @@ with the features that need them.
 4. `ResultSlotId` values are unique.
 5. At most one edge terminates at any given input `PortAddress` (fan-in is a
    junction stage, not edge multiplicity).
-6. The document is closed under its own references; nothing points outside.
+6. At most one edge originates at any given output `PortAddress` (fan-out is
+   a junction stage, not edge multiplicity).
+7. Execution policy contract and payload are present together or absent
+   together on a node.
+8. The document is closed under its own references; nothing points outside.
 
 Structural invariants do not require a catalog. A structurally valid document
 can still be semantically invalid against a catalog.
