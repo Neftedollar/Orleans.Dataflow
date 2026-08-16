@@ -28,7 +28,7 @@ Every row starts at **Research**. Nothing in this matrix currently claims implem
 | Reusable `Flow<TIn,TOut>` composition | P0 | M0 | Implemented | Reusing one fragment creates independent node identities and runtime state. |
 | Closed runnable graphs | P0 | M0 | Research | Validation can distinguish open ports from a materializable graph. |
 | Named graph, stage, port, and revision identity | P0 | M0 | Implemented | Deterministic serialization, collision checks, and compatible revision rules. |
-| Runtime materialization | P0 | M2 | Research | Each run allocates independent runtime resources and exposes completion. |
+| Runtime materialization | P0 | M2 | Implemented | Each run allocates independent runtime resources and exposes completion. |
 | Typed result slots | P1 | M2 | Research | Source, flow, sink, and lifecycle results are declared as typed named slots and resolved per run without persisting runtime objects; a run rejects slots from another graph identity, revision, or import scope. |
 | Named multiple results | P1 | M4 | Research | Results remain type-safe and versionable across distributed execution. |
 | Explicit fan-in/fan-out graph construction | P1 | M4 | Research | All ports are connected exactly once unless a junction contract states otherwise. |
@@ -47,14 +47,14 @@ Every row starts at **Research**. Nothing in this matrix currently claims implem
 | Credit protocol across Orleans boundaries | P0 | M3 | Research | Grain calls or stream publication are not mistaken for downstream demand. |
 | Partition-aware placement | P1 | M3 | Research | Partition ownership, rebalance, ordering, and failover are specified. |
 | Pause, resume, drain, shutdown, and abort | P1 | M2 | Research | Each control has distinct state transitions and in-flight behavior. |
-| Kill switch and external shutdown control | P1 | M2 | Research | Single-run control resolves through a result slot; a switch shared across runs is a separate documented contract. |
+| Kill switch and external shutdown control | P1 | M2 | Implemented | Single-run control is a RunHandle intrinsic (ADR 0004): shutdown drains, disposal cancels; a switch shared across runs is a separate documented contract. |
 
 ## Lifecycle and failure
 
 | Capability | Tier | Target | Status | Required semantic proof |
 |---|---:|---:|---|---|
-| Completion propagation | P0 | M2 | Research | Downstream completion and upstream resource release are deterministic. |
-| Failure propagation | P0 | M2 | Research | Downstream receives failure; upstream receives cancellation unless recovery intercepts it. |
+| Completion propagation | P0 | M2 | Implemented | Downstream completion and upstream resource release are deterministic. |
+| Failure propagation | P0 | M2 | Implemented | Downstream receives failure; upstream receives cancellation unless recovery intercepts it. |
 | Downstream cancellation | P0 | M2 | Research | Early sinks cancel upstream and release resources. |
 | Cancellation of async work | P0 | M2 | Research | Stage cancellation reaches `Task`, `ValueTask`, and later F# `Async` adapters. |
 | Supervision: stop | P1 | M5 | Research | The failing stage fails the defined section or graph. |

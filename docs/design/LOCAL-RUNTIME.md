@@ -39,9 +39,28 @@ on every terminal path.
 
 Shutdown and cancellation are distinct on purpose: shutdown is "stop pulling
 and keep what you have" (the seed of drain), cancellation is "abandon the
-run". No element is observed after a failing one. `DisposeAsync` awaits the
-run's termination, never throws for the cancellation it caused itself, and
-is idempotent.
+run". No element is observed after a failing one. Implementation-refined
+rules, all tested:
+
+- `DisposeAsync` and `ShutdownAsync` never throw at all — teardown must not
+  replace the caller's own exception under `await using`; the outcome stays
+  readable on `Completion` and the result task. Both await termination and
+  are idempotent.
+- A token already canceled at materialization still yields a handle: the
+  run starts, observes the token before the first pull, and ends Canceled
+  without ever touching the source. Cancellation is an outcome of a run,
+  not a failure of materialization.
+- The source enumerator is obtained lazily at the first pull and disposed
+  on every terminal path. A `Dispose` that throws faults an
+  otherwise-successful run but never replaces an existing failure or a
+  requested cancellation; a `GetEnumerator` returning null is reported as a
+  sentence, not a `NullReferenceException`.
+- The loop runs on a dedicated long-running thread: stages are synchronous
+  author delegates and pulls are synchronous calls, either may block
+  indefinitely, and a blocked thread-pool thread would starve the process.
+- Fresh state per run means the aggregate seed; state captured inside the
+  author's own lambdas is the author's to keep fresh, and the limit is
+  stated rather than implied.
 
 ## Slot resolution
 
