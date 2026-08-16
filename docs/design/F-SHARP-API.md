@@ -239,9 +239,13 @@ overload families) into a package whose entire reason to exist is not
 having them. A C# fluent API can never be idiomatic F#; the algebra can
 serve both because it is functions over immutable values. Where a piece the
 F# facade needs is currently internal to the C# package (the local stage
-vocabulary and binding-table types), the answer is a public language-neutral
-seam added when M7 starts — never `InternalsVisibleTo` to the F# package
-and never a detour through the C# fluent types.
+vocabulary and binding-table types), the answer at M7 is a language-neutral
+seam: public when it is a genuine extension contract third parties should
+also build against, or friend-assembly access (`InternalsVisibleTo` to the
+F# package) when the surface should stay private to the package family —
+the two packages ship from one repository in lockstep, so the friend
+coupling is safe. What is never acceptable is a detour through the C#
+fluent types.
 
 Where types cross the shared graph core, use CLR-neutral opaque types and immutable descriptors. Keep F# records and discriminated unions inside the F# package unless their .NET representation and compatibility policy are deliberately public.
 
