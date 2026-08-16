@@ -28,7 +28,8 @@ whole vocabulary.
 
 ## Representative usage
 
-Linear pipeline with a materialized result:
+Linear pipeline with a materialized result (the compiling form; see
+[ADR 0004](../architecture/0004-csharp-api-baseline.md)):
 
 ```csharp
 Source<OrderCreated> orders = Source.From(orderEvents);
@@ -40,11 +41,17 @@ Flow<OrderCreated, OrderDocument> normalize =
 
 RunnableGraph graph = orders
     .Via(normalize)
-    .To(Sink.Fold(0L, (count, _) => count + 1), out ResultSlot<long> processed);
+    .To(s => s.Fold(0L, (count, _) => count + 1), "processed", out ResultSlot<long> processed);
 
 await using RunHandle run = await host.MaterializeAsync(graph, cancellationToken);
 long count = await run.GetValueAsync(processed, cancellationToken);
 ```
+
+Counter-example, kept deliberately: `To(Sink.Fold(0L, (count, _) => count + 1), ...)`
+does not compile (`CS0411` — the element type appears only as an implicit
+lambda parameter, and C# does not flow the outer call's element type inward).
+The sink-factory lambda pins the element type from the source, which is why
+the `s => s.Fold(...)` form needs zero type arguments and zero annotations.
 
 Reuse of one flow in two graphs (independent node identities per import):
 
@@ -87,23 +94,20 @@ Flow<OrderDocument, PricedOrder> price =
 
 ## Result slots in linear composition
 
-ADR 0002 leaves the exposure shape open. Three candidates go to the compile
-prototype; the ADR picks one:
+Decided by [ADR 0004](../architecture/0004-csharp-api-baseline.md) on compile
+evidence: the hybrid of a typed carrier and a mandatory slot name.
+`Sink.Fold` and every result-bearing factory return
+`SinkWithResult<TIn, TResult>`; `To` offers three instance overloads —
+`To(Sink<T>)`, the tuple form `To(sinkWithResult, "name")`, and the fluent
+form `To(sinkWithResult, "name", out ResultSlot<TResult> slot)` — plus
+sink-factory lambda variants (`To(s => s.Fold(...), "name", out var slot)`)
+that make inference total. The mandatory name separates overloads by arity
+(dropping a result is always explicit), and gives every slot an
+author-stable durable identity instead of a positional machine name.
 
-1. **`out` parameter at attachment** (currently favored):
-   `source.Via(flow).To(Sink.Fold(...), out ResultSlot<long> total)`.
-   Reads fluently, binds the slot to the sink's occurrence, keeps
-   `RunnableGraph` non-generic. Requires `To` overloads per result-bearing
-   sink family.
-2. **Typed carrier**: `Sink.Fold` returns `SinkWithResult<TIn, TResult>`;
-   `To` on that type returns `(RunnableGraph Graph, ResultSlot<TResult> Slot)`.
-   No `out`, but tuple returns read worse in fluent chains.
-3. **Post-hoc exposure**: `GraphBuilder.ExposeResult(occurrence, name)`.
-   Always available in the full graph builder; too ceremonial as the only
-   path for linear pipelines.
-
-Whichever wins: attaching one sink value twice yields two distinct slots, and
-a slot binds to an occurrence in a graph, never to the sink value itself.
+Attaching one sink value twice yields two distinct slots (two names), and a
+slot binds to the fingerprint of the document that declared it, never to the
+sink value itself.
 
 ## Delegates and deployability
 
@@ -124,16 +128,22 @@ shutdown/kill-switch controls (slots as well), and `IAsyncDisposable` for
 deterministic teardown. `host.MaterializeAsync(graph)` is the only way work
 starts; materializing the same graph twice yields independent runs.
 
-## Open questions for the M1 ADR
+## Open questions
 
-1. Result-slot exposure shape (candidates above).
-2. `Flow.For<T>()` versus `Flow.Create<T>()` versus implicit flow start on
-   `Source` only.
-3. Whether `PipelineDefinition` creation is `graph.AsPipeline(id, revision)`
+Resolved by [ADR 0004](../architecture/0004-csharp-api-baseline.md):
+result-slot exposure (hybrid carrier + mandatory name), `Flow.For<T>()`
+naming, instance methods over extensions, non-generic `RunnableGraph`,
+slot-to-run binding via `GraphFingerprint`, completion/shutdown as
+`RunHandle` intrinsics, and the `ephemeral-identity`/`nondeployable`
+capability split.
+
+Still open:
+
+1. Whether `PipelineDefinition` creation is `graph.AsPipeline(id, revision)`
    or a `Pipeline.Define(...)` static — and where deployability validation
    surfaces in the signature.
-4. Exact option-record set for M2 operators and their required members.
-5. Namespace layout: everything in `Orleans.Dataflow` versus splitting
+2. Exact option-record set for M2 operators and their required members.
+3. Namespace layout: everything in `Orleans.Dataflow` versus splitting
    operator extensions into `Orleans.Dataflow.Operators`.
 
 ## Constraints carried from the F# frontend

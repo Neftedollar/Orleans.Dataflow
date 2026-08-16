@@ -3,6 +3,7 @@
 - Status: Accepted
 - Date: 2026-08-16
 - Amends: [ADR 0001](0001-definition-runtime-authoring-planes.md) (materialized-value shape)
+- Amended by: [ADR 0004](0004-csharp-api-baseline.md) (slot-to-run binding is the graph fingerprint; completion and shutdown are run intrinsics)
 
 ## Context
 
