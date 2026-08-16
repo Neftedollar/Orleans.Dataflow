@@ -22,6 +22,7 @@ This file is the durable working agreement for automated contributors. It applie
 ## Engineering standard
 
 - Source code, comments, XML documentation, tests, commit messages, and repository documentation are written in English.
+- Test method names use underscore-free PascalCase. CA1707 and the rest of the `latest-recommended` analyzer set stay enabled for test projects; the analyzer baseline is not weakened to admit a naming convention.
 - Prefer ordinary, discoverable C# and .NET patterns over clever metaprogramming.
 - Public API changes require documentation and tests in the same checkpoint.
 - Define completion, failure, cancellation, ordering, backpressure, buffering, and durability semantics explicitly. Do not rely on accidental runtime behavior.

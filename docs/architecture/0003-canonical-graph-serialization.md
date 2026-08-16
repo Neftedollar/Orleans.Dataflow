@@ -38,7 +38,11 @@ Graph documents serialize to **canonical JSON** with the following rules.
   written, in that order, with no omitted defaults;
 - collections have canonical order: nodes sort by `NodeId`, edges by
   (`From.Node`, `From.Port`, `To.Node`, `To.Port`), result slots by
-  `ResultSlotId`, capabilities by token, all ordinal;
+  `ResultSlotId`, capabilities by token, all ordinal. Ordinal means ordinal
+  comparison of the canonical string form; for `NodeId` that is the full
+  `/`-joined path text, not a segment-wise comparison (`a-b` sorts before
+  `a/b` because `-` precedes `/` in code-point order, and that is fine —
+  canonical order only has to be total, deterministic, and documented);
 - parameter and execution-policy payloads are embedded JSON values written by
   the same canonical writer and constrained to the same rules (object keys in
   ordinal order for payloads, since payload schemas are provider-defined);
