@@ -1,0 +1,28 @@
+## Build output
+bin/
+obj/
+[Bb]uild/
+[Bb]uild[Ll]og.*
+
+## Test results and coverage
+TestResults/
+*.trx
+coverage/
+*.coverage
+*.coveragexml
+
+## IDE files
+.vs/
+.vscode/
+.idea/
+*.user
+*.suo
+*.userosscache
+*.sln.docstates
+*.DotSettings.user
+
+## NuGet and local tooling
+packages/
+*.nupkg
+*.snupkg
+artifacts/

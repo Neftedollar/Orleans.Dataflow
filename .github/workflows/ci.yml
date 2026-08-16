@@ -1,0 +1,35 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      CI: true
+      DOTNET_CLI_TELEMETRY_OPTOUT: 1
+      DOTNET_NOLOGO: true
+      TESTINGPLATFORM_TELEMETRY_OPTOUT: 1
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Set up .NET
+        uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6.0.0
+        with:
+          dotnet-version: 10.0.400
+      - name: Restore
+        run: dotnet restore Orleans.Dataflow.slnx --configfile NuGet.Config
+      - name: Build
+        run: dotnet build Orleans.Dataflow.slnx --no-restore --configuration Release
+      - name: Test
+        run: dotnet test Orleans.Dataflow.slnx --no-build --no-restore --configuration Release

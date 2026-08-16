@@ -1,0 +1,9 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <Description>Typed dataflow authoring and runtime APIs for Microsoft Orleans.</Description>
+    <GenerateDocumentationFile>true</GenerateDocumentationFile>
+  </PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="../Orleans.Dataflow.Abstractions/Orleans.Dataflow.Abstractions.csproj" />
+  </ItemGroup>
+</Project>
