@@ -133,6 +133,52 @@ run, cancels the other in-flight callbacks, and no later element starts.
 `ParallelismOptions.MaxConcurrency >= 1` required. `MaxConcurrency = 1`
 ordered is semantically the sequential async map.
 
+## Checkpoint 3 contract (operator breadth and core adapters) — design ahead of code
+
+All checkpoint-3 stages are synchronous local stages and fuse per the
+checkpoint-2 rule; none introduces a boundary.
+
+- **Stateful per-run operator state** (scan, take, skip, distinct) is
+  allocated per materialization, like the aggregate seed; the invariant
+  "fresh state per run, captured lambda state is the author's" extends
+  unchanged.
+- **Operators**: `Scan` (emits each intermediate state; seed not emitted),
+  `Take(n)`/`Skip(n)` (n >= 0; Take(0) completes immediately after start),
+  `TakeWhile`/`SkipWhile` (exclusive boundary per the naming rules;
+  `TakeThrough` inclusive), `Distinct()` (bounded by an explicit required
+  capacity — `Distinct(DistinctOptions)` with `MaxTrackedKeys` and a
+  documented eviction rejection: exceeding the bound faults the run, because
+  silent unbounded key tracking is forbidden and silent eviction changes
+  semantics; relaxations arrive with the deduplication policies of M4).
+- **Early completion**: `Take` reaching its bound completes the run the way
+  a source end does — upstream segments observe downstream completion and
+  stop pulling; the source's enumerator is released. This is the first
+  downstream-driven completion, and it flips the matrix row "Downstream
+  cancellation" only when the release is proven by test.
+- **Sources**: `Source.Empty<T>()`, `Source.Single(value)`,
+  `Source.Repeat(value, count)` (bounded; unbounded repeat arrives only
+  together with `Take`-style bounds and is still spelled with an explicit
+  count or a `Take`), `Source.Range(start, count)`, `Source.FromTask(task)`
+  (one element or the task's failure), `Source.Failed<T>(exception)`,
+  `Source.Unfold(seed, generator)` (generator returns null/none to
+  complete; bounded by construction only through its own logic — documented
+  as author-bounded).
+- **Sinks**: `Sink.ForEach(Action<T>)` (awaited per element, the sequential
+  callback boundary), `Sink.ForEachAsync(ParallelismOptions, callback)`
+  (bounded-parallel callback with the async-stage semantics),
+  `Sink.First<T>()`/`Sink.Count<T>()` as result-bearing sinks
+  (`First` completes the run early like `Take(1)` and faults on an empty
+  source with a documented exception; `FirstOrDefault` variant returns the
+  default honestly).
+- **`Choose` naming is an open question**: C# has no idiomatic
+  option-returning map; `Where`+`Select` covers the semantics today, F#'s
+  `Flow.choose` arrives with the F# frontend over the algebra, and a C#
+  spelling (nullable-based pair `Choose`/`ChooseValue` or a tuple form) is
+  decided in M4 with the operator-breadth ADR rather than guessed now.
+- **Controllable time** stays out: the first time-dependent operator (M4
+  timing group) brings the clock abstraction with it; nothing in
+  checkpoint 3 reads a clock.
+
 **Terminal semantics extend unchanged**: shutdown drains boundaries (a
 buffer's contents are delivered, in-flight async callbacks are awaited,
 then the run completes with what it has); cancellation abandons buffered
