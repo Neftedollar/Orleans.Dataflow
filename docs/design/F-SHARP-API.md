@@ -249,6 +249,39 @@ fluent types.
 
 Where types cross the shared graph core, use CLR-neutral opaque types and immutable descriptors. Keep F# records and discriminated unions inside the F# package unless their .NET representation and compatibility policy are deliberately public.
 
+### Seam inventory (from the compile prototype, 2026-08-16)
+
+An algebra-bound F# facade was built against the real assembly and produced
+byte-identical documents to the C# fluent facade (fingerprints equal,
+runtime-verified), proving the algebra is the sufficient shared substrate.
+What the facade could NOT do, and therefore what the M7 seam must open
+(friend-assembly access was proven to cover all of it):
+
+1. construct `RunnableGraph` (internal constructor) — `Source.toSink` must
+   return the shared closed-graph value;
+2. mint `ResultSlot<'T>` with the authoring nonce (internal factory; the
+   nonce is the third slot component — without it F# graphs would be
+   strictly less safe than C# ones);
+3. populate the local binding table (`LocalStageDescriptor` and friends are
+   internal — the deepest blocker: an F#-authored lambda graph is
+   un-materializable by construction);
+4. share the local vocabulary and closure rules (`LocalVocabulary`,
+   `LocalGraphBuilder`) — the prototype re-derived them by hand and matched
+   byte-for-byte, but nothing keeps two copies agreeing; the seam must make
+   drift impossible, not unlikely.
+
+Findings that constrain the C# surface, proven by compilation: keep
+`SinkWithResult.ToSink()` (F# has no spelling for a user-defined explicit
+conversion); do not mirror `SinkFactory<'T>` in F# (it patches a C#-only
+inference hole — F# infers the plain `Sink.Aggregate` call fine); the F#
+facade uses one named function per operation, never overload families
+(overloads are what degrade F# diagnostics to an FS0041 candidate dump);
+the camelCase module-function convention is load-bearing, because an F#
+module binding silently shadows a same-named C# static method; identity
+structs need `IComparable<'T>` for F# `Set`/`Map` keying; and samples must
+write `string value`, never `.ToString()`, on the readonly structs
+(`FS0052` defensive-copy warning under warnings-as-errors).
+
 ## Expensive mistakes to avoid
 
 - Making the F# package a file of extension methods over C# fluent overloads.
