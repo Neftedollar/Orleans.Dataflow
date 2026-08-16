@@ -88,3 +88,39 @@ different slots all see one terminal state.
 - runtime metrics and monitors;
 - executing documents not built by this process (foreign documents fail
   validation or slot binding by design).
+
+## Checkpoint 2 contract (buffers and async stages) — design ahead of code
+
+Checkpoint 2 relaxes the credit-of-one bound only where the author asks for
+it, and nowhere else.
+
+**Fusion is the default.** Adjacent synchronous stages keep executing fused
+in one pull loop exactly as in checkpoint 1. A boundary exists only where
+the author placed a `Buffer` or an async stage; each boundary is one bounded
+channel, and each segment between boundaries is one loop. No boundary, no
+queue — the operator-fusion row of the capability matrix is this rule.
+
+**`Buffer(BufferOptions)`.** `Capacity >= 1` is required — there is no
+unbounded spelling. `OverflowPolicy` is one of: `Backpressure` (default:
+the upstream segment waits; this is prefetch, not loss), `DropOldest`,
+`DropNewest`, `DropBuffer`, `Fail`. Drop policies count and expose dropped
+elements (the count is a later monitor concern, but the contract states
+drops are observable, never silent). Policy semantics apply at the moment
+the upstream segment offers an element to a full buffer.
+
+**`SelectAsync(ParallelismOptions, callback)`** — ordered: up to
+`MaxConcurrency` callbacks in flight; outputs emitted in input order (head
+of line blocks emission, not admission); the callback receives a
+`CancellationToken` that is the run's token; a callback failure faults the
+run, cancels the other in-flight callbacks, and no later element starts.
+**`SelectAsyncUnordered`** — same bounds, emission in completion order.
+`ParallelismOptions.MaxConcurrency >= 1` required. `MaxConcurrency = 1`
+ordered is semantically the sequential async map.
+
+**Terminal semantics extend unchanged**: shutdown drains boundaries (a
+buffer's contents are delivered, in-flight async callbacks are awaited,
+then the run completes with what it has); cancellation abandons buffered
+and in-flight work; failure wins over everything queued behind it. The
+one-element-in-flight test of checkpoint 1 becomes per-segment:
+in-flight-per-segment never exceeds the declared bound, and total memory is
+the sum of declared capacities — provable per boundary with gated probes.

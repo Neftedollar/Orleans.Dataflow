@@ -22,11 +22,28 @@ Akka.NET Streams is an important capability reference, not an implementation to 
 
 ## Current state
 
-The definition core exists: stable identifiers, the immutable graph document
-with structural validation, canonical serialization with golden compatibility
-fixtures, graph fingerprints, stage catalog contracts, and a graph compiler
-with stable diagnostic rules. There is no public authoring API and no runtime
-yet; nothing here can execute a pipeline. The
+Linear local pipelines work end to end: the C# authoring API composes
+immutable `Source<T>`/`Flow<TIn, TOut>`/`Sink<T>` values into a validated,
+canonically serialized graph document, and the local runtime executes it
+under strict pull (one element in flight) with distinct completion, failure,
+cancellation, and graceful-shutdown outcomes and typed result-slot
+resolution:
+
+```csharp
+RunnableGraph graph = Source.From(orderEvents)
+    .Where(order => order.IsValid)
+    .Select(OrderDocument.FromEvent)
+    .To(s => s.Aggregate(0L, (count, _) => count + 1), "processed", out ResultSlot<long> processed);
+
+await using RunHandle run = await new LocalDataflowHost().MaterializeAsync(graph, cancellationToken);
+long count = await run.GetValueAsync(processed, cancellationToken);
+```
+
+Underneath: stable identifiers, the immutable graph document with structural
+validation, canonical serialization with golden fixtures, graph
+fingerprints, stage catalog contracts, and a graph compiler with stable
+diagnostic rules. Not yet here: buffered/parallel operators, junctions, any
+Orleans execution, supervision, or durability — the
 [capability matrix](docs/CAPABILITY-MATRIX.md) tracks honest per-capability
 status, and the [roadmap](docs/ROADMAP.md) orders the work ahead.
 
