@@ -12,7 +12,7 @@ Akka.NET Streams is the reference for the general streaming model. Microsoft Orl
 - **Qualified**: contract, failure, and integration tests prove the documented behavior.
 - **Deferred**: intentionally outside the current milestone, with a recorded reason.
 
-Every row starts at **Research**. Nothing in this matrix currently claims implementation.
+Every row starts at **Research** and advances only together with its evidence; Implemented rows have code and focused tests on `main`.
 
 ## Capability tiers
 
@@ -26,10 +26,10 @@ Every row starts at **Research**. Nothing in this matrix currently claims implem
 |---|---:|---:|---|---|
 | Immutable typed source, flow, and sink blueprints | P0 | M0 | Implemented | Composition does not execute work; instances are thread-safe and reusable. |
 | Reusable `Flow<TIn,TOut>` composition | P0 | M0 | Implemented | Reusing one fragment creates independent node identities and runtime state. |
-| Closed runnable graphs | P0 | M0 | Research | Validation can distinguish open ports from a materializable graph. |
+| Closed runnable graphs | P0 | M0 | Implemented | Validation can distinguish open ports from a materializable graph. |
 | Named graph, stage, port, and revision identity | P0 | M0 | Implemented | Deterministic serialization, collision checks, and compatible revision rules. |
 | Runtime materialization | P0 | M2 | Implemented | Each run allocates independent runtime resources and exposes completion. |
-| Typed result slots | P1 | M2 | Research | Source, flow, sink, and lifecycle results are declared as typed named slots and resolved per run without persisting runtime objects; a run rejects slots from another graph identity, revision, or import scope. |
+| Typed result slots | P1 | M2 | Implemented | Source, flow, sink, and lifecycle results are declared as typed named slots and resolved per run without persisting runtime objects; a run rejects slots from another graph identity, revision, or import scope. |
 | Named multiple results | P1 | M4 | Research | Results remain type-safe and versionable across distributed execution. |
 | Explicit fan-in/fan-out graph construction | P1 | M4 | Research | All ports are connected exactly once unless a junction contract states otherwise. |
 | Cycles | P2 | M4+ | Research | Liveness validation requires an explicit buffer/delay boundary and has deadlock tests. |
