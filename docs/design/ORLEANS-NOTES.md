@@ -1,0 +1,76 @@
+# Orleans research notes for M3
+
+- Status: research snapshot, 2026-08-16; verify package versions before scaffolding
+- Source: Microsoft Learn (orleans-10-0 pivot) and NuGet.org; full citations in the research run
+
+Facts the M3 design depends on, distilled. This is a snapshot of external
+reality, not a contract of ours; re-verify the version-sensitive lines when
+M3 starts.
+
+## Versions and packages
+
+Current stable: **Orleans 10.x**, latest patch 10.2.2 (2026-07-21); targets
+.NET 8/9/10. Package namespace is `Microsoft.Orleans.*` (post-7.0 layout).
+Proposed test-project set: `TestingHost`, `Sdk`, `Reminders`, `Streaming`
+(includes the memory stream provider), `Persistence.Memory`,
+`BroadcastChannel` — all pinned to one patch version. Whether `TestingHost`
+transitively carries the silo host or needs `Server` explicitly is
+unverified: check `dotnet list package --include-transitive` at scaffold
+time.
+
+## API facts that shape the design
+
+- **Codegen**: automatic via the `Sdk` source generator; no
+  `ConfigureApplicationParts`. Every cross-boundary type needs
+  `[GenerateSerializer]` and per-member `[Id(n)]` (missing `[Id]` is a hard
+  documented failure; missing `[GenerateSerializer]` fails at first runtime
+  use — different blast radii).
+- **Testing**: `InProcessTestCluster` is the recommended API (9.0+);
+  `TestCluster` remains for multi-process simulation. Failover pattern:
+  `KillSiloAsync` (crash) / `StopSiloAsync` (semi-graceful) /
+  `RestartSiloAsync`, then `WaitForLivenessToStabilizeAsync(didKill)` before
+  asserting. Membership tuning via `ClusterMembershipOptions` (the 3.x-era
+  "ShortGossipInterval" name no longer exists).
+- **Streams**: `IAsyncStream<T>` is both observer and observable; explicit
+  subscriptions survive deactivation but the grain must `ResumeAsync` each
+  handle on reactivation — even when it implements `IAsyncObserver<T>`
+  itself. Implicit subscriptions via `[ImplicitStreamSubscription(ns)]`.
+  Memory provider: `AddMemoryStreams(name)` + `AddMemoryGrainStorage("PubSubStore")`;
+  non-durable by design. Rewind is per-provider via `IsRewindable` (Azure
+  Queues no, Event Hubs yes; **memory provider's value undocumented — probe
+  it before promising rewind tests on it**).
+- **Broadcast Channel**: implicit-only, best-effort, no history —
+  matches our capability-matrix contract for the bridge row verbatim.
+- **Timers/reminders**: `RegisterGrainTimer` (8.2+) with
+  `GrainTimerCreationOptions` replaces obsoleted `RegisterTimer`; the
+  default flipped to non-interleaving — a rename-only migration silently
+  changes concurrency. Reminders: definitions survive restarts, missed
+  ticks are not replayed (matches our matrix contract);
+  `ReminderOptions.MinimumReminderPeriod` exists but its default and
+  enforcement mode are undocumented — **probe before writing fast-ticking
+  reminder tests**.
+- **Grain streaming**: `IAsyncEnumerable<T>` grain methods are first-class
+  (7.2+), batched (`WithBatchSize`, default 100), cooperative cancellation
+  end-to-end — the natural transport for our grain async-enumerable source.
+  10.0 gotcha: `MessagingOptions.CancelRequestOnTimeout` now defaults to
+  false, so a timeout no longer auto-cancels the grain-side enumeration.
+- **Coordinator-relevant**: grains non-reentrant by default;
+  `[AlwaysInterleave]`/`[ReadOnly]` for selective interleaving. Default
+  placement changed to `ResourceOptimizedPlacement` (9.2+) — pin
+  `RandomPlacement` where tests assume spread. `OnDeactivateAsync` is not
+  guaranteed (crash) — never park durable state there.
+- **Fencing**: `IPersistentState<T>.WriteStateAsync` with a stale ETag
+  throws `InconsistentStateException` and the documented consequence is the
+  current activation being killed — this is the primitive our
+  coordinator/run-ownership fencing builds on.
+- **Breaking-change watchlist for 7.x-era knowledge**:
+  `AddGrainCallFilter` removed (use `AddIncomingGrainCallFilter`);
+  failure-detection default dropped 10 min → 90 s (9.0); `[Unordered]` is a
+  no-op; SMS removed in favor of Broadcast Channel; no rolling upgrade
+  across the 7.x→10 boundary.
+
+## Named unknowns (probe, do not guess)
+
+1. Memory stream provider rewindability (`IsRewindable` value).
+2. `ReminderOptions.MinimumReminderPeriod` default and throw-vs-clamp.
+3. `TestingHost` package dependency closure.
