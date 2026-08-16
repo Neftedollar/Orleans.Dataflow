@@ -2,6 +2,7 @@
 
 - Status: Accepted for M0
 - Date: 2026-08-16
+- Amended by: [ADR 0002](0002-result-slots.md) (materialized-value shape)
 
 ## Context
 
@@ -101,12 +102,7 @@ The definition plane represents materialized outputs as named, versioned result 
 
 The exact public C# generic shape remains an M0 prototype decision. The graph IR must be able to support source, flow, sink, and lifecycle materialized outputs without persisting runtime objects. Durable graphs initially allow structural selection and composition of named slots; arbitrary result-combining delegates cannot be part of a persisted graph.
 
-This intentionally keeps the architectural capability while leaving room to compare:
-
-- fully generic `Source<TOut,TMat>` / `Flow<TIn,TOut,TMat>`;
-- convenience `Source<TOut>` / `Flow<TIn,TOut>` facades with typed named controls on the run handle.
-
-The decision will be made with C# and F# compile prototypes before the M0 public baseline is accepted.
+This comparison is resolved by [ADR 0002](0002-result-slots.md): stream shapes carry element types only (`Source<TOut>`, `Flow<TIn,TOut>`, `Sink<TIn>`), and materialized results are typed named result slots resolved through a run handle.
 
 ## Provider boundary
 

@@ -31,7 +31,7 @@ Deliverables:
 - core map, filter, choose, async map, scan, take/drop, fold, and callback stages;
 - bounded buffers and explicit overflow results;
 - completion, failure, cancellation, shutdown, and abort;
-- runtime handle and initial materialized-value model;
+- run handle and result-slot resolution for local runs;
 - demand-aware test probes.
 
 Exit criteria:

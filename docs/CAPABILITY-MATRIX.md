@@ -29,7 +29,7 @@ Every row starts at **Research** or **Planned**. Nothing in this matrix currentl
 | Closed runnable graphs | P0 | M0 | Research | Validation can distinguish open ports from a materializable graph. |
 | Named graph, stage, port, and revision identity | P0 | M0 | Research | Deterministic serialization, collision checks, and compatible revision rules. |
 | Runtime materialization | P0 | M1 | Research | Each run allocates independent runtime resources and exposes completion. |
-| Typed materialized values | P1 | M1 | Research | Source, flow, sink, and lifecycle values can be selected or combined without persisting runtime objects. |
+| Typed result slots | P1 | M1 | Research | Source, flow, sink, and lifecycle results are declared as typed named slots and resolved per run without persisting runtime objects; a run rejects slots from another graph identity, revision, or import scope. |
 | Named multiple results | P1 | M4 | Research | Results remain type-safe and versionable across distributed execution. |
 | Explicit fan-in/fan-out graph construction | P1 | M4 | Research | All ports are connected exactly once unless a junction contract states otherwise. |
 | Cycles | P2 | M4+ | Research | Liveness validation requires an explicit buffer/delay boundary and has deadlock tests. |

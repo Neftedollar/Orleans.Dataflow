@@ -5,7 +5,7 @@
 
 Orleans.Dataflow is a typed distributed dataflow library for [Microsoft Orleans](https://github.com/dotnet/orleans).
 
-The goal is an original, Orleans-native implementation with the expressive power expected from a modern streaming and dataflow system: declarative `Source<T>`, `Flow<TIn, TOut>`, and `Sink<TIn, TMaterialized>` values; reusable and composable flow fragments; backpressure; explicit lifecycle and failure semantics; materialized values; and adapters for Orleans and external systems.
+The goal is an original, Orleans-native implementation with the expressive power expected from a modern streaming and dataflow system: declarative `Source<T>`, `Flow<TIn, TOut>`, and `Sink<T>` values; reusable and composable flow fragments; backpressure; explicit lifecycle and failure semantics; typed result slots resolved through run handles; and adapters for Orleans and external systems.
 
 Akka.NET Streams is an important capability reference, not an implementation to port. Orleans.Dataflow will define its own contracts around virtual actors, durable identities, Orleans Streams, reminders, grains, placement, persistence, and cluster lifecycle.
 

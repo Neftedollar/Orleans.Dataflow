@@ -17,7 +17,7 @@ The F# frontend is not implemented yet. This document exists now so that C# and 
 
 ## Naming
 
-Public types, records, unions, and interfaces use PascalCase. Module functions and parameters use camelCase. Generic parameter names use meaningful PascalCase names when they improve signatures, for example `'Input`, `'Output`, and `'Materialized`.
+Public types, records, unions, and interfaces use PascalCase. Module functions and parameters use camelCase. Generic parameter names use meaningful PascalCase names when they improve signatures, for example `'Input`, `'Output`, and `'Result`.
 
 The package should use a namespace and qualified companion modules:
 
@@ -51,13 +51,13 @@ Conceptual signatures:
 ```fsharp
 val Source.via :
     flow: Flow<'Input, 'Output> ->
-    source: Source<'Input, 'Materialized> ->
-        Source<'Output, 'Materialized>
+    source: Source<'Input> ->
+        Source<'Output>
 
 val Source.toSink :
-    sink: Sink<'Input, 'SinkMaterialized> ->
-    source: Source<'Input, 'SourceMaterialized> ->
-        RunnableGraph<MaterializedPair<'SourceMaterialized, 'SinkMaterialized>>
+    sink: Sink<'Input> ->
+    source: Source<'Input> ->
+        RunnableGraph
 
 val Flow.andThen :
     next: Flow<'Middle, 'Output> ->
@@ -65,7 +65,15 @@ val Flow.andThen :
         Flow<'Input, 'Output>
 ```
 
-The exact materialized-value generics are an M0 prototype decision. The argument order and conceptual separation are stable requirements.
+Stream shapes carry element types only. Materialized results are typed named result slots resolved from a run handle ([ADR 0002](../architecture/0002-result-slots.md)), so no `'Materialized` parameter threads through composition:
+
+```fsharp
+let result : ValueTask<'T> =
+    runHandle
+    |> RunHandle.getValueTask resultSlot
+```
+
+The argument order and conceptual separation are stable requirements.
 
 ## Basic composition
 
@@ -179,7 +187,7 @@ The option type names and function qualification make ownership clear at every p
 
 ## Whole-graph composition
 
-Linear convenience functions are not the complete graph model. The future `Graph` module must expose typed port/shape values for fan-in, fan-out, reusable subgraphs, and named materialized results.
+Linear convenience functions are not the complete graph model. The future `Graph` module must expose typed port/shape values for fan-in, fan-out, reusable subgraphs, and named result slots.
 
 Graph composition follows the same rules:
 

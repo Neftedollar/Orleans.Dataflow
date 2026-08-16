@@ -16,10 +16,13 @@ The durable vocabulary is:
 
 - `Source<T>`: a reusable description of where elements enter a graph;
 - `Flow<TIn, TOut>`: a reusable, composable transformation from one typed stream shape to another;
-- `Sink<TIn, TMaterialized>`: a reusable terminal consumer and the runtime value it materializes;
-- `RunnableGraph<TMaterialized>`: a closed graph which can be validated and materialized;
-- `PipelineDefinition<TMaterialized>`: a named and versioned deployable definition when durable Orleans execution is requested;
-- `PipelineHandle<TMaterialized>`: the runtime control and observation surface returned by materialization.
+- `Sink<T>`: a reusable terminal consumer of elements;
+- `RunnableGraph`: a closed graph which can be validated and materialized;
+- `PipelineDefinition`: a named and versioned deployable definition when durable Orleans execution is requested;
+- `ResultSlot<T>`: a typed declaration of one materialized result or runtime control (completion, fold result, first/last element, ingress control, queue control, hub endpoint, monitor, metrics snapshot, shutdown control);
+- `RunHandle`: the control and observation surface of one materialized run; it resolves `ResultSlot<T>` declarations into runtime values.
+
+Stream shapes carry element types only. Materialized results do not thread through authoring types as an extra generic parameter; they are named typed slots resolved from the run handle ([ADR 0002](architecture/0002-result-slots.md)). A run accepts only slots of the graph identity, revision, and import scope from which it was materialized.
 
 Names remain design candidates until the public API baseline is approved. The semantic separation is not optional.
 
@@ -32,7 +35,7 @@ The API must support all of the following without rebuilding operators by hand:
 3. composition of flows into larger flows;
 4. composition of complete graphs where their ports and materialized values permit it;
 5. explicit fan-in, fan-out, partition, broadcast, balance, merge, concat, and zip shapes;
-6. explicit selection or combination of materialized values;
+6. explicit declaration and typed resolution of result slots;
 7. source and sink adapters implemented outside the core package;
 8. stable identities for durable, stateful, or side-effecting stages.
 
