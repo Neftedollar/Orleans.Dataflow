@@ -68,7 +68,7 @@ Names are provisional until repository and NuGet namespace checks are performed.
 | `IEnumerable<T>` | P0 | Enumerator is created and disposed per materialization. |
 | `IAsyncEnumerable<T>` | P0 | Cancellation and async disposal flow from the run. |
 | Task/deferred factory | P0 | Deferred factory executes once per materialization. |
-| Unfold/async unfold | P0 | Explicit state and completion result. |
+| Unfold/async unfold | P1 | Explicit state and completion result. |
 | Bounded queue | P0 | Offers return accepted/dropped/closed/failed; acceptance is not downstream completion. |
 | Bounded `Channel<T>` | P1 | Local bridge only; channel completion is not persistence. |
 | Tick/manual clock | P1 | Missed-tick behavior and slow-consumer policy are explicit. |
@@ -91,8 +91,9 @@ Names are provisional until repository and NuGet namespace checks are performed.
 | Sink | Priority | Notes |
 |---|---:|---|
 | Ignore/completion | P0 | Materializes terminal completion. |
-| First/last/fold/reduce | P0 | Early cancellation and empty behavior are explicit. |
-| Bounded collect | P0 | Requires element or byte cap; never silently accumulates an unbounded list. |
+| First/last | P0 | Early cancellation and empty behavior are explicit. |
+| Fold/reduce | P1 | Final result and overflow behavior are specified. |
+| Bounded collect | P1 | Requires element or byte cap; never silently accumulates an unbounded list. |
 | Sequential callback | P0 | Awaited callback is the processing boundary. |
 | Bounded parallel callback | P0 | Ordering and in-flight limit are explicit. |
 | Bounded `Channel<T>`/queue | P1 | Write acceptance differs from consumer processing. |
@@ -102,7 +103,7 @@ Names are provisional until repository and NuGet namespace checks are performed.
 | Adapter | Priority | Notes |
 |---|---:|---|
 | Awaited grain call | P0 | A reply acknowledges that method invocation, not an arbitrary downstream side effect. |
-| Keyed grain call | P0 | Bounded parallelism and per-key ordering are first-class options. |
+| Keyed grain call | P1 | Bounded parallelism and per-key ordering are first-class options. |
 | Orleans Stream publication | P0 | Publication acknowledgement and end-to-end delivery are provider-specific. |
 | One-way grain call | P2 | Explicit best-effort adapter; never the default durable sink. |
 | Grain observer callback | P2 | Best effort; disconnect and resubscription behavior are surfaced. |
@@ -118,8 +119,9 @@ Names are provisional until repository and NuGet namespace checks are performed.
 | HTTP/serverless/webhook sink | P2 | Reused clients, timeout, idempotency key, retry policy, response classification. |
 | SSE source | P2 | Reconnect cursor, heartbeat timeout, duplicate window, bounded parsing. |
 | SignalR source/sink | P2 | Connection-scoped lifecycle, cancellation, reconnect/application sequence IDs, bounded channel. |
-| File/stream source | P2 | Silo-local versus shared ownership, offset, partial record, rotation, truncation, async disposal. |
-| File/stream sink | P2 | Flush/fsync boundary, atomic replacement/append, partial writes, rotation. |
+| File/stream/`PipeReader` source | P2 | Silo-local versus shared ownership, offset, partial record, rotation, truncation, async disposal. |
+| File/stream/`PipeWriter` sink | P2 | Flush/fsync boundary, atomic replacement/append, partial writes, rotation. |
+| Azure Queue/Event Hubs | P2 | Prefer Orleans stream-provider integration where it preserves semantics; provider-specific package otherwise. |
 | `IObservable<T>`/.NET event source | P2 | Cannot force upstream demand; bounded buffer and overflow are mandatory. |
 | Reactive Streams bridge | P2 | Protocol compliance and cancellation/error translation. |
 
