@@ -90,7 +90,7 @@ internal sealed class StageRuntime
     /// <remarks>
     /// A factory rather than a value, because a plan is built once and a run's state has to be its own:
     /// a terminal that accumulates into a mutable object would otherwise be one object two runs both
-    /// wrote into. This is the same rule <see cref="LocalRunPlan.SeedFactory"/> states for the local
+    /// wrote into. This is the same rule <see cref="LocalEnding.SeedFactory"/> states for the local
     /// collecting sink, applied to every provider terminal without asking the provider to know it.
     /// </remarks>
     internal Func<object?>? Seed { get; }

@@ -40,11 +40,21 @@ namespace Orleans.Dataflow.Runtime;
 /// </para>
 /// <para>
 /// <b>Downstream completion.</b> A stage that has taken everything it was asked for ends the stream where
-/// it stands, and that is a success rather than a stop: the segments at and above it stop pulling and
-/// release what they hold, the segments below it drain what already passed, and the run reports what it
-/// accumulated. It reaches an upstream segment two ways at once, because one of them alone would leave a
-/// deadlock: a flag it examines between elements, and the closing of the channels it writes into, which is
-/// what releases a source parked in a full buffer's offer.
+/// it stands, and that is a success rather than a stop: the segments above it that have nothing else to
+/// feed stop pulling and release what they hold, the segments below it drain what already passed, and the
+/// run reports what it accumulated. It reaches an upstream segment two ways at once, because one of them
+/// alone would leave a deadlock: a flag it examines between elements, and the closing of the channels it
+/// writes into, which is what releases a source parked in a full buffer's offer.
+/// </para>
+/// <para>
+/// <b>Branching.</b> A graph is segments and channels whichever shape it has, and everything above is
+/// stated per segment and per channel rather than per position, which is what lets a junction be one more
+/// segment instead of one more model. Three things follow. A junction pump reads one channel and writes
+/// several under the rule its strategy states, and holds one element while it does. A completion walks
+/// upstream edge by edge and stops at a junction that still has a live leg, so a finished branch stops
+/// feeding without stopping the world. And a run has as many endings as the graph has sinks: each folds
+/// its own state and settles its own slot, the run settles when every segment has stopped, and the single
+/// outcome — a failure anywhere, a cancellation, a clean end — is what every slot reports.
 /// </para>
 /// <para>
 /// <b>Pausing.</b> A pause holds every segment at a safe point without ending the run, and the safe points
@@ -69,15 +79,17 @@ internal sealed class LocalRun
     private readonly LocalPause _pause;
     private readonly LocalRunContext _context;
     private readonly TaskCompletionSource _completion = new(TaskCreationOptions.RunContinuationsAsynchronously);
-    private readonly TaskCompletionSource<object?>? _result;
+    private readonly TaskCompletionSource<object?>?[] _results;
     private readonly Dictionary<ResultSlotId, Task<object?>> _controls;
     private readonly Lock _gate = new();
     private readonly Channel<object?>[] _channels;
+    private readonly int[] _closed;
+    private readonly int[] _stopped;
+    private readonly int[] _live;
+    private readonly object?[] _states;
+    private readonly bool[] _observed;
     private int _running;
     private long _dropped;
-    private int _completedAt = -1;
-    private object? _state;
-    private bool _observed;
     private Exception? _failure;
     private volatile bool _canceled;
     private bool _cancellationReleased;
@@ -95,7 +107,9 @@ internal sealed class LocalRun
         CancellationToken cancellationToken)
     {
         _plan = plan;
-        _state = plan.SeedFactory is { } make ? make() : plan.Seed;
+        _states = new object?[plan.Endings.Count];
+        _observed = new bool[plan.Endings.Count];
+        _results = new TaskCompletionSource<object?>?[plan.Endings.Count];
         _cancellation = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
         _token = _cancellation.Token;
         _stopping = CancellationTokenSource.CreateLinkedTokenSource(_token);
@@ -109,11 +123,24 @@ internal sealed class LocalRun
         // rather than called from the two request methods, because a caller's token cancels this run
         // without either of them being called at all.
         _ = _stopping.Token.Register(static held => ((LocalPause)held!).Open(), _pause);
-        _result = plan.Slot is null
-            ? null
-            : new TaskCompletionSource<object?>(TaskCreationOptions.RunContinuationsAsynchronously);
         _running = plan.Segments.Count;
         _channels = new Channel<object?>[plan.Boundaries.Count];
+        _closed = new int[plan.Boundaries.Count];
+        _stopped = new int[plan.Segments.Count];
+        _live = new int[plan.Segments.Count];
+
+        // One state and one settled slot per ending, because a graph may stop in several places and each
+        // of them folds its own elements. A run still ends once and in one state; what is per ending is
+        // what was accumulated on the way there.
+        for (int index = 0; index < plan.Endings.Count; index++)
+        {
+            LocalEnding ending = plan.Endings[index];
+
+            _states[index] = ending.SeedFactory is { } make ? make() : ending.Seed;
+            _results[index] = ending.Slot is null
+                ? null
+                : new TaskCompletionSource<object?>(TaskCreationOptions.RunContinuationsAsynchronously);
+        }
 
         // A control is a slot whose value exists as soon as the run does, which is what makes it a control
         // rather than a result: producers push into a run that is already running, so the handle cannot
@@ -132,6 +159,11 @@ internal sealed class LocalRun
         for (int index = 0; index < _channels.Length; index++)
         {
             _channels[index] = Open(plan.Boundaries[index]);
+        }
+
+        for (int index = 0; index < plan.Segments.Count; index++)
+        {
+            _live[index] = plan.Segments[index].Outputs.Count;
         }
 
         Graph = graph;
@@ -213,13 +245,19 @@ internal sealed class LocalRun
     /// One task per slot, shared by every caller: two callers asking for one result observe one outcome,
     /// and asking after the run ended is answered from the settled task rather than by re-reading state.
     /// A control's task is complete before this run's handle exists, and a terminal result's completes when
-    /// the run does; the difference is when the value became available and nothing else.
+    /// the run does; the difference is when the value became available and nothing else. A graph with
+    /// several sinks declares several results, and each of them resolves from its own ending's fold — the
+    /// scan is linear because a graph has a handful of them and a dictionary per run would cost more than
+    /// it saved.
     /// </remarks>
     internal Task<object?>? Result(ResultSlotId slot)
     {
-        if (_plan.Slot is { } declared && declared == slot)
+        for (int index = 0; index < _plan.Endings.Count; index++)
         {
-            return _result?.Task;
+            if (_plan.Endings[index].Slot is { } declared && declared == slot)
+            {
+                return _results[index]?.Task;
+            }
         }
 
         return _controls.TryGetValue(slot, out Task<object?>? control) ? control : null;
@@ -333,9 +371,9 @@ internal sealed class LocalRun
     /// </remarks>
     private void Launch()
     {
-        if (_plan.CompletesAtStart >= 0)
+        for (int index = 0; index < _plan.CompletesAtStart.Count; index++)
         {
-            Complete(_plan.CompletesAtStart);
+            Complete(_plan.CompletesAtStart[index]);
         }
 
         for (int index = 0; index < _plan.Segments.Count; index++)
@@ -353,8 +391,8 @@ internal sealed class LocalRun
     /// <summary>Runs one segment to its end and reports how it ended to the run.</summary>
     /// <param name="index">The segment's position in the plan.</param>
     /// <remarks>
-    /// The three loop shapes are chosen here and the outcome of all of them is folded here, so that what a
-    /// failure, a cancellation and a clean end mean is stated once for every segment rather than three
+    /// The four loop shapes are chosen here and the outcome of all of them is folded here, so that what a
+    /// failure, a cancellation and a clean end mean is stated once for every segment rather than four
     /// times. An enumerator obtained by the head segment is released on every path, including the ones
     /// where obtaining or reading it is what went wrong, which is why it is held in this frame.
     /// </remarks>
@@ -371,7 +409,9 @@ internal sealed class LocalRun
                 ? Pull(segment, index, source, ref elements)
                 : segment.Async is { } asynchronous
                     ? Map(segment, index, asynchronous)
-                    : Push(segment, index);
+                    : segment.FanOut is { } junction
+                        ? Fan(segment, index, junction)
+                        : Push(segment, index);
         }
         catch (OperationCanceledException) when (_token.IsCancellationRequested)
         {
@@ -478,7 +518,7 @@ internal sealed class LocalRun
     /// </remarks>
     private bool Push(LocalSegment segment, int index)
     {
-        ChannelReader<object?> reader = _channels[index - 1].Reader;
+        ChannelReader<object?> reader = _channels[segment.Inputs[0]].Reader;
 
         while (true)
         {
@@ -573,7 +613,7 @@ internal sealed class LocalRun
     /// </remarks>
     private bool Map(LocalSegment segment, int index, LocalAsyncStage stage)
     {
-        ChannelReader<object?> reader = _channels[index - 1].Reader;
+        ChannelReader<object?> reader = _channels[segment.Inputs[0]].Reader;
 
         // Not sized by the bound. The window only ever holds what was actually admitted, which is limited
         // by what the source produces as much as by the bound, and a bound near the top of its range is a
@@ -812,6 +852,345 @@ internal sealed class LocalRun
         }
     }
 
+    /// <summary>Drives a junction: waits for the room its rule requires, pulls one element, places it.</summary>
+    /// <param name="segment">The segment being executed.</param>
+    /// <param name="index">Its position in the plan.</param>
+    /// <param name="junction">The strategy that decides which outputs must have room and which receive.</param>
+    /// <returns><see langword="true"/> when the loop stopped because the run was canceled.</returns>
+    /// <remarks>
+    /// <para>
+    /// <b>Room first, pull second.</b> This order is ADR 0005's demand rule and it is also the whole of the
+    /// held-element bound: the one element a junction ever holds outside a declared buffer is the one it is
+    /// placing, because it never takes an element it has nowhere to put. A junction that pulled first and
+    /// then waited would hold that element for the length of the wait and would have nothing honest to do
+    /// with it if the last leg left meanwhile.
+    /// </para>
+    /// <para>
+    /// <b>What "room" means is the strategy's.</b> A broadcast and an unzip need every live leg to have
+    /// room, which is slowest-consumer backpressure by construction: one slow consumer paces the stream for
+    /// all of them. A balance needs one, which is why its wait is a wait-any and its placement a rotation.
+    /// A leg whose downstream has completed is not waited for at all — it has left the delivery set — and
+    /// when the last one leaves, this junction has nowhere to deliver and completes upstream in its turn.
+    /// </para>
+    /// <para>
+    /// <b>The park points are the ordinary ones.</b> Between elements, once before the pull and once after
+    /// it, exactly as the source pump parks: an element obtained from a wait that began before the pause
+    /// is held rather than delivered, and the room secured for it is still there when the run resumes,
+    /// because a junction is the only writer to its own legs.
+    /// </para>
+    /// </remarks>
+    private bool Fan(LocalSegment segment, int index, LocalFanOut junction)
+    {
+        ChannelReader<object?> reader = _channels[segment.Inputs[0]].Reader;
+        IReadOnlyList<int> legs = segment.Outputs;
+
+        // One pending room-wait per leg at most, kept across passes for the same reason the asynchronous
+        // segment keeps its arrival: a wait-any that abandoned the waits it did not choose would leave one
+        // more waiter on every leg of every pass, and a bounded channel remembers every one of them.
+        Task<bool>?[] pending = new Task<bool>?[legs.Count];
+        int cursor = 0;
+
+        while (true)
+        {
+            if (_token.IsCancellationRequested)
+            {
+                return true;
+            }
+
+            if (Stopping(index))
+            {
+                return false;
+            }
+
+            if (_pause.Park())
+            {
+                continue;
+            }
+
+            if (!Room(index, legs, junction, pending))
+            {
+                return false;
+            }
+
+            // A pause that arrived while this junction was waiting for room is observed before the pull,
+            // not after it: securing room takes no step the run can see, and pulling would take one.
+            if (_pause.IsPaused)
+            {
+                continue;
+            }
+
+            if (!reader.TryRead(out object? element))
+            {
+                if (!Arrival(reader))
+                {
+                    return false;
+                }
+
+                continue;
+            }
+
+            while (_pause.Park())
+            {
+                if (_token.IsCancellationRequested)
+                {
+                    return true;
+                }
+            }
+
+            if (!Place(index, legs, junction, element, pending, ref cursor))
+            {
+                return false;
+            }
+        }
+    }
+
+    /// <summary>Waits until this junction's rule about room is satisfied by its live legs.</summary>
+    /// <param name="index">The junction segment's position in the plan.</param>
+    /// <param name="legs">The channels this junction writes into.</param>
+    /// <param name="junction">The strategy whose rule to satisfy.</param>
+    /// <param name="pending">The per-leg room-waits kept across passes.</param>
+    /// <returns>
+    /// <see langword="true"/> when the junction may pull; <see langword="false"/> when every leg has left
+    /// and there is nothing to pull for.
+    /// </returns>
+    /// <exception cref="OperationCanceledException">The run was cancelled.</exception>
+    /// <remarks>
+    /// <para>
+    /// The two arms are the two halves of the fan-out table. Needing every leg is a loop of ordinary waits,
+    /// one after another, because needing all of them makes their order irrelevant and lets each wait be
+    /// consumed by the thread that started it. Needing one is a wait-any over the legs that have none,
+    /// which is where the cached waits matter.
+    /// </para>
+    /// <para>
+    /// The arms also differ in what "room" means, and deliberately. A junction that needs every leg offers
+    /// to every leg, so a boundary whose policy answers without room keeps that policy — a dropping leg
+    /// drops rather than pacing its siblings, and a failing one fails. A junction that needs one leg picks
+    /// a leg that really has room, whatever policy it declared, because picking a full one and then
+    /// applying its policy would drop or fail an element another leg was willing to take. The consequence
+    /// is worth stating: an overflow policy on a balance's leg is unreachable, and a balance is drawn
+    /// towards a leg that declared a dropping policy, because such a leg always has room.
+    /// </para>
+    /// </remarks>
+    private bool Room(int index, IReadOnlyList<int> legs, LocalFanOut junction, Task<bool>?[] pending)
+    {
+        if (junction.NeedsEveryOutput)
+        {
+            bool live = false;
+
+            for (int leg = 0; leg < legs.Count; leg++)
+            {
+                if (!Closed(legs[leg]) && Vacancy(legs[leg]))
+                {
+                    live = true;
+                }
+            }
+
+            if (live)
+            {
+                return true;
+            }
+
+            Complete(index);
+
+            return false;
+        }
+
+        while (true)
+        {
+            List<Task>? waits = null;
+            bool live = false;
+
+            for (int leg = 0; leg < legs.Count; leg++)
+            {
+                int channel = legs[leg];
+
+                if (Closed(channel))
+                {
+                    pending[leg] = null;
+
+                    continue;
+                }
+
+                live = true;
+
+                Task<bool> wait = pending[leg] ??=
+                    _channels[channel].Writer.WaitToWriteAsync(_token).AsTask();
+
+                if (!wait.IsCompleted)
+                {
+                    (waits ??= []).Add(wait);
+
+                    continue;
+                }
+
+                pending[leg] = null;
+
+                // A completed wait is consumed here and not remembered, because room this junction did not
+                // take is room it still has: it is the only writer to this leg, so a second look answers
+                // the same way without a second waiter.
+                if (wait.GetAwaiter().GetResult())
+                {
+                    return true;
+                }
+            }
+
+            if (!live)
+            {
+                Complete(index);
+
+                return false;
+            }
+
+            if (waits is null)
+            {
+                // Every live leg answered that its channel is closed, which the next pass sees as the leg
+                // having left. Nothing is waited for, and the loop is bounded by legs that only ever leave.
+                continue;
+            }
+
+            _pause.Idle();
+
+            try
+            {
+                _ = Task.WaitAny([.. waits], _token);
+            }
+            finally
+            {
+                _pause.Busy();
+            }
+        }
+    }
+
+    /// <summary>Waits until one leg can take an element.</summary>
+    /// <param name="channel">The leg's channel.</param>
+    /// <returns><see langword="false"/> when the leg's channel is closed and it has left the set.</returns>
+    /// <exception cref="OperationCanceledException">The run was cancelled.</exception>
+    /// <remarks>
+    /// A boundary whose policy is anything but backpressure answers an offer whether or not it has room —
+    /// by dropping, by discarding what it held, or by failing the run — so waiting for room at one would
+    /// make its policy unreachable. The wait is therefore for the boundaries that wait, and the offer is
+    /// what applies every policy, exactly as it does in a chain.
+    /// </remarks>
+    private bool Vacancy(int channel)
+    {
+        if (_plan.Boundaries[channel].Policy is not OverflowPolicy.Backpressure)
+        {
+            return true;
+        }
+
+        ValueTask<bool> ready = _channels[channel].Writer.WaitToWriteAsync(_token);
+
+        if (ready.IsCompleted)
+        {
+            return ready.GetAwaiter().GetResult();
+        }
+
+        _pause.Idle();
+
+        try
+        {
+            return ready.AsTask().GetAwaiter().GetResult();
+        }
+        finally
+        {
+            _pause.Busy();
+        }
+    }
+
+    /// <summary>Places one pulled element into the legs this junction's strategy names.</summary>
+    /// <param name="index">The junction segment's position in the plan.</param>
+    /// <param name="legs">The channels this junction writes into.</param>
+    /// <param name="junction">The strategy that decides which legs receive what.</param>
+    /// <param name="element">The element this junction is holding.</param>
+    /// <param name="pending">The per-leg room-waits kept across passes.</param>
+    /// <param name="cursor">The leg a balance starts its rotation at, advanced past the one it used.</param>
+    /// <returns>
+    /// <see langword="true"/> when the element was placed; <see langword="false"/> when every leg has left.
+    /// </returns>
+    /// <exception cref="OperationCanceledException">The run was cancelled.</exception>
+    /// <remarks>
+    /// <para>
+    /// A balance writes to the first willing leg from its cursor and moves the cursor past it, which is
+    /// round-robin among the willing: distribution on an idle graph is even rather than accidentally
+    /// sticky, and no promise is made about which leg any particular element went to. The write is a
+    /// try and never a wait, because waiting on one leg while another has room is precisely the head-of-line
+    /// blocking a balance exists to avoid; when the leg that had room leaves between the wait and the
+    /// write, the element stays in hand — it is the one element a balance holds — and another willing leg
+    /// is waited for.
+    /// </para>
+    /// <para>
+    /// A broadcast writes the element to every live leg and an unzip writes each leg its own half of the
+    /// row, which is the same loop with a projection: both outputs had to have room before the pull, both
+    /// receive their part of the same row, and the two legs therefore advance in lockstep and can be
+    /// re-joined downstream without skew. The offer applies each leg's own overflow policy, so a leg the
+    /// author declared as dropping drops rather than pacing its siblings.
+    /// </para>
+    /// </remarks>
+    private bool Place(
+        int index,
+        IReadOnlyList<int> legs,
+        LocalFanOut junction,
+        object? element,
+        Task<bool>?[] pending,
+        ref int cursor)
+    {
+        if (junction.Kind is LocalFanOutKind.Balance)
+        {
+            while (true)
+            {
+                for (int step = 0; step < legs.Count; step++)
+                {
+                    int leg = cursor + step >= legs.Count ? cursor + step - legs.Count : cursor + step;
+                    int channel = legs[leg];
+
+                    if (Closed(channel) || !_channels[channel].Writer.TryWrite(element))
+                    {
+                        continue;
+                    }
+
+                    cursor = leg + 1 == legs.Count ? 0 : leg + 1;
+
+                    return true;
+                }
+
+                if (!Room(index, legs, junction, pending))
+                {
+                    return false;
+                }
+
+                // The element is still in hand and a leg has just reported room, which is exactly the
+                // moment a pause has to be looked at: an element a junction holds is held rather than in
+                // flight, and placing it would be a step a paused run does not take.
+                _ = _pause.Park();
+            }
+        }
+
+        bool delivered = false;
+
+        for (int leg = 0; leg < legs.Count; leg++)
+        {
+            int channel = legs[leg];
+
+            if (Closed(channel))
+            {
+                continue;
+            }
+
+            object? part = junction.Halves is { } halves ? halves[leg](element) : element;
+
+            delivered |= Offer(channel, part);
+        }
+
+        if (delivered)
+        {
+            return true;
+        }
+
+        Complete(index);
+
+        return false;
+    }
+
     /// <summary>Pushes one element through a segment's fused stages and into whatever follows it.</summary>
     /// <param name="segment">The segment doing the work.</param>
     /// <param name="index">Its position in the plan.</param>
@@ -823,9 +1202,11 @@ internal sealed class LocalRun
     /// <remarks>
     /// <para>
     /// A filter that drops the element ends the push immediately, so no stage downstream of a drop is
-    /// asked about an element that is not there. What follows the stages is the next boundary when there
-    /// is one and the terminal when there is not, which is the only place a segment's position in the plan
-    /// changes what it does.
+    /// asked about an element that is not there. What follows the stages is this segment's one output
+    /// channel when it has one and its terminal when it has none, which is the only place what a segment
+    /// is connected to changes what it does. A segment that reaches this method has at most one output —
+    /// the several a junction has are the junction pump's, and a junction fuses with no stage and holds no
+    /// terminal.
     /// </para>
     /// <para>
     /// A stage that ends the stream ends it for this segment and for everything above it, whether or not
@@ -865,17 +1246,19 @@ internal sealed class LocalRun
             return true;
         }
 
-        if (index < _channels.Length)
+        if (segment.Outputs.Count > 0)
         {
-            if (!Offer(index, element))
+            if (!Offer(segment.Outputs[0], element))
             {
                 return false;
             }
         }
         else if (segment.Terminal is { } terminal)
         {
-            _observed = true;
-            _state = terminal.Folder(_state, element, _context);
+            int ending = segment.Ending;
+
+            _observed[ending] = true;
+            _states[ending] = terminal.Folder(_states[ending], element, _context);
             completing |= terminal.CompletesOnFirstElement;
         }
 
@@ -890,7 +1273,7 @@ internal sealed class LocalRun
     }
 
     /// <summary>Offers one element to a boundary, applying its overflow policy if it is full.</summary>
-    /// <param name="index">The boundary's position, which is also the offering segment's.</param>
+    /// <param name="channel">The boundary to offer to.</param>
     /// <param name="element">The element to offer.</param>
     /// <returns>
     /// <see langword="true"/> when the element was accepted or discarded by policy; <see langword="false"/>
@@ -919,33 +1302,33 @@ internal sealed class LocalRun
     /// moment, and taking elements is delivery rather than loss.
     /// </para>
     /// </remarks>
-    private bool Offer(int index, object? element)
+    private bool Offer(int channel, object? element)
     {
-        Channel<object?> channel = _channels[index];
+        Channel<object?> boundary = _channels[channel];
 
-        if (channel.Writer.TryWrite(element))
+        if (boundary.Writer.TryWrite(element))
         {
             return true;
         }
 
-        if (Stopping(index))
+        if (Closed(channel))
         {
             return false;
         }
 
-        switch (_plan.Boundaries[index].Policy)
+        switch (_plan.Boundaries[channel].Policy)
         {
             case OverflowPolicy.DropBuffer:
-                while (channel.Reader.TryRead(out object? _))
+                while (boundary.Reader.TryRead(out object? _))
                 {
                     Interlocked.Increment(ref _dropped);
                 }
 
-                _ = channel.Writer.TryWrite(element);
+                _ = boundary.Writer.TryWrite(element);
 
                 return true;
             case OverflowPolicy.Fail:
-                throw BufferOverflowException.Full(_plan.Boundaries[index].Capacity);
+                throw BufferOverflowException.Full(_plan.Boundaries[channel].Capacity);
             default:
                 try
                 {
@@ -958,14 +1341,14 @@ internal sealed class LocalRun
 
                     try
                     {
-                        channel.Writer.WriteAsync(element, _token).AsTask().GetAwaiter().GetResult();
+                        boundary.Writer.WriteAsync(element, _token).AsTask().GetAwaiter().GetResult();
                     }
                     finally
                     {
                         _pause.Busy();
                     }
                 }
-                catch (ChannelClosedException) when (Stopping(index))
+                catch (ChannelClosedException) when (Closed(channel))
                 {
                     // The wait this segment was parked in is exactly the deadlock a downstream completion
                     // has to break: closing the channel is what releases it, and the release is a clean
@@ -977,49 +1360,79 @@ internal sealed class LocalRun
         }
     }
 
-    /// <summary>Ends the stream at one segment and stops everything above it.</summary>
+    /// <summary>Ends the stream at one segment and stops everything above it that has nothing else to feed.</summary>
     /// <param name="index">The position of the segment whose stream is over.</param>
     /// <remarks>
     /// <para>
-    /// Two things happen and both are needed. The flag is raised first, so that every segment at or above
-    /// this one stops between elements rather than continuing to produce for a stream that has ended; then
-    /// every channel above this segment is completed, which releases a writer parked in a full one and
-    /// wakes a reader waiting on an empty one. A flag alone would deadlock a source waiting for room that
-    /// will never be taken, and a closed channel alone would leave an idle segment asleep.
+    /// Two things happen and both are needed. The flag is raised first, so that this segment stops between
+    /// elements rather than continuing to produce for a stream that has ended; then every channel it was
+    /// reading is closed, which releases a writer parked in a full one and wakes a reader waiting on an
+    /// empty one. A flag alone would deadlock a producer waiting for room that will never be taken, and a
+    /// closed channel alone would leave an idle segment asleep.
     /// </para>
     /// <para>
-    /// The position is raised to the furthest downstream completion and never lowered, because completing
-    /// further downstream subsumes completing above it: the segments a lower completion stops are a subset
-    /// of the ones a higher one does. Segments below this one are untouched — they drain what already
-    /// passed, which is what makes an early completion a success rather than a stop.
+    /// The walk upstream is per edge and stops where a producer still has somewhere to deliver. This is
+    /// ADR 0005's third shared rule as engine mechanics: a completed leg leaves a junction's delivery set,
+    /// and only when the last of them leaves does the junction itself have nowhere to go and complete
+    /// upstream in its turn. A linear plan is the degenerate case — every segment has one output, so the
+    /// count falls to zero at the first closed channel and the walk runs to the source exactly as the old
+    /// watermark did.
+    /// </para>
+    /// <para>
+    /// Segments below this one are untouched — they drain what already passed, which is what makes an early
+    /// completion a success rather than a stop. Idempotent by construction, because the same edge can be
+    /// completed by a segment's own end and by a downstream stop at the same moment.
     /// </para>
     /// </remarks>
     private void Complete(int index)
     {
-        int seen = Volatile.Read(ref _completedAt);
-
-        while (index > seen)
+        if (Interlocked.Exchange(ref _stopped[index], 1) == 1)
         {
-            int actual = Interlocked.CompareExchange(ref _completedAt, index, seen);
-
-            if (actual == seen)
-            {
-                break;
-            }
-
-            seen = actual;
+            return;
         }
 
-        for (int channel = 0; channel < index; channel++)
+        IReadOnlyList<int> inputs = _plan.Segments[index].Inputs;
+
+        for (int input = 0; input < inputs.Count; input++)
         {
-            _ = _channels[channel].Writer.TryComplete();
+            Leave(inputs[input]);
+        }
+    }
+
+    /// <summary>Closes one edge and stops its producer when that was the producer's last one.</summary>
+    /// <param name="channel">The channel whose consumer has stopped reading.</param>
+    /// <remarks>
+    /// The order inside is what lets a producer tell a closed stream from a full buffer: the flag is set
+    /// before the channel is completed, so a writer that saw its write refused is guaranteed to see the
+    /// flag. Completing the channel is what releases a producer parked in a full one, and it is why a
+    /// deadlock cannot outlive a downstream completion.
+    /// </remarks>
+    private void Leave(int channel)
+    {
+        if (Interlocked.Exchange(ref _closed[channel], 1) == 1)
+        {
+            return;
+        }
+
+        _ = _channels[channel].Writer.TryComplete();
+
+        int producer = _plan.Producers[channel];
+
+        if (Interlocked.Decrement(ref _live[producer]) == 0)
+        {
+            Complete(producer);
         }
     }
 
     /// <summary>Reports whether one segment's stream has been ended from below.</summary>
     /// <param name="index">The segment's position in the plan.</param>
     /// <returns><see langword="true"/> when this segment has nowhere left to deliver to.</returns>
-    private bool Stopping(int index) => index <= Volatile.Read(ref _completedAt);
+    private bool Stopping(int index) => Volatile.Read(ref _stopped[index]) == 1;
+
+    /// <summary>Reports whether one edge has been closed by the segment that was reading it.</summary>
+    /// <param name="channel">The channel's position in the plan.</param>
+    /// <returns><see langword="true"/> when nothing will ever read this channel again.</returns>
+    private bool Closed(int channel) => Volatile.Read(ref _closed[channel]) == 1;
 
     /// <summary>Releases a segment's resources and folds a release failure into its outcome.</summary>
     /// <param name="elements">The enumerator to dispose, or <see langword="null"/> when none was obtained.</param>
@@ -1059,10 +1472,11 @@ internal sealed class LocalRun
     /// <param name="canceled">Whether it ended in cancellation.</param>
     /// <remarks>
     /// The order is fixed. The failure is recorded first, so that it is already the run's answer before
-    /// anything downstream can act on the end of its input; the boundary this segment fed is completed
-    /// next, so a graceful stop reaches the segment below as the end of its input rather than as silence;
-    /// and the count of running segments is decremented last, so the run settles only once every segment
-    /// has released what it held.
+    /// anything downstream can act on the end of its input; every boundary this segment fed is completed
+    /// next, so a graceful stop reaches the segments below as the end of their input rather than as
+    /// silence; and the count of running segments is decremented last, so the run settles only once every
+    /// segment has released what it held. A junction ends by closing every one of its legs at once, which
+    /// is what carries one completion into every branch below it.
     /// </remarks>
     private void Finish(int index, Exception? failure, bool canceled)
     {
@@ -1076,9 +1490,11 @@ internal sealed class LocalRun
             _canceled = true;
         }
 
-        if (index < _channels.Length)
+        IReadOnlyList<int> outputs = _plan.Segments[index].Outputs;
+
+        for (int output = 0; output < outputs.Count; output++)
         {
-            _ = _channels[index].Writer.TryComplete();
+            _ = _channels[outputs[output]].Writer.TryComplete();
         }
 
         // A segment that has ended will never park again, so a pause waiting for it to come to rest is
@@ -1147,11 +1563,22 @@ internal sealed class LocalRun
 
         Exception? failure = _failure;
         bool canceled = failure is null && _canceled;
-        object? result = null;
+        object?[] resolved = new object?[_plan.Endings.Count];
 
         if (failure is null && !canceled)
         {
-            failure = Missing() ?? Project(out result);
+            // Every ending is asked, and the first complaint is the run's. A graph that stops in several
+            // places still ends once: an empty stream at one sink faults the run and therefore faults the
+            // other sinks' slots too, which is failure winning everywhere rather than in one branch.
+            for (int ending = 0; ending < _plan.Endings.Count; ending++)
+            {
+                failure = Missing(ending) ?? Project(ending, out resolved[ending]);
+
+                if (failure is not null)
+                {
+                    break;
+                }
+            }
         }
 
         Exception? released = Close(failure ?? (canceled ? new OperationCanceledException(_token) : null));
@@ -1163,19 +1590,37 @@ internal sealed class LocalRun
 
         ReleaseCancellation();
 
-        if (failure is { } reported)
+        for (int ending = 0; ending < _results.Length; ending++)
         {
-            _result?.TrySetException(reported);
-            _completion.TrySetException(reported);
+            if (_results[ending] is not { } slot)
+            {
+                continue;
+            }
+
+            if (failure is { } reported)
+            {
+                slot.TrySetException(reported);
+            }
+            else if (canceled)
+            {
+                slot.TrySetCanceled(_token);
+            }
+            else
+            {
+                slot.TrySetResult(resolved[ending]);
+            }
+        }
+
+        if (failure is { } outcome)
+        {
+            _completion.TrySetException(outcome);
         }
         else if (canceled)
         {
-            _result?.TrySetCanceled(_token);
             _completion.TrySetCanceled(_token);
         }
         else
         {
-            _result?.TrySetResult(result);
             _completion.TrySetResult();
         }
     }
@@ -1187,10 +1632,11 @@ internal sealed class LocalRun
     /// <returns>The failure the release raised, or <see langword="null"/>.</returns>
     /// <remarks>
     /// <para>
-    /// Only a channel sink has anything here, and what it has is the author's writer: a consumer reading
-    /// the other side has to learn that the stream is over and why, whichever way the run ended. A
+    /// Only a channel sink and a probe sink have anything here, and what they have is the receiver on the
+    /// far side: it has to learn that the stream is over and why, whichever way the run ended. A
     /// cancellation is reported as the <see cref="OperationCanceledException"/> it is, so the consumer sees
-    /// the same three outcomes the run's own completion has rather than an unexplained end.
+    /// the same three outcomes the run's own completion has rather than an unexplained end. Every ending is
+    /// released, because a graph with two channel sinks has two consumers waiting.
     /// </para>
     /// <para>
     /// Called once, from the one place that settles a run, and before the cancellation link is released and
@@ -1200,27 +1646,35 @@ internal sealed class LocalRun
     /// </remarks>
     private Exception? Close(Exception? failure)
     {
-        if (_plan.Segments[^1].Terminal?.Closing is not { } closing)
+        Exception? raised = null;
+
+        for (int ending = 0; ending < _plan.Endings.Count; ending++)
         {
-            return null;
+            if (_plan.Segments[_plan.Endings[ending].Segment].Terminal?.Closing is not { } closing)
+            {
+                continue;
+            }
+
+            try
+            {
+                closing(failure);
+            }
+            catch (Exception error)
+            {
+                // Deliberately every exception: what is being released is an author's own channel writer,
+                // and a writer whose completion throws must fault the run rather than strand it. This is
+                // the same rule a sequence that throws while being released follows. Every other ending is
+                // still released afterwards, because a consumer on the far side of one branch's channel is
+                // not the one that misbehaved.
+                raised ??= error;
+            }
         }
 
-        try
-        {
-            closing(failure);
-
-            return null;
-        }
-        catch (Exception error)
-        {
-            // Deliberately every exception: what is being released is an author's own channel writer, and
-            // a writer whose completion throws must fault the run rather than strand it. This is the same
-            // rule a sequence that throws while being released follows.
-            return error;
-        }
+        return raised;
     }
 
-    /// <summary>Projects the accumulated state into the value the result slot resolves.</summary>
+    /// <summary>Projects one ending's accumulated state into the value its result slot resolves.</summary>
+    /// <param name="ending">The ending to project.</param>
     /// <param name="result">The projected result, when this method returns <see langword="null"/>.</param>
     /// <returns>The failure the projection raised, or <see langword="null"/>.</returns>
     /// <remarks>
@@ -1229,18 +1683,18 @@ internal sealed class LocalRun
     /// project, and it runs inside a <c>try</c> because a projection comes from a binding table: the one
     /// this authoring surface writes cannot fail, and a hand-built one is not this run's to trust.
     /// </remarks>
-    private Exception? Project(out object? result)
+    private Exception? Project(int ending, out object? result)
     {
-        if (_plan.Segments[^1].Terminal?.Finisher is not { } finisher)
+        if (_plan.Segments[_plan.Endings[ending].Segment].Terminal?.Finisher is not { } finisher)
         {
-            result = _state;
+            result = _states[ending];
 
             return null;
         }
 
         try
         {
-            result = finisher(_state);
+            result = finisher(_states[ending]);
 
             return null;
         }
@@ -1252,8 +1706,9 @@ internal sealed class LocalRun
         }
     }
 
-    /// <summary>Builds the failure of a run whose terminal needed an element and never saw one.</summary>
-    /// <returns>The exception, or <see langword="null"/> when the run has nothing to complain about.</returns>
+    /// <summary>Builds the failure of an ending whose terminal needed an element and never saw one.</summary>
+    /// <param name="ending">The ending to examine.</param>
+    /// <returns>The exception, or <see langword="null"/> when this ending has nothing to complain about.</returns>
     /// <remarks>
     /// <para>
     /// An <see cref="InvalidOperationException"/> carrying the base class library's own wording, because
@@ -1267,14 +1722,15 @@ internal sealed class LocalRun
     /// terminal that inferred emptiness from its state would report the wrong answer for exactly those two.
     /// </para>
     /// </remarks>
-    private InvalidOperationException? Missing()
+    private InvalidOperationException? Missing(int ending)
     {
-        if (_plan.Segments[^1].Terminal is not { RequiresElement: true } terminal || _observed)
+        if (_plan.Segments[_plan.Endings[ending].Segment].Terminal is not { RequiresElement: true } terminal ||
+            _observed[ending])
         {
             return null;
         }
 
-        string result = _plan.Slot is { } slot ? $"the result '{slot}'" : "this run's result";
+        string result = _plan.Endings[ending].Slot is { } slot ? $"the result '{slot}'" : "this run's result";
 
         return new InvalidOperationException(
             $"Sequence contains no elements: the stream ended without one, and {result} is its {terminal.Element} element. Close the graph with a {terminal.Element}-or-default sink to resolve the element type's default value instead of failing.");
@@ -1291,7 +1747,10 @@ internal sealed class LocalRun
     {
         await _completion.Task.ConfigureAwait(ConfigureAwaitOptions.SuppressThrowing);
 
-        _ = _result?.Task.Exception;
+        for (int ending = 0; ending < _results.Length; ending++)
+        {
+            _ = _results[ending]?.Task.Exception;
+        }
     }
 
     /// <summary>Asks the run to cancel.</summary>

@@ -1,10 +1,8 @@
-using Orleans.Dataflow.Identity;
-
 namespace Orleans.Dataflow.Runtime;
 
 /// <summary>
 /// A graph reduced to the shape one run executes: the segments that do the work, the bounded channels
-/// between them, and what terminates them.
+/// between them, and the endings that terminate them.
 /// </summary>
 /// <remarks>
 /// <para>
@@ -14,94 +12,103 @@ namespace Orleans.Dataflow.Runtime;
 /// share no delegate wrapper, no seed, no enumerator, and no channel.
 /// </para>
 /// <para>
-/// Fusion is the shape of this type. A chain of synchronous stages is one segment and no boundary at all;
-/// a boundary appears where — and only where — the author placed a <c>Buffer</c> or an asynchronous stage,
-/// the asynchronous callback sink included.
-/// <see cref="Boundaries"/> therefore always holds exactly one fewer element than
-/// <see cref="Segments"/>, and boundary <c>i</c> is the channel from segment <c>i</c> to segment
-/// <c>i + 1</c>.
+/// Fusion is the shape of this type. A maximal junction-free chain of synchronous stages is one segment and
+/// no boundary at all; a boundary appears where — and only where — the author placed a <c>Buffer</c>, an
+/// asynchronous stage, the asynchronous callback sink included, or a junction, which is a boundary on its
+/// input and on every one of its legs. A linear graph therefore plans to exactly the segments and channels
+/// it always did, and a branch of a graph plans the way the whole of a linear one does.
 /// </para>
 /// <para>
-/// The plan is a description and holds no run state. The fold's running state lives in
-/// <see cref="LocalRun"/>, which is why <see cref="Seed"/> is here and the state is not: a fresh run starts
-/// from the same seed the author wrote, and never from where another run left off. The channels are not
-/// here either, for the same reason.
+/// <b>Channels are keyed by edge rather than by position.</b> A channel used to be found by the offering
+/// segment's index, which worked only because a segment's position named both its input and its output.
+/// <see cref="Boundaries"/> is now a table of channels in its own right, and a segment says which of them
+/// it reads and writes; the planner is where a document's <see cref="Definition.GraphEdge"/> becomes one of
+/// these indices, and nothing below the planner needs the edge again.
+/// </para>
+/// <para>
+/// The plan is a description and holds no run state. The folds' running states live in
+/// <see cref="LocalRun"/>, which is why <see cref="LocalEnding.Seed"/> is on the ending and the state is
+/// not: a fresh run starts from the same seeds the author wrote, and never from where another run left
+/// off. The channels are not here either, for the same reason.
 /// </para>
 /// <para>
 /// What two runs do share is what the author shared with them: the same sequence instance, the same
 /// delegate instances, and therefore whatever those delegates captured. A run isolates the state it owns —
-/// its enumerator, its fold state, its wrappers, its channels — and cannot isolate state an author put
+/// its enumerator, its fold states, its wrappers, its channels — and cannot isolate state an author put
 /// outside the graph.
 /// </para>
 /// </remarks>
 internal sealed class LocalRunPlan
 {
     /// <summary>Initializes a new instance of the <see cref="LocalRunPlan"/> class.</summary>
-    /// <param name="segments">The segments in flow order; at least one.</param>
-    /// <param name="boundaries">The channels between them, one fewer than there are segments.</param>
-    /// <param name="seed">The terminal's initial state, meaningful only when the last segment has one.</param>
-    /// <param name="seedFactory">
-    /// The maker of the terminal's initial state, for a terminal whose state is mutable.
-    /// </param>
-    /// <param name="slot">The result slot the terminal's final state resolves, or <see langword="null"/>.</param>
+    /// <param name="segments">The segments, in the order the planner closed them.</param>
+    /// <param name="boundaries">The channels between them, one per plan edge.</param>
+    /// <param name="producers">The segment that writes each channel, indexed by channel.</param>
+    /// <param name="endings">The places branches stop, one per sink of the graph.</param>
     /// <param name="controls">The runtime controls this plan built, in document order.</param>
     /// <param name="completesAtStart">
-    /// The segment whose stream is over before the run begins, or minus one when none is.
+    /// The segments whose stream is over before the run begins, which is usually none.
     /// </param>
     internal LocalRunPlan(
         IReadOnlyList<LocalSegment> segments,
         IReadOnlyList<LocalBoundary> boundaries,
-        object? seed,
-        Func<object?>? seedFactory,
-        ResultSlotId? slot,
+        IReadOnlyList<int> producers,
+        IReadOnlyList<LocalEnding> endings,
         IReadOnlyList<LocalControl> controls,
-        int completesAtStart)
+        IReadOnlyList<int> completesAtStart)
     {
         Segments = segments;
         Boundaries = boundaries;
-        Seed = seed;
-        SeedFactory = seedFactory;
-        Slot = slot;
+        Producers = producers;
+        Endings = endings;
         Controls = controls;
         CompletesAtStart = completesAtStart;
     }
 
-    /// <summary>Gets the segments this plan executes, in flow order.</summary>
-    /// <value>One segment for a fully fused chain, and one more for every boundary in it.</value>
+    /// <summary>Gets the segments this plan executes.</summary>
+    /// <value>
+    /// One segment for a fully fused branch, and one more for every boundary in it; the order is the
+    /// planner's own and carries no meaning a run reads.
+    /// </value>
+    /// <remarks>
+    /// A run starts every one of them at once, so their order is not an execution order. What used to be
+    /// read off the order — who feeds whom, who is upstream of a completion — is stated by
+    /// <see cref="LocalSegment.Inputs"/> and <see cref="LocalSegment.Outputs"/> instead, because a graph
+    /// has no single order to read it off.
+    /// </remarks>
     internal IReadOnlyList<LocalSegment> Segments { get; }
 
-    /// <summary>Gets the bounded channels between the segments, in flow order.</summary>
+    /// <summary>Gets the bounded channels this plan's segments hand elements through.</summary>
     /// <value>
-    /// One fewer element than <see cref="Segments"/>: element <c>i</c> is the channel segment <c>i</c>
-    /// writes into and segment <c>i + 1</c> reads from. Empty for a fully fused chain.
+    /// One per edge of the plan: element <c>c</c> is the channel <see cref="Producers"/> names the writer
+    /// of, and exactly one segment lists it among its <see cref="LocalSegment.Inputs"/>. Empty for a fully
+    /// fused chain.
     /// </value>
     internal IReadOnlyList<LocalBoundary> Boundaries { get; }
 
-    /// <summary>Gets the terminal's initial state.</summary>
-    /// <value>
-    /// The seed the author wrote, the zero a count starts from, or the default value an honest
-    /// first-element sink resolves when it saw nothing; any of them may legitimately be
-    /// <see langword="null"/>, and the last segment's <see cref="LocalSegment.Terminal"/> and not this
-    /// value decides whether a state exists at all.
-    /// </value>
-    internal object? Seed { get; }
-
-    /// <summary>Gets the maker of the terminal's initial state, when the state cannot be shared.</summary>
-    /// <value>
-    /// The factory for a collecting sink, whose state is a list a run appends to; <see langword="null"/>
-    /// for every terminal whose seed is a value two runs may hold at once.
-    /// </value>
+    /// <summary>Gets the segment that writes into each channel.</summary>
+    /// <value>The producing segment's position, indexed by channel.</value>
     /// <remarks>
-    /// A plan outlives no run and is shared by none, but it is built once and a run reads
-    /// <see cref="Seed"/> from it, so a mutable seed would be one object two runs both appended to. The
-    /// factory is what keeps "fresh state per run" true for a terminal that accumulates rather than
-    /// replaces.
+    /// The upstream direction of the plan, precomputed because a run walks it at every completion: a
+    /// consumer that stops closes its input channels, and each closed channel has to reach the segment that
+    /// was writing into it so that its count of live outputs can fall. A junction is where that count is
+    /// more than one, and it is the whole of ADR 0005's third shared rule.
     /// </remarks>
-    internal Func<object?>? SeedFactory { get; }
+    internal IReadOnlyList<int> Producers { get; }
+
+    /// <summary>Gets the places the branches of this plan stop.</summary>
+    /// <value>One ending per sink, in the order the planner reached them.</value>
+    /// <remarks>
+    /// A linear plan has one and a branching plan has several, and the run's countdown does not care which:
+    /// it settles when every segment has stopped, which is when every ending has been reached. Each ending
+    /// keeps its own state and settles its own slot.
+    /// </remarks>
+    internal IReadOnlyList<LocalEnding> Endings { get; }
 
     /// <summary>Gets the runtime controls this plan built for its run.</summary>
     /// <value>
-    /// One control per ingress queue in the graph, or an empty list for a graph with none.
+    /// One control per ingress queue and per probe sink in the graph, or an empty list for a graph with
+    /// none.
     /// </value>
     /// <remarks>
     /// Built when the plan is compiled, which is once per materialization: a control is per run in exactly
@@ -109,26 +116,17 @@ internal sealed class LocalRunPlan
     /// </remarks>
     internal IReadOnlyList<LocalControl> Controls { get; }
 
-    /// <summary>Gets the segment whose stream is over before the run begins.</summary>
+    /// <summary>Gets the segments whose stream is over before the run begins.</summary>
     /// <value>
-    /// The position of the segment holding a <c>Take</c> of no elements, or minus one for every other plan.
+    /// The positions of the segments holding a <c>Take</c> of no elements, which is an empty list for
+    /// every other plan.
     /// </value>
     /// <remarks>
     /// A stage that can never emit is known when the plan is built, and a run that waited for an element to
     /// discover it would block on a source that is slow and stall forever on one that never ends. The run
-    /// therefore completes from this segment before its first pull, which is why <c>Take(0)</c> never
-    /// touches the source at all.
+    /// therefore completes from these segments before its first pull, which is why <c>Take(0)</c> never
+    /// touches the source at all. A list because a graph has branches: a <c>Take(0)</c> on one leg of a
+    /// junction ends that leg alone, and the other legs run exactly as they would have.
     /// </remarks>
-    internal int CompletesAtStart { get; }
-
-    /// <summary>Gets the result slot the terminal's final state resolves.</summary>
-    /// <value>
-    /// The slot name the document declares, or <see langword="null"/> when the graph exposes no result.
-    /// </value>
-    /// <remarks>
-    /// A result-bearing terminal with no slot is a real case rather than a defect: converting such a sink
-    /// through <see cref="SinkWithResult{TIn, TResult}.ToSink"/> keeps the terminal and drops the
-    /// declaration, so the run still folds every element and simply exposes nothing to ask for.
-    /// </remarks>
-    internal ResultSlotId? Slot { get; }
+    internal IReadOnlyList<int> CompletesAtStart { get; }
 }

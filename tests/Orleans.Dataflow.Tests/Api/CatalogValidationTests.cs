@@ -150,6 +150,8 @@ public sealed class CatalogValidationTests
         // either said; this list is the independent statement of what the vocabulary is.
         Assert.Equal(
             [
+                LocalStage("balance"),
+                LocalStage("broadcast"),
                 LocalStage("buffer"),
                 LocalStage("collect"),
                 LocalStage("count"),
@@ -191,18 +193,25 @@ public sealed class CatalogValidationTests
                 LocalStage("to-channel"),
                 LocalStage("unfold"),
                 LocalStage("unfold-async"),
+                LocalStage("unzip"),
                 LocalStage("where"),
             ],
             LocalStageCatalog.Instance.Specifications.Select(specification => specification.Stage));
     }
 
     [Fact]
-    public void EveryStageDeclaresThePortsItsPlaceInAChainImplies()
+    public void EveryStageDeclaresThePortsItsPlaceInAGraphImplies()
     {
         // The ports are derived from where a shape stands, so this is where that derivation is checked
-        // against a list written by hand: a source consumes nothing, a sink produces nothing, and
-        // everything else does both. A shape that moved between the three would keep validating and start
-        // executing somewhere it cannot stand.
+        // against a list written by hand: a source consumes nothing, a sink produces nothing, a junction
+        // consumes one stream and produces several, and everything else does both. A shape that moved
+        // between the four would keep validating and start executing somewhere it cannot stand.
+        Dictionary<string, int> junctions = new(StringComparer.Ordinal)
+        {
+            ["balance"] = 8,
+            ["broadcast"] = 8,
+            ["unzip"] = 2,
+        };
         string[] sources =
         [
             "cycle",
@@ -243,8 +252,38 @@ public sealed class CatalogValidationTests
             string stage = specification.Stage.Stage.Value;
 
             Assert.Equal(sources.Contains(stage) ? 0 : 1, specification.InputPorts.Count);
-            Assert.Equal(sinks.Contains(stage) ? 0 : 1, specification.OutputPorts.Count);
+
+            int outputs = junctions.TryGetValue(stage, out int legs)
+                ? legs
+                : sinks.Contains(stage) ? 0 : 1;
+
+            Assert.Equal(outputs, specification.OutputPorts.Count);
         }
+
+        // A junction declares more legs than most graphs wire, and the ones past the second are ignorable
+        // so that the edges of a document are what state how many this occurrence has. Exactly the first
+        // two are not, which is how "a junction routes to at least two outputs" becomes a rule the graph
+        // compiler checks rather than a promise the author makes.
+        foreach ((string stage, int _) in junctions)
+        {
+            Assert.True(
+                LocalStageCatalog.Instance.TryGetSpecification(
+                    LocalStage(stage),
+                    out StageSpecification? specification));
+            Assert.Equal(2, specification!.OutputPorts.Count(port => !port.IsIgnorable));
+            Assert.All(
+                specification.OutputPorts.Take(2),
+                port => Assert.False(port.IsIgnorable));
+        }
+
+        Assert.True(LocalStageCatalog.Instance.TryGetSpecification(LocalStage("unzip"), out StageSpecification? unzip));
+        Assert.Equal(["left", "right"], unzip!.OutputPorts.Select(port => port.Id.Value));
+
+        Assert.True(
+            LocalStageCatalog.Instance.TryGetSpecification(LocalStage("broadcast"), out StageSpecification? broadcast));
+        Assert.Equal(
+            ["out-0", "out-1", "out-2", "out-3", "out-4", "out-5", "out-6", "out-7"],
+            broadcast!.OutputPorts.Select(port => port.Id.Value));
     }
 
     [Fact]
@@ -291,6 +330,8 @@ public sealed class CatalogValidationTests
         Assert.Equal(
             new Dictionary<string, string>(StringComparer.Ordinal)
             {
+                ["balance"] = "local-parameters",
+                ["broadcast"] = "local-parameters",
                 ["buffer"] = "local-buffer-parameters",
                 ["collect"] = "local-collect-parameters",
                 ["count"] = "local-parameters",
@@ -332,6 +373,7 @@ public sealed class CatalogValidationTests
                 ["to-channel"] = "local-parameters",
                 ["unfold"] = "local-parameters",
                 ["unfold-async"] = "local-parameters",
+                ["unzip"] = "local-parameters",
                 ["where"] = "local-parameters",
             },
             contracts);
@@ -362,13 +404,22 @@ public sealed class CatalogValidationTests
                     Assert.False(port.IsOptional);
                 });
 
+            // A junction's legs are the one place a local output port is named anything but "out" and the
+            // one place an output is ignorable: which legs an occurrence has is stated by the edges of the
+            // document, so the ports past the second are outputs a graph may leave unwired.
+            bool junction = specification.Stage.Stage.Value is "broadcast" or "balance" or "unzip";
+
             Assert.All(
                 specification.OutputPorts,
                 port =>
                 {
-                    Assert.Equal("out", port.Id.Value);
+                    if (!junction)
+                    {
+                        Assert.Equal("out", port.Id.Value);
+                        Assert.False(port.IsIgnorable);
+                    }
+
                     Assert.Equal(Contract("local-opaque"), port.ElementContract);
-                    Assert.False(port.IsIgnorable);
                 });
 
             // Three opaque result contracts and not one. 'local-fold-result' is the identity a fold's
@@ -404,6 +455,8 @@ public sealed class CatalogValidationTests
         Assert.Equal(
             new Dictionary<string, int>(StringComparer.Ordinal)
             {
+                ["balance"] = 0,
+                ["broadcast"] = 0,
                 ["buffer"] = 0,
                 ["collect"] = 1,
                 ["count"] = 1,
@@ -445,6 +498,7 @@ public sealed class CatalogValidationTests
                 ["to-channel"] = 0,
                 ["unfold"] = 0,
                 ["unfold-async"] = 0,
+                ["unzip"] = 0,
                 ["where"] = 0,
             },
             resultPorts);

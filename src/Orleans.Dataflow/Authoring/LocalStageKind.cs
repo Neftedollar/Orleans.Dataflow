@@ -15,9 +15,9 @@ namespace Orleans.Dataflow.Authoring;
 /// </para>
 /// <para>
 /// The members are grouped by what a shape does to a chain: the shapes that begin one, the shapes that
-/// transform elements inside one, the shapes that cut one into segments, and the shapes that end one. A
-/// source declares no input port, a terminal declares no output port, and the three result-bearing
-/// terminals declare a result port on top of that.
+/// transform elements inside one, the shapes that cut one into segments, the shapes that split one into
+/// branches, and the shapes that end one. A source declares no input port, a terminal declares no output
+/// port, and the three result-bearing terminals declare a result port on top of that.
 /// </para>
 /// <para>
 /// Six of the shapes are boundaries: <see cref="Buffer"/>, <see cref="SelectAsync"/>,
@@ -25,6 +25,13 @@ namespace Orleans.Dataflow.Authoring;
 /// <see cref="SelectValueTaskAsyncUnordered"/>, and <see cref="ForEachAsync"/> each cut the chain into
 /// segments the runtime executes as separate loops joined by one bounded channel. Every other shape fuses,
 /// which is what makes fusion the default and a queue something an author asked for.
+/// </para>
+/// <para>
+/// Three of the shapes are junctions: <see cref="Broadcast"/>, <see cref="Balance"/>, and
+/// <see cref="Unzip"/> each declare several output ports and each is a boundary on every one of them. A
+/// junction never fuses with anything, because its pump shape — one reader, several writers, and a rule
+/// about which of them must have room before it pulls — is the whole of what it is. Their contracts are
+/// ADR 0005's fan-out table, and the runtime holds them per junction rather than per graph.
 /// </para>
 /// <para>
 /// <see cref="SinkProbe"/> is the one shape no author-facing operator of this package builds: it is the
@@ -164,6 +171,24 @@ internal enum LocalStageKind
     /// order; one input port and one output port.
     /// </summary>
     SelectValueTaskAsyncUnordered,
+
+    /// <summary>
+    /// Delivers every element to every live output; one input port and between two and
+    /// <see cref="LocalVocabulary.MaxFanOut"/> output ports.
+    /// </summary>
+    Broadcast,
+
+    /// <summary>
+    /// Delivers each element to exactly one output that has room; one input port and between two and
+    /// <see cref="LocalVocabulary.MaxFanOut"/> output ports.
+    /// </summary>
+    Balance,
+
+    /// <summary>
+    /// Delivers the two halves of a row to two outputs that both have room; one input port and the two
+    /// output ports <c>left</c> and <c>right</c>.
+    /// </summary>
+    Unzip,
 
     /// <summary>Folds every element into a state value; one input port and one result port.</summary>
     Fold,

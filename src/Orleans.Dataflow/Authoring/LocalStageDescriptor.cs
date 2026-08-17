@@ -115,15 +115,22 @@ internal sealed class LocalStageDescriptor : StageOccurrence
     /// source, which consumes none.
     /// </value>
     internal override PortId? InputPort =>
-        LocalVocabulary.ConsumesElements(Kind) ? LocalVocabulary.InputPort : null;
+        LocalVocabulary.InputPortsOf(Kind) is [{ } only] ? only.Id : null;
 
     /// <inheritdoc/>
     /// <value>
-    /// The one local output port name for every shape that produces elements; <see langword="null"/> for a
-    /// terminal, which produces none.
+    /// The one local output port name for every shape that produces one stream; <see langword="null"/> for
+    /// a terminal, which produces none, and for a junction, which produces several.
     /// </value>
+    /// <remarks>
+    /// A junction answers <see langword="null"/> here rather than naming its first leg, because this member
+    /// is what the chain-composing builder connects to and a junction is not something a chain can hold: it
+    /// is authored as a graph, and the graph surface that spells one is a later checkpoint. Deriving the
+    /// answer from the declared port list rather than from a place is what makes that true by construction
+    /// instead of by a rule written twice.
+    /// </remarks>
     internal override PortId? OutputPort =>
-        LocalVocabulary.ProducesElements(Kind) ? LocalVocabulary.OutputPort : null;
+        LocalVocabulary.OutputPortsOf(Kind) is [{ } only] ? only.Id : null;
 
     /// <inheritdoc/>
     /// <value>
@@ -393,6 +400,33 @@ internal sealed class LocalStageDescriptor : StageOccurrence
             selector,
             seed: null,
             LocalParallelismParameters.Write(options));
+
+    /// <summary>Creates a junction that delivers every element to every live output.</summary>
+    /// <returns>The descriptor.</returns>
+    /// <remarks>
+    /// No behavior and no payload at all: a broadcast is decided entirely by the edges its legs carry, so
+    /// there is nothing left for a binding to say and nothing a document could state twice.
+    /// </remarks>
+    internal static LocalStageDescriptor Broadcast() =>
+        new(LocalStageKind.Broadcast, behavior: null, seed: null, LocalVocabulary.EmptyParameters);
+
+    /// <summary>Creates a junction that delivers each element to exactly one output with room.</summary>
+    /// <returns>The descriptor.</returns>
+    internal static LocalStageDescriptor Balance() =>
+        new(LocalStageKind.Balance, behavior: null, seed: null, LocalVocabulary.EmptyParameters);
+
+    /// <summary>Creates a junction that delivers the two halves of a row to two outputs.</summary>
+    /// <param name="left">The projection of a row onto its left half, as the authoring value received it.</param>
+    /// <param name="right">The projection of a row onto its right half, as the authoring value received it.</param>
+    /// <returns>The descriptor.</returns>
+    /// <remarks>
+    /// The two projections are behavior for the reason every projection is: which member of a row is its
+    /// left half is a statement about an element type, and an element type never appears in a local
+    /// document. What the document states is that this node splits one stream into two, which is the part
+    /// that is topology.
+    /// </remarks>
+    internal static LocalStageDescriptor Unzip(object left, object right) =>
+        new(LocalStageKind.Unzip, new[] { left, right }, seed: null, LocalVocabulary.EmptyParameters);
 
     /// <summary>Creates a folding sink.</summary>
     /// <param name="seed">The initial state, which may be <see langword="null"/>.</param>

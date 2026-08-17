@@ -59,6 +59,25 @@ internal static class LocalVocabulary
     /// <summary>The numeric format that pads a position to the four digits <see cref="MaxAutoNamedPosition"/> allows.</summary>
     private const string AutoNameNumberFormat = "D4";
 
+    /// <summary>The greatest number of outputs a broadcast or a balance declares.</summary>
+    /// <remarks>
+    /// A stage specification declares a port list rather than an arity, so a junction's legs have to be
+    /// ports that exist whether or not a given document wires them; the bound is where that list stops. It
+    /// is stated rather than implied because every bound in this runtime is: a graph that needs a ninth leg
+    /// says so and gets a diagnostic, instead of silently losing one.
+    /// </remarks>
+    internal const int MaxFanOut = 8;
+
+    /// <summary>The smallest number of outputs a junction declares.</summary>
+    /// <remarks>
+    /// Both of the first two ports are required, which is what makes "this is a junction" a fact the graph
+    /// compiler checks rather than a promise the author makes.
+    /// </remarks>
+    internal const int MinFanOut = 2;
+
+    /// <summary>The prefix of every numbered fan-out port name.</summary>
+    private const string FanOutPortPrefix = "out-";
+
     /// <summary>The provider every local stage belongs to.</summary>
     internal static readonly ProviderId Provider = ProviderId.Create("local");
 
@@ -184,6 +203,18 @@ internal static class LocalVocabulary
             Provider,
             StageId.Create("select-value-task-async-unordered"),
             StageRef.FirstMajorVersion);
+
+    /// <summary>The stage reference of a junction that delivers every element to every output.</summary>
+    internal static readonly StageRef Broadcast =
+        StageRef.Create(Provider, StageId.Create("broadcast"), StageRef.FirstMajorVersion);
+
+    /// <summary>The stage reference of a junction that delivers each element to one output with room.</summary>
+    internal static readonly StageRef Balance =
+        StageRef.Create(Provider, StageId.Create("balance"), StageRef.FirstMajorVersion);
+
+    /// <summary>The stage reference of a junction that delivers a row's halves to two outputs.</summary>
+    internal static readonly StageRef Unzip =
+        StageRef.Create(Provider, StageId.Create("unzip"), StageRef.FirstMajorVersion);
 
     /// <summary>The stage reference of a folding sink.</summary>
     internal static readonly StageRef Fold =
@@ -331,8 +362,46 @@ internal static class LocalVocabulary
     /// <summary>The input port name of every local stage that consumes elements.</summary>
     internal static readonly PortId InputPort = PortId.Create("in");
 
-    /// <summary>The output port name of every local stage that produces elements.</summary>
+    /// <summary>The output port name of every local stage that produces elements into one chain.</summary>
     internal static readonly PortId OutputPort = PortId.Create("out");
+
+    /// <summary>The output port name of the left half of an unzipped row.</summary>
+    internal static readonly PortId LeftPort = PortId.Create("left");
+
+    /// <summary>The output port name of the right half of an unzipped row.</summary>
+    internal static readonly PortId RightPort = PortId.Create("right");
+
+    /// <summary>The input ports of every shape that consumes elements, which is the one element port.</summary>
+    private static readonly InputPortSpecification[] ElementInput =
+        [InputPortSpecification.Create(InputPort, ElementContract)];
+
+    /// <summary>The input ports of a source, which are none.</summary>
+    private static readonly InputPortSpecification[] NoInputs = [];
+
+    /// <summary>The output ports of every shape that produces one stream, which is the one element port.</summary>
+    private static readonly OutputPortSpecification[] ElementOutput =
+        [OutputPortSpecification.Create(OutputPort, ElementContract)];
+
+    /// <summary>The output ports of a terminal, which are none.</summary>
+    private static readonly OutputPortSpecification[] NoOutputs = [];
+
+    /// <summary>The output ports an unzip declares, which are the two halves of a row.</summary>
+    private static readonly OutputPortSpecification[] RowOutputs =
+    [
+        OutputPortSpecification.Create(LeftPort, ElementContract),
+        OutputPortSpecification.Create(RightPort, ElementContract),
+    ];
+
+    /// <summary>The output ports a broadcast or a balance declares, in rotation order.</summary>
+    /// <remarks>
+    /// The first two are wired or the document does not validate — a junction with one leg is a chain
+    /// written the long way, and one with none is a discarding sink. The rest are ignorable, which is the
+    /// definition plane's own spelling of "an output a graph may leave unwired": the edges of the document
+    /// are what say how many legs this junction has, and the runtime reads exactly them. That is why a
+    /// junction carries no parameter payload at all — an arity written down beside the edges would be a
+    /// second statement of the same fact, and two statements can disagree.
+    /// </remarks>
+    private static readonly OutputPortSpecification[] FanOutOutputs = FanOutPorts();
 
     /// <summary>The result contract the <c>control</c> port of a local ingress queue declares.</summary>
     /// <remarks>
@@ -438,6 +507,9 @@ internal static class LocalVocabulary
         LocalStageKind.SelectAsyncUnordered => SelectAsyncUnordered,
         LocalStageKind.SelectValueTaskAsync => SelectValueTaskAsync,
         LocalStageKind.SelectValueTaskAsyncUnordered => SelectValueTaskAsyncUnordered,
+        LocalStageKind.Broadcast => Broadcast,
+        LocalStageKind.Balance => Balance,
+        LocalStageKind.Unzip => Unzip,
         LocalStageKind.Fold => Fold,
         LocalStageKind.Ignore => Ignore,
         LocalStageKind.ForEach => ForEach,
@@ -488,6 +560,9 @@ internal static class LocalVocabulary
             LocalStageKind.UnfoldAsync or
             LocalStageKind.FromChannel or
             LocalStageKind.Select or
+            LocalStageKind.Broadcast or
+            LocalStageKind.Balance or
+            LocalStageKind.Unzip or
             LocalStageKind.Where or
             LocalStageKind.Scan or
             LocalStageKind.TakeWhile or
@@ -574,6 +649,9 @@ internal static class LocalVocabulary
             LocalStageKind.SelectAsyncUnordered or
             LocalStageKind.SelectValueTaskAsync or
             LocalStageKind.SelectValueTaskAsyncUnordered => LocalStagePlace.Operator,
+        LocalStageKind.Broadcast or
+            LocalStageKind.Balance or
+            LocalStageKind.Unzip => LocalStagePlace.FanOut,
         LocalStageKind.Fold or
             LocalStageKind.Ignore or
             LocalStageKind.ForEach or
@@ -602,6 +680,60 @@ internal static class LocalVocabulary
     /// <exception cref="ArgumentOutOfRangeException"><paramref name="kind"/> is not a declared member.</exception>
     internal static bool ProducesElements(LocalStageKind kind) =>
         PlaceOf(kind) is not LocalStagePlace.Terminal;
+
+    /// <summary>Returns the input ports an occurrence of <paramref name="kind"/> declares.</summary>
+    /// <param name="kind">The stage shape.</param>
+    /// <returns>The one element input port, or an empty list for a source.</returns>
+    /// <exception cref="ArgumentOutOfRangeException"><paramref name="kind"/> is not a declared member.</exception>
+    /// <remarks>
+    /// Every shape that consumes anything consumes one stream in this checkpoint, junctions included: a
+    /// fan-out has one input by definition, and the shapes that have several arrive with the fan-in pumps.
+    /// </remarks>
+    internal static IReadOnlyList<InputPortSpecification> InputPortsOf(LocalStageKind kind) =>
+        ConsumesElements(kind) ? ElementInput : NoInputs;
+
+    /// <summary>Returns the output ports an occurrence of <paramref name="kind"/> declares.</summary>
+    /// <param name="kind">The stage shape.</param>
+    /// <returns>
+    /// The two halves of a row for an unzip, the numbered legs for the other two junctions, the one element
+    /// output port for every other producing shape, and an empty list for a terminal.
+    /// </returns>
+    /// <exception cref="ArgumentOutOfRangeException"><paramref name="kind"/> is not a declared member.</exception>
+    internal static IReadOnlyList<OutputPortSpecification> OutputPortsOf(LocalStageKind kind) => kind switch
+    {
+        LocalStageKind.Unzip => RowOutputs,
+        LocalStageKind.Broadcast or LocalStageKind.Balance => FanOutOutputs,
+        _ => ProducesElements(kind) ? ElementOutput : NoOutputs,
+    };
+
+    /// <summary>Builds the numbered output ports of a broadcast or a balance.</summary>
+    /// <returns>The ports, <see cref="MinFanOut"/> of them required and the rest ignorable.</returns>
+    /// <remarks>
+    /// Ordinal order over the names is rotation order, which is what a balance distributes in and what a
+    /// broadcast asks for room in. The number is formatted with the invariant culture for the reason every
+    /// identifier in this vocabulary is: a culture with non-ASCII digits would otherwise produce a name the
+    /// identifier grammar rejects.
+    /// </remarks>
+    private static OutputPortSpecification[] FanOutPorts()
+    {
+        OutputPortSpecification[] ports = new OutputPortSpecification[MaxFanOut];
+
+        for (int index = 0; index < ports.Length; index++)
+        {
+            ports[index] = OutputPortSpecification.Create(
+                FanOutPort(index),
+                ElementContract,
+                isIgnorable: index >= MinFanOut);
+        }
+
+        return ports;
+    }
+
+    /// <summary>Builds the name of one numbered fan-out port.</summary>
+    /// <param name="leg">The zero-based position of the leg.</param>
+    /// <returns>The port name, such as <c>out-0</c>.</returns>
+    internal static PortId FanOutPort(int leg) =>
+        PortId.Create(FanOutPortPrefix + leg.ToString(CultureInfo.InvariantCulture));
 
     /// <summary>Returns the result port an occurrence of <paramref name="kind"/> declares.</summary>
     /// <param name="kind">The stage shape.</param>

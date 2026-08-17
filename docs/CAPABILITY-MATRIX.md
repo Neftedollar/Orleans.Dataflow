@@ -92,10 +92,10 @@ C# names should follow .NET expectations where possible. If the Akka.NET behavio
 | Merge preferred/prioritized/sorted | P2 | M4+ | Research | Fairness and starvation policies are part of the contract. |
 | Concat | P1 | M4 | Research | Later input is not consumed as the active input until the prior one completes, except bounded prefetch if declared. |
 | Zip/zip-with | P1 | M4 | Research | Positional pairing and early-completion behavior are deterministic. |
-| Broadcast | P1 | M4 | Research | Every output receives each element; one slow output backpressures by default. |
-| Balance | P1 | M4 | Research | Exactly one available output receives each element; fairness is specified. |
+| Broadcast | P1 | M4 | Implemented | Every output receives each element; one slow output backpressures by default. The local engine's junction asks every live leg for room before it pulls, so the slow leg paces the stream (proved by how far a held source gets), holds one element outside its declared buffers, drops a leg whose downstream completed, and completes upstream when the last leg leaves. No C# authoring spelling yet: the graph builder is M4.2, and the proofs are over documents built directly. |
+| Balance | P1 | M4 | Implemented | Exactly one available output receives each element; fairness is specified. The local engine rotates among the outputs that have room, so a leg with no room is routed around rather than blocking the others, every element arrives exactly once, and one element is held outside the declared buffers. An overflow policy on a balance's leg is unreachable by construction and is recorded as such. No C# authoring spelling yet. |
 | Partition | P1 | M4 | Research | Routing function and invalid partition behavior are explicit. |
-| Unzip/unzip-with | P1 | M4 | Research | Output backpressure interaction is explicit. |
+| Unzip/unzip-with | P1 | M4 | Implemented | Output backpressure interaction is explicit: both outputs must have room before the row is pulled, so the two legs advance in lockstep and re-zip without skew (proved by pairing the collected halves, since zip does not exist yet). No C# authoring spelling yet. |
 | Interleave | P2 | M4 | Research | Segment size, fairness, and per-input completion behavior are explicit. |
 | Combine latest | P2 | M4 | Research | Initial completeness, which-input-emits, and completion rules are deterministic. |
 | Group by key | P1 | M4+ | Research | Maximum active keys, eviction, cancellation, and idle cleanup are bounded. |

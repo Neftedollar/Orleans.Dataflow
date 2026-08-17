@@ -6,13 +6,13 @@ using Orleans.Dataflow.Identity;
 namespace Orleans.Dataflow.Runtime;
 
 /// <summary>
-/// Turns a validated graph into the plan one run executes: the document decides the order and the
+/// Turns a validated graph into the plan one run executes: the document decides the shape and the
 /// configuration, the binding table decides the behavior.
 /// </summary>
 /// <remarks>
 /// <para>
 /// The two halves of a local graph are read here and nowhere else. The document is the statement of
-/// topology, so the chain order comes from its edges; it is also the statement of configuration, so a
+/// topology, so the branch order comes from its edges; it is also the statement of configuration, so a
 /// buffer's capacity and policy and an asynchronous stage's concurrency bound are read from its parameter
 /// payloads. The binding table is the statement of behavior, so the delegates come from it. Neither is
 /// trusted to imply the other: a node whose binding is missing, whose binding has the wrong shape for the
@@ -23,26 +23,35 @@ namespace Orleans.Dataflow.Runtime;
 /// Reading the options from the document rather than from the authoring-side descriptor is deliberate and
 /// is what makes the payload real. A capacity that lived only in the binding table would make two
 /// documents that differ observably look identical, and a hand-built document's capacity would be
-/// decoration the runtime ignored.
+/// decoration the runtime ignored. A junction is the same rule seen from the other side: how many legs one
+/// has is stated by the edges alone, so there is no arity payload to disagree with them.
 /// </para>
 /// <para>
 /// The order is derived from edges rather than from node order, because a document orders its nodes
 /// ordinally by identifier text and nothing obliges that order to be the flow. The authoring API's
 /// zero-padded numbering happens to make the two agree for the graphs it closes, but a document this type
 /// is handed by anything else has no such property, and a runtime that read the node list would execute
-/// such a document in the wrong order rather than reject it. Following edges is also what makes the
-/// linearity check real: every shape that is not one chain from one source to one terminal is rejected
-/// here, which is the defense that keeps the run loops free of cases they cannot execute.
+/// such a document in the wrong order rather than reject it. Following edges is also what makes the shape
+/// check real: every shape this checkpoint cannot execute — two sources, a node fed by two others, a node
+/// that is not a junction feeding two, a cycle, a component nothing reaches — is rejected here, which is
+/// the defense that keeps the run loops free of cases they cannot execute.
 /// </para>
 /// <para>
-/// <b>Fusion.</b> The chain is cut into segments at boundaries and nowhere else, so adjacent synchronous
-/// stages end up in one segment and one loop. A <c>buffer</c> declares the channel of the next cut; an
-/// asynchronous stage cuts and heads the segment that follows, whether it maps its elements or is the
-/// callback sink that ends the chain. A buffer standing immediately before an asynchronous stage is that
-/// stage's own input channel rather than a second one with an empty relay segment between them — which is
-/// what an author who writes <c>Buffer(8).SelectAsync(...)</c> means, and it keeps the count of channels
-/// equal to the count of boundaries the author wrote. Every operator this checkpoint adds fuses, so a
-/// chain of them is still one loop holding one element.
+/// <b>Branches and fusion.</b> The graph is walked as branches: one from the source, and one more from
+/// every leg of every junction. A branch is cut into segments at boundaries and nowhere else, so adjacent
+/// synchronous stages end up in one segment and one loop, exactly as a whole linear graph does. A
+/// <c>buffer</c> declares the channel of the next cut; an asynchronous stage cuts and heads the segment
+/// that follows, whether it maps its elements or is the callback sink that ends the branch; a junction cuts
+/// and is its own segment, because its pump shape is what defines it. A buffer standing immediately before
+/// an asynchronous stage or a junction is that stage's own input channel, and a buffer standing
+/// immediately on a leg is that leg's own channel, rather than a second one with an empty relay segment
+/// between them — which is what an author who writes <c>Buffer(8)</c> there means, and it keeps the count
+/// of channels equal to the count of boundaries the author wrote.
+/// </para>
+/// <para>
+/// A linear document therefore plans to exactly the segments, channels and fusion it always did: one
+/// branch, no junction, one ending. The graph plan is the general case and the chain is its degenerate
+/// one, rather than two planners that have to be kept in agreement.
 /// </para>
 /// <para>
 /// None of the rejections here is reachable through the authoring API. Its generic signatures make the
@@ -59,8 +68,9 @@ internal static class LocalRunPlanner
     /// <param name="runIdentity">What the run this plan is for is called in this process.</param>
     /// <returns>The plan.</returns>
     /// <exception cref="InvalidOperationException">
-    /// The document is not one linear chain, a node has no binding, a binding does not have the shape the
-    /// stage it is bound to requires, or a parameterized stage carries a payload this runtime cannot read.
+    /// The document is not a shape this runtime executes, a node has no binding, a binding does not have
+    /// the shape the stage it is bound to requires, or a parameterized stage carries a payload this runtime
+    /// cannot read.
     /// </exception>
     internal static LocalRunPlan Compile(RunnableGraph graph, StageRuntimeBinder binder, string runIdentity) =>
         Compile(graph.Document, graph.LocalBindings, binder, runIdentity);
@@ -72,13 +82,13 @@ internal static class LocalRunPlanner
     /// <param name="runIdentity">What the run this plan is for is called in this deployment.</param>
     /// <returns>The plan.</returns>
     /// <exception cref="InvalidOperationException">
-    /// The document is not one linear chain, a node is neither locally bound nor resolvable through
-    /// <paramref name="binder"/>, a binding does not have the shape the stage it is bound to requires, a
-    /// resolved stage's shape cannot stand where the node does, or a parameterized stage carries a payload
-    /// this runtime cannot read.
+    /// The document is not a shape this runtime executes, a node is neither locally bound nor resolvable
+    /// through <paramref name="binder"/>, a binding does not have the shape the stage it is bound to
+    /// requires, a resolved stage's shape cannot stand where the node does, or a parameterized stage
+    /// carries a payload this runtime cannot read.
     /// </exception>
     /// <remarks>
-    /// The two halves of a chain are read the same way whichever plane a node comes from: the document
+    /// The two halves of a branch are read the same way whichever plane a node comes from: the document
     /// decides order and configuration, and behavior comes either from the binding table or from a runtime
     /// factory. A mixed document is therefore not a special case here — each node is asked of the table
     /// first and of the binder second, which is exactly the precedence the local vocabulary needs, because
@@ -90,371 +100,622 @@ internal static class LocalRunPlanner
         StageRuntimeBinder binder,
         string runIdentity)
     {
-        List<NodeId> order = LinearOrder(document);
         Dictionary<NodeId, StageNode> declarations = Declarations(document);
+        Dictionary<PortAddress, NodeId> downstream = new(document.Edges.Count);
+        Dictionary<NodeId, List<GraphEdge>> leaving = new(document.Nodes.Count);
+        HashSet<NodeId> fed = new(document.Edges.Count);
+
+        foreach (GraphEdge edge in document.Edges)
+        {
+            if (!downstream.TryAdd(edge.From, edge.To.Node))
+            {
+                throw Foreign($"the port '{edge.From}' feeds more than one node");
+            }
+
+            if (!fed.Add(edge.To.Node))
+            {
+                throw Foreign($"the node '{edge.To.Node}' is fed by more than one node");
+            }
+
+            if (leaving.TryGetValue(edge.From.Node, out List<GraphEdge>? edges))
+            {
+                edges.Add(edge);
+            }
+            else
+            {
+                leaving.Add(edge.From.Node, [edge]);
+            }
+        }
+
+        NodeId head = Head(document, fed);
         List<LocalSegment> segments = [];
         List<LocalBoundary> boundaries = [];
-        List<LocalElementStage> stages = [];
+        List<int> producers = [];
+        List<Sink> sinks = [];
+        List<int> completesAtStart = [];
         Dictionary<NodeId, (LocalIngressQueue? Queue, object Handle)> controls = [];
-        LocalSource? elements = null;
-        LocalAsyncStage? head = null;
-        LocalBoundary? pending = null;
-        LocalTerminal? terminal = null;
-        object? seed = null;
-        Func<object?>? seedFactory = null;
-        bool produces = false;
-        int completesAtStart = -1;
+        HashSet<NodeId> walked = new(document.Nodes.Count);
+        Queue<(NodeId Start, int Input)> branches = new();
 
-        for (int index = 0; index < order.Count; index++)
+        branches.Enqueue((head, -1));
+
+        while (branches.Count > 0)
         {
-            StageNode declaration = declarations[order[index]];
-            bool first = index == 0;
-            bool last = index == order.Count - 1;
+            (NodeId start, int input) = branches.Dequeue();
 
-            if (!bindings.TryGetValue(declaration.Id, out LocalStageDescriptor? descriptor))
+            Branch(start, input);
+        }
+
+        if (walked.Count != document.Nodes.Count)
+        {
+            throw Foreign(
+                $"its {document.Nodes.Count} nodes do not form one graph, and following the edges from '{head}' reached {walked.Count} of them");
+        }
+
+        for (int index = 0; index < segments.Count; index++)
+        {
+            if (segments[index].Inputs.Count == 0 && segments[index].Elements is null)
             {
-                StageRuntime provided = Provided(binder, declaration);
+                throw Foreign("the graph does not begin with a source");
+            }
+        }
 
-                switch (provided.Shape)
+        (ResultSlotId?[] slots, LocalControl[] declared) = Slots(document, sinks, controls);
+        LocalEnding[] endings = new LocalEnding[sinks.Count];
+
+        for (int index = 0; index < endings.Length; index++)
+        {
+            endings[index] = new LocalEnding(
+                sinks[index].Segment,
+                sinks[index].Seed,
+                sinks[index].SeedFactory,
+                slots[index]);
+        }
+
+        return new LocalRunPlan(segments, boundaries, producers, endings, declared, completesAtStart);
+
+        // Compiles one maximal junction-free chain, from the node that begins it to the terminal or the
+        // junction that ends it. The head branch begins at the source and reads no channel; every other
+        // branch begins on a leg and reads the channel that leg is.
+        void Branch(NodeId start, int input)
+        {
+            LocalSource? elements = null;
+            LocalAsyncStage? asynchronous = null;
+            List<LocalElementStage> stages = [];
+            LocalBoundary? pending = null;
+            LocalTerminal? terminal = null;
+            object? seed = null;
+            Func<object?>? seedFactory = null;
+            bool produces = false;
+            List<int> inputs = input < 0 ? [] : [input];
+            NodeId current = start;
+
+            while (true)
+            {
+                // Refused rather than skipped, because skipping would leave the channel this branch was
+                // entered on with nobody reading it, and a channel nobody reads is a run that waits
+                // forever. It is unreachable for a document whose nodes each have at most one edge into
+                // them, which is checked above; this is what keeps that reasoning from being load-bearing.
+                if (!walked.Add(current))
                 {
-                    case StageRuntimeShape.Source when first && !last:
-                    {
-                        StageSourceOpener open = provided.Opener!;
-
-                        elements = context => LocalSequence.Async(
-                            _ => new LocalAsyncCursor<object?>(
-                                open(new StageRunTokens(runIdentity, context.RunToken, context.StopToken))
-                                    .GetAsyncEnumerator(context.RunToken)),
-                            context);
-
-                        break;
-                    }
-
-                    case StageRuntimeShape.Element when !first && !last:
-                        Fuse(LocalElementStage.Select(provided.Map!));
-                        break;
-                    case StageRuntimeShape.ElementAsync when !first && !last:
-                        Cut(pending ?? LocalBoundary.Handoff);
-                        head = new LocalAsyncStage(
-                            provided.AsAsyncCallback(),
-                            provided.MaxConcurrency,
-                            provided.Ordered);
-                        break;
-                    case StageRuntimeShape.Terminal when last && !first:
-                        Settle();
-                        terminal = LocalTerminal.Provided(provided.Fold!, provided.Finish);
-                        seedFactory = provided.Seed;
-                        produces = provided.ProducesResult;
-                        break;
-                    default:
-                        throw Foreign(
-                            $"the node '{declaration.Id}' is an occurrence of the stage '{declaration.Stage}', whose runtime factory built a '{provided.Shape}' shape, and that shape cannot stand at position {index + 1} of {order.Count}");
+                    throw Foreign($"the node '{current}' is reached from more than one place");
                 }
 
+                StageNode declaration = declarations[current];
+
+                // What a shape may be is decided by what the document connects it to and not by a position
+                // in a list, because a graph has no single list to count along. For a chain the two agree
+                // exactly: the node nothing feeds is the first and the node that feeds nothing is the last.
+                bool first = !fed.Contains(current);
+                bool last = !leaving.ContainsKey(current);
+                int position = walked.Count;
+
+                if (!bindings.TryGetValue(declaration.Id, out LocalStageDescriptor? descriptor))
+                {
+                    StageRuntime provided = Provided(binder, declaration);
+
+                    switch (provided.Shape)
+                    {
+                        case StageRuntimeShape.Source when first && !last:
+                        {
+                            StageSourceOpener open = provided.Opener!;
+
+                            elements = context => LocalSequence.Async(
+                                _ => new LocalAsyncCursor<object?>(
+                                    open(new StageRunTokens(runIdentity, context.RunToken, context.StopToken))
+                                        .GetAsyncEnumerator(context.RunToken)),
+                                context);
+
+                            break;
+                        }
+
+                        case StageRuntimeShape.Element when !first && !last:
+                            Fuse(LocalElementStage.Select(provided.Map!));
+                            break;
+                        case StageRuntimeShape.ElementAsync when !first && !last:
+                            Open(pending ?? LocalBoundary.Handoff);
+                            asynchronous = new LocalAsyncStage(
+                                provided.AsAsyncCallback(),
+                                provided.MaxConcurrency,
+                                provided.Ordered);
+                            break;
+                        case StageRuntimeShape.Terminal when last && !first:
+                            Settle();
+                            terminal = LocalTerminal.Provided(provided.Fold!, provided.Finish);
+                            seedFactory = provided.Seed;
+                            produces = provided.ProducesResult;
+                            break;
+                        default:
+                            throw Foreign(
+                                $"the node '{declaration.Id}' is an occurrence of the stage '{declaration.Stage}', whose runtime factory built a '{provided.Shape}' shape, and that shape cannot stand at position {position} of {document.Nodes.Count}");
+                    }
+                }
+                else
+                {
+                    switch (descriptor.Kind)
+                    {
+                        case LocalStageKind.FromEnumerable when first && !last:
+                        {
+                            IEnumerable sequence = LocalDelegateAdapter.Elements(descriptor.Behavior, descriptor.Kind);
+
+                            elements = _ => sequence;
+
+                            break;
+                        }
+
+                        case LocalStageKind.Empty when first && !last:
+                            elements = static _ => LocalSequence.Empty();
+                            break;
+                        case LocalStageKind.Single when first && !last:
+                        {
+                            object? value = descriptor.Behavior;
+
+                            elements = _ => LocalSequence.Single(value);
+
+                            break;
+                        }
+
+                        case LocalStageKind.Repeat when first && !last:
+                        {
+                            object? value = descriptor.Behavior;
+                            int count = Count(declaration);
+
+                            elements = _ => LocalSequence.Repeat(value, count);
+
+                            break;
+                        }
+
+                        case LocalStageKind.Range when first && !last:
+                        {
+                            (int from, int count) = Range(declaration);
+
+                            elements = _ => LocalSequence.Range(from, count);
+
+                            break;
+                        }
+
+                        case LocalStageKind.FromTask when first && !last:
+                        {
+                            Func<object?> value = LocalDelegateAdapter.TaskValue(descriptor.Behavior);
+
+                            elements = _ => LocalSequence.Deferred(value);
+
+                            break;
+                        }
+
+                        case LocalStageKind.Failed when first && !last:
+                        {
+                            Exception failure = LocalDelegateAdapter.Failure(descriptor.Behavior);
+
+                            elements = _ => LocalSequence.Failed(failure);
+
+                            break;
+                        }
+
+                        case LocalStageKind.Unfold when first && !last:
+                        {
+                            object? state = descriptor.Seed;
+                            LocalGenerator generator = LocalDelegateAdapter.Generator(descriptor.Behavior);
+
+                            elements = _ => LocalSequence.Unfold(state, generator);
+
+                            break;
+                        }
+
+                        case LocalStageKind.FromAsyncEnumerable when first && !last:
+                        {
+                            LocalAsyncCursorFactory open = LocalDelegateAdapter.AsyncCursors(descriptor.Behavior);
+
+                            elements = context => LocalSequence.Async(open, context);
+
+                            break;
+                        }
+
+                        case LocalStageKind.FromFactory when first && !last:
+                        {
+                            Func<object?> factory = LocalDelegateAdapter.Factory(descriptor.Behavior);
+
+                            elements = _ => LocalSequence.Deferred(factory);
+
+                            break;
+                        }
+
+                        case LocalStageKind.FromAsyncFactory when first && !last:
+                        {
+                            Func<CancellationToken, object?> factory =
+                                LocalDelegateAdapter.AsyncFactory(descriptor.Behavior);
+
+                            elements = context => LocalSequence.Deferred(() => factory(context.RunToken));
+
+                            break;
+                        }
+
+                        case LocalStageKind.Never when first && !last:
+                            elements = static context => LocalSequence.Never(context);
+                            break;
+                        case LocalStageKind.Cycle when first && !last:
+                        {
+                            IEnumerable cycled = LocalDelegateAdapter.Elements(descriptor.Behavior, descriptor.Kind);
+
+                            elements = _ => LocalSequence.Cycle(cycled);
+
+                            break;
+                        }
+
+                        case LocalStageKind.UnfoldAsync when first && !last:
+                        {
+                            object? state = descriptor.Seed;
+                            LocalAsyncGenerator generator = LocalDelegateAdapter.AsyncGenerator(descriptor.Behavior);
+
+                            elements = context => LocalSequence.UnfoldAsync(state, generator, context);
+
+                            break;
+                        }
+
+                        case LocalStageKind.Queue when first && !last:
+                        {
+                            LocalIngressQueue queue = Ingress(declaration);
+                            object handle = LocalDelegateAdapter.QueueFacade(descriptor.Behavior)(queue);
+
+                            controls.Add(current, (queue, handle));
+                            elements = queue.Elements;
+
+                            break;
+                        }
+
+                        case LocalStageKind.FromChannel when first && !last:
+                        {
+                            LocalChannelSource reader = LocalDelegateAdapter.ChannelSource(descriptor.Behavior);
+
+                            elements = context => LocalSequence.Channel(reader, context);
+
+                            break;
+                        }
+
+                        case LocalStageKind.Select when !first && !last:
+                            Fuse(LocalElementStage.Select(LocalDelegateAdapter.Selector(descriptor.Behavior)));
+                            break;
+                        case LocalStageKind.Where when !first && !last:
+                            Fuse(LocalElementStage.Where(Predicate(descriptor)));
+                            break;
+                        case LocalStageKind.Scan when !first && !last:
+                            Fuse(LocalElementStage.Scan(
+                                descriptor.Seed,
+                                LocalDelegateAdapter.Folder(descriptor.Behavior, descriptor.Kind)));
+                            break;
+                        case LocalStageKind.Take when !first && !last:
+                            Fuse(LocalElementStage.Take(Count(declaration)));
+                            break;
+                        case LocalStageKind.Skip when !first && !last:
+                            Fuse(LocalElementStage.Skip(Count(declaration)));
+                            break;
+                        case LocalStageKind.TakeWhile when !first && !last:
+                            Fuse(LocalElementStage.TakeWhile(Predicate(descriptor), inclusive: false));
+                            break;
+                        case LocalStageKind.TakeThrough when !first && !last:
+                            Fuse(LocalElementStage.TakeWhile(Predicate(descriptor), inclusive: true));
+                            break;
+                        case LocalStageKind.SkipWhile when !first && !last:
+                            Fuse(LocalElementStage.SkipWhile(Predicate(descriptor)));
+                            break;
+                        case LocalStageKind.Distinct when !first && !last:
+                            Fuse(LocalElementStage.Distinct(
+                                Distinct(declaration),
+                                LocalDelegateAdapter.Comparer(descriptor.Behavior)));
+                            break;
+                        case LocalStageKind.Buffer when !first && !last:
+                            Settle();
+                            pending = Boundary(declaration);
+                            break;
+                        case LocalStageKind.SelectAsync or
+                            LocalStageKind.SelectAsyncUnordered or
+                            LocalStageKind.SelectValueTaskAsync or
+                            LocalStageKind.SelectValueTaskAsyncUnordered when !first && !last:
+                            Open(pending ?? LocalBoundary.Handoff);
+                            asynchronous = Asynchronous(declaration, descriptor);
+                            break;
+                        case LocalStageKind.Broadcast when !first && !last:
+                            Split(declaration, descriptor.Kind, LocalFanOut.Broadcast());
+                            return;
+                        case LocalStageKind.Balance when !first && !last:
+                            Split(declaration, descriptor.Kind, LocalFanOut.Balance());
+                            return;
+                        case LocalStageKind.Unzip when !first && !last:
+                            Split(
+                                declaration,
+                                descriptor.Kind,
+                                LocalFanOut.Unzip(LocalDelegateAdapter.Halves(descriptor.Behavior)));
+                            return;
+                        case LocalStageKind.Fold when last:
+                            Settle();
+                            terminal = LocalTerminal.Folding(
+                                LocalDelegateAdapter.Folder(descriptor.Behavior, descriptor.Kind));
+                            seed = descriptor.Seed;
+                            produces = true;
+                            break;
+                        case LocalStageKind.Ignore when last:
+                            Settle();
+                            break;
+                        case LocalStageKind.ForEach when last:
+                            Settle();
+                            terminal = LocalTerminal.Calling(LocalDelegateAdapter.Action(descriptor.Behavior));
+                            break;
+                        case LocalStageKind.ForEachAsync when last && !first:
+                            Open(pending ?? LocalBoundary.Handoff);
+                            asynchronous = Asynchronous(declaration, descriptor);
+                            break;
+                        case LocalStageKind.First or LocalStageKind.FirstOrDefault when last:
+                            Settle();
+                            terminal = LocalTerminal.FirstElement(descriptor.Kind is LocalStageKind.First);
+                            seed = descriptor.Seed;
+                            produces = true;
+                            break;
+                        case LocalStageKind.Count when last:
+                            Settle();
+                            terminal = LocalTerminal.Counting();
+                            seed = descriptor.Seed;
+                            produces = true;
+                            break;
+                        case LocalStageKind.Last or LocalStageKind.LastOrDefault when last:
+                            Settle();
+                            terminal = LocalTerminal.LastElement(descriptor.Kind is LocalStageKind.Last);
+                            seed = descriptor.Seed;
+                            produces = true;
+                            break;
+                        case LocalStageKind.Collect when last:
+                            Settle();
+                            terminal = LocalTerminal.Collecting(
+                                Collected(declaration),
+                                LocalDelegateAdapter.Freeze(descriptor.Behavior));
+                            seedFactory = static () => new List<object?>();
+                            produces = true;
+                            break;
+                        case LocalStageKind.ToChannel when last:
+                            Settle();
+                            terminal = LocalTerminal.Channel(LocalDelegateAdapter.ChannelSink(descriptor.Behavior));
+                            break;
+                        case LocalStageKind.SinkProbe when last && !first:
+                        {
+                            Settle();
+
+                            LocalSinkProbe probe = new();
+
+                            controls.Add(current, (Queue: null, LocalDelegateAdapter.ProbeFacade(descriptor.Behavior)(probe)));
+                            terminal = LocalTerminal.Probing(probe);
+
+                            break;
+                        }
+
+                        default:
+                            throw Foreign(
+                                $"the node '{current}' is a '{descriptor.Kind}' stage at position {position} of {document.Nodes.Count}, where that shape cannot stand");
+                    }
+                }
+
+                if (last)
+                {
+                    segments.Add(new LocalSegment(
+                        elements,
+                        asynchronous,
+                        fanOut: null,
+                        [.. stages],
+                        terminal,
+                        inputs,
+                        [],
+                        sinks.Count));
+                    sinks.Add(new Sink(segments.Count - 1, seed, seedFactory, current, produces));
+
+                    return;
+                }
+
+                List<GraphEdge> onwards = leaving[current];
+
+                if (onwards.Count != 1)
+                {
+                    throw Foreign($"the node '{current}' feeds more than one node");
+                }
+
+                current = onwards[0].To.Node;
+            }
+
+            // Adds one synchronous stage to the segment under construction, opening the segment a pending
+            // buffer declared if this is the first thing to stand on its far side, and remembering a stage
+            // whose stream is over before the run begins.
+            void Fuse(LocalElementStage stage)
+            {
+                Settle();
+                stages.Add(stage);
+
+                if (stage.CompletesBeforeAnyElement)
+                {
+                    completesAtStart.Add(segments.Count);
+                }
+            }
+
+            // Closes the segment under construction at a boundary and starts the next one of this branch.
+            void Cut(LocalBoundary boundary)
+            {
+                int channel = boundaries.Count;
+
+                boundaries.Add(boundary);
+                producers.Add(segments.Count);
+                segments.Add(new LocalSegment(
+                    elements,
+                    asynchronous,
+                    fanOut: null,
+                    [.. stages],
+                    terminal: null,
+                    inputs,
+                    [channel],
+                    -1));
+
+                pending = null;
+                elements = null;
+                asynchronous = null;
+                stages.Clear();
+                inputs = [channel];
+            }
+
+            // Closes the segment under construction at a boundary, unless there is nothing to close. A
+            // branch that begins at an asynchronous stage or at a junction was entered on a channel of its
+            // own, and cutting an empty segment there would put a relay holding nothing between that
+            // channel and the stage that reads it — one more thread, one more channel, and one more
+            // element of slack than the author asked for.
+            void Open(LocalBoundary boundary)
+            {
+                if (elements is not null || asynchronous is not null || stages.Count > 0 || pending is not null)
+                {
+                    Cut(boundary);
+                }
+            }
+
+            // Materializes a buffer's boundary once something has to stand on the far side of it. Deferring
+            // the cut this way is what lets a buffer in front of an asynchronous stage or a junction be
+            // that stage's own input channel rather than one more channel with an empty segment between
+            // them.
+            void Settle()
+            {
+                if (pending is { } boundary)
+                {
+                    Cut(boundary);
+                }
+            }
+
+            // Ends this branch at a junction. The junction is a segment of its own, because its pump shape
+            // is what it is and nothing fuses with it: whatever was under construction is closed at a
+            // boundary first, the legs are allocated in the specification's port order — which is rotation
+            // order — and one branch is queued behind each of them.
+            void Split(StageNode node, LocalStageKind kind, LocalFanOut junction)
+            {
+                Open(pending ?? LocalBoundary.Handoff);
+
+                int segment = segments.Count;
+                IReadOnlyList<OutputPortSpecification> ports = LocalVocabulary.OutputPortsOf(kind);
+                List<int> legs = [];
+                List<(NodeId Start, int Input)> queued = [];
+
+                for (int port = 0; port < ports.Count; port++)
+                {
+                    if (!downstream.TryGetValue(PortAddress.Create(node.Id, ports[port].Id), out NodeId target))
+                    {
+                        continue;
+                    }
+
+                    (LocalBoundary boundary, NodeId begins) = Leg(target);
+                    int channel = boundaries.Count;
+
+                    boundaries.Add(boundary);
+                    producers.Add(segment);
+                    legs.Add(channel);
+                    queued.Add((begins, channel));
+                }
+
+                if (legs.Count != leaving[node.Id].Count)
+                {
+                    throw Foreign(
+                        $"the junction '{node.Id}' is wired at a port the stage '{node.Stage}' does not declare as an output");
+                }
+
+                if (legs.Count < LocalVocabulary.MinFanOut)
+                {
+                    throw Foreign(
+                        $"the junction '{node.Id}' connects {legs.Count} of its outputs, and a junction routes to at least {LocalVocabulary.MinFanOut}");
+                }
+
+                if (junction.Halves is { } halves && halves.Count != legs.Count)
+                {
+                    throw Foreign(
+                        $"the junction '{node.Id}' splits a row into {halves.Count} parts and connects {legs.Count} outputs");
+                }
+
+                segments.Add(new LocalSegment(
+                    elements: null,
+                    async: null,
+                    junction,
+                    [],
+                    terminal: null,
+                    inputs,
+                    legs,
+                    -1));
+
+                for (int leg = 0; leg < queued.Count; leg++)
+                {
+                    branches.Enqueue(queued[leg]);
+                }
+            }
+        }
+
+        // Reads the boundary one leg of a junction gets and where the branch behind it begins. A buffer
+        // standing immediately on a leg is that leg's own channel rather than a second one behind an
+        // implicit handoff, which is the rule a buffer in front of an asynchronous stage already follows
+        // and what keeps "total memory is the sum of the declared capacities" true across a junction.
+        (LocalBoundary Boundary, NodeId Start) Leg(NodeId target)
+        {
+            if (!bindings.TryGetValue(target, out LocalStageDescriptor? buffer) ||
+                buffer.Kind is not LocalStageKind.Buffer ||
+                !leaving.TryGetValue(target, out List<GraphEdge>? edges) ||
+                edges.Count != 1)
+            {
+                return (LocalBoundary.Handoff, target);
+            }
+
+            _ = walked.Add(target);
+
+            return (Boundary(declarations[target]), edges[0].To.Node);
+        }
+    }
+
+    /// <summary>Finds the one node a document's edges begin at.</summary>
+    /// <param name="document">The document being compiled.</param>
+    /// <param name="fed">The nodes some edge terminates at.</param>
+    /// <returns>The identifier of the node nothing feeds.</returns>
+    /// <exception cref="InvalidOperationException">There is not exactly one such node.</exception>
+    /// <remarks>
+    /// One source and no more, in this checkpoint. Two sources are not a fan-in — they are two runs written
+    /// in one document, whose elements never meet — and executing them as one would give a single outcome
+    /// to two independent streams. The junctions that really do join several inputs arrive with the fan-in
+    /// pump, and the refusal is what keeps this checkpoint's promise honest until they do.
+    /// </remarks>
+    private static NodeId Head(GraphDocument document, HashSet<NodeId> fed)
+    {
+        NodeId? head = null;
+
+        foreach (StageNode node in document.Nodes)
+        {
+            if (fed.Contains(node.Id))
+            {
                 continue;
             }
 
-            switch (descriptor.Kind)
+            if (head is not null)
             {
-                case LocalStageKind.FromEnumerable when first && !last:
-                {
-                    IEnumerable sequence = LocalDelegateAdapter.Elements(descriptor.Behavior, descriptor.Kind);
-
-                    elements = _ => sequence;
-
-                    break;
-                }
-
-                case LocalStageKind.Empty when first && !last:
-                    elements = static _ => LocalSequence.Empty();
-                    break;
-                case LocalStageKind.Single when first && !last:
-                {
-                    object? value = descriptor.Behavior;
-
-                    elements = _ => LocalSequence.Single(value);
-
-                    break;
-                }
-
-                case LocalStageKind.Repeat when first && !last:
-                {
-                    object? value = descriptor.Behavior;
-                    int count = Count(declaration);
-
-                    elements = _ => LocalSequence.Repeat(value, count);
-
-                    break;
-                }
-
-                case LocalStageKind.Range when first && !last:
-                {
-                    (int start, int count) = Range(declaration);
-
-                    elements = _ => LocalSequence.Range(start, count);
-
-                    break;
-                }
-
-                case LocalStageKind.FromTask when first && !last:
-                {
-                    Func<object?> value = LocalDelegateAdapter.TaskValue(descriptor.Behavior);
-
-                    elements = _ => LocalSequence.Deferred(value);
-
-                    break;
-                }
-
-                case LocalStageKind.Failed when first && !last:
-                {
-                    Exception failure = LocalDelegateAdapter.Failure(descriptor.Behavior);
-
-                    elements = _ => LocalSequence.Failed(failure);
-
-                    break;
-                }
-
-                case LocalStageKind.Unfold when first && !last:
-                {
-                    object? state = descriptor.Seed;
-                    LocalGenerator generator = LocalDelegateAdapter.Generator(descriptor.Behavior);
-
-                    elements = _ => LocalSequence.Unfold(state, generator);
-
-                    break;
-                }
-
-                case LocalStageKind.FromAsyncEnumerable when first && !last:
-                {
-                    LocalAsyncCursorFactory open = LocalDelegateAdapter.AsyncCursors(descriptor.Behavior);
-
-                    elements = context => LocalSequence.Async(open, context);
-
-                    break;
-                }
-
-                case LocalStageKind.FromFactory when first && !last:
-                {
-                    Func<object?> factory = LocalDelegateAdapter.Factory(descriptor.Behavior);
-
-                    elements = _ => LocalSequence.Deferred(factory);
-
-                    break;
-                }
-
-                case LocalStageKind.FromAsyncFactory when first && !last:
-                {
-                    Func<CancellationToken, object?> factory =
-                        LocalDelegateAdapter.AsyncFactory(descriptor.Behavior);
-
-                    elements = context => LocalSequence.Deferred(() => factory(context.RunToken));
-
-                    break;
-                }
-
-                case LocalStageKind.Never when first && !last:
-                    elements = static context => LocalSequence.Never(context);
-                    break;
-                case LocalStageKind.Cycle when first && !last:
-                {
-                    IEnumerable cycled = LocalDelegateAdapter.Elements(descriptor.Behavior, descriptor.Kind);
-
-                    elements = _ => LocalSequence.Cycle(cycled);
-
-                    break;
-                }
-
-                case LocalStageKind.UnfoldAsync when first && !last:
-                {
-                    object? state = descriptor.Seed;
-                    LocalAsyncGenerator generator = LocalDelegateAdapter.AsyncGenerator(descriptor.Behavior);
-
-                    elements = context => LocalSequence.UnfoldAsync(state, generator, context);
-
-                    break;
-                }
-
-                case LocalStageKind.Queue when first && !last:
-                {
-                    LocalIngressQueue queue = Ingress(declaration);
-                    object handle = LocalDelegateAdapter.QueueFacade(descriptor.Behavior)(queue);
-
-                    controls.Add(order[index], (queue, handle));
-                    elements = queue.Elements;
-
-                    break;
-                }
-
-                case LocalStageKind.FromChannel when first && !last:
-                {
-                    LocalChannelSource reader = LocalDelegateAdapter.ChannelSource(descriptor.Behavior);
-
-                    elements = context => LocalSequence.Channel(reader, context);
-
-                    break;
-                }
-
-                case LocalStageKind.Select when !first && !last:
-                    Fuse(LocalElementStage.Select(LocalDelegateAdapter.Selector(descriptor.Behavior)));
-                    break;
-                case LocalStageKind.Where when !first && !last:
-                    Fuse(LocalElementStage.Where(Predicate(descriptor)));
-                    break;
-                case LocalStageKind.Scan when !first && !last:
-                    Fuse(LocalElementStage.Scan(
-                        descriptor.Seed,
-                        LocalDelegateAdapter.Folder(descriptor.Behavior, descriptor.Kind)));
-                    break;
-                case LocalStageKind.Take when !first && !last:
-                    Fuse(LocalElementStage.Take(Count(declaration)));
-                    break;
-                case LocalStageKind.Skip when !first && !last:
-                    Fuse(LocalElementStage.Skip(Count(declaration)));
-                    break;
-                case LocalStageKind.TakeWhile when !first && !last:
-                    Fuse(LocalElementStage.TakeWhile(Predicate(descriptor), inclusive: false));
-                    break;
-                case LocalStageKind.TakeThrough when !first && !last:
-                    Fuse(LocalElementStage.TakeWhile(Predicate(descriptor), inclusive: true));
-                    break;
-                case LocalStageKind.SkipWhile when !first && !last:
-                    Fuse(LocalElementStage.SkipWhile(Predicate(descriptor)));
-                    break;
-                case LocalStageKind.Distinct when !first && !last:
-                    Fuse(LocalElementStage.Distinct(
-                        Distinct(declaration),
-                        LocalDelegateAdapter.Comparer(descriptor.Behavior)));
-                    break;
-                case LocalStageKind.Buffer when !first && !last:
-                    Settle();
-                    pending = Boundary(declaration);
-                    break;
-                case LocalStageKind.SelectAsync or
-                    LocalStageKind.SelectAsyncUnordered or
-                    LocalStageKind.SelectValueTaskAsync or
-                    LocalStageKind.SelectValueTaskAsyncUnordered when !first && !last:
-                    Cut(pending ?? LocalBoundary.Handoff);
-                    head = Asynchronous(declaration, descriptor);
-                    break;
-                case LocalStageKind.Fold when last:
-                    Settle();
-                    terminal = LocalTerminal.Folding(
-                        LocalDelegateAdapter.Folder(descriptor.Behavior, descriptor.Kind));
-                    seed = descriptor.Seed;
-                    produces = true;
-                    break;
-                case LocalStageKind.Ignore when last:
-                    Settle();
-                    break;
-                case LocalStageKind.ForEach when last:
-                    Settle();
-                    terminal = LocalTerminal.Calling(LocalDelegateAdapter.Action(descriptor.Behavior));
-                    break;
-                case LocalStageKind.ForEachAsync when last && !first:
-                    Cut(pending ?? LocalBoundary.Handoff);
-                    head = Asynchronous(declaration, descriptor);
-                    break;
-                case LocalStageKind.First or LocalStageKind.FirstOrDefault when last:
-                    Settle();
-                    terminal = LocalTerminal.FirstElement(descriptor.Kind is LocalStageKind.First);
-                    seed = descriptor.Seed;
-                    produces = true;
-                    break;
-                case LocalStageKind.Count when last:
-                    Settle();
-                    terminal = LocalTerminal.Counting();
-                    seed = descriptor.Seed;
-                    produces = true;
-                    break;
-                case LocalStageKind.Last or LocalStageKind.LastOrDefault when last:
-                    Settle();
-                    terminal = LocalTerminal.LastElement(descriptor.Kind is LocalStageKind.Last);
-                    seed = descriptor.Seed;
-                    produces = true;
-                    break;
-                case LocalStageKind.Collect when last:
-                    Settle();
-                    terminal = LocalTerminal.Collecting(
-                        Collected(declaration),
-                        LocalDelegateAdapter.Freeze(descriptor.Behavior));
-                    seedFactory = static () => new List<object?>();
-                    produces = true;
-                    break;
-                case LocalStageKind.ToChannel when last:
-                    Settle();
-                    terminal = LocalTerminal.Channel(LocalDelegateAdapter.ChannelSink(descriptor.Behavior));
-                    break;
-                case LocalStageKind.SinkProbe when last && !first:
-                {
-                    Settle();
-
-                    LocalSinkProbe probe = new();
-
-                    controls.Add(order[index], (Queue: null, LocalDelegateAdapter.ProbeFacade(descriptor.Behavior)(probe)));
-                    terminal = LocalTerminal.Probing(probe);
-
-                    break;
-                }
-
-                default:
-                    throw Foreign(
-                        $"the node '{order[index]}' is a '{descriptor.Kind}' stage at position {index + 1} of {order.Count}, where that shape cannot stand");
+                throw Foreign($"both '{head}' and '{node.Id}' begin a chain");
             }
+
+            head = node.Id;
         }
 
-        segments.Add(new LocalSegment(elements, head, [.. stages], terminal));
-
-        if (segments[0].Elements is null)
-        {
-            throw Foreign("the chain does not begin with a source");
-        }
-
-        (ResultSlotId? slot, LocalControl[] declared) = Slots(document, order[^1], produces, controls);
-
-        return new LocalRunPlan(
-            segments,
-            boundaries,
-            seed,
-            seedFactory,
-            slot,
-            declared,
-            completesAtStart);
-
-        // Adds one synchronous stage to the segment under construction, opening the segment a pending
-        // buffer declared if this is the first thing to stand on its far side, and remembering a stage
-        // whose stream is over before the run begins.
-        void Fuse(LocalElementStage stage)
-        {
-            Settle();
-            stages.Add(stage);
-
-            if (stage.CompletesBeforeAnyElement)
-            {
-                completesAtStart = Math.Max(completesAtStart, segments.Count);
-            }
-        }
-
-        // Closes the segment under construction at a boundary and starts the next one.
-        void Cut(LocalBoundary boundary)
-        {
-            segments.Add(new LocalSegment(elements, head, [.. stages], terminal: null));
-            boundaries.Add(boundary);
-            pending = null;
-            elements = null;
-            head = null;
-            stages.Clear();
-        }
-
-        // Materializes a buffer's boundary once something has to stand on the far side of it. Deferring
-        // the cut this way is what lets a buffer in front of an asynchronous stage be that stage's own
-        // input channel rather than one more channel with an empty segment between them.
-        void Settle()
-        {
-            if (pending is { } boundary)
-            {
-                Cut(boundary);
-            }
-        }
+        return head ?? throw Foreign("no node begins a chain");
     }
 
     /// <summary>Resolves a node no local behavior is bound to through the runtime-factory seam.</summary>
@@ -483,7 +744,7 @@ internal static class LocalRunPlanner
     /// <returns>The nodes, keyed by identifier.</returns>
     /// <remarks>
     /// A document's node identifiers are unique by construction, so the index is total and building it is
-    /// the cheapest way to read a node's payload while walking the chain in edge order.
+    /// the cheapest way to read a node's payload while walking the graph in edge order.
     /// </remarks>
     private static Dictionary<NodeId, StageNode> Declarations(GraphDocument document)
     {
@@ -622,89 +883,27 @@ internal static class LocalRunPlanner
             descriptor.Kind is LocalStageKind.SelectAsync or LocalStageKind.SelectValueTaskAsync);
     }
 
-    /// <summary>Orders a document's nodes by following its edges from the one node nothing feeds.</summary>
-    /// <param name="document">The document to walk.</param>
-    /// <returns>The node identifiers in flow order.</returns>
-    /// <exception cref="InvalidOperationException">The document is not one linear chain.</exception>
-    private static List<NodeId> LinearOrder(GraphDocument document)
-    {
-        Dictionary<NodeId, NodeId> next = new(document.Edges.Count);
-        HashSet<NodeId> fed = new(document.Edges.Count);
-
-        foreach (GraphEdge edge in document.Edges)
-        {
-            if (!next.TryAdd(edge.From.Node, edge.To.Node))
-            {
-                throw Foreign($"the node '{edge.From.Node}' feeds more than one node");
-            }
-
-            if (!fed.Add(edge.To.Node))
-            {
-                throw Foreign($"the node '{edge.To.Node}' is fed by more than one node");
-            }
-        }
-
-        NodeId? head = null;
-
-        foreach (StageNode node in document.Nodes)
-        {
-            if (fed.Contains(node.Id))
-            {
-                continue;
-            }
-
-            if (head is not null)
-            {
-                throw Foreign($"both '{head}' and '{node.Id}' begin a chain");
-            }
-
-            head = node.Id;
-        }
-
-        if (head is null)
-        {
-            throw Foreign("no node begins a chain");
-        }
-
-        List<NodeId> order = new(document.Nodes.Count);
-        HashSet<NodeId> walked = new(document.Nodes.Count);
-        NodeId current = head.Value;
-
-        while (walked.Add(current))
-        {
-            order.Add(current);
-
-            if (!next.TryGetValue(current, out NodeId following))
-            {
-                break;
-            }
-
-            current = following;
-        }
-
-        return order.Count == document.Nodes.Count
-            ? order
-            : throw Foreign(
-                $"its {document.Nodes.Count} nodes do not form one chain, and following the edges from '{head}' reached {order.Count} of them");
-    }
-
-    /// <summary>Sorts the document's declared slots into the terminal's result and the run's controls.</summary>
+    /// <summary>Sorts the document's declared slots into the endings' results and the run's controls.</summary>
     /// <param name="document">The document being compiled.</param>
-    /// <param name="terminal">The identifier of the last node of the chain.</param>
-    /// <param name="produces">Whether the terminal declares a result port.</param>
+    /// <param name="sinks">The endings this compilation found, in the order it found them.</param>
     /// <param name="controls">The per-run controls this plan built, keyed by node identifier.</param>
-    /// <returns>The terminal's slot name, if any, and one <see cref="LocalControl"/> per control.</returns>
+    /// <returns>One slot name per ending, if any, and one <see cref="LocalControl"/> per control.</returns>
     /// <exception cref="InvalidOperationException">
-    /// The document declares a slot no node of this chain produces, declares two on one producer, or leaves
+    /// The document declares a slot no node of this graph produces, declares two on one producer, or leaves
     /// a control-bearing stage without one.
     /// </exception>
     /// <remarks>
     /// <para>
     /// Two kinds of slot and one mechanism. A control slot is produced by a <c>control</c> port — a queue's
-    /// at the head of a chain, a probe sink's at the end of one — and its value exists from the start of
-    /// the run; the terminal's slot is produced by the last node's <c>result</c> port and its value exists
-    /// at the end. Everything else about them is the same, which is why they travel together in one
-    /// document and resolve through one handle.
+    /// at the head of a branch, a probe sink's at the end of one — and its value exists from the start of
+    /// the run; an ending's slot is produced by its terminal's <c>result</c> port and its value exists at
+    /// the end. Everything else about them is the same, which is why they travel together in one document
+    /// and resolve through one handle.
+    /// </para>
+    /// <para>
+    /// A graph with several sinks declares several results, and each of them is matched to the ending that
+    /// produces it: the slots are per terminal and never per run, so two sinks resolve two values and
+    /// neither can be read from the other's fold.
     /// </para>
     /// <para>
     /// A stage that produces a control and declares no slot for it is rejected rather than run. Nothing
@@ -713,13 +912,12 @@ internal static class LocalRunPlanner
     /// API, where declaring the stage is what names the control.
     /// </para>
     /// </remarks>
-    private static (ResultSlotId? Slot, LocalControl[] Controls) Slots(
+    private static (ResultSlotId?[] Slots, LocalControl[] Controls) Slots(
         GraphDocument document,
-        NodeId terminal,
-        bool produces,
+        IReadOnlyList<Sink> sinks,
         Dictionary<NodeId, (LocalIngressQueue? Queue, object Handle)> controls)
     {
-        ResultSlotId? result = null;
+        ResultSlotId?[] results = new ResultSlotId?[sinks.Count];
         Dictionary<NodeId, LocalControl> named = [];
 
         foreach (ResultSlotDefinition declared in document.ResultSlots)
@@ -735,20 +933,20 @@ internal static class LocalRunPlanner
                 continue;
             }
 
-            if (produces && declared.Producer.Node == terminal)
+            int ending = Producer(sinks, declared.Producer.Node);
+
+            if (ending < 0)
             {
-                if (result is not null)
-                {
-                    throw Foreign($"the terminal '{terminal}' declares more than one result slot");
-                }
-
-                result = declared.Id;
-
-                continue;
+                throw Foreign(
+                    $"the result '{declared.Id}' is produced by '{declared.Producer}', which is neither a terminal of the graph nor the control port of one of its stages");
             }
 
-            throw Foreign(
-                $"the result '{declared.Id}' is produced by '{declared.Producer}', which is neither the terminal of the chain nor the control port of one of its stages");
+            if (results[ending] is not null)
+            {
+                throw Foreign($"the terminal '{declared.Producer.Node}' declares more than one result slot");
+            }
+
+            results[ending] = declared.Id;
         }
 
         foreach (NodeId node in controls.Keys)
@@ -760,12 +958,47 @@ internal static class LocalRunPlanner
             }
         }
 
-        return (result, [.. named.Values]);
+        return (results, [.. named.Values]);
+    }
+
+    /// <summary>Finds the ending one node terminates, when that node produces a result at all.</summary>
+    /// <param name="sinks">The endings this compilation found.</param>
+    /// <param name="node">The node a slot names as its producer.</param>
+    /// <returns>The ending's position, or minus one when no ending of this graph produces a result there.</returns>
+    private static int Producer(IReadOnlyList<Sink> sinks, NodeId node)
+    {
+        for (int index = 0; index < sinks.Count; index++)
+        {
+            if (sinks[index].Produces && sinks[index].Node == node)
+            {
+                return index;
+            }
+        }
+
+        return -1;
     }
 
     /// <summary>Builds the exception for a document this runtime cannot execute.</summary>
     /// <param name="reason">The clause naming what is wrong, read after "cannot be materialized because".</param>
     /// <returns>The exception to throw.</returns>
     private static InvalidOperationException Foreign(string reason) =>
-        new($"The graph cannot be materialized by the local runtime because {reason}. This runtime executes one linear chain of local stages, from one source to one terminal.");
+        new($"The graph cannot be materialized by the local runtime because {reason}. This runtime executes one graph of local stages, from one source through its junctions to its terminals.");
+
+    /// <summary>One ending of the plan under construction, as the walk found it.</summary>
+    /// <param name="Segment">The position of the segment the branch stops at.</param>
+    /// <param name="Seed">The terminal's initial state.</param>
+    /// <param name="SeedFactory">The maker of the terminal's initial state, when it cannot be shared.</param>
+    /// <param name="Node">The identifier of the terminal, which a result slot names as its producer.</param>
+    /// <param name="Produces">Whether that terminal declares a result port.</param>
+    /// <remarks>
+    /// The identifier and the flag live only long enough to match the document's declared slots to the
+    /// endings that resolve them, which is why they are here and not on <see cref="LocalEnding"/>: a plan
+    /// states what a run executes, and a node identifier is not something a run ever reads.
+    /// </remarks>
+    private readonly record struct Sink(
+        int Segment,
+        object? Seed,
+        Func<object?>? SeedFactory,
+        NodeId Node,
+        bool Produces);
 }

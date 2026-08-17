@@ -23,8 +23,9 @@ namespace Orleans.Dataflow.Runtime;
 /// </para>
 /// <para>
 /// The state itself is not here. It belongs to the run, because a run is what a state is fresh per, and a
-/// plan is shared by none: <see cref="LocalRunPlan.Seed"/> and <see cref="LocalRunPlan.SeedFactory"/> are
-/// where a run starts and this is what moves it.
+/// plan is shared by none: <see cref="LocalEnding.Seed"/> and <see cref="LocalEnding.SeedFactory"/> are
+/// where a run starts and this is what moves it. A graph with several sinks has several endings and
+/// therefore several states, and one terminal instance never sees another's.
 /// </para>
 /// </remarks>
 internal sealed class LocalTerminal

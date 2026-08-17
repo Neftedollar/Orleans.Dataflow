@@ -102,6 +102,42 @@ internal static class LocalDelegateAdapter
         return (Func<object?, object?>)Close(SelectorTemplate, [arguments[0], arguments[1]], behavior);
     }
 
+    /// <summary>Wraps a junction's row projections into ones over boxed elements.</summary>
+    /// <param name="behavior">The bound array of one <c>Func&lt;TRow, TPart&gt;</c> per output port.</param>
+    /// <returns>The wrapped projections, in port order.</returns>
+    /// <exception cref="InvalidOperationException">
+    /// <paramref name="behavior"/> is not an array of one-argument functions.
+    /// </exception>
+    /// <remarks>
+    /// An array rather than a pair, because what a document states is that this junction splits one stream
+    /// into the outputs it declares, and how many those are is the edges' to say. Each projection is
+    /// wrapped exactly as a mapping stage's is, so an unzip leg costs one delegate call per row and no
+    /// reflection at all after the plan is built.
+    /// </remarks>
+    internal static IReadOnlyList<Func<object?, object?>> Halves(object? behavior)
+    {
+        if (behavior is not object?[] parts || parts.Length == 0)
+        {
+            throw Mismatch(behavior, LocalStageKind.Unzip, "array of Func<TRow, TPart> projections");
+        }
+
+        Func<object?, object?>[] halves = new Func<object?, object?>[parts.Length];
+
+        for (int index = 0; index < parts.Length; index++)
+        {
+            Type[] arguments = Arguments(
+                parts[index],
+                typeof(Func<,>),
+                LocalStageKind.Unzip,
+                "array of Func<TRow, TPart> projections");
+
+            halves[index] =
+                (Func<object?, object?>)Close(SelectorTemplate, [arguments[0], arguments[1]], parts[index]);
+        }
+
+        return halves;
+    }
+
     /// <summary>Reads a source binding as the exception the run is to fail with.</summary>
     /// <param name="behavior">The bound exception, as the authoring value received it.</param>
     /// <returns>The exception.</returns>

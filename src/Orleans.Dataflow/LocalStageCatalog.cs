@@ -65,19 +65,17 @@ public static class LocalStageCatalog
     /// <returns>The catalog.</returns>
     /// <remarks>
     /// The port lists follow from where a shape stands: a source produces and does not consume, an operator
-    /// does both, and a sink consumes and produces nothing, with a result port when it exposes a value. A
-    /// buffer and an asynchronous mapping are operator-shaped, because from the document's point of view
-    /// they are: one element in, one element out, whatever they do about queueing and concurrency in
-    /// between. No port is optional or ignorable, so the graph compiler's connectivity rule requires every
-    /// port of every occurrence to be wired — which is exactly the linear chain the authoring types can
-    /// build, and nothing looser.
+    /// does both, a junction consumes one stream and produces several, and a sink consumes and produces
+    /// nothing, with a result port when it exposes a value. A buffer and an asynchronous mapping are
+    /// operator-shaped, because from the document's point of view they are: one element in, one element
+    /// out, whatever they do about queueing and concurrency in between. No port of a chain shape is
+    /// optional or ignorable, so the graph compiler's connectivity rule requires every one of them to be
+    /// wired — which is exactly the linear chain the authoring types can build, and nothing looser. The
+    /// legs of a junction beyond its first two are the one exception and are ignorable, because the edges
+    /// of a document are what state how many legs a given junction has.
     /// </remarks>
     private static StageCatalog Build()
     {
-        InputPortSpecification input =
-            InputPortSpecification.Create(LocalVocabulary.InputPort, LocalVocabulary.ElementContract);
-        OutputPortSpecification output =
-            OutputPortSpecification.Create(LocalVocabulary.OutputPort, LocalVocabulary.ElementContract);
         LocalStageKind[] kinds = Enum.GetValues<LocalStageKind>();
         StageSpecification[] specifications = new StageSpecification[kinds.Length];
 
@@ -90,8 +88,8 @@ public static class LocalStageCatalog
 
         StageSpecification Specification(LocalStageKind kind)
         {
-            InputPortSpecification[] inputs = LocalVocabulary.ConsumesElements(kind) ? [input] : [];
-            OutputPortSpecification[] outputs = LocalVocabulary.ProducesElements(kind) ? [output] : [];
+            IReadOnlyList<InputPortSpecification> inputs = LocalVocabulary.InputPortsOf(kind);
+            IReadOnlyList<OutputPortSpecification> outputs = LocalVocabulary.OutputPortsOf(kind);
             ResultPortSpecification[] results = LocalVocabulary.ResultPortOf(kind) is { } result
                 ? [result]
                 : [];

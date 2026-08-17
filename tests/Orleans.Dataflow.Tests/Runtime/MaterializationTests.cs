@@ -73,7 +73,10 @@ public sealed class MaterializationTests
     public async Task MaterializeAsyncRejectsADocumentThatIsTwoChains()
     {
         // Two independent source-to-sink chains validate against the catalog perfectly well: every port is
-        // connected and every capability is declared. Only the runtime, which executes one chain, refuses.
+        // connected and every capability is declared. Only the runtime refuses, and it refuses for a
+        // reason branching does not weaken: two sources are not a fan-in but two runs written in one
+        // document, whose elements never meet and whose single outcome would say nothing true about
+        // either.
         GraphDocument document = Document(
             [
                 Node("stage-1", "from-enumerable"),
@@ -94,7 +97,7 @@ public sealed class MaterializationTests
         InvalidOperationException rejected =
             await Assert.ThrowsAsync<InvalidOperationException>(async () => await Host.MaterializeAsync(graph, TestToken));
 
-        Assert.Contains("one linear chain", rejected.Message, StringComparison.Ordinal);
+        Assert.Contains("one graph of local stages", rejected.Message, StringComparison.Ordinal);
         Assert.Contains("begin a chain", rejected.Message, StringComparison.Ordinal);
     }
 
@@ -212,7 +215,9 @@ public sealed class MaterializationTests
     public async Task MaterializeAsyncRejectsAChainThatLeavesSomeNodesUnreached()
     {
         // One real chain beside a cycle nothing feeds into. Walking from the only head reaches half the
-        // document, and a run that executed it would silently ignore the other half.
+        // document, and a run that executed it would silently ignore the other half. This is also how a
+        // cycle is refused in this checkpoint: every node of one is fed, so no walk from a source ever
+        // reaches it.
         RunnableGraph graph = Graph(
             Document(
                 [
@@ -231,7 +236,7 @@ public sealed class MaterializationTests
         InvalidOperationException rejected =
             await Assert.ThrowsAsync<InvalidOperationException>(async () => await Host.MaterializeAsync(graph, TestToken));
 
-        Assert.Contains("do not form one chain", rejected.Message, StringComparison.Ordinal);
+        Assert.Contains("do not form one graph", rejected.Message, StringComparison.Ordinal);
         Assert.Contains("reached 2 of them", rejected.Message, StringComparison.Ordinal);
     }
 }

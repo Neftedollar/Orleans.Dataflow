@@ -349,9 +349,9 @@ depended on the plan being linear — and a probe attaches to an edge.
 
 ### Checkpoints for M4.1
 
-1. **DAG plan and fan-out**: edge-keyed channels, multiple terminals,
-   broadcast/balance/unzip, multiple named result slots resolving
-   per-terminal. Proves the plan model and the FanOut pump.
+1. **DAG plan and fan-out** — *as implemented, see below*: edge-keyed channels,
+   multiple terminals, broadcast/balance/unzip, multiple named result slots
+   resolving per-terminal. Proves the plan model and the FanOut pump.
 2. **Simple fan-in**: merge, concat, interleave — the FanIn pump with
    strategies that never hold a partial row.
 3. **Row-building fan-in**: zip and combine-latest — held rows, eager
@@ -367,3 +367,81 @@ depended on the plan being linear — and a probe attaches to an edge.
 Each checkpoint lands with its tests and its as-implemented notes here,
 replacing this section's future tense the way M2's checkpoints replaced
 theirs.
+
+## M4.1 checkpoint 1 (DAG plan and fan-out) — as implemented
+
+The plan above is what was built; what follows is where it needed a decision it
+did not already contain, and what this checkpoint does not do.
+
+**A junction's arity is its edges, and its legs are ports.** A stage
+specification declares a port list rather than an arity, so `broadcast` and
+`balance` declare `out-0` … `out-7` — the first two required, the rest
+ignorable — and `unzip` declares `left` and `right`, both required. Which legs
+an occurrence has is therefore stated by the edges that reach them and by
+nothing else: there is no arity payload, because a number written beside the
+edges would be a second statement of the same fact and two statements can
+disagree. Eight is a stated ceiling rather than a natural one, exactly as the
+four digits of an automatic node name are.
+
+This is also the whole of "junction-aware validation": the graph compiler
+needed no new rule. *Connected exactly per its cardinality* already falls out
+of the two rules that were there — a document structurally carries at most one
+edge per port address, and the compiler requires an edge at every port that is
+not optional or ignorable. What was missing was a stage whose port list has
+more than one output in it.
+
+**Channels are keyed by plan edge.** A segment says which channels it reads and
+which it writes; the planner is where a document's `GraphEdge` becomes one of
+those indices, and nothing below it needs the edge again. Everything the
+boundary machinery does is unchanged per channel.
+
+**Completion walks upstream per edge.** A segment that stops closes every
+channel it was reading; each closed channel reaches the segment that was
+writing into it and lowers that segment's count of live outputs; a segment
+whose count reaches zero stops in its turn. A junction with a live leg left
+therefore keeps feeding it, which is ADR 0005's third shared rule as mechanics,
+and a linear plan is the degenerate case — one output per segment, so the walk
+runs to the source exactly as the old watermark did.
+
+**Terminals are counted.** A plan carries one *ending* per sink: the segment it
+stops at, the seed its terminal folds from, and the slot it resolves. The run
+keeps one state and one settled slot per ending and settles when every segment
+has stopped. The outcome stays single: a failure anywhere, a cancellation, or a
+first-element sink with no element faults or cancels **every** slot, because a
+run ends once.
+
+**The FanOut pump asks for room and then pulls,** which is both the demand rule
+and the held-element bound: the one element a junction ever holds outside a
+declared buffer is the one it is placing. Broadcast and unzip need every live
+leg to have room and are the same loop with a projection per leg; balance needs
+one and places by rotation among the willing, holding its element rather than
+losing it if the leg that reported room leaves first. A junction never fuses
+with anything and is a boundary on its input and on every leg, so a `Buffer`
+written immediately before one or immediately on a leg is that channel rather
+than a second one behind an implicit handoff — the rule a buffer in front of an
+asynchronous stage already followed.
+
+**Two consequences worth stating rather than discovering.** An overflow policy
+on a *broadcast* or *unzip* leg keeps working, because such a junction offers to
+every live leg: a leg declared `DropOldest` drops rather than pacing its
+siblings, and one declared `Fail` fails. An overflow policy on a *balance* leg
+is unreachable, because a balance picks a leg that really has room and routes
+around a full one whatever policy it declared — and a leg that declared a
+dropping policy always has room, so a balance is drawn towards it.
+
+**An unzip's halves are behavior.** Which member of a row is its left half is a
+statement about an element type, and an element type never appears in a local
+document; the document states that the node splits one stream into two, and the
+binding states how. Unzip is therefore literally broadcast with a projection per
+leg, which is what ADR 0005 says it is.
+
+**What this checkpoint does not do.** There is no authoring spelling for a
+junction — the C# graph builder is M4.2, and the tests here build documents and
+binding tables directly, which is the durable half of a fan-out graph in any
+case. There is no fan-in, no partition, and no cycle: two sources are refused
+as two runs written in one document, a second edge into one node is refused
+structurally, and a cycle is unreachable from the head and refused as a
+component nothing reaches. Pause, shutdown, and cancellation are proven to work
+across a fan-out rather than proven in general — the control-plane
+generalization is checkpoint 5, and the pause of a branching run is claimed here
+only as "it comes to rest and moves again".
