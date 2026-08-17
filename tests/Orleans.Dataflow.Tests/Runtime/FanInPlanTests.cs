@@ -306,6 +306,40 @@ public sealed class FanInPlanTests
     }
 
     [Fact]
+    public async Task AMergeBoundToAZipIsRefusedBecauseNothingElseCouldTellThemApart()
+    {
+        // The gap checkpoint 2 recorded and checkpoint 5 closed. Every other disagreement between the two
+        // planes is caught by something structural — a port the stage does not declare, a payload the
+        // runtime cannot read, a shape that cannot stand where the document puts it — but two fan-in
+        // junctions of the same arity have the same ports, the same place, and the same empty payload, so
+        // the only thing that can separate them is asking. Until this checkpoint the binding simply won,
+        // and a document saying "merge" executed a zip's completion rule while its fingerprint went on
+        // describing a merge.
+        RunnableGraph graph = Graph(
+            Declaring(
+                [
+                    Node("stage-1", "from-enumerable"),
+                    Node("stage-2", "from-enumerable"),
+                    Node("stage-3", "merge"),
+                    Node("stage-4", "ignore"),
+                ],
+                [Into("stage-1", "stage-3", 0), Into("stage-2", "stage-3", 1), Edge("stage-3", "stage-4")],
+                []),
+            Bindings(
+                ("stage-1", LocalStageDescriptor.FromEnumerable(new RecordingEnumerable<int>(1))),
+                ("stage-2", LocalStageDescriptor.FromEnumerable(new RecordingEnumerable<int>(2))),
+                ("stage-3", LocalStageDescriptor.Zip(Rows())),
+                ("stage-4", LocalStageDescriptor.Ignore())));
+
+        InvalidOperationException refused =
+            await Assert.ThrowsAsync<InvalidOperationException>(async () => await Host.MaterializeAsync(graph, TestToken));
+
+        Assert.Contains("local/merge@v1", refused.Message, StringComparison.Ordinal);
+        Assert.Contains("local/zip@v1", refused.Message, StringComparison.Ordinal);
+        Assert.Contains("describe two different nodes", refused.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public async Task AnInputThatWantsNothingLeavesTheJunctionAndTheOthersRunOn()
     {
         // A take of no elements is resolved when the plan is built, and in a joining graph that resolution

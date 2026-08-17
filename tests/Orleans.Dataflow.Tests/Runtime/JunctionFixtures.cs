@@ -1,6 +1,7 @@
 using Orleans.Dataflow.Authoring;
 using Orleans.Dataflow.Definition;
 using Orleans.Dataflow.Identity;
+using Orleans.Dataflow.Testing;
 using Xunit;
 using static Orleans.Dataflow.Tests.Runtime.RuntimeFixtures;
 
@@ -53,6 +54,73 @@ internal static class JunctionFixtures
             ResultSlotId.Create(name),
             ContractReference.Create(ContractId.Create(contract), 1),
             PortAddress.Create(NodeId.Create(node), PortId.Create("result")));
+
+    /// <summary>Builds the node a probing source stands at, which is an ingress queue of one element.</summary>
+    /// <param name="id">The node identifier text.</param>
+    /// <returns>The node.</returns>
+    /// <remarks>
+    /// The capacity is the handover a probe declares and not a choice made here: room for the element being
+    /// handed over and no room for a second, which is what makes an emit a rendezvous rather than a write
+    /// into a buffer. Spelling it out is what a hand-built document has to do, and it agrees with the
+    /// binding by construction because both come from the same authoring value.
+    /// </remarks>
+    internal static StageNode Emitter(string id) =>
+        Node(id, "queue", "local-buffer-parameters", """{"capacity":1,"overflowPolicy":"backpressure"}""");
+
+    /// <summary>Builds the node a probing sink stands at.</summary>
+    /// <param name="id">The node identifier text.</param>
+    /// <returns>The node.</returns>
+    internal static StageNode Receiver(string id) => Node(id, "sink-probe");
+
+    /// <summary>Builds one control slot declaration on a stage's control port.</summary>
+    /// <param name="name">The slot name, which is also the name the probe is asked for by.</param>
+    /// <param name="node">The producing node's identifier text.</param>
+    /// <returns>The declaration.</returns>
+    /// <remarks>
+    /// The counterpart of <see cref="Slot"/> for the other kind of value a document declares. A control is
+    /// produced by the <c>control</c> port and resolves at the start of a run rather than at its end, which
+    /// is what lets a test hold one end of a branching graph while the run is still moving.
+    /// </remarks>
+    internal static ResultSlotDefinition Control(string name, string node) =>
+        ResultSlotDefinition.Create(
+            ResultSlotId.Create(name),
+            ContractReference.Create(ContractId.Create("local-control"), 1),
+            PortAddress.Create(NodeId.Create(node), PortId.Create("control")));
+
+    /// <summary>Builds the control registry a hand-built document's probes are resolved through.</summary>
+    /// <param name="controls">The pairs of slot name and control type, in any order.</param>
+    /// <returns>The registry.</returns>
+    internal static IReadOnlyDictionary<ResultSlotId, Type> Controls(
+        params (string Name, Type Control)[] controls) =>
+        controls.ToDictionary(control => ResultSlotId.Create(control.Name), control => control.Control);
+
+    /// <summary>Takes the binding of a probing source out of the authoring value that spells it.</summary>
+    /// <typeparam name="T">The element type the probe emits.</typeparam>
+    /// <param name="name">The name the probe is declared under, which the document declares too.</param>
+    /// <returns>The descriptor, ready to be bound to a node of a hand-built document.</returns>
+    /// <remarks>
+    /// <para>
+    /// The probes belong to the testing package and are ordinary stages of the local vocabulary, so a
+    /// junction document uses the very ones an authored chain does rather than a hand-rolled imitation. What
+    /// a chain-composing surface cannot do is put one at the head of a <em>branch</em>, so the occurrence is
+    /// lifted out of the authoring value and bound to a node directly — which is the same back door every
+    /// junction fixture here goes through, applied to a stage that already exists.
+    /// </para>
+    /// <para>
+    /// Reusing the real occurrence is what makes the claim worth making: the demand meter, the rendezvous,
+    /// and the terminal expectations under test are the ones a test author actually gets.
+    /// </para>
+    /// </remarks>
+    internal static LocalStageDescriptor Emitting<T>(string name) =>
+        (LocalStageDescriptor)TestSource.Probe<T>(name).Stages[0];
+
+    /// <summary>Takes the binding of a probing sink out of the authoring value that spells it.</summary>
+    /// <typeparam name="T">The element type the probe receives.</typeparam>
+    /// <param name="name">The name the probe is declared under, which the document declares too.</param>
+    /// <returns>The descriptor, ready to be bound to a node of a hand-built document.</returns>
+    /// <remarks>The mirror of <see cref="Emitting{T}"/>, for the end of a branch rather than its head.</remarks>
+    internal static LocalStageDescriptor Receiving<T>(string name) =>
+        (LocalStageDescriptor)TestSink.Probe<T>(name).Stages[0];
 
     /// <summary>Builds the typed slot of one result a hand-built document declares.</summary>
     /// <typeparam name="TResult">The type the sink resolves.</typeparam>

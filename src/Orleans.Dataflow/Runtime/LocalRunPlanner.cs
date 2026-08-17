@@ -256,6 +256,32 @@ internal static class LocalRunPlanner
             }
         }
 
+        // The two planes have to be talking about the same node, and until this checkpoint nothing said
+        // so where the shapes were indistinguishable: a document naming a merge could carry a binding that
+        // is a zip, and the binding — which is the statement of behavior — simply won, so the run's
+        // fingerprint, its validation, and its diagnostics all described a graph it was not executing.
+        // The disagreement then surfaced as whatever the other pump happens to do, which for a junction of
+        // the same arity is a different completion rule rather than an error.
+        //
+        // Asked last, and that placement is the rule rather than an accident. Every check above names
+        // something the runtime actually cannot do — this node is fed by two streams and a mapping cannot
+        // join them, this junction is wired at a port its stage does not declare, this shape cannot stand
+        // where the document puts it — and those sentences are sharper than "the two planes disagree", so
+        // they keep speaking first for every mismatch whose shapes differ enough to be told apart.
+        // What reaches here is the residue: two stages with the same ports, the same place, and the same
+        // payload contract, which nothing structural could ever separate. Reading over the document's own
+        // node order rather than over a dictionary keeps a document with two of these refused by the same
+        // one every time.
+        foreach (StageNode declaration in document.Nodes)
+        {
+            if (bindings.TryGetValue(declaration.Id, out LocalStageDescriptor? bound) &&
+                bound.Stage != declaration.Stage)
+            {
+                throw Foreign(
+                    $"the node '{declaration.Id}' is an occurrence of the stage '{declaration.Stage}' and is bound to the behavior of '{bound.Stage}', so its document and its binding table describe two different nodes; the binding is what a run would execute, which would make the document — and the fingerprint taken over it — a description of a graph nobody ran");
+            }
+        }
+
         (ResultSlotId?[] slots, LocalControl[] declared) = Slots(document, sinks, controls);
         LocalEnding[] endings = new LocalEnding[sinks.Count];
 

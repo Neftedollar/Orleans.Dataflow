@@ -357,6 +357,20 @@ probes generalize without new concepts: quiescence is still "every
 segment parked or idle and no callback in flight" — the counters never
 depended on the plan being linear — and a probe attaches to an edge.
 
+**Half of that survived checkpoint 5 and half of it did not.** The counters
+really are shape-blind: they count segments and callbacks, and a junction is a
+segment, so nothing in `LocalPause` needed a line. What the claim quietly
+assumed is that every wait a segment can take reports itself, and one did not —
+a channel sink's write, which is this runtime's own wait on a channel the
+author owns. That is a hole the linear suite could have found and never looked
+for, and it is described with its fix in checkpoint 5's section below. "A probe
+attaches to an edge" is the half that was aspirational: a probe is a stage, so
+it attaches where a stage can stand, which is the head or the end of a branch.
+In a graph that turns out to be enough for every contract this milestone
+states — a branch end is one leg of a split or one input of a join — so the
+sentence is downgraded to what is true rather than paid for with machinery
+nothing needed.
+
 ### Checkpoints for M4.1
 
 1. **DAG plan and fan-out** — *as implemented, see below*: edge-keyed channels,
@@ -370,10 +384,10 @@ depended on the plan being linear — and a probe attaches to an edge.
 4. **Partition and cycles** — *as implemented, see below*: the routed-element
    hold, out-of-range failure, cycle detection at validation, a legal cycle
    executing, and the corrected statement of when one ends.
-5. **Control-plane generalization**: pause quiescence, shutdown drain,
-   cancellation, and probes proven across branching topologies; the
-   bounded-memory suite extended to junctions (held elements counted
-   against ADR 0005's stated bounds).
+5. **Control-plane generalization** — *as implemented, see below*: pause
+   quiescence, shutdown drain, cancellation, and probes proven across branching
+   topologies; the bounded-memory suite extended to junctions (held elements
+   counted against ADR 0005's stated bounds).
 
 Each checkpoint lands with its tests and its as-implemented notes here,
 replacing this section's future tense the way M2's checkpoints replaced
@@ -979,3 +993,206 @@ is a property of the graph's shape alone — a loop of waiting boundaries waits
 for itself whatever the elements do — while this hazard's depends on the
 element counts a graph actually produces. The first is decidable by looking;
 the second is not.
+
+## M4.1 checkpoint 5 (control-plane generalization) — as implemented
+
+The engine's last checkpoint, and the one whose job was to check a claim rather
+than to add a pump. What follows is the hole the check found, the states that
+had to be reachable before any of it could be asserted, and what the whole M4.1
+arc does and does not leave behind.
+
+**The counters needed no change and one wait did, which is why the claim was
+checked rather than repeated.** The design's claim — quiescence is every
+segment parked or idle with no callback in flight, and the counters never
+depended on the plan being linear — is true of `LocalPause` itself: it counts
+segments, and a junction is a segment. What the claim rests on is a second
+statement nobody had written down, that *every wait a segment can take reports
+itself*, and that one was false. A channel sink's write into a full channel
+blocked the segment's thread without telling the pause gate anything, so a run
+holding an element at a `Sink.ToChannel` whose consumer had stopped reading
+could never reach quiescence: `PauseAsync` did not fail, it hung, which is why
+no assertion had ever caught it. The wait is exactly the mirror of the one a channel
+*source* takes on an empty reader, and that one has reported itself since it
+was written — the two halves of one adapter were answering a pause differently.
+The fix is the bracket the other waits already have, taken only when the write
+does not complete at once so that the ordinary element pays nothing, and the
+regression lives with the linear suite because the hole was never junction-
+specific. It was found by sweeping every blocking call in the runtime against
+the question "does this one say so", which is a different exercise from reading
+the pause code and agreeing with it.
+
+**Every junction's own held state comes to rest, and a probe is what made the
+states reachable at all.** ADR 0005's rule 5 says a junction parks between
+elements and that what it holds is held rather than in flight. Asserting that
+needs the junction to actually *be* holding something, which needs a consumer
+that has stopped consuming — and the only two ways to stop a consumer are an
+author's callback, which blocks quiescence by design and would therefore be
+asserting a pause the contract says cannot happen, and a probe's rendezvous,
+which holds the element on the run's own thread inside a wait this runtime owns.
+That is why checkpoint 4 deferred the partition case and why it is here: the
+suite now pauses a partition **holding an element it has already routed**, a
+broadcast that cannot pull because one leg is full, a balance with no willing
+leg, a concat asleep on the input whose turn it is while another input has
+something ready, a merge asleep on every input, a zip holding a column, a
+combine-latest remembering both inputs' latest, and a loop with its own stream
+circulating. Every one of them reaches quiescence, resumes, and finishes with
+the elements it was holding delivered once, unchanged, and in order.
+
+**The double pause is the idiom that makes those claims facts.** A pause asked
+for while a segment is still on its way to a wait may be answered by an
+ordinary park at that segment's safe point, which proves nothing about the
+wait. Pausing, resuming, and pausing again — the M2 suite's own idiom for a
+source that parks on nothing at all — leaves the run in a state from which
+nothing can move, so the second quiescence is the wait's own. It is what turns
+"a partition was probably in its room-wait" into "the routing function has run
+three times and the fourth element is still in the junction's input channel".
+
+**The bounds are proven through the pause and not beside it.** Each junction's
+ADR 0005 number is asserted as how far a held source got, read while the run is
+quiescent and again after it ends: a partition holds one element and starves
+the other leg for exactly as long (the leg receives nothing at all while the
+pause is in effect, and receives everything afterwards); a broadcast holds
+*none* while it waits, because it asks for room before it pulls, so the element
+it would have taken is still in its input channel; a merge holds none while
+waiting and one while placing, which is four elements absorbed and no fifth
+pull; a zip holds N−1 columns, and the column read before the pause is the
+column of the row emitted after it; a combine-latest holds N, proven by a row
+emitted after the resume from an arrival on one input alone. The two overflow
+policies checkpoint 3 recorded as inherited-but-untested below a row junction
+are tested here: a dropping boundary below a zip drops rather than pacing the
+pump and every row is accounted for as delivered or counted, and a failing one
+faults the run with the junction's own offer as the origin.
+
+**Shutdown drains and cancellation abandons, asserted on one graph in one
+state.** A diamond — a broadcast, a declared buffer on each leg, a transform on
+one of them, and a zip that joins them — is held at its first row and then
+either shut down or disposed, so the drain and the abandonment differ by
+nothing but the request. Shutdown delivers all six elements the run had
+admitted, with nothing dropped; cancellation delivers the row already inside
+the author's callback and nothing behind it. A graph mixing kinds — a partition
+splitting by parity, a transform per leg, a merge joining them, a declared
+buffer below that — drains all eight, which is the accounting ADR 0005 asks
+for read across a split and a join at once. What "admitted" means is exact here
+rather than estimated, because an emit into a source probe completes when the
+run has taken the element.
+
+**A failure on one branch reaches its sibling as cancellation, and the sibling
+says so.** ADR 0005's first shared rule is usually read across a fan-in; the
+new statement is across a fan-out, where the branch that did not fail has to
+learn that the run is over. Proving that it learns it as an abandonment rather
+than as an ordinary end takes a branch that can tell the two apart, which is an
+asynchronous callback holding the run's own token: the callback records which
+of the two it observed, and it observes the cancellation.
+
+**Disposal mid-flight is asserted once per junction kind, and the first claim
+is the one that would hang.** Ten graphs — one per junction plus a cycle — are
+built over endless sources, held at a sink, and disposed. That `DisposeAsync`
+*returns* is the claim: it waits for every segment to have left its loop, so a
+pump that could not be woken from its own wait would never let the test finish.
+The outcome is then the cancellation that was asked for, every enumerator the
+run obtained was released — including the per-lap ones an endless source hands
+out, which is where a branching run has more of them than a linear one ever
+did — and disposing again changes nothing.
+
+**Resume-then-repause storms neither deadlock nor lose an element.** Two of
+them: a diamond stormed once per element for forty elements, whose output is an
+exact sequence of rows, and a graph in which a partition, a merge, a broadcast
+and a zip all stand at once, stormed sixty times, whose output is an exact
+multiset because a merge promises the multiset rather than the interleaving.
+Each cycle asks for quiescence with elements genuinely in flight on several
+branches, so a counter hole anywhere would hang rather than fail — which is
+what the deadline in the suite's `Reaches` helper exists to turn into a report.
+
+**A probe attaches to a branch end, and in a graph that is enough.** The design
+sentence said "a probe attaches to an edge", and this checkpoint is where that
+had to become true or be withdrawn. It is withdrawn, because a probe is an
+ordinary stage of the local vocabulary — a bounded ingress queue at the head of
+a branch, a rendezvous terminal at its end — and a stage attaches where a stage
+can stand. What changed in the DAG world is not the probe but what a branch end
+*is*: one leg of a split, one input of a join, one exit of a loop. So a
+`TestSource.Probe` feeds a broadcast, a `TestSink.Probe` measures one leg of a
+partition while its sibling starves, and the demand meter reads through a
+fan-in exactly as it reads along a chain — `PullsObserved <= emitted + 1` on
+every input. A probe that attached to the *middle* of an edge would be a
+different thing, a tap, and nothing in this milestone's contracts needs one;
+building it to make a sentence true would have been machinery with no claim
+behind it. The one thing the testing package needed was nothing at all: the
+occurrences are lifted out of the authoring values that spell them, which is
+the same back door every junction fixture already goes through.
+
+**The two planes have to be talking about the same node, and now they say so.**
+Checkpoint 2 recorded that a `merge` node bound to a different junction kind
+was undetected, and this is that gap closed. The check is one comparison per
+node — the stage the document names against the stage the binding's kind
+declares — and its placement is the whole of its design: it is asked **last**,
+after every structural refusal has had its say. Every one of those names
+something the runtime actually cannot do (this node is fed by two streams and a
+mapping cannot join them; this junction is wired at a port its stage does not
+declare; this shape cannot stand where the document puts it), and those
+sentences are sharper than "the two planes disagree", so they keep speaking
+first for every mismatch whose shapes differ enough to be told apart. What
+reaches the new check is the residue nothing structural could ever separate:
+two fan-in junctions of the same arity, a `select` bound to a `where`, a
+`first` bound to a `last`. Adding it changed no existing diagnostic, which is
+what the placement bought, and it is unreachable through the authoring API for
+the reason every refusal here is — that surface builds the node from the
+binding's own kind, so the two agree by construction.
+
+### What the M4.1 arc proved, and what it left
+
+Five checkpoints turned a line into a graph without changing the execution
+model underneath it. What they proved together: channels keyed by edge rather
+than by chain position, with fusion unchanged inside the branches and a
+junction that never fuses; every junction of ADR 0005 with the memory bound its
+table states, measured rather than argued; completion that walks upstream per
+edge and stops at a junction with a live leg; terminals counted rather than
+singular, with one result slot per ending and one outcome for the run; cycles
+legal exactly when a relieving boundary breaks them, refused by a walk that
+names the surviving loop's path, and ending from inside or by a stop but never
+by the closing of their external inputs; and a control plane — pause, resume,
+shutdown, cancellation, failure, probes — that holds across all of it, with the
+one wait that did not report itself found and fixed.
+
+What it left, deliberately and by name. There is no authoring spelling for any
+junction: every proof here is over a document and a binding table built
+directly, which is the durable half of a branching graph, and the C# graph
+builder is M4.2. There is no liveness rule for the acyclic split-join hazard —
+the assessment above says why a rule that refused it would be worse than the
+hazard. There is no quiescence detection for a loop that has gone quiet, and
+the honest promise stays "write the loop's exit as a stage on the loop, or stop
+the run". The operator waves M4 owes — batching, windowing, timing, rate,
+flattening, deduplication, sequence edits, observation — are untouched here,
+and so is the clock that the timing group brings with it. Substreams,
+group-by, split, prefix-and-tail, and dynamic hubs are M4+ and not started.
+
+### What checkpoint 5 does not prove
+
+The pause contract is proven for every junction *this engine has*, in the held
+states those junctions can be in, on graphs of a handful of segments. It is not
+a proof that no wait anywhere reports nothing: the sweep that found the channel
+sink was over this runtime's own blocking calls, and a wait added later without
+the bracket would be exactly as invisible as that one was — the invariant is
+maintained by discipline, not by a test that could fail. Nothing here is a
+statement about an author's own code either: a callback that blocks, an
+enumerable that ignores its token, a channel consumer that stops reading all
+still delay a pause and a shutdown by design, and the tests that show a pause
+waiting for a callback in flight are showing that rule rather than working
+around it.
+
+"No leaked threads" is proven in the only form this suite can prove it: a
+disposal returns, and it can only return once every segment has left its loop.
+Nothing here counts threads or watches for an unobserved task exception raised
+after a run has settled — the continuation that observes every abandoned
+callback is a structural argument the M2 suite made, not a fact re-measured
+here.
+
+The accounting claims are about elements the run *admitted*, which a source
+probe makes exact and an enumerable source does not: a shutdown of a graph fed
+by an enumerable delivers what it had, and how much that was depends on how far
+the source had run. Nothing here claims a number for that shape.
+
+And the whole of it is the local runtime. The Orleans runtime distributes runs
+rather than stages, so a branching document executes inside one local engine
+there too — but no test in this checkpoint materializes one through a silo, and
+"the control plane holds across a distributed DAG" is a sentence nobody has
+earned yet.

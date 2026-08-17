@@ -172,6 +172,31 @@ public sealed class MaterializationTests
     }
 
     [Fact]
+    public async Task MaterializeAsyncRejectsABindingForADifferentStageOfTheSameShape()
+    {
+        // The residue every other check leaves behind. A select and a where stand in the same place, wire
+        // the same ports, and carry the same empty payload, so nothing structural separates them; the
+        // document is the statement of topology and the fingerprint is taken over it, so a run that
+        // filtered where its document said it mapped would be a run nothing could describe afterwards.
+        // Asked last, after every sharper refusal has had its say.
+        RunnableGraph graph = Graph(
+            Document(
+                [Node("stage-1", "from-enumerable"), Node("stage-2", "select"), Node("stage-3", "ignore")],
+                [Edge("stage-1", "stage-2"), Edge("stage-2", "stage-3")]),
+            Bindings(
+                ("stage-1", LocalStageDescriptor.FromEnumerable(new RecordingEnumerable<int>(1))),
+                ("stage-2", LocalStageDescriptor.Where((Func<int, bool>)(value => value > 0))),
+                ("stage-3", LocalStageDescriptor.Ignore())));
+
+        InvalidOperationException rejected =
+            await Assert.ThrowsAsync<InvalidOperationException>(async () => await Host.MaterializeAsync(graph, TestToken));
+
+        Assert.Contains("local/select@v1", rejected.Message, StringComparison.Ordinal);
+        Assert.Contains("local/where@v1", rejected.Message, StringComparison.Ordinal);
+        Assert.Contains("describe two different nodes", rejected.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public async Task MaterializeAsyncRejectsABindingWhoseShapeCannotStandWhereTheDocumentPutsIt()
     {
         // The document says the middle node maps, and the binding table says it discards. The document is

@@ -452,6 +452,48 @@ public sealed class PauseTests
     }
 
     [Fact]
+    public async Task ARunHeldAtAFullChannelSinkIsStillPausable()
+    {
+        // The mirror of the buffer case, on the far side of the graph, and a hole this suite did not have
+        // until checkpoint 5 looked for one. A channel sink's write is this runtime's own wait on a channel
+        // the author owns — the exact counterpart of the wait a channel *source* takes on an empty reader,
+        // which has reported itself since it was written — and a wait that says nothing leaves a pause
+        // waiting forever on a segment that will take no step until a consumer makes room. Before the fix
+        // this test did not fail; it hung.
+        Channel<int> channel = Channel.CreateBounded<int>(1);
+        RecordingEnumerable<int> elements = new(1, 2, 3, 4);
+
+        RunnableGraph graph = Source.From(elements).To(Sink.ToChannel(channel.Writer));
+
+        RunHandle run = await Host.MaterializeAsync(graph, TestToken);
+
+        // One element taken out of the channel and one written into it leaves the sink holding a third
+        // with nowhere to put it, so the segment is inside the write and nothing but a reader can free it.
+        Assert.Equal(1, await channel.Reader.ReadAsync(TestToken));
+
+        await run.PauseAsync(TestToken);
+
+        Assert.True(run.IsPaused);
+
+        await run.ResumeAsync();
+
+        // Everything the source had, once each and in order: the element held across the pause is the one
+        // the run writes when it moves again.
+        List<int> written = [];
+
+        for (int element = 0; element < 3; element++)
+        {
+            written.Add(await channel.Reader.ReadAsync(TestToken));
+        }
+
+        await run.Completion;
+        await run.DisposeAsync();
+
+        Assert.Equal([2, 3, 4], written);
+        Assert.Equal(1, elements.Releases);
+    }
+
+    [Fact]
     public async Task PauseWaitsForTheCallbacksInFlightAndAdmitsNothingNew()
     {
         TaskCompletionSource<long>[] callbacks = Sources(4);

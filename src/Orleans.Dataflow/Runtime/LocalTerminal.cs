@@ -220,7 +220,7 @@ internal sealed class LocalTerminal
         new(
             (state, element, context) =>
             {
-                channel.Write(element, context.RunToken);
+                channel.Write(element, context);
 
                 return state;
             },

@@ -78,12 +78,19 @@ internal abstract class LocalChannelSink
 {
     /// <summary>Writes one element, waiting for room.</summary>
     /// <param name="element">The element to write.</param>
-    /// <param name="cancellationToken">The run's own token, which releases the wait.</param>
-    /// <exception cref="OperationCanceledException"><paramref name="cancellationToken"/> was cancelled.</exception>
+    /// <param name="context">The tokens and the pause gate of the run.</param>
+    /// <exception cref="OperationCanceledException">The run was cancelled while this element waited.</exception>
     /// <exception cref="ChannelClosedException">
     /// The writer was completed by something other than this run, so the element cannot be delivered.
     /// </exception>
-    internal abstract void Write(object? element, CancellationToken cancellationToken);
+    /// <remarks>
+    /// The whole context and not only a token, because the wait for room is one of this runtime's own and
+    /// has to say so: a segment blocked here takes no step until a consumer on the author's side of the
+    /// channel makes room, which is exactly the state <see cref="LocalPause.Idle"/> exists to count. It is
+    /// the mirror of the wait a channel <em>source</em> takes on an empty reader, and it reports itself for
+    /// the same reason — the two halves of one adapter cannot answer a pause differently.
+    /// </remarks>
+    internal abstract void Write(object? element, LocalRunContext context);
 
     /// <summary>Completes the writer with the run's outcome.</summary>
     /// <param name="failure">
@@ -105,8 +112,34 @@ internal abstract class LocalChannelSink
 internal sealed class LocalChannelSink<T>(ChannelWriter<T> writer) : LocalChannelSink
 {
     /// <inheritdoc/>
-    internal override void Write(object? element, CancellationToken cancellationToken) =>
-        writer.WriteAsync((T)element!, cancellationToken).AsTask().GetAwaiter().GetResult();
+    /// <remarks>
+    /// The synchronous case is answered without touching the pause gate at all, because a write that
+    /// needed no room to appear is not a wait and taking the gate's lock per element would be a cost paid
+    /// by every run that has a channel sink in it. Only the write that really blocks reports itself, which
+    /// is the shape every other wait in this runtime that can complete at once already uses.
+    /// </remarks>
+    internal override void Write(object? element, LocalRunContext context)
+    {
+        ValueTask written = writer.WriteAsync((T)element!, context.RunToken);
+
+        if (written.IsCompleted)
+        {
+            written.GetAwaiter().GetResult();
+
+            return;
+        }
+
+        context.Pause.Idle();
+
+        try
+        {
+            written.AsTask().GetAwaiter().GetResult();
+        }
+        finally
+        {
+            context.Pause.Busy();
+        }
+    }
 
     /// <inheritdoc/>
     internal override void Close(Exception? failure) => _ = writer.TryComplete(failure);
