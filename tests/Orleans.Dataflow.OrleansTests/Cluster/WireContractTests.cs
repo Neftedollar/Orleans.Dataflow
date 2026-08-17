@@ -95,26 +95,11 @@ public sealed class WireContractTests(DataflowCluster cluster)
     }
 
     [Fact]
-    public void TheCoordinatorStateRoundTripsIncludingItsRunRegister()
+    public void TheCoordinatorStateRoundTripsItsEpochCounter()
     {
-        PipelineCoordinatorState state = new() { LastEpoch = 3L };
-
-        state.Runs.Add(new PipelineRunRecord
-        {
-            RunId = "abcdef0123456789abcdef0123456789",
-            Epoch = 3L,
-            GraphFingerprint = "sha256:9f86d081884c7d659a2feaa0c55ad015a3bf4f1b2b0b822cd15d6c15b0f00a08",
-            StartedAt = new DateTimeOffset(2026, 8, 17, 12, 0, 0, TimeSpan.Zero),
-        });
-
-        PipelineCoordinatorState round = RoundTrip(state);
+        PipelineCoordinatorState round = RoundTrip(new PipelineCoordinatorState { LastEpoch = 3L });
 
         Assert.Equal(3L, round.LastEpoch);
-        Assert.Single(round.Runs);
-        Assert.Equal(state.Runs[0].RunId, round.Runs[0].RunId);
-        Assert.Equal(state.Runs[0].Epoch, round.Runs[0].Epoch);
-        Assert.Equal(state.Runs[0].GraphFingerprint, round.Runs[0].GraphFingerprint);
-        Assert.Equal(state.Runs[0].StartedAt, round.Runs[0].StartedAt);
     }
 
     [Fact]
@@ -186,7 +171,6 @@ public sealed class WireContractTests(DataflowCluster cluster)
             typeof(RunStatusSnapshot),
             typeof(ResultEnvelope),
             typeof(PipelineCoordinatorState),
-            typeof(PipelineRunRecord),
         ];
 
         foreach (Type contract in wire)

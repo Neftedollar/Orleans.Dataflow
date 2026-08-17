@@ -20,15 +20,15 @@ namespace Orleans.Dataflow.OrleansTests.Cluster;
 /// politely, which is the only version of the event a deployment actually suffers.
 /// </para>
 /// <para>
-/// <b>Every assertion here is made after the cluster has agreed the silo is gone</b>, never across the
-/// instant of the kill. That is a deliberate boundary and not a convenience. A grain call already in flight
-/// when its host dies is not answered by anybody: measured over ten kills, two of the ten status polls that
-/// were airborne at that moment sat until the runtime's thirty-second response timeout and surfaced as
-/// <see cref="TimeoutException"/> rather than as the loss the handle documents. That is a real gap in
-/// <see cref="OrleansRunHandle.Completion"/>'s contract, it belongs to the handle rather than to the
-/// cluster, and a test that asserted the current behavior would be pinning a defect in place. So these
-/// tests assert what the cluster guarantees — that once membership has settled, the truth is reported —
-/// and the in-flight window is written down as a known gap instead.
+/// <b>The instant of the kill is covered, not avoided.</b> A grain call already in flight when its host
+/// dies is answered by nobody: measured over ten kills, two of the ten status polls that were airborne at
+/// that moment sat until the runtime's response timeout. The handle's poll loop treats that — and an
+/// unavailable silo, and a rejected message — as a fact about one call rather than about the run, and
+/// retries until an authoritative answer arrives; the fresh activation's "not started" is the real loss.
+/// One test here observes <see cref="OrleansRunHandle.Completion"/> before the kill so its poll loop lives
+/// across the instant, and asserts the loss is reported either way. The remaining assertions are made
+/// after the cluster has agreed the silo is gone, because what they claim — ownership, epochs, fencing —
+/// is a claim about a settled cluster.
 /// </para>
 /// <para>
 /// Each test that kills a silo restores the cluster afterwards, so the next one starts from three.
@@ -102,6 +102,35 @@ public sealed class SiloFailoverTests(MultiSiloCluster cluster) : IAsyncLifetime
         _ = await Assert.ThrowsAsync<PipelineRunLostException>(() => handle.GetValueAsync(slot, Token));
 
         // Disposal of a handle whose run died with its silo is a no-op rather than a second failure.
+        await handle.DisposeAsync();
+    }
+
+    [Fact]
+    public async Task APollAirborneAtTheMomentOfTheKillStillReportsTheLoss()
+    {
+        (PipelineDefinition pipeline, ResultSlot<long> _) =
+            TestPipelines.Doubling("kill-mid-poll", 2, halt: "kill-mid-poll");
+
+        OrleansRunHandle handle = await cluster.MaterializeAsync(pipeline);
+
+        await TestSignals.Reached("kill-mid-poll");
+
+        IPipelineRunGrain run = cluster.Run(handle);
+
+        // Touched before the kill, which is the whole test: the first touch starts the handle's poll loop,
+        // so the loop is running — and a poll may be airborne — at the instant the host dies. Whichever
+        // side of that race an individual execution lands on, the contract is the same, and that is the
+        // assertion: a poll the dead silo never answers is retried rather than surfaced, and the loss
+        // arrives as itself.
+        Task completion = handle.Completion;
+
+        _ = await cluster.KillHostOfAsync(run);
+
+        PipelineRunLostException lost = await Assert.ThrowsAsync<PipelineRunLostException>(
+            () => Deadline.Within(completion, $"the run {handle.RunId} reported the loss through a poll loop that outlived its host"));
+
+        Assert.Contains(handle.RunId, lost.Message, StringComparison.Ordinal);
+
         await handle.DisposeAsync();
     }
 

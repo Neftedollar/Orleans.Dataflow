@@ -5,9 +5,12 @@ namespace Orleans.Dataflow.Grains;
 /// </summary>
 /// <remarks>
 /// <para>
-/// Small on purpose. The coordinator owns the ordering of starts and nothing about a run's progress, so
-/// what it persists is the counter that makes epochs monotonic and the register of runs it has issued.
-/// Progress belongs to the run grain, and the run grain persists none of it in phase 1.
+/// Small on purpose, and bounded by construction: one counter, whatever the pipeline's history. The
+/// coordinator owns the ordering of starts and nothing about a run's progress — progress belongs to the
+/// run grain, which persists none of it in phase 1. A register of issued runs used to sit beside the
+/// counter, written for a reconciliation that phase 4 turned out not to need; it grew by one record per
+/// accepted start with nothing pruning it, so it was removed rather than capped. The milestone that builds
+/// durable resume (M5) will persist what reconciliation actually reads, shaped by that need.
 /// </para>
 /// <para>
 /// This state is also the fencing primitive. Every start writes it, so a stale activation that has been
@@ -15,6 +18,10 @@ namespace Orleans.Dataflow.Grains;
 /// <see cref="Storage.InconsistentStateException"/>, the runtime kills the activation, and the fresh one
 /// reads the truth. That is why the counter is persisted rather than kept in a field even though a field
 /// would be enough within one activation.
+/// </para>
+/// <para>
+/// Serializer id 1 is retired: it was the run register. It must not be reused for a new member, because a
+/// state written by a build that had the register would then deserialize the old list into the new member.
 /// </para>
 /// </remarks>
 [GenerateSerializer]
@@ -28,38 +35,4 @@ internal sealed class PipelineCoordinatorState
     /// </remarks>
     [Id(0)]
     public long LastEpoch { get; set; }
-
-    /// <summary>Gets the runs this coordinator has started, oldest first.</summary>
-    [Id(1)]
-    public List<PipelineRunRecord> Runs { get; } = [];
-}
-
-/// <summary>
-/// One run a coordinator started, as its register remembers it.
-/// </summary>
-/// <remarks>
-/// A record of an issued claim rather than a status: what the coordinator knows without asking is which
-/// runs it started, under which epoch, and against which document. Where a run has got to is the run
-/// grain's answer and is fetched rather than cached, because a cached phase would be a second truth that
-/// could disagree with the run itself.
-/// </remarks>
-[GenerateSerializer]
-internal sealed class PipelineRunRecord
-{
-    /// <summary>Gets or sets the run's identity.</summary>
-    [Id(0)]
-    public string RunId { get; set; } = string.Empty;
-
-    /// <summary>Gets or sets the ownership epoch the run was started under.</summary>
-    [Id(1)]
-    public long Epoch { get; set; }
-
-    /// <summary>Gets or sets the identity of the document the run was started from.</summary>
-    /// <value>The canonical text form of the document's fingerprint.</value>
-    [Id(2)]
-    public string GraphFingerprint { get; set; } = string.Empty;
-
-    /// <summary>Gets or sets when the run was started.</summary>
-    [Id(3)]
-    public DateTimeOffset StartedAt { get; set; }
 }

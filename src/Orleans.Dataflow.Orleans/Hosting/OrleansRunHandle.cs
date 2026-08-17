@@ -1,5 +1,6 @@
 using Orleans.Dataflow.Definition;
 using Orleans.Dataflow.Grains;
+using Orleans.Runtime;
 
 namespace Orleans.Dataflow.Hosting;
 
@@ -234,10 +235,22 @@ public sealed class OrleansRunHandle : IAsyncDisposable
     /// <exception cref="PipelineRunLostException">The activation hosting the run was recycled.</exception>
     /// <exception cref="OperationCanceledException">The run was cancelled.</exception>
     /// <remarks>
+    /// <para>
     /// The very first poll happens before any wait, so a run that had already finished by the time a
     /// caller looked is reported at once rather than one interval later. A run reported as not started is
     /// a lost attempt whether or not this client had seen it running: a handle exists only because a start
     /// succeeded, so "no run here" can only mean the attempt is gone.
+    /// </para>
+    /// <para>
+    /// A poll that fails to be delivered decides nothing. A response timeout, an unavailable silo, and a
+    /// rejected message are facts about one call, not about the run — a poll in flight when the run's host
+    /// is killed times out against a directory entry the client has not yet learned is dead, and surfacing
+    /// that as this task's outcome would report the transport's confusion instead of the run's fate. The
+    /// loop retries instead, and converges on an authoritative answer: once the cluster has noticed the
+    /// death, the next poll activates a fresh run grain whose "not started" is the real "this attempt is
+    /// lost". Only a cluster that never answers again keeps this task pending, and no other answer would
+    /// be honest there either.
+    /// </para>
     /// </remarks>
     private async Task WatchAsync()
     {
@@ -245,7 +258,19 @@ public sealed class OrleansRunHandle : IAsyncDisposable
 
         while (true)
         {
-            RunStatusSnapshot status = await _run.GetStatusAsync(Epoch).ConfigureAwait(false);
+            RunStatusSnapshot status;
+
+            try
+            {
+                status = await _run.GetStatusAsync(Epoch).ConfigureAwait(false);
+            }
+            catch (Exception undelivered) when (
+                undelivered is TimeoutException or SiloUnavailableException or OrleansMessageRejectionException)
+            {
+                _ = await timer.WaitForNextTickAsync().ConfigureAwait(false);
+
+                continue;
+            }
 
             switch (status.Phase)
             {

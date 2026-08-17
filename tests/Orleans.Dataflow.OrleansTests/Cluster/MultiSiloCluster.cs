@@ -153,8 +153,17 @@ public sealed class MultiSiloCluster : IAsyncLifetime
         });
 
         builder.ConfigureClientHost(client =>
-            client.Services.AddOrleansDataflowClient(options =>
-                options.PollInterval = TimeSpan.FromMilliseconds(20)));
+        {
+            _ = client.Services.AddOrleansDataflowClient(options =>
+                options.PollInterval = TimeSpan.FromMilliseconds(20));
+
+            // A poll that is airborne when its target's silo is killed is answered by nobody and waits out
+            // the whole response timeout before the handle's loop retries. Five seconds instead of the
+            // default thirty keeps that one unlucky poll from dominating a test's runtime; it is a test
+            // budget, not part of any contract under test.
+            _ = client.Services.Configure<ClientMessagingOptions>(options =>
+                options.ResponseTimeout = TimeSpan.FromSeconds(5));
+        });
 
         Cluster = builder.Build();
 

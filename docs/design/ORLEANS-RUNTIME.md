@@ -102,11 +102,14 @@ uses a mailbox as an unbounded buffer.
 - **Phase-1 limits, stated**: results live only as long as the run grain's
   activation (proven absent, not promised); a deactivation mid-run faults
   that attempt; a remote failure arrives as type name plus message — the
-  author's exception type does not survive the hop; the coordinator's
-  `Runs` register is written for phase-4 reconciliation but only
-  `LastEpoch` is load-bearing today; ETag fencing of competing coordinator
-  activations is designed but demonstrated only across deliberate
-  deactivation until phase 4's kill tests.
+  author's exception type does not survive the hop; the coordinator
+  persists `LastEpoch` and nothing else (a `Runs` register written "for
+  phase-4 reconciliation" was removed after phase 4 shipped without
+  reading it: it grew per accepted start with nothing pruning it, and M5's
+  durable resume will persist what reconciliation actually reads); ETag
+  fencing of competing coordinator activations is designed but
+  demonstrated only across deliberate deactivation until phase 4's kill
+  tests.
 
 ## Phase 2 — as implemented
 

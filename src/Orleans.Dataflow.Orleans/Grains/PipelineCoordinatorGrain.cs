@@ -56,14 +56,6 @@ internal sealed class PipelineCoordinatorGrain(
         RunId run = RunId.Create(Guid.NewGuid().ToString("N", CultureInfo.InvariantCulture));
         GraphFingerprint fingerprint = GraphFingerprint.OfSerialized(canonicalDocument);
 
-        state.State.Runs.Add(new PipelineRunRecord
-        {
-            RunId = run.Value,
-            Epoch = epoch,
-            GraphFingerprint = fingerprint.ToString(),
-            StartedAt = DateTimeOffset.UtcNow,
-        });
-
         await state.WriteStateAsync();
 
         await GrainFactory
