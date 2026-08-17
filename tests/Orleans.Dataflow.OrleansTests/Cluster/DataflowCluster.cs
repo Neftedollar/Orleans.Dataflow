@@ -33,6 +33,13 @@ namespace Orleans.Dataflow.OrleansTests.Cluster;
 /// </remarks>
 public sealed class DataflowCluster : IAsyncLifetime
 {
+    /// <summary>The storage provider name Orleans streaming requires for its pub-sub records.</summary>
+    /// <remarks>
+    /// Fixed by Orleans rather than chosen here: the streaming runtime resolves its subscription store under
+    /// exactly this name, and a memory store is what makes the whole thing non-durable by design.
+    /// </remarks>
+    internal const string PubSubStore = "PubSubStore";
+
     /// <summary>Gets the deployed cluster.</summary>
     /// <value>The cluster, available from the moment the fixture has initialized.</value>
     internal InProcessTestCluster Cluster { get; private set; } = null!;
@@ -48,9 +55,28 @@ public sealed class DataflowCluster : IAsyncLifetime
         builder.ConfigureSilo((siloOptions, silo) =>
         {
             _ = silo.AddMemoryGrainStorage(OrleansDataflowStorage.CoordinatorProviderName);
+
+            // The memory stream provider and the pub-sub store it needs, registered exactly as the research
+            // notes say a deployment registers them: the adapters name a provider and never configure one.
+            _ = silo.AddMemoryGrainStorage(PubSubStore);
+            _ = silo.AddMemoryStreams(AdapterVocabulary.StreamProvider);
+
             _ = silo.AddOrleansDataflow(dataflow => dataflow
                 .AddCatalog(TestVocabulary.Catalog())
-                .AddFactory(TestVocabulary.Provider, new TestStageFactory()));
+                .AddFactory(TestVocabulary.Provider, new TestStageFactory())
+                .AddCatalog(AdapterVocabulary.Catalog())
+                .AddFactory(AdapterVocabulary.Provider, new AdapterStageFactory())
+                .AddStreamElement(AdapterVocabulary.OrderElement)
+                .AddStreamElement(AdapterVocabulary.PriceElement)
+                .AddGrainCall(AdapterVocabulary.Pricing)
+                .AddGrainCall(AdapterVocabulary.GatedPricing)
+                .AddGrainCall(AdapterVocabulary.SignalledPricing)
+                .AddGrainCall(AdapterVocabulary.FailingPricing)
+                .AddGrainCall(AdapterVocabulary.HangingPricing)
+                .AddGrainCallSink(AdapterVocabulary.Recording)
+                .AddGrainCallSink(AdapterVocabulary.GatedRecording)
+                .AddGrainEnumerable(AdapterVocabulary.Feed)
+                .AddGrainEnumerable(AdapterVocabulary.EndlessFeed));
         });
 
         // The client-side registration, exercised the way a deployment writes it rather than by newing the

@@ -108,6 +108,42 @@ uses a mailbox as an unbounded buffer.
   activations is designed but demonstrated only across deliberate
   deactivation until phase 4's kill tests.
 
+## Phase 2 — as implemented
+
+- **The subscription consumer is the silo's hosted client, never the run
+  grain** — forced by the never-park-a-grain-turn rule: a grain-consumed
+  delivery under the backpressure policy would park a turn or lie. Probed:
+  the stream and grain-call APIs work off any grain context inside a silo.
+  The source's enumerator owns the subscription, so the engine's guaranteed
+  disposal on every terminal path IS the teardown, and the explicit-
+  subscription ResumeAsync trap dissolves — there is no grain-owned
+  subscription to resume or leak.
+- **Backpressure's shared cost, measured**: under the backpressure policy a
+  stalled run stalls the provider's pulling agent for the whole queue — an
+  unrelated subscriber on the same stream stops receiving. Correct for a
+  bounded system, documented on the source with the advice to declare a
+  dropping policy where that cost cannot be paid.
+- **Stream elements are registered** (`AddStreamElement<T>`): Orleans binds
+  one stream identity to one element type per process, so opening streams
+  as `object` would break co-hosted grains — probed, not assumed.
+- **Declare once, use twice**: binding declarations (stream element, grain
+  call, grain-call sink, grain enumerable) serve silo registration and
+  authoring; payloads carry the name plus both contract references, so
+  validation is contract-to-contract with messages naming both sides.
+- **Timeouts are enforced twice** (CancelAfter plus WaitAsync) so they fire
+  against uncooperative calls too; a cooperative arrival maps to
+  `GrainCallTimeoutException`, distinguished from a real run cancellation
+  by the run token.
+- **Phase-2 limits, stated**: the terminal seam hands no cancellation
+  token, so an in-flight grain-call-sink or stream-sink publication is not
+  cancelled — only the next admission is; grain-call emission is ordered
+  only; adapter ports declare the opaque `orleans-element@v1` contract, so
+  an adapter-to-typed-stage edge needs `OrleansStages.Element<T>()` on the
+  other side; ingress remainder at shutdown is abandoned; the registry is
+  deployment-scoped behavior — two silos with different bindings accept
+  different documents under one catalog fingerprint, stated rather than
+  hidden.
+
 ## Phasing
 
 1. **Hosting + coordinator + run grain** — DI registration, the
@@ -137,6 +173,13 @@ uses a mailbox as an unbounded buffer.
 3. The exact credit protocol wire shape for phase 4 (grant-on-reply versus
    explicit credit messages) — decided against measured multi-silo behavior,
    not upfront.
-4. Memory-stream rewindability and the reminder minimum period — the two
-   research unknowns, probed in phase 2/3 respectively before any contract
-   claims them.
+4. The reminder minimum period — the remaining research unknown, probed in
+   phase 3 before any contract claims it (memory-stream rewindability
+   resolved: true; rewind stays unexposed until a checkpoint/cursor story
+   exists to consume it).
+5. Per-occurrence port contracts in the definition model — escalated by
+   phase 2: fixed stage ids mean one element contract per adapter port, so
+   typed seams need the explicit opaque-contract escape hatch today; lifting
+   that means the definition model letting an occurrence override its
+   specification's port contracts, a change owned by the definition plane
+   (considered with M4's provider SDK), not by adapters.

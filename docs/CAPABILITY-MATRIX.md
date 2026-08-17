@@ -131,13 +131,13 @@ C# names should follow .NET expectations where possible. If the Akka.NET behavio
 
 | Capability | Tier | Target | Status | Required contract |
 |---|---:|---:|---|---|
-| Orleans Stream source | P0 | M3 | Research | Provider-specific delivery, ordering, rewind token, subscription ownership, and resubscription. |
-| Orleans Stream sink | P0 | M3 | Research | Publication acknowledgement is not universal end-to-end processing. |
-| Awaited grain-call flow/sink | P0 | M3 | Research | Awaited reply is the acknowledgement boundary; timeout/retry/idempotency are explicit. |
+| Orleans Stream source | P0 | M3 | Implemented | Provider-specific delivery, ordering, rewind token, subscription ownership, and resubscription. |
+| Orleans Stream sink | P0 | M3 | Implemented | Publication acknowledgement is not universal end-to-end processing. |
+| Awaited grain-call flow/sink | P0 | M3 | Implemented | Awaited reply is the acknowledgement boundary; timeout/retry/idempotency are explicit. |
 | Keyed grain-call flow | P1 | M3 | Research | Per-key ordering and parallelism bounds. |
 | Controlled grain group source | P1 | M3 | Research | A coordinator enumerates bounded keys/partitions; never an implicit cluster-wide grain scan. |
 | One-way grain-call sink | P2 | M3 | Research | Explicit best-effort adapter; never the default durable sink. |
-| Grain `IAsyncEnumerable<T>` source | P1 | M3 | Research | Call-scoped backpressure and cancellation; no implicit resume. |
+| Grain `IAsyncEnumerable<T>` source | P1 | M3 | Implemented | Call-scoped backpressure and cancellation; no implicit resume. |
 | Timer source | P1 | M3 | Research | Activation-scoped and non-durable. |
 | Reminder trigger source | P1 | M3 | Research | Definition survives restart, but missed ticks are not replayed. |
 | Observer bridge | P2 | M3 | Research | Best-effort, resubscription, randomized observer identity, no replay. |

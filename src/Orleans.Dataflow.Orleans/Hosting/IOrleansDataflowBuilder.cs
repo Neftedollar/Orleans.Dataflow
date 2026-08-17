@@ -1,3 +1,4 @@
+using Orleans.Dataflow.Adapters;
 using Orleans.Dataflow.Definition;
 using Orleans.Dataflow.Identity;
 
@@ -45,4 +46,51 @@ public interface IOrleansDataflowBuilder
     /// same reason two catalog entries for one stage are.
     /// </remarks>
     IOrleansDataflowBuilder AddFactory(ProviderId provider, IDataflowStageFactory factory);
+
+    /// <summary>Registers the CLR type that carries one element contract over this silo's streams.</summary>
+    /// <typeparam name="T">The element type.</typeparam>
+    /// <param name="element">The binding, declared once and handed to the authoring side as well.</param>
+    /// <returns>This builder, so registrations chain.</returns>
+    /// <exception cref="ArgumentNullException"><paramref name="element"/> is <see langword="null"/>.</exception>
+    /// <remarks>
+    /// <para>
+    /// A stream adapter needs the element type and cannot get it from a document, because a document never
+    /// names a CLR type. It cannot open the stream as <see cref="object"/> either: Orleans binds one stream
+    /// identity to one element type per process and refuses a second <c>GetStream</c> under a different one,
+    /// which was probed rather than assumed. So the type is a registration and the document names the
+    /// contract.
+    /// </para>
+    /// <para>
+    /// <typeparamref name="T"/> must satisfy Orleans serialization, because a stream serializes what crosses
+    /// it. That is checked by Orleans at first use rather than here.
+    /// </para>
+    /// </remarks>
+    IOrleansDataflowBuilder AddStreamElement<T>(StreamElementBinding<T> element);
+
+    /// <summary>Registers a named awaited grain call that transforms elements.</summary>
+    /// <typeparam name="TIn">The element type the call consumes.</typeparam>
+    /// <typeparam name="TOut">The element type the call produces.</typeparam>
+    /// <param name="binding">The binding, declared once and handed to the authoring side as well.</param>
+    /// <returns>This builder, so registrations chain.</returns>
+    /// <exception cref="ArgumentNullException"><paramref name="binding"/> is <see langword="null"/>.</exception>
+    /// <remarks>
+    /// The name is what a document may carry; the delegate is what a document may not. A document naming a
+    /// call this silo does not register is refused when the run is started, with the compiler's own
+    /// diagnostics naming the node and listing the calls this silo does publish.
+    /// </remarks>
+    IOrleansDataflowBuilder AddGrainCall<TIn, TOut>(GrainCallBinding<TIn, TOut> binding);
+
+    /// <summary>Registers a named awaited grain call that terminates a graph.</summary>
+    /// <typeparam name="TIn">The element type the call consumes.</typeparam>
+    /// <param name="binding">The binding, declared once and handed to the authoring side as well.</param>
+    /// <returns>This builder, so registrations chain.</returns>
+    /// <exception cref="ArgumentNullException"><paramref name="binding"/> is <see langword="null"/>.</exception>
+    IOrleansDataflowBuilder AddGrainCallSink<TIn>(GrainCallSinkBinding<TIn> binding);
+
+    /// <summary>Registers a named grain enumeration that heads a graph.</summary>
+    /// <typeparam name="T">The element type the enumeration produces.</typeparam>
+    /// <param name="source">The binding, declared once and handed to the authoring side as well.</param>
+    /// <returns>This builder, so registrations chain.</returns>
+    /// <exception cref="ArgumentNullException"><paramref name="source"/> is <see langword="null"/>.</exception>
+    IOrleansDataflowBuilder AddGrainEnumerable<T>(GrainEnumerableBinding<T> source);
 }

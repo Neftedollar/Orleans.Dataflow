@@ -222,6 +222,101 @@ internal sealed class LocalIngressQueue
         }
     }
 
+    /// <summary>The asynchronous sequence a registered source pulls the offered elements from.</summary>
+    /// <param name="runToken">The run's own token, which abandons the enumeration.</param>
+    /// <param name="stopToken">The run's stop token, which ends the enumeration as running out would.</param>
+    /// <returns>The sequence, which ends when the queue is completed and drained.</returns>
+    /// <remarks>
+    /// <para>
+    /// The same contract <see cref="Elements"/> states, for the other side of the runtime-factory seam: a
+    /// registered source is handed the two tokens and no run context, so the wait is on those tokens
+    /// directly rather than on <see cref="LocalRunContext"/>. The failure is checked before every element
+    /// and again at the end, so a queue failed while it still held elements faults the run instead of
+    /// delivering them.
+    /// </para>
+    /// <para>
+    /// The one thing this form does not do is report its wait to the run's pause gate, because a registered
+    /// source is not given one. That is the same blindness every registered source already has — the seam
+    /// hands over two tokens and nothing else — so a pause requested against a run whose head is parked
+    /// here waits for the next element rather than taking effect at once. The bound is documented rather
+    /// than hidden, and it is why the counting of pulls stays exactly the same: the demand meter is a
+    /// statement about the queue and not about which reader is draining it.
+    /// </para>
+    /// </remarks>
+    internal async IAsyncEnumerable<object?> ElementsAsync(
+        [System.Runtime.CompilerServices.EnumeratorCancellation] CancellationToken runToken,
+        CancellationToken stopToken)
+    {
+        try
+        {
+            while (true)
+            {
+                Interlocked.Increment(ref _pulls);
+
+                object? element;
+                bool taken = false;
+
+                while (true)
+                {
+                    if (_failure is { } pending)
+                    {
+                        throw pending;
+                    }
+
+                    if (_channel.Reader.TryRead(out element))
+                    {
+                        _observer?.Taken();
+                        taken = true;
+
+                        break;
+                    }
+
+                    if (!await WaitToReadAsync(runToken, stopToken).ConfigureAwait(false))
+                    {
+                        break;
+                    }
+                }
+
+                if (!taken)
+                {
+                    break;
+                }
+
+                yield return element;
+            }
+
+            if (_failure is { } failure)
+            {
+                throw failure;
+            }
+        }
+        finally
+        {
+            EndRun();
+        }
+    }
+
+    /// <summary>Waits until the queue has an element or has ended, for the asynchronous reader.</summary>
+    /// <param name="runToken">The run's own token.</param>
+    /// <param name="stopToken">The run's stop token.</param>
+    /// <returns><see langword="true"/> when an element may be available.</returns>
+    /// <remarks>
+    /// A shutdown ends the wait as the queue running out would, and a cancellation is raised and abandons
+    /// the run. The two are told apart by which token was cancelled, exactly as the synchronous reader tells
+    /// them apart through <see cref="LocalRunContext.ShuttingDown"/>.
+    /// </remarks>
+    private async ValueTask<bool> WaitToReadAsync(CancellationToken runToken, CancellationToken stopToken)
+    {
+        try
+        {
+            return await _channel.Reader.WaitToReadAsync(stopToken).ConfigureAwait(false);
+        }
+        catch (OperationCanceledException) when (!runToken.IsCancellationRequested)
+        {
+            return false;
+        }
+    }
+
     /// <summary>Takes the next element the run asked for, waiting for one if the queue is empty.</summary>
     /// <param name="context">The tokens of the run.</param>
     /// <param name="element">The element, when this method returns <see langword="true"/>.</param>

@@ -71,8 +71,11 @@ time.
 
 ## Named unknowns (probe, do not guess)
 
-1. Memory stream provider rewindability (`IsRewindable` value) — probe in
-   M3 phase 2.
+1. ~~Memory stream provider rewindability~~ **Resolved by probe
+   (phase 2)**: `IsRewindable = true` for `AddMemoryStreams` (Orleans
+   10.2.2, `PersistentStreamProvider`), on both silo and client. No rewind
+   API is exposed yet; the source subscribes without a sequence token and
+   reads only what arrives after subscription.
 2. `ReminderOptions.MinimumReminderPeriod` default and throw-vs-clamp —
    probe in M3 phase 3.
 3. ~~`TestingHost` package dependency closure~~ **Resolved by probe

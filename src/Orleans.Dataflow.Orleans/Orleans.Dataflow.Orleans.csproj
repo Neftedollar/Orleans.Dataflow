@@ -10,6 +10,11 @@
     </PackageReference>
     <PackageReference Include="Microsoft.Orleans.Sdk" />
     <PackageReference Include="Microsoft.Orleans.Server" />
+    <!--
+      The stream adapters need the provider abstractions and the stream implementation types; Server is
+      Runtime plus Persistence.Memory plus Sdk plus Core and deliberately carries no Streaming.
+    -->
+    <PackageReference Include="Microsoft.Orleans.Streaming" />
   </ItemGroup>
   <ItemGroup>
     <ProjectReference Include="../Orleans.Dataflow/Orleans.Dataflow.csproj" />
