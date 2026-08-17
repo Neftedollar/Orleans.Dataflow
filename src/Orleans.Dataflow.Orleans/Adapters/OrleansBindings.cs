@@ -181,15 +181,32 @@ internal interface IObserverBridgeEntry
 }
 
 /// <summary>
-/// What one silo knows about a named Broadcast Channel publication.
+/// What one silo knows about an element contract carried over a Broadcast Channel, in either direction.
 /// </summary>
-internal interface IBroadcastSinkEntry
+/// <remarks>
+/// One registration serves the publication and the consumption, because a channel carries one element type
+/// either way and a deployment that registered it for one direction has said everything the other needs.
+/// The two members below are the two directions: <see cref="PublishAsync"/> is what a sink does, and
+/// <see cref="Accepts"/> is what a source's receiver checks — a relay attaches to a channel untyped, so the
+/// silo executing the run is the only place that can say whether what arrived is what the run declared.
+/// </remarks>
+internal interface IBroadcastElementEntry
 {
-    /// <summary>Gets the contract the elements of this publication declare.</summary>
+    /// <summary>Gets the contract the elements of this channel declare.</summary>
     ContractReference Contract { get; }
 
     /// <summary>Gets the CLR type this silo binds to <see cref="Contract"/>.</summary>
     Type ElementType { get; }
+
+    /// <summary>Reports whether one delivered element is the type this silo binds to the contract.</summary>
+    /// <param name="element">The element as it arrived over the channel.</param>
+    /// <returns><see langword="true"/> when the run may be handed it.</returns>
+    /// <remarks>
+    /// An answer rather than a throw, because the caller is a receiver whose only honest response to the
+    /// wrong type is to fail its own run: raising into the relay would push one run's contract problem onto
+    /// a publisher that never heard of it.
+    /// </remarks>
+    bool Accepts(object? element);
 
     /// <summary>Publishes one element to a channel.</summary>
     /// <param name="services">The silo's container, which the named provider is resolved from.</param>
@@ -838,9 +855,11 @@ public static class ObserverBridgeBinding
 /// <remarks>
 /// A separate declaration from <see cref="StreamElementBinding{T}"/> and not a reuse of it: a channel and a
 /// stream are different providers with different guarantees, and one registration that served both would
-/// make a deployment publishing to a channel look as though it had also registered a stream.
+/// make a deployment publishing to a channel look as though it had also registered a stream. One
+/// declaration does serve both <em>directions</em> of a channel, because a channel carries one element type
+/// whether this deployment is publishing to it or consuming it.
 /// </remarks>
-public sealed class BroadcastElementBinding<T> : IBroadcastSinkEntry
+public sealed class BroadcastElementBinding<T> : IBroadcastElementEntry
 {
     /// <summary>Initializes a new instance of the <see cref="BroadcastElementBinding{T}"/> class.</summary>
     /// <param name="contract">The validated element contract declaration.</param>
@@ -850,10 +869,10 @@ public sealed class BroadcastElementBinding<T> : IBroadcastSinkEntry
     public ElementContract<T> Element { get; }
 
     /// <inheritdoc/>
-    ContractReference IBroadcastSinkEntry.Contract => Element.Reference;
+    ContractReference IBroadcastElementEntry.Contract => Element.Reference;
 
     /// <inheritdoc/>
-    Type IBroadcastSinkEntry.ElementType => typeof(T);
+    Type IBroadcastElementEntry.ElementType => typeof(T);
 
     /// <summary>Returns a one-line diagnostic summary of this declaration.</summary>
     /// <returns>Text of the form <c>broadcast element order@v1 as Order</c>.</returns>
@@ -861,7 +880,11 @@ public sealed class BroadcastElementBinding<T> : IBroadcastSinkEntry
     public override string ToString() => $"broadcast element {Element}";
 
     /// <inheritdoc/>
-    Task IBroadcastSinkEntry.PublishAsync(
+    bool IBroadcastElementEntry.Accepts(object? element) =>
+        element is T || (element is null && default(T) is null);
+
+    /// <inheritdoc/>
+    Task IBroadcastElementEntry.PublishAsync(
         IServiceProvider services,
         string provider,
         string channelNamespace,

@@ -26,7 +26,7 @@ internal sealed class OrleansAdapterRegistry
     private readonly Dictionary<string, IGrainCallSinkEntry> _callSinks;
     private readonly Dictionary<string, IGrainEnumerableEntry> _enumerables;
     private readonly Dictionary<string, IObserverBridgeEntry> _bridges;
-    private readonly Dictionary<string, IBroadcastSinkEntry> _broadcasts;
+    private readonly Dictionary<string, IBroadcastElementEntry> _broadcasts;
 
     /// <summary>Initializes a new instance of the <see cref="OrleansAdapterRegistry"/> class.</summary>
     /// <param name="elements">The stream element bindings, keyed by contract text.</param>
@@ -43,7 +43,7 @@ internal sealed class OrleansAdapterRegistry
         Dictionary<string, IGrainCallSinkEntry> callSinks,
         Dictionary<string, IGrainEnumerableEntry> enumerables,
         Dictionary<string, IObserverBridgeEntry> bridges,
-        Dictionary<string, IBroadcastSinkEntry> broadcasts)
+        Dictionary<string, IBroadcastElementEntry> broadcasts)
     {
         _elements = elements;
         _calls = calls;
@@ -148,7 +148,7 @@ internal sealed class OrleansAdapterRegistry
     /// <param name="contract">The contract text a payload carries.</param>
     /// <param name="element">When this method returns <see langword="true"/>, the binding.</param>
     /// <returns><see langword="true"/> when this silo binds a CLR type to that contract for channels.</returns>
-    internal bool TryGetBroadcast(string contract, out IBroadcastSinkEntry? element) =>
+    internal bool TryGetBroadcast(string contract, out IBroadcastElementEntry? element) =>
         _broadcasts.TryGetValue(contract, out element);
 
     /// <summary>Lists the broadcast element contracts this silo publishes, in ordinal order.</summary>
@@ -181,7 +181,7 @@ internal sealed class OrleansAdapterRegistry
         private readonly Dictionary<string, IGrainCallSinkEntry> _callSinks = new(StringComparer.Ordinal);
         private readonly Dictionary<string, IGrainEnumerableEntry> _enumerables = new(StringComparer.Ordinal);
         private readonly Dictionary<string, IObserverBridgeEntry> _bridges = new(StringComparer.Ordinal);
-        private readonly Dictionary<string, IBroadcastSinkEntry> _broadcasts = new(StringComparer.Ordinal);
+        private readonly Dictionary<string, IBroadcastElementEntry> _broadcasts = new(StringComparer.Ordinal);
         private readonly List<string> _violations = [];
 
         /// <summary>Gets a value indicating whether anything at all has been registered.</summary>
@@ -275,7 +275,7 @@ internal sealed class OrleansAdapterRegistry
 
         /// <summary>Registers one broadcast element binding.</summary>
         /// <param name="element">The binding.</param>
-        internal void Add(IBroadcastSinkEntry element)
+        internal void Add(IBroadcastElementEntry element)
         {
             Any = true;
 
@@ -346,6 +346,7 @@ internal sealed class OrleansStageValidator(OrleansAdapterRegistry registry, Orl
         OrleansStageKind.GrainEnumerable => GrainEnumerable(parameters),
         OrleansStageKind.ReminderTrigger => ReminderTrigger(parameters),
         OrleansStageKind.ObserverBridge => ObserverBridge(parameters),
+        OrleansStageKind.BroadcastSource => BroadcastSource(parameters),
         _ => BroadcastSink(parameters),
     };
 
@@ -608,6 +609,36 @@ internal sealed class OrleansStageValidator(OrleansAdapterRegistry registry, Orl
             : [Mismatch(ObserverBridgePayload.OutputMember, declaration.Bridge, declaration.Output, output)];
     }
 
+    /// <summary>Checks a broadcast source's payload.</summary>
+    /// <param name="parameters">The payload.</param>
+    /// <returns>The violations.</returns>
+    /// <remarks>
+    /// The same element-contract check the sink's payload gets, because the registration is the same one:
+    /// a channel carries one CLR type in a silo whichever direction that silo faces. Whether the named
+    /// provider exists is not asked here for the reason the stream adapters do not ask it either — which
+    /// providers a silo hosts is not a property of a payload — and it is asked where the container can
+    /// answer, when the run is materialized.
+    /// </remarks>
+    private IReadOnlyList<string> BroadcastSource(CanonicalJsonValue parameters)
+    {
+        if (!BroadcastSourcePayload.TryRead(
+            parameters,
+            out BroadcastSourceDeclaration? declaration,
+            out IReadOnlyList<string> violations))
+        {
+            return violations;
+        }
+
+        if (registry.IsEmpty)
+        {
+            return [];
+        }
+
+        return registry.TryGetBroadcast(declaration!.Element, out IBroadcastElementEntry? _)
+            ? []
+            : [Unregistered("broadcast element contract", declaration.Element, registry.Broadcasts)];
+    }
+
     /// <summary>Checks a broadcast sink's payload.</summary>
     /// <param name="parameters">The payload.</param>
     /// <returns>The violations.</returns>
@@ -626,13 +657,13 @@ internal sealed class OrleansStageValidator(OrleansAdapterRegistry registry, Orl
             return [];
         }
 
-        return registry.TryGetBroadcast(declaration!.Element, out IBroadcastSinkEntry? _)
+        return registry.TryGetBroadcast(declaration!.Element, out IBroadcastElementEntry? _)
             ? []
             : [Unregistered("broadcast element contract", declaration.Element, registry.Broadcasts)];
     }
 }
 
-/// <summary>Which of the nine Orleans adapters a validator or a factory is dealing with.</summary>
+/// <summary>Which of the ten Orleans adapters a validator or a factory is dealing with.</summary>
 internal enum OrleansStageKind
 {
     /// <summary>A subscription that feeds a run's bounded ingress.</summary>
@@ -658,6 +689,9 @@ internal enum OrleansStageKind
 
     /// <summary>A named bridge external grain code pushes elements at.</summary>
     ObserverBridge,
+
+    /// <summary>A subscription to a Broadcast Channel of this package's own namespace.</summary>
+    BroadcastSource,
 
     /// <summary>A publication to a Broadcast Channel.</summary>
     BroadcastSink,

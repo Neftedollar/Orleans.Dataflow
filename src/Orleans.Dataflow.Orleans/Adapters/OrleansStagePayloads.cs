@@ -924,6 +924,142 @@ internal sealed record BroadcastSinkDeclaration(
     bool FireAndForgetDelivery);
 
 /// <summary>
+/// How a Broadcast Channel source states which channel it consumes and how much of it the run will hold.
+/// </summary>
+/// <remarks>
+/// <para>
+/// Five members, and the interesting thing about them is the one that is missing. There is no
+/// <c>namespace</c>: a channel a run can consume is always in the namespace this package's relay grain
+/// subscribes to, because Broadcast Channel subscription is implicit — a compile-time attribute on a grain
+/// type — and no run can subscribe to a namespace chosen by a document. So the document names a channel
+/// <em>key</em> and the namespace is the platform's answer rather than an author's choice. The sink's
+/// payload keeps its namespace, because publishing needs no subscription.
+/// </para>
+/// <para>
+/// There is no <c>fireAndForgetDelivery</c> either, and its absence is a measured result rather than an
+/// omission. That mode decides whether a <em>publisher</em> waits for its subscribers and whether their
+/// failures reach it; a subscriber's own contract is identical under both, and this relay never fails a
+/// publication in either. A member here would therefore be a declaration with nothing to check it against.
+/// </para>
+/// <para>
+/// The overflow policy is refused for exactly one of its five values, for the reason the reminder trigger
+/// refuses the same one: the relay forwards on its own grain turn and serves every run listening to the
+/// channel, so a run that waited for room would hold that turn and stop the channel for everybody — and
+/// under a fire-and-forget provider it would hold it while no publisher was waiting at all.
+/// </para>
+/// </remarks>
+internal static class BroadcastSourcePayload
+{
+    /// <summary>The payload member holding the ingress capacity.</summary>
+    internal const string CapacityMember = "capacity";
+
+    /// <summary>The payload member holding the element contract the channel carries.</summary>
+    internal const string ElementMember = "element";
+
+    /// <summary>The payload member holding the channel key within this package's own namespace.</summary>
+    internal const string KeyMember = "key";
+
+    /// <summary>The payload member holding the ingress overflow policy.</summary>
+    internal const string PolicyMember = "overflowPolicy";
+
+    /// <summary>The payload member holding the broadcast provider's registration name.</summary>
+    internal const string ProviderMember = "provider";
+
+    /// <summary>Writes the payload of one broadcast source.</summary>
+    /// <param name="element">The contract text of the elements the channel carries.</param>
+    /// <param name="provider">The broadcast provider's registration name.</param>
+    /// <param name="key">The channel's key.</param>
+    /// <param name="ingress">The bounded ingress the publications land in.</param>
+    /// <returns>The canonical payload.</returns>
+    internal static CanonicalJsonValue Write(
+        string element,
+        string provider,
+        string key,
+        BufferOptions ingress) =>
+        CanonicalJsonValue.Parse(string.Create(
+            CultureInfo.InvariantCulture,
+            $"{{\"{CapacityMember}\":{ingress.Capacity}," +
+            $"\"{ElementMember}\":{JsonSerializer.Serialize(element)}," +
+            $"\"{KeyMember}\":{JsonSerializer.Serialize(key)}," +
+            $"\"{PolicyMember}\":\"{LocalBufferParameters.Spell(ingress.OverflowPolicy)}\"," +
+            $"\"{ProviderMember}\":{JsonSerializer.Serialize(provider)}}}"));
+
+    /// <summary>Reads a payload back into what it declares.</summary>
+    /// <param name="parameters">The node's payload, in canonical form.</param>
+    /// <param name="declaration">
+    /// When this method returns <see langword="true"/>, what the payload declares; otherwise
+    /// <see langword="null"/>.
+    /// </param>
+    /// <param name="violations">
+    /// When this method returns <see langword="false"/>, one lower-case sentence fragment per violation.
+    /// </param>
+    /// <returns><see langword="true"/> when the payload is a valid broadcast-source payload.</returns>
+    internal static bool TryRead(
+        CanonicalJsonValue parameters,
+        out BroadcastSourceDeclaration? declaration,
+        out IReadOnlyList<string> violations)
+    {
+        declaration = null;
+
+        if (!OrleansPayload.TryOpen(parameters, out JsonElement payload, out violations))
+        {
+            return false;
+        }
+
+        List<string> found = [];
+        int capacity = 0;
+
+        if (LocalParameterPayload.TryReadPositiveInteger(payload, CapacityMember, found, out int declared))
+        {
+            capacity = declared;
+        }
+
+        string? element = OrleansPayload.ReadText(payload, ElementMember, found);
+        string? key = OrleansPayload.ReadText(payload, KeyMember, found);
+        string? provider = OrleansPayload.ReadText(payload, ProviderMember, found);
+        OverflowPolicy policy = OrleansPayload.ReadPolicy(payload, PolicyMember, found);
+
+        if (policy is OverflowPolicy.Backpressure && found.Count == 0)
+        {
+            found.Add(
+                $"the member '{PolicyMember}' is 'backpressure', and a broadcast source cannot backpressure a channel: the relay grain forwards to every run listening to that channel on one turn, so a run waiting for room would stop the channel for all of them and, under a fire-and-forget provider, for no publisher's benefit at all. Declare one of 'drop-oldest', 'drop-newest', 'drop-buffer', and 'fail'");
+        }
+
+        LocalParameterPayload.ReportUnknownMembers(
+            payload,
+            [CapacityMember, ElementMember, KeyMember, PolicyMember, ProviderMember],
+            found);
+
+        if (found.Count > 0)
+        {
+            violations = found;
+
+            return false;
+        }
+
+        violations = [];
+        declaration = new BroadcastSourceDeclaration(
+            element!,
+            provider!,
+            key!,
+            new BufferOptions { Capacity = capacity, OverflowPolicy = policy });
+
+        return true;
+    }
+}
+
+/// <summary>What a broadcast source's payload declares.</summary>
+/// <param name="Element">The contract text of the elements the channel carries.</param>
+/// <param name="Provider">The broadcast provider's registration name.</param>
+/// <param name="Key">The channel's key within this package's own channel namespace.</param>
+/// <param name="Ingress">The bounded ingress the publications land in.</param>
+internal sealed record BroadcastSourceDeclaration(
+    string Element,
+    string Provider,
+    string Key,
+    BufferOptions Ingress);
+
+/// <summary>
 /// The payload rules every Orleans adapter shares.
 /// </summary>
 /// <remarks>

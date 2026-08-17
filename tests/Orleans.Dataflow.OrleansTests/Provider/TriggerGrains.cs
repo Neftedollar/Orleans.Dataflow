@@ -129,4 +129,28 @@ internal static class BroadcastObservations
 {
     /// <summary>The namespace every broadcast test publishes into.</summary>
     internal const string ChannelNamespace = "adapter-broadcast";
+
+    /// <summary>The namespace the implicit-subscription probes publish into.</summary>
+    /// <remarks>
+    /// Its own namespace rather than the sink tests', because the probes assert how many activations a
+    /// namespace produced and what each of them was subscribed to. Sharing a namespace with the recording
+    /// receiver would make every one of those counts a statement about two grain types at once.
+    /// </remarks>
+    internal const string ProbeNamespace = "adapter-broadcast-probe";
+
+    /// <summary>The namespace the untyped-subscription probe publishes into.</summary>
+    /// <remarks>
+    /// A third namespace, because the question it asks is whether a subscriber may attach as
+    /// <see cref="object"/> at all — which is the question the relay grain's existence depends on, since a
+    /// relay learns which CLR type a channel carries from the run that attaches to it and not from the
+    /// runtime that activates it.
+    /// </remarks>
+    internal const string ObjectProbeNamespace = "adapter-broadcast-object-probe";
+
+    /// <summary>The namespace the delivery-concurrency probe publishes into.</summary>
+    /// <remarks>
+    /// Its own namespace because its subscriber deliberately takes its time over every delivery, which would
+    /// make every other probe in the suite slower for no reason.
+    /// </remarks>
+    internal const string SerialProbeNamespace = "adapter-broadcast-serial-probe";
 }

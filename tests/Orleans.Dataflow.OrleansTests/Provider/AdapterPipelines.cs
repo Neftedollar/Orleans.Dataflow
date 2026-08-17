@@ -438,6 +438,123 @@ internal static class AdapterPipelines
         return graph.AsPipeline(GraphId.Create(id), GraphRevision.Create(1));
     }
 
+    /// <summary>Builds a pipeline that counts what a Broadcast Channel publishes at it.</summary>
+    /// <param name="id">The pipeline's identity.</param>
+    /// <param name="provider">The broadcast provider whose publications the run consumes.</param>
+    /// <param name="channel">The channel's key, within the package's own channel namespace.</param>
+    /// <param name="ingress">The bounded ingress the publications land in.</param>
+    /// <param name="signal">The signal the sink raises once it has seen enough.</param>
+    /// <param name="signalAt">How many elements are enough.</param>
+    /// <returns>The pipeline and the slot its total resolves under.</returns>
+    internal static (PipelineDefinition Pipeline, ResultSlot<long> Slot) CountingBroadcast(
+        string id,
+        string provider,
+        string channel,
+        BufferOptions ingress,
+        string signal,
+        int signalAt)
+    {
+        (RunnableGraph graph, ResultSlot<long> _) = Source
+            .FromRegistered(
+                OrleansStages.BroadcastSource(AdapterVocabulary.BroadcastOrder),
+                "published",
+                OrleansStages.BroadcastSourceParameters(
+                    AdapterVocabulary.BroadcastOrder,
+                    provider,
+                    channel,
+                    ingress))
+            .To(
+                RegisteredStage.SinkWithResult(
+                    AdapterVocabulary.Catalog(),
+                    AdapterVocabulary.Count,
+                    OrleansStages.Element<AdapterOrder>(),
+                    AdapterVocabulary.Total),
+                "counted",
+                AdapterVocabulary.CountPayload(signal, signalAt),
+                TotalSlot);
+
+        return Close(graph, id);
+    }
+
+    /// <summary>Builds a pipeline that counts what a channel publishes at it, behind a gate.</summary>
+    /// <param name="id">The pipeline's identity.</param>
+    /// <param name="provider">The broadcast provider whose publications the run consumes.</param>
+    /// <param name="channel">The channel's key, within the package's own channel namespace.</param>
+    /// <param name="ingress">The bounded ingress the publications land in.</param>
+    /// <param name="entered">The signal the gate raises when its first element reaches it.</param>
+    /// <param name="release">The signal that releases it.</param>
+    /// <param name="signal">The signal the sink raises once it has seen enough.</param>
+    /// <param name="signalAt">How many elements are enough.</param>
+    /// <returns>The pipeline and the slot its total resolves under.</returns>
+    /// <remarks>
+    /// The gate is what makes the ingress observable from outside. A run held inside it takes nothing from
+    /// its queue, so a test can fill the queue to its declared bound and watch the policy decide what
+    /// happens to the element after that.
+    /// </remarks>
+    internal static (PipelineDefinition Pipeline, ResultSlot<long> Slot) GatedBroadcast(
+        string id,
+        string provider,
+        string channel,
+        BufferOptions ingress,
+        string entered,
+        string release,
+        string signal,
+        int signalAt)
+    {
+        (RunnableGraph graph, ResultSlot<long> _) = Source
+            .FromRegistered(
+                OrleansStages.BroadcastSource(AdapterVocabulary.BroadcastOrder),
+                "published",
+                OrleansStages.BroadcastSourceParameters(
+                    AdapterVocabulary.BroadcastOrder,
+                    provider,
+                    channel,
+                    ingress))
+            .Via(
+                RegisteredStage.Flow(
+                    AdapterVocabulary.Catalog(),
+                    AdapterVocabulary.Gate,
+                    OrleansStages.Element<AdapterOrder>(),
+                    OrleansStages.Element<AdapterOrder>()),
+                "gate",
+                AdapterVocabulary.GatePayload(entered, release))
+            .To(
+                RegisteredStage.SinkWithResult(
+                    AdapterVocabulary.Catalog(),
+                    AdapterVocabulary.Count,
+                    OrleansStages.Element<AdapterOrder>(),
+                    AdapterVocabulary.Total),
+                "counted",
+                AdapterVocabulary.CountPayload(signal, signalAt),
+                TotalSlot);
+
+        return Close(graph, id);
+    }
+
+    /// <summary>Builds a pipeline whose broadcast source carries a payload the test wrote by hand.</summary>
+    /// <param name="id">The pipeline's identity.</param>
+    /// <param name="payload">The payload.</param>
+    /// <returns>The pipeline.</returns>
+    internal static PipelineDefinition HandWrittenBroadcastSource(string id, CanonicalJsonValue payload)
+    {
+        (RunnableGraph graph, ResultSlot<long> _) = Source
+            .FromRegistered(
+                OrleansStages.BroadcastSource(AdapterVocabulary.BroadcastOrder),
+                "published",
+                payload)
+            .To(
+                RegisteredStage.SinkWithResult(
+                    AdapterVocabulary.Catalog(),
+                    AdapterVocabulary.Count,
+                    OrleansStages.Element<AdapterOrder>(),
+                    AdapterVocabulary.Total),
+                "counted",
+                AdapterVocabulary.CountPayload("unused", int.MaxValue),
+                TotalSlot);
+
+        return graph.AsPipeline(GraphId.Create(id), GraphRevision.Create(1));
+    }
+
     /// <summary>Addresses a broadcast channel nothing else in the suite uses.</summary>
     /// <param name="provider">The broadcast provider's registration name.</param>
     /// <param name="name">The test's own name for the channel.</param>

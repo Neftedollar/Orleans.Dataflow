@@ -1,7 +1,8 @@
 # Orleans runtime design
 
-- Status: M3 architecture; phases 1-3 and 4a are implemented, 4b (failover)
-  is the remaining target
+- Status: M3 architecture; phases 1-3 and 4a are implemented, and 4b's
+  delivery-registry half — the broadcast source — is implemented and documented
+  below; 4b's failover half is tracked separately
 - Depends on: [ORLEANS-NOTES.md](ORLEANS-NOTES.md) (verified Orleans 10
   facts), [REGISTERED-STAGES.md](REGISTERED-STAGES.md),
   [LOCAL-RUNTIME.md](LOCAL-RUNTIME.md), ADRs 0001-0004
@@ -73,7 +74,9 @@ as canonical bytes, never as Orleans-serialized object graphs.
 | Grain `IAsyncEnumerable<T>` source | `orleans/grain-enumerable` | call-scoped pull (Orleans batching) | cooperative cancellation; `CancelRequestOnTimeout=false` gotcha handled explicitly |
 | Timer trigger source | `orleans/timer` | none (tick generation) | activation-scoped, non-durable — documented |
 | Reminder trigger source | `orleans/reminder` | none | definition survives restart, missed ticks not replayed — matrix contract verbatim |
-| Observer / Broadcast Channel bridges | `orleans/observer`, `orleans/broadcast-channel` | best-effort, bounded ingress mandatory | no history, resubscription rules surfaced |
+| Observer bridge | `orleans/observer` | best-effort, bounded ingress mandatory | no history; every push answers Accepted/Dropped/Closed/Failed |
+| Broadcast Channel sink | `orleans/broadcast-sink` | one awaited `Publish` per element (publication, not end-to-end) | delivery mode declared and checked against the provider |
+| Broadcast Channel source | `orleans/broadcast-source` | delivery into the run's bounded ingress (dropping/failing policy only) | implicit-only subscription means one package-owned namespace; a relay grain per channel key holds the delivery registry; no history |
 | `IObservable<T>` / .NET events | `dotnet/observable`, `dotnet/event` | bounded ingress buffer mandatory (push source cannot be pulled) | overflow policy required, mirrors the ingress queue |
 
 Backpressure across every boundary is the adapter's await or its bounded
@@ -181,7 +184,10 @@ uses a mailbox as an unbounded buffer.
   is a checked declaration against the silo's provider options, not a
   per-publication choice. **Broadcast SOURCE stays deferred to phase 4**:
   implicit-only subscription means a run cannot subscribe at all; it needs
-  the delivery-registry design that belongs with distribution.
+  the delivery-registry design that belongs with distribution. (It landed
+  there — see the phase-4b section, where the registry turned out to be a
+  relay grain per channel key and the deferral's premise turned out to be
+  exactly right.)
 - Teardown of adapter infrastructure never replaces how a run ended
   (infrastructure release failures are swallowed; an author's disposal
   failure still surfaces) — both bridges self-heal through refusal-driven
@@ -265,6 +271,102 @@ uses a mailbox as an unbounded buffer.
   the executor rather than at the start — the same deployment-scoped limit the
   registry has carried since phase 2, now reachable one hop further away.
 
+## Phase 4b — as implemented (the broadcast source and its delivery registry)
+
+- **Seven Orleans facts, all probed, and the design is what they leave.** They live
+  in `BroadcastSubscriptionProbeTests` so that a future Orleans re-answers them
+  rather than a document asserting them. (1) An implicit channel subscriber is
+  activated under a grain key **equal to the channel's key** — not the namespace,
+  not a composite — which is the only reason a run can address the very activation
+  the runtime feeds. (2) `IOnBroadcastChannelSubscribed.OnSubscribed` fires **once
+  per activation per publishing provider**, carrying the `ChannelId` and the
+  provider name, and not once per publication; so the handler it attaches is the
+  one every later element arrives through, and an attach table can live across
+  publications. (3) Two channel keys under one namespace are **two activations**,
+  each receiving only its own key's elements — a relay is per channel, never per
+  namespace. (4) One key under **two providers is one activation with two
+  subscriptions**: a channel's identity is a namespace and a key with no provider
+  in it, so provider separation has to be done by us. (5) A subscriber that throws
+  **fails a checked publication and is invisible to a fire-and-forget one**, which
+  is why nothing thrown ever leaves the relay. (6) A subscriber may
+  **`Attach<object>`** and receives the author's own type unchanged, and a grain
+  activated *before* the first publication is still subscribed when one arrives —
+  which decided the shape more than any of the others, because a relay cannot know
+  the CLR type: it comes from the document of whichever run attaches, and that run
+  may attach later or never. (7) Two deliveries to one subscriber **never overlap**
+  — a slow subscriber was measured entering and leaving each delivery in turn — so
+  the attach table can be an ordinary dictionary mutated while forwarding, which is
+  a claim about scheduling rather than about an attribute nobody wrote.
+- **Consuming one namespace is the platform's answer and not a choice**, and
+  ADAPTERS.md states it as such. Broadcast Channel subscription is implicit only:
+  a grain *type* names its namespaces in a compile-time attribute. Nothing
+  subscribes to a namespace decided at run time, so the subscriber must be a grain
+  this package compiled, and consumption is confined to
+  `orleans-dataflow-broadcast` with the document's channel id as the **key** inside
+  it. `OrleansStages.BroadcastSourceChannel(provider, key)` composes the address a
+  publisher writes to. The sink stays namespace-free, because publishing needs no
+  subscription — the asymmetry is the rule showing through.
+- **The relay grain is the delivery registry**, one activation per channel key,
+  attach table in memory, nothing persisted. That matches what a channel is
+  (implicit, best-effort, no history) and it is the thing the phase-3 note deferred:
+  the keyed stage needed no registry because an executor's address is composed from
+  the run's own identity, while a broadcast subscriber's address is the runtime's to
+  choose. This is the opposite direction, and the registry is what bridges it.
+- **A run attaches at its first pull and detaches in the `finally`** — the
+  observer-bridge pattern, with the receiver rooted by `GC.KeepAlive` past the
+  detach because Orleans holds observer objects weakly. What differs is that the
+  relay holds *many* receivers: an attachment is named `{graph}/{run}/{node}` and
+  carries the provider the document declared, so two runs of one pipeline, two
+  occurrences of one run, and two runs wanting two providers all coexist on one
+  channel. Every push is outcome-aware and a receiver answering `Closed` or
+  `Failed` — or raising at all — is forgotten after one refusal, the same
+  arithmetic the bridge did: an unreachable receiver costs the whole response
+  timeout per push, so remembering it makes every later publication on that channel
+  pay for a run that has gone.
+- **The turn is never parked, so the backpressuring policy is refused** — in the
+  payload reader and in the authoring helper, exactly as the reminder trigger
+  refuses it. The relay forwards on its own non-reentrant turn and awaits each
+  push, so a run waiting for room would hold the channel for every other run
+  listening to it; and under a fire-and-forget provider it would hold it while no
+  publisher was waiting at all. The fan-out itself is concurrent (`Task.WhenAll`),
+  which changes no ordering that exists — two runs are independent — and bounds one
+  lost run's cost at one response timeout rather than at one per listener. Ordering
+  within a run survives because the grain is non-reentrant: a publication is fully
+  forwarded before the next begins.
+- **Nothing thrown leaves the relay, and a contract mismatch fails the run instead.**
+  Under checked delivery a subscriber's exception *is* the publisher's exception, so
+  raising would let one run's trouble fail a publication that never heard of it —
+  and every other listener with it. So failures are outcomes; and the one thing
+  that is genuinely wrong, an element of a type the run did not declare, fails
+  *that* run with a message naming both types while the publication succeeds. One
+  channel key carries one element type, the same shape the stream adapters have,
+  and the check runs on the run's own receiver because the relay is subscribed
+  untyped.
+- **`FireAndForgetDelivery` is absent from the source's payload and that is a
+  measured result.** The mode decides whether a publisher waits for its subscribers
+  and whether their failures reach it; a subscriber's contract is identical under
+  both and this relay fails a publication under neither. A member here would be a
+  declaration with nothing to check it against — the sink declares one because a
+  sink is the publisher. A test runs the same source against both providers.
+- **Phase-4b limits, stated**: the registry lives in an activation, so a relay
+  collected while runs are attached loses them and those runs go **quiet rather
+  than failing** — nothing links a relay back to the runs it lost, the same
+  asymmetry the reminder trigger documents, and blinder than the bridge's because a
+  publisher is never told either. That one is reasoned from the design rather than
+  measured: the suite never forces a relay to deactivate, so it is a stated limit
+  and not a tested one. A publication that arrives before a run attaches
+  is gone; there is no history to catch up from and no subscriber list a publisher
+  could have consulted. A run lost without detaching costs the *next* publication
+  on that channel a full response timeout — and, under a checked-delivery provider,
+  costs the publisher the same wait — paid once for the channel rather than once per
+  listener, and once rather than repeatedly, which is what the forget-on-refusal
+  rule buys. Provider separation is ours and only ours: Orleans will
+  deliver one key's publications from every provider to one activation, so a
+  deployment that puts two providers on one key is relying on our filter rather than
+  on the platform. And these are single-silo tests: nothing here proves that a relay
+  activated on one silo reaches a run executing on another, only that the addresses
+  agree and that a lost receiver is forgotten.
+
 ## Phasing
 
 1. **Hosting + coordinator + run grain** — DI registration, the
@@ -285,7 +387,9 @@ uses a mailbox as an unbounded buffer.
    catalog refusal. Split in two: **4a** is the keyed stage, its credit
    protocol, and the placement options — landed, see the as-implemented
    section above; **4b** is failover, which needs the multi-silo fixture
-   nothing before it required.
+   nothing before it required, together with the delivery registry the
+   phase-3 note deferred to it — the broadcast source, landed, see its own
+   as-implemented section.
 
 ## Open questions (answered by their phase, not guessed now)
 

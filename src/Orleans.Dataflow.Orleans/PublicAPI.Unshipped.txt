@@ -217,6 +217,12 @@ static Orleans.Dataflow.Adapters.OrleansStages.BroadcastSink<T>(Orleans.Dataflow
 static Orleans.Dataflow.Adapters.OrleansStages.BroadcastSinkParameterContract.get -> Orleans.Dataflow.Identity.ContractReference
 static Orleans.Dataflow.Adapters.OrleansStages.BroadcastSinkParameters<T>(Orleans.Dataflow.Adapters.BroadcastElementBinding<T>! element, Orleans.Dataflow.Adapters.OrleansStreamAddress channel, bool fireAndForgetDelivery) -> Orleans.Dataflow.Serialization.CanonicalJsonValue
 static Orleans.Dataflow.Adapters.OrleansStages.BroadcastSinkStage.get -> Orleans.Dataflow.Identity.StageRef
+static Orleans.Dataflow.Adapters.OrleansStages.BroadcastSource<T>(Orleans.Dataflow.Adapters.BroadcastElementBinding<T>! element) -> Orleans.Dataflow.RegisteredSource<T>!
+static Orleans.Dataflow.Adapters.OrleansStages.BroadcastSourceChannel(string! provider, string! key) -> Orleans.Dataflow.Adapters.OrleansStreamAddress
+static Orleans.Dataflow.Adapters.OrleansStages.BroadcastSourceNamespace.get -> string!
+static Orleans.Dataflow.Adapters.OrleansStages.BroadcastSourceParameterContract.get -> Orleans.Dataflow.Identity.ContractReference
+static Orleans.Dataflow.Adapters.OrleansStages.BroadcastSourceParameters<T>(Orleans.Dataflow.Adapters.BroadcastElementBinding<T>! element, string! provider, string! channel, Orleans.Dataflow.BufferOptions! ingress) -> Orleans.Dataflow.Serialization.CanonicalJsonValue
+static Orleans.Dataflow.Adapters.OrleansStages.BroadcastSourceStage.get -> Orleans.Dataflow.Identity.StageRef
 static Orleans.Dataflow.Adapters.OrleansStages.Catalog.get -> Orleans.Dataflow.Definition.StageCatalog!
 static Orleans.Dataflow.Adapters.OrleansStages.Element<T>() -> Orleans.Dataflow.ElementContract<T>
 static Orleans.Dataflow.Adapters.OrleansStages.ElementContract.get -> Orleans.Dataflow.Identity.ContractReference

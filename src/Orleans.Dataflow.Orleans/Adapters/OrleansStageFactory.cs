@@ -91,6 +91,11 @@ internal sealed class OrleansStageFactory(
             return ObserverBridge(node);
         }
 
+        if (node.Stage == OrleansStages.BroadcastSourceStage)
+        {
+            return BroadcastSource(node);
+        }
+
         if (node.Stage == OrleansStages.BroadcastSinkStage)
         {
             return BroadcastSink(node);
@@ -632,6 +637,124 @@ internal sealed class OrleansStageFactory(
         }
     }
 
+    /// <summary>Builds the Broadcast Channel subscription source.</summary>
+    /// <param name="node">The node.</param>
+    /// <returns>The runtime.</returns>
+    /// <remarks>
+    /// <para>
+    /// Two things are checked here that no parameter validator could see, and only one of them is the same
+    /// check the sink makes. The element contract has to be one this silo carries, exactly as the sink's
+    /// does. The provider has to be one this silo hosts — and that check means something slightly different
+    /// on this side, so it is worth saying what: the run itself never touches the provider, because the
+    /// relay grain does the subscribing and the cluster may activate that anywhere. What refusing here buys
+    /// is that a document naming a provider nobody hosts fails at the start instead of becoming a run that
+    /// receives nothing forever, which is the hardest failure of a source to diagnose.
+    /// </para>
+    /// <para>
+    /// No delivery mode is checked, because there is nothing on this side to check it against: a
+    /// provider's <c>FireAndForgetDelivery</c> decides whether the <em>publisher</em> waits for its
+    /// subscribers and whether their failures reach it, and this source's contract is the same either way.
+    /// The sink declares the mode because a sink is the publisher.
+    /// </para>
+    /// </remarks>
+    private DataflowStageRuntime BroadcastSource(StageNode node)
+    {
+        BroadcastSourceDeclaration declaration = Read<BroadcastSourceDeclaration>(
+            node,
+            BroadcastSourcePayload.TryRead);
+
+        if (!registry.TryGetBroadcast(declaration.Element, out IBroadcastElementEntry? element))
+        {
+            throw Unregistered(node, "broadcast element contract", declaration.Element);
+        }
+
+        if (services.GetKeyedService<IBroadcastChannelProvider>(declaration.Provider) is null)
+        {
+            throw new InvalidOperationException(
+                $"The node '{node.Id}', an occurrence of '{node.Stage}', names the broadcast provider '{declaration.Provider}', and this silo registers no broadcast channel under that name. A broadcast source needs the provider registered on the silo, such as by AddBroadcastChannel(\"{declaration.Provider}\").");
+        }
+
+        // The node's identifier completes the attachment's name, so a document that one day heads two chains
+        // from one channel attaches twice rather than colliding with itself. The run's half of it is what
+        // keeps two runs of one pipeline apart on a relay they share.
+        string occurrence = node.Id.ToString();
+
+        return DataflowStageRuntime.Source(tokens => Publications(
+            grains,
+            $"{tokens.RunIdentity}/{occurrence}",
+            declaration,
+            element!,
+            tokens));
+    }
+
+    /// <summary>Attaches one run to a channel's relay and yields what is published to it.</summary>
+    /// <param name="grains">The silo's grain factory.</param>
+    /// <param name="subscriber">The attachment's name, composed of the run's identity and the node's.</param>
+    /// <param name="declaration">The channel, the contract, and the ingress the publications land in.</param>
+    /// <param name="element">The registered binding, which types what the run may be handed.</param>
+    /// <param name="tokens">The run's tokens.</param>
+    /// <returns>The sequence the run pulls.</returns>
+    /// <remarks>
+    /// <para>
+    /// The same shape the observer bridge's source has, and for the same reasons: the attachment is made
+    /// when the run first pulls and dropped in the <c>finally</c> the engine reaches on every terminal path,
+    /// the ingress is ended first so a delivery arriving during the teardown is refused rather than left
+    /// waiting, and the receiver object is rooted by this method because Orleans holds observer objects
+    /// weakly and a collected one is unregistered silently.
+    /// </para>
+    /// <para>
+    /// What differs is who is on the other side. A bridge grain belongs to one run and is addressed from
+    /// that run's identity; a relay belongs to a channel and is addressed by the channel's key, so it holds
+    /// many runs at once and this attachment is one row of its registry. Nothing is replayed and nothing is
+    /// held for a run that has not attached yet: a publication that arrives a moment before this attach is
+    /// dropped, exactly as a broadcast to a subscriber that had not subscribed is.
+    /// </para>
+    /// </remarks>
+    private static async IAsyncEnumerable<object?> Publications(
+        IGrainFactory grains,
+        string subscriber,
+        BroadcastSourceDeclaration declaration,
+        IBroadcastElementEntry element,
+        DataflowRunTokens tokens)
+    {
+        LocalIngressQueue queue = new(declaration.Ingress.Capacity, declaration.Ingress.OverflowPolicy);
+        IBroadcastRelayGrain relay = grains.GetGrain<IBroadcastRelayGrain>(declaration.Key);
+        BroadcastReceiver receiver = new(queue, element);
+        IDataflowPushReceiver reference = grains.CreateObjectReference<IDataflowPushReceiver>(receiver);
+
+        try
+        {
+            await relay.AttachAsync(subscriber, declaration.Provider, reference).ConfigureAwait(false);
+        }
+        catch (Exception)
+        {
+            queue.EndRun();
+            grains.DeleteObjectReference<IDataflowPushReceiver>(reference);
+            GC.KeepAlive(receiver);
+
+            throw;
+        }
+
+        try
+        {
+            await foreach (object? published in queue
+                .ElementsAsync(tokens.RunToken, tokens.StopToken)
+                .ConfigureAwait(false))
+            {
+                yield return published;
+            }
+        }
+        finally
+        {
+            queue.EndRun();
+
+            await Release(() => relay.DetachAsync(subscriber), grains, reference).ConfigureAwait(false);
+
+            // Orleans's observer table would let the receiver be collected mid-run; see Ticks's remarks.
+            GC.KeepAlive(receiver);
+        }
+    }
+
     /// <summary>Builds the Broadcast Channel publication sink.</summary>
     /// <param name="node">The node.</param>
     /// <returns>The runtime.</returns>
@@ -646,7 +769,7 @@ internal sealed class OrleansStageFactory(
     {
         BroadcastSinkDeclaration declaration = Read<BroadcastSinkDeclaration>(node, BroadcastSinkPayload.TryRead);
 
-        if (!registry.TryGetBroadcast(declaration.Element, out IBroadcastSinkEntry? element))
+        if (!registry.TryGetBroadcast(declaration.Element, out IBroadcastElementEntry? element))
         {
             throw Unregistered(node, "broadcast element contract", declaration.Element);
         }
@@ -749,6 +872,55 @@ internal sealed class OrleansStageFactory(
 
         /// <inheritdoc/>
         public void Fail(Exception failure) => queue.Fail(failure);
+    }
+
+    /// <summary>The object a run publishes so that a channel's relay grain can forward to it.</summary>
+    /// <param name="queue">The run's ingress.</param>
+    /// <param name="element">The binding that types the channel in this silo.</param>
+    /// <remarks>
+    /// <para>
+    /// Nearly <see cref="PushReceiver"/>, and separate for the one thing it does differently: what it does
+    /// with an element that is not the type this run declared. The bridge raises, because there the caller
+    /// is the author of the push and the mismatch is theirs to fix. Here the caller is a relay forwarding
+    /// somebody else's publication, and raising would travel further than that: under a provider configured
+    /// for checked delivery a subscriber's exception is the publisher's exception — measured — so one run's
+    /// contract disagreement would fail a publication that has nothing to do with it, and every other run
+    /// listening to that channel with it.
+    /// </para>
+    /// <para>
+    /// So the mismatch fails <em>this</em> run and nothing else. The run ends with a message naming both
+    /// types, the outcome tells the relay to forget this receiver, and the publisher and every other
+    /// listener carry on. It is loud where it should be loud and silent where it has no standing: a channel
+    /// is untyped and shared, but the namespace it lives in belongs to this package, so an element of the
+    /// wrong type on a channel a run declared is a document or deployment error rather than traffic that
+    /// merely was not meant for us.
+    /// </para>
+    /// </remarks>
+    private sealed class BroadcastReceiver(LocalIngressQueue queue, IBroadcastElementEntry element)
+        : IDataflowPushReceiver
+    {
+        /// <inheritdoc/>
+        public async Task<DataflowPushOutcome> PushAsync(object? published)
+        {
+            if (!element.Accepts(published))
+            {
+                queue.Fail(new InvalidOperationException(
+                    $"A broadcast channel delivered '{published?.GetType().FullName ?? "null"}' to a run that declares the contract '{element.Contract}', which this silo carries as '{element.ElementType.FullName}'. One channel key carries one element type, so this run and whatever published that element disagree about what the channel is."));
+
+                return DataflowPushOutcome.Failed;
+            }
+
+            QueueOfferOutcome outcome = await queue.OfferAsync(published, CancellationToken.None)
+                .ConfigureAwait(false);
+
+            return outcome switch
+            {
+                QueueOfferOutcome.Accepted => DataflowPushOutcome.Accepted,
+                QueueOfferOutcome.Dropped => DataflowPushOutcome.Dropped,
+                QueueOfferOutcome.Failed => DataflowPushOutcome.Failed,
+                _ => DataflowPushOutcome.Closed,
+            };
+        }
     }
 
     /// <summary>The object a run publishes as a grain reference so that a bridge grain can reach it.</summary>

@@ -149,9 +149,17 @@ public interface IOrleansDataflowBuilder
     /// <returns>This builder, so registrations chain.</returns>
     /// <exception cref="ArgumentNullException"><paramref name="element"/> is <see langword="null"/>.</exception>
     /// <remarks>
+    /// <para>
     /// The same reason a stream element is registered: a document names a contract and never a CLR type, so
     /// the type has to come from the deployment. <typeparamref name="T"/> must satisfy Orleans
     /// serialization, which is checked by Orleans at first use rather than here.
+    /// </para>
+    /// <para>
+    /// One registration serves both directions of a channel. A sink uses it to publish the type; a source
+    /// uses it to decide whether what a channel delivered is what the run declared — which is a check only
+    /// the silo executing the run can make, because the relay grain that subscribes on the run's behalf
+    /// attaches to the channel untyped and has no way to know.
+    /// </para>
     /// </remarks>
     IOrleansDataflowBuilder AddBroadcastElement<T>(BroadcastElementBinding<T> element);
 

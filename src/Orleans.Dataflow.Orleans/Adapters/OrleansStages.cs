@@ -6,28 +6,29 @@ using Orleans.Dataflow.Serialization;
 namespace Orleans.Dataflow.Adapters;
 
 /// <summary>
-/// The Orleans-native adapter vocabulary: nine registered stages, the catalog that publishes them, and the
+/// The Orleans-native adapter vocabulary: ten registered stages, the catalog that publishes them, and the
 /// typed handles and payloads an author writes them with.
 /// </summary>
 /// <remarks>
 /// <para>
-/// <b>Nine stages and no more.</b> A stream subscription that feeds a run and a stream publication a run
+/// <b>Ten stages and no more.</b> A stream subscription that feeds a run and a stream publication a run
 /// feeds; an awaited grain call in its transforming and its terminating form; a keyed grain call, which is
 /// the one stage that may distribute below its run; a grain enumeration that heads a run; a cluster reminder
-/// whose ticks head one; a named bridge external grain code pushes at; and a Broadcast Channel publication.
-/// Each is a real registered stage — named in a document, resolved from a silo's catalog by identity, built
-/// by a runtime factory — so a pipeline written with them carries no delegate, no CLR name, and nothing a
-/// document could not honestly say.
+/// whose ticks head one; a named bridge external grain code pushes at; and a Broadcast Channel publication
+/// and subscription. Each is a real registered stage — named in a document, resolved from a silo's catalog
+/// by identity, built by a runtime factory — so a pipeline written with them carries no delegate, no CLR
+/// name, and nothing a document could not honestly say.
 /// </para>
 /// <para>
-/// <b>The Broadcast Channel <em>source</em> is deliberately absent.</b> A channel's subscription is
-/// implicit — a grain type declares the namespaces it receives, and the runtime activates one grain per
-/// channel key — so a run cannot subscribe to one at all. Reaching it needs a delivery registry that maps
-/// live runs to the grains the runtime activates, and the keyed stage below did <em>not</em> turn out to
-/// need one: an executor's address is composed from the run's own identity, so the run knows where to send
-/// and never has to look anything up. A broadcast subscriber's address is the runtime's to choose, which is
-/// the opposite direction and the registry is what would bridge it. The sink is complete; the source is
-/// still scheduled rather than approximated.
+/// <b>The Broadcast Channel <em>source</em> consumes one namespace and that is the platform's answer, not a
+/// choice.</b> A channel's subscription is implicit — a grain <em>type</em> carries an attribute naming the
+/// namespaces it receives, and the runtime activates one grain of that type per channel key — so nothing
+/// subscribes to a namespace decided at run time, and a run least of all. What a run can do is attach to a
+/// subscriber this package compiled, which is why consumption is confined to
+/// <see cref="BroadcastSourceNamespace"/> and a document names a channel <em>key</em> within it. The relay
+/// grain behind that namespace holds the delivery registry the phase-3 note said this stage needed: the
+/// runtime chooses the subscriber's address, the registry maps it back to the live runs that asked for it.
+/// The sink stays namespace-free, because publishing needs no subscription.
 /// </para>
 /// <para>
 /// <b>Declare once, use twice.</b> The bindings in this namespace are written once by deployment code and
@@ -39,7 +40,7 @@ namespace Orleans.Dataflow.Adapters;
 /// </para>
 /// <para>
 /// <b>The element contract these ports declare is opaque, and that is a stated limit.</b> Every one of the
-/// nine is one specification, and a specification declares one element contract per port; the contract a
+/// ten is one specification, and a specification declares one element contract per port; the contract a
 /// given occurrence actually carries is a property of that occurrence and has nowhere in a specification to
 /// live. So the ports declare <see cref="ElementContract"/> — one opaque reference, exactly as every local
 /// port declares one — and what an occurrence really carries is stated in its payload and checked against
@@ -109,6 +110,29 @@ public static class OrleansStages
     /// <value><c>orleans/broadcast-sink@v1</c>.</value>
     public static StageRef BroadcastSinkStage { get; } =
         StageRef.Create(Provider, StageId.Create("broadcast-sink"), StageRef.FirstMajorVersion);
+
+    /// <summary>Gets the reference of the Broadcast Channel subscription source.</summary>
+    /// <value><c>orleans/broadcast-source@v1</c>.</value>
+    public static StageRef BroadcastSourceStage { get; } =
+        StageRef.Create(Provider, StageId.Create("broadcast-source"), StageRef.FirstMajorVersion);
+
+    /// <summary>Gets the one channel namespace a dataflow run can consume.</summary>
+    /// <value><c>orleans-dataflow-broadcast</c>.</value>
+    /// <remarks>
+    /// <para>
+    /// Public because a publisher needs it. A run consumes a channel by attaching to the implicit subscriber
+    /// this package compiled, and an implicit subscription names its namespace in an attribute, so the
+    /// namespace is fixed when the package is built and everything that wants to reach a run publishes into
+    /// this one. <see cref="BroadcastSourceChannel"/> composes the address for that.
+    /// </para>
+    /// <para>
+    /// It is a property of Orleans rather than a decision taken here: there is no explicit subscription to a
+    /// Broadcast Channel and therefore no way for a running thing to subscribe to a namespace a document
+    /// named. A deployment that wants its own namespace consumed needs its own subscriber grain type, which
+    /// is a grain it compiles rather than a stage this package can offer.
+    /// </para>
+    /// </remarks>
+    public static string BroadcastSourceNamespace => OrleansBroadcastChannels.SourceNamespace;
 
     /// <summary>Gets the one element contract every Orleans adapter port declares.</summary>
     /// <value><c>orleans-element@v1</c>.</value>
@@ -182,6 +206,13 @@ public static class OrleansStages
     public static ContractReference BroadcastSinkParameterContract { get; } =
         ContractReference.Create(
             ContractId.Create("orleans-broadcast-sink-parameters"),
+            ContractReference.FirstMajorVersion);
+
+    /// <summary>Gets the parameter contract a broadcast source declares.</summary>
+    /// <value><c>orleans-broadcast-source-parameters@v1</c>.</value>
+    public static ContractReference BroadcastSourceParameterContract { get; } =
+        ContractReference.Create(
+            ContractId.Create("orleans-broadcast-source-parameters"),
             ContractReference.FirstMajorVersion);
 
     /// <summary>Gets the contract every reminder tick is carried under.</summary>
@@ -669,6 +700,169 @@ public static class OrleansStages
         return RegisteredStage.Sink(Catalog, BroadcastSinkStage, Element<T>());
     }
 
+    /// <summary>Declares a Broadcast Channel subscription as the typed start of a graph.</summary>
+    /// <typeparam name="T">The element type the channel carries in this process.</typeparam>
+    /// <param name="element">The broadcast element binding this silo registered.</param>
+    /// <returns>The typed handle.</returns>
+    /// <exception cref="ArgumentNullException"><paramref name="element"/> is <see langword="null"/>.</exception>
+    /// <remarks>
+    /// <para>
+    /// <b>Which channels, and why not any channel.</b> A run consumes a channel key within
+    /// <see cref="BroadcastSourceNamespace"/> and no other namespace, because Broadcast Channel subscription
+    /// is implicit only: a grain <em>type</em> declares in an attribute which namespaces it receives, and
+    /// the runtime activates one grain of that type per channel key. Nothing subscribes to a namespace
+    /// decided at run time, so the subscriber has to be a grain this package compiled and a document names a
+    /// key inside its namespace. That is the platform's shape rather than a decision taken here, and the
+    /// sink is unaffected: publishing needs no subscription, so a broadcast sink still addresses any
+    /// namespace at all. Use <see cref="BroadcastSourceChannel"/> to compose the address a publisher —
+    /// including a broadcast sink of another pipeline — writes to.
+    /// </para>
+    /// <para>
+    /// <b>What is on the other side.</b> One relay grain per channel key, activated by the runtime under
+    /// that key, holding the receivers of every run currently listening to the channel. Its attach table
+    /// <em>is</em> the delivery registry, it is held in memory, and nothing about it is durable — which
+    /// matches what a channel is: implicit, best-effort, and without history.
+    /// </para>
+    /// <para>
+    /// <b>Acknowledgement</b>: the offer into the run's bounded ingress, and nothing further. An element the
+    /// relay handed over may still be lost by a run that fails afterwards, exactly as a stream delivery may
+    /// be. A publisher learns none of this — <c>Publish</c> reports no per-subscriber outcome — so the
+    /// acknowledgement is observable to the run and to nobody else.
+    /// </para>
+    /// <para>
+    /// <b>Delivery</b>: best-effort, and the two ways an element is lost are worth naming. A publication
+    /// that arrives when no run is attached is dropped and says nothing to anybody: there is no history and
+    /// no queue, so a run that attaches a moment later never sees it. A publication that finds a full
+    /// ingress is dropped or fails by the run's declared policy.
+    /// </para>
+    /// <para>
+    /// <b>Replay</b>: none, ever. A channel keeps nothing.
+    /// </para>
+    /// <para>
+    /// <b>Ordering</b>: one publisher's elements reach one run in the order it published them, because the
+    /// relay grain is not reentrant and forwards one publication completely before it starts the next.
+    /// Nothing is ordered across publishers, and nothing is ordered across the runs listening to one
+    /// channel — the fan-out to them is concurrent, which changes no order that exists and keeps one lost
+    /// run from costing every other listener its response timeout.
+    /// </para>
+    /// <para>
+    /// <b>Backpressure</b>: the declared ingress bound, and the overflow policy may not be
+    /// <c>backpressure</c>. A run that waited for room would hold the relay's grain turn, and with it the
+    /// channel, for every other run listening to it — and under a provider configured for fire-and-forget
+    /// delivery it would hold it while no publisher was waiting at all. So a full ingress drops or fails by
+    /// the declared policy, and a deployment that cannot lose elements needs a stream rather than a channel.
+    /// </para>
+    /// <para>
+    /// <b>The delivery mode is the publisher's business and not this stage's.</b> A provider's
+    /// <c>FireAndForgetDelivery</c> decides whether a publication waits for its subscribers and whether
+    /// their failures reach the publisher; what a run receives is the same under both, and this source never
+    /// fails a publication in either — measured, because under checked delivery a subscriber that throws
+    /// does fail the publisher, and one run's ingress is nobody else's business. That is why this payload
+    /// declares no mode while the sink's does.
+    /// </para>
+    /// <para>
+    /// <b>Provider</b>: declared and honored. A channel's identity is a namespace and a key with no provider
+    /// in it — probed — so two providers publishing one key reach one relay activation, which subscribes
+    /// once per provider and forwards each element only to the runs that declared the provider it came
+    /// through. A document naming a provider this silo does not host is refused at the start, because a
+    /// source that receives nothing forever is the hardest thing to diagnose.
+    /// </para>
+    /// <para>
+    /// <b>Element type</b>: one channel key carries one element type. An element of some other type
+    /// delivered to a run that declared this contract fails <em>that</em> run, naming both types, and leaves
+    /// the publisher and every other listener alone.
+    /// </para>
+    /// <para>
+    /// <b>Attachment lifetime</b>: one run. The attachment is made when the run first pulls and dropped on
+    /// every terminal path, including the disposal a deactivating run grain performs. The stated cost of a
+    /// registry that lives in an activation: a relay recycled while a run is attached loses the attachment,
+    /// and that run goes quiet rather than failing — nothing links a relay back to the runs it lost, exactly
+    /// as nothing links a reminder trigger back to its run.
+    /// </para>
+    /// <para>
+    /// <b>What a lost run costs everybody else, once.</b> A run whose process is gone without having
+    /// detached leaves a receiver that neither answers nor fails, so the publication that next reaches this
+    /// channel waits Orleans' own response timeout — thirty seconds by default — before the relay gives up
+    /// on it. Under a provider configured for checked delivery the publisher waits with it. It is paid once,
+    /// because the relay forgets a receiver after one refusal, and it is paid once for the channel rather
+    /// than once per listener, because the fan-out is concurrent. A deployment that cannot afford even that
+    /// shortens <c>MessagingOptions.ResponseTimeout</c>, which is a cluster-wide decision and therefore not
+    /// this adapter's to make.
+    /// </para>
+    /// </remarks>
+    public static RegisteredSource<T> BroadcastSource<T>(BroadcastElementBinding<T> element)
+    {
+        ArgumentNullException.ThrowIfNull(element);
+
+        return RegisteredStage.Source(Catalog, BroadcastSourceStage, Element<T>());
+    }
+
+    /// <summary>Composes the address of a channel a dataflow run can consume.</summary>
+    /// <param name="provider">The broadcast provider's registration name.</param>
+    /// <param name="key">The channel's key.</param>
+    /// <returns>The address, in <see cref="BroadcastSourceNamespace"/>.</returns>
+    /// <exception cref="ArgumentNullException">Either argument is <see langword="null"/>.</exception>
+    /// <exception cref="ArgumentException">Either argument is empty or white space.</exception>
+    /// <remarks>
+    /// What a publisher writes to, and the one place the reserved namespace is spelled on the authoring
+    /// side. A broadcast sink handed this address publishes into runs rather than into whatever the author
+    /// happened to type, which is the whole reason the helper exists: two spellings of the namespace would
+    /// be a publication into silence.
+    /// </remarks>
+    public static OrleansStreamAddress BroadcastSourceChannel(string provider, string key)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(provider);
+        ArgumentException.ThrowIfNullOrWhiteSpace(key);
+
+        return OrleansStreamAddress.Create(provider, BroadcastSourceNamespace, key);
+    }
+
+    /// <summary>Writes the payload of one broadcast source occurrence.</summary>
+    /// <typeparam name="T">The element type the channel carries.</typeparam>
+    /// <param name="element">The broadcast element binding this silo registered.</param>
+    /// <param name="provider">The broadcast provider whose publications this run consumes.</param>
+    /// <param name="channel">
+    /// The channel's key within <see cref="BroadcastSourceNamespace"/>. There is no namespace to give,
+    /// because implicit subscription fixes it when this package is built.
+    /// </param>
+    /// <param name="ingress">
+    /// The bounded ingress the publications land in, whose overflow policy may not be
+    /// <see cref="OverflowPolicy.Backpressure"/>.
+    /// </param>
+    /// <returns>The canonical payload.</returns>
+    /// <exception cref="ArgumentNullException">
+    /// <paramref name="element"/>, <paramref name="provider"/>, <paramref name="channel"/>, or
+    /// <paramref name="ingress"/> is <see langword="null"/>.
+    /// </exception>
+    /// <exception cref="ArgumentException">
+    /// <paramref name="provider"/> or <paramref name="channel"/> is empty or white space, or
+    /// <paramref name="ingress"/> declares the backpressuring policy, which a shared relay cannot honor.
+    /// </exception>
+    public static CanonicalJsonValue BroadcastSourceParameters<T>(
+        BroadcastElementBinding<T> element,
+        string provider,
+        string channel,
+        BufferOptions ingress)
+    {
+        ArgumentNullException.ThrowIfNull(element);
+        ArgumentNullException.ThrowIfNull(ingress);
+        ArgumentException.ThrowIfNullOrWhiteSpace(provider);
+        ArgumentException.ThrowIfNullOrWhiteSpace(channel);
+
+        if (ingress.OverflowPolicy is OverflowPolicy.Backpressure)
+        {
+            throw new ArgumentException(
+                "A broadcast source cannot backpressure a channel: one relay grain forwards to every run listening to that channel on one turn, so a run waiting for room would stop the channel for all of them — and under a fire-and-forget provider it would stop it while no publisher was waiting. Declare one of the dropping policies or the failing one.",
+                nameof(ingress));
+        }
+
+        return BroadcastSourcePayload.Write(
+            element.Element.Reference.ToString(),
+            provider,
+            channel,
+            ingress);
+    }
+
     /// <summary>Composes the address of one run's observer bridge.</summary>
     /// <param name="graphId">The identity of the pipeline the run belongs to.</param>
     /// <param name="runId">The identity of the run.</param>
@@ -1008,6 +1202,14 @@ public static class OrleansStages
                 BroadcastSinkParameterContract,
                 [],
                 new OrleansStageValidator(registry, OrleansStageKind.BroadcastSink)),
+            StageSpecification.Create(
+                BroadcastSourceStage,
+                [],
+                [OutputPortSpecification.Create(OutputPort, ElementContract)],
+                [],
+                BroadcastSourceParameterContract,
+                [],
+                new OrleansStageValidator(registry, OrleansStageKind.BroadcastSource)),
         ]);
 
     /// <summary>Refuses an address that addresses nothing.</summary>

@@ -40,7 +40,7 @@ public static class OrleansDataflowSiloBuilderExtensions
     /// The Orleans adapter vocabulary is published exactly when this silo registers at least one Orleans
     /// binding. A deployment that uses no adapter therefore keeps precisely the catalog it wrote — and
     /// precisely the catalog fingerprint it had — while a deployment that registers one stream element or
-    /// one named call gets all nine adapter stages, because they ship as one vocabulary and a half-published
+    /// one named call gets all ten adapter stages, because they ship as one vocabulary and a half-published
     /// one would fail at the first element instead of at the start.
     /// </para>
     /// <para>
@@ -213,7 +213,7 @@ public static class OrleansDataflowSiloBuilderExtensions
         {
             ArgumentNullException.ThrowIfNull(element);
 
-            _adapters.Add((IBroadcastSinkEntry)element);
+            _adapters.Add((IBroadcastElementEntry)element);
 
             return this;
         }
