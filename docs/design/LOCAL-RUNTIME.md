@@ -280,3 +280,90 @@ and in-flight work; failure wins over everything queued behind it. The
 one-element-in-flight test of checkpoint 1 becomes per-segment:
 in-flight-per-segment never exceeds the declared bound, and total memory is
 the sum of declared capacities — provable per boundary with gated probes.
+
+## M4 DAG execution model — design ahead of code
+
+The engine grows from a line to a graph. What follows is the shape M4.1
+implements, checkpointed like M2 was; ADR 0005 fixes the junction
+contracts this model must keep, and nothing below weakens one.
+
+### Plan
+
+- **Channels are keyed by edge, not by chain position.** The linear plan's
+  `_channels[index]` — where a segment's position named both its input and
+  its output — becomes a table from `GraphEdge` to its bounded channel.
+  Everything the boundary machinery does today (policies, closing on
+  completion, the offer discipline) is unchanged per channel; what changes
+  is only how one is found.
+- **Fusion survives inside the branches.** A maximal junction-free chain
+  fuses exactly as a linear graph does today, with the same rules for
+  where a boundary is mandatory. A junction never fuses: it is its own
+  segment, because its pump shape is what defines it.
+- **Two new pump shapes join the existing three.** `Pull` (head), `Push`
+  (linear), and `Map` (async) are joined by `FanIn` (N readers, one
+  delivery path) and `FanOut` (one reader, N writers). A junction is one
+  of the two shapes plus a strategy — merge, zip, and interleave are all
+  `FanIn` pumps differing in when they pull which reader and when a
+  delivery is ready; broadcast, balance, partition, and unzip are `FanOut`
+  pumps differing in which writers must have room before the pull and
+  which receive the element. The strategies are small and synchronous; the
+  waiting stays in the pump, on the segment's own thread, exactly as
+  today.
+
+### Completion and stopping across a graph
+
+- The linear watermark (`_completedAt` as an index) becomes per-edge
+  state: a stream completes *along an edge*. A segment completes its
+  output edges when its junction rule says its inputs are done — all of
+  them for merge and interleave, the first for zip, the last for concat —
+  and closing an edge's channel is what carries the completion downstream,
+  as it already does.
+- Stopping propagates upstream per edge, and a fan-out segment stops
+  pulling only when *every* output edge has stopped; until then a
+  completed leg merely leaves the delivery set. This is ADR 0005's rule 3
+  as engine mechanics.
+- **Terminals are counted, not singular.** A graph may end in several
+  sinks; the run completes when every terminal has completed, and each
+  result slot resolves from its own terminal's fold. The countdown that
+  terminalizes a linear run generalizes to a count over terminals with no
+  change of meaning.
+
+### Cycles
+
+Validation refuses a cycle unless it passes a boundary whose policy can
+answer without downstream room (ADR 0005). Execution needs nothing new
+beyond that rule: a legal cycle is edges and channels like any others, and
+the boundary that made it legal is what breaks the wait. The subtle part
+is completion — a cycle's segments feed each other, so "inputs done" can
+only arrive from outside the cycle; the plan detects strongly connected
+components at validation time and completion enters a cycle only when
+every edge into the component has completed, at which point the component
+drains and its channels close in dependency order.
+
+### Controls, pause, and probes
+
+The pause gate, the control slots, the kill switch, and the demand-aware
+probes generalize without new concepts: quiescence is still "every
+segment parked or idle and no callback in flight" — the counters never
+depended on the plan being linear — and a probe attaches to an edge.
+
+### Checkpoints for M4.1
+
+1. **DAG plan and fan-out**: edge-keyed channels, multiple terminals,
+   broadcast/balance/unzip, multiple named result slots resolving
+   per-terminal. Proves the plan model and the FanOut pump.
+2. **Simple fan-in**: merge, concat, interleave — the FanIn pump with
+   strategies that never hold a partial row.
+3. **Row-building fan-in**: zip and combine-latest — held rows, eager
+   completion for zip, frozen-leg semantics for combine-latest.
+4. **Partition and cycles**: the routed-element hold, out-of-range
+   failure, SCC detection at validation, a legal cycle executing and
+   completing from outside in.
+5. **Control-plane generalization**: pause quiescence, shutdown drain,
+   cancellation, and probes proven across branching topologies; the
+   bounded-memory suite extended to junctions (held elements counted
+   against ADR 0005's stated bounds).
+
+Each checkpoint lands with its tests and its as-implemented notes here,
+replacing this section's future tense the way M2's checkpoints replaced
+theirs.
