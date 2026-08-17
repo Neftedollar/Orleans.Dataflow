@@ -164,8 +164,9 @@ public sealed class ReminderTriggerTests(DataflowCluster cluster)
         // stopped listening is what removes the reminder, and not a call the run happened to make first.
         IReminderTriggerGrain trigger = cluster.Cluster.Client
             .GetGrain<IReminderTriggerGrain>("orphan-trigger/refusing");
+        ClosedReceiver refusing = new();
         IDataflowPushReceiver receiver = cluster.Cluster.Client
-            .CreateObjectReference<IDataflowPushReceiver>(new ClosedReceiver());
+            .CreateObjectReference<IDataflowPushReceiver>(refusing);
 
         try
         {
@@ -184,6 +185,10 @@ public sealed class ReminderTriggerTests(DataflowCluster cluster)
             await trigger.StopAsync();
 
             cluster.Cluster.Client.DeleteObjectReference<IDataflowPushReceiver>(receiver);
+
+            // Rooted so the tick reaches the object and its answer, not a collected reference: the removal
+            // this test asserts must come from the receiver saying "closed", not from Orleans finding it dead.
+            GC.KeepAlive(refusing);
         }
     }
 

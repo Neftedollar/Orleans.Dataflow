@@ -338,6 +338,14 @@ internal sealed class OrleansStageFactory(
     /// trigger, so nothing about the bridge outlives the enumeration that holds it.
     /// </para>
     /// <para>
+    /// The receiver object is kept alive by this method, and has to be: Orleans holds a hosted client's
+    /// observer objects weakly, so a receiver nothing else roots is collected at the next garbage
+    /// collection, the runtime silently unregisters it, and every later push finds nobody — a run that
+    /// waits forever for a tick that was delivered to a dead reference. The <see cref="GC.KeepAlive"/> at
+    /// the end of each path is that root, placed after the unsubscribe so the object outlives the last
+    /// push the trigger could make.
+    /// </para>
+    /// <para>
     /// The ingress is ended before the trigger is stopped, and the order matters for the same reason it
     /// does everywhere else here: ending it makes every later offer answer at once, so a tick that arrives
     /// during the teardown is refused rather than left waiting on a run that has gone — and the refusal is
@@ -352,18 +360,19 @@ internal sealed class OrleansStageFactory(
     {
         LocalIngressQueue queue = new(declaration.Ingress.Capacity, declaration.Ingress.OverflowPolicy);
         IReminderTriggerGrain trigger = grains.GetGrain<IReminderTriggerGrain>(key);
-        IDataflowPushReceiver receiver = grains.CreateObjectReference<IDataflowPushReceiver>(
-            new PushReceiver(queue, element: null));
+        PushReceiver receiver = new(queue, element: null);
+        IDataflowPushReceiver reference = grains.CreateObjectReference<IDataflowPushReceiver>(receiver);
 
         try
         {
-            await trigger.StartAsync(receiver, (long)declaration.Period.TotalMilliseconds)
+            await trigger.StartAsync(reference, (long)declaration.Period.TotalMilliseconds)
                 .ConfigureAwait(false);
         }
         catch (Exception)
         {
             queue.EndRun();
-            grains.DeleteObjectReference<IDataflowPushReceiver>(receiver);
+            grains.DeleteObjectReference<IDataflowPushReceiver>(reference);
+            GC.KeepAlive(receiver);
 
             throw;
         }
@@ -381,7 +390,10 @@ internal sealed class OrleansStageFactory(
         {
             queue.EndRun();
 
-            await Release(trigger.StopAsync, grains, receiver).ConfigureAwait(false);
+            await Release(trigger.StopAsync, grains, reference).ConfigureAwait(false);
+
+            // Orleans's observer table would let the receiver be collected mid-run; see the remarks.
+            GC.KeepAlive(receiver);
         }
     }
 
@@ -418,7 +430,9 @@ internal sealed class OrleansStageFactory(
     /// The attachment is made when the run first pulls and dropped in the <c>finally</c> the engine reaches
     /// on every terminal path, so a bridge is listening exactly while its run is. The ingress is ended
     /// first, which releases a pusher parked for room with a refusal instead of leaving its grain call
-    /// waiting on a run that has gone.
+    /// waiting on a run that has gone. The receiver object is rooted by this method for the same reason
+    /// <see cref="Ticks"/> roots its own: Orleans holds observer objects weakly, and a collected receiver
+    /// is unregistered silently, turning every later push into a delivery to nobody.
     /// </remarks>
     private static async IAsyncEnumerable<object?> Pushes(
         IGrainFactory grains,
@@ -429,17 +443,18 @@ internal sealed class OrleansStageFactory(
     {
         LocalIngressQueue queue = new(ingress.Capacity, ingress.OverflowPolicy);
         IObserverBridgeGrain grain = grains.GetGrain<IObserverBridgeGrain>(key);
-        IDataflowPushReceiver receiver = grains.CreateObjectReference<IDataflowPushReceiver>(
-            new PushReceiver(queue, bridge));
+        PushReceiver receiver = new(queue, bridge);
+        IDataflowPushReceiver reference = grains.CreateObjectReference<IDataflowPushReceiver>(receiver);
 
         try
         {
-            await grain.AttachAsync(receiver).ConfigureAwait(false);
+            await grain.AttachAsync(reference).ConfigureAwait(false);
         }
         catch (Exception)
         {
             queue.EndRun();
-            grains.DeleteObjectReference<IDataflowPushReceiver>(receiver);
+            grains.DeleteObjectReference<IDataflowPushReceiver>(reference);
+            GC.KeepAlive(receiver);
 
             throw;
         }
@@ -457,7 +472,10 @@ internal sealed class OrleansStageFactory(
         {
             queue.EndRun();
 
-            await Release(grain.DetachAsync, grains, receiver).ConfigureAwait(false);
+            await Release(grain.DetachAsync, grains, reference).ConfigureAwait(false);
+
+            // Orleans's observer table would let the receiver be collected mid-run; see the remarks.
+            GC.KeepAlive(receiver);
         }
     }
 

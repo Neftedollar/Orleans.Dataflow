@@ -245,8 +245,9 @@ public sealed class ObserverBridgeTests(DataflowCluster cluster)
     {
         IObserverBridgeGrain bridge = cluster.Cluster.Client.GetGrain<IObserverBridgeGrain>(
             OrleansStages.ObserverBridgeKey("contested", "run", AdapterVocabulary.OrderBridge.Name));
+        AcceptingReceiver accepting = new();
         IDataflowPushReceiver receiver = cluster.Cluster.Client
-            .CreateObjectReference<IDataflowPushReceiver>(new AcceptingReceiver());
+            .CreateObjectReference<IDataflowPushReceiver>(accepting);
 
         try
         {
@@ -262,6 +263,9 @@ public sealed class ObserverBridgeTests(DataflowCluster cluster)
             await bridge.DetachAsync();
 
             cluster.Cluster.Client.DeleteObjectReference<IDataflowPushReceiver>(receiver);
+
+            // Rooted for the test's duration; Orleans holds observer objects weakly.
+            GC.KeepAlive(accepting);
         }
     }
 
@@ -270,8 +274,9 @@ public sealed class ObserverBridgeTests(DataflowCluster cluster)
     {
         IObserverBridgeGrain bridge = cluster.Cluster.Client.GetGrain<IObserverBridgeGrain>(
             OrleansStages.ObserverBridgeKey("unreachable", "run", AdapterVocabulary.OrderBridge.Name));
+        FailingReceiver failing = new();
         IDataflowPushReceiver receiver = cluster.Cluster.Client
-            .CreateObjectReference<IDataflowPushReceiver>(new FailingReceiver());
+            .CreateObjectReference<IDataflowPushReceiver>(failing);
 
         try
         {
@@ -289,6 +294,10 @@ public sealed class ObserverBridgeTests(DataflowCluster cluster)
             await bridge.DetachAsync();
 
             cluster.Cluster.Client.DeleteObjectReference<IDataflowPushReceiver>(receiver);
+
+            // Rooted so the push reaches the object and its thrown answer, not a collected reference: the
+            // Closed this test asserts must come from the receiver failing, not from Orleans finding it dead.
+            GC.KeepAlive(failing);
         }
     }
 

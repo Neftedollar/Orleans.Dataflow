@@ -49,6 +49,14 @@ time.
   `ReminderOptions.MinimumReminderPeriod` exists but its default and
   enforcement mode are undocumented — **probe before writing fast-ticking
   reminder tests**.
+- **Observers are weakly referenced** (learned from a flake, 2026-08-17): the
+  client-side table behind `CreateObjectReference` does not root the observer
+  object. An implementation nothing else references is garbage-collected, the
+  runtime logs `LogObserverGarbageCollected` and silently unregisters it, and
+  every later call to the reference reports a dead target. Whoever creates an
+  observer must keep the object alive for the reference's whole life —
+  `GC.KeepAlive` after the unsubscribe, not a local the compiler may not hoist.
+  The adapter sources (`Ticks`, `Pushes`) do this; any new observer must too.
 - **Grain streaming**: `IAsyncEnumerable<T>` grain methods are first-class
   (7.2+), batched (`WithBatchSize`, default 100), cooperative cancellation
   end-to-end — the natural transport for our grain async-enumerable source.

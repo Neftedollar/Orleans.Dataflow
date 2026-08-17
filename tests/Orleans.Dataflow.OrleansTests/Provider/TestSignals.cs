@@ -22,6 +22,16 @@ namespace Orleans.Dataflow.OrleansTests.Provider;
 /// </remarks>
 internal static class TestSignals
 {
+    /// <summary>The longest a wait for a signal lasts before it reports that the signal never came.</summary>
+    /// <remarks>
+    /// The same reasoning as the poll helper's bound, for the same reason: a signal nobody raises must fail
+    /// the one test that waited for it, with the signal's name in the message, rather than hang the suite
+    /// until something outside it — a CI job limit, a person — kills the process and discards the diagnosis.
+    /// A minute is dozens of times longer than the slowest legitimate wait here (the reminder tests wait for
+    /// a tick of the fixture's one-second floor) and was chosen by that margin, not by measurement.
+    /// </remarks>
+    private static readonly TimeSpan Budget = TimeSpan.FromMinutes(1);
+
     private static readonly ConcurrentDictionary<string, TaskCompletionSource> Raised = new(StringComparer.Ordinal);
 
     /// <summary>Raises one signal, releasing everyone waiting for it.</summary>
@@ -32,7 +42,20 @@ internal static class TestSignals
     /// <summary>Waits until one signal has been raised.</summary>
     /// <param name="name">The signal's name.</param>
     /// <returns>A task that completes when the signal is raised, and at once when it already was.</returns>
-    internal static Task Reached(string name) => Source(name).Task;
+    /// <exception cref="TimeoutException">The signal was not raised within the budget.</exception>
+    internal static async Task Reached(string name)
+    {
+        try
+        {
+            await Source(name).Task.WaitAsync(Budget).ConfigureAwait(false);
+        }
+        catch (TimeoutException)
+        {
+            throw new TimeoutException(
+                $"The signal '{name}' was not raised within {Budget}. " +
+                "Whatever was expected to raise it did not get there; this wait is reporting that, not causing it.");
+        }
+    }
 
     /// <summary>Gets the completion source behind one signal, creating it on first mention.</summary>
     /// <param name="name">The signal's name.</param>
