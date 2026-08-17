@@ -52,6 +52,7 @@ internal sealed class PipelineRunGrain(DataflowSiloRegistry registry) : Grain, I
                 GraphFingerprint.OfSerialized(canonicalDocument),
                 registry.Catalog,
                 registry.Factories,
+                this.GetPrimaryKeyString(),
                 CancellationToken.None);
         }
         catch (InvalidOperationException refusal)

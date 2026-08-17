@@ -93,4 +93,50 @@ public interface IOrleansDataflowBuilder
     /// <returns>This builder, so registrations chain.</returns>
     /// <exception cref="ArgumentNullException"><paramref name="source"/> is <see langword="null"/>.</exception>
     IOrleansDataflowBuilder AddGrainEnumerable<T>(GrainEnumerableBinding<T> source);
+
+    /// <summary>Registers a named observer bridge that heads a graph.</summary>
+    /// <typeparam name="T">The element type the bridge accepts.</typeparam>
+    /// <param name="bridge">The binding, declared once and handed to the authoring side as well.</param>
+    /// <returns>This builder, so registrations chain.</returns>
+    /// <exception cref="ArgumentNullException"><paramref name="bridge"/> is <see langword="null"/>.</exception>
+    /// <remarks>
+    /// A bridge registration binds a name to an element type and to nothing else, because the code on the
+    /// far side of a bridge belongs to whoever pushes at it. What the type buys is the one check a caller
+    /// cannot make for itself: a push arrives as <see cref="object"/> over the wire, and this is what turns
+    /// the wrong type into a refusal naming both sides instead of a cast inside the run.
+    /// </remarks>
+    IOrleansDataflowBuilder AddObserverBridge<T>(ObserverBridgeBinding<T> bridge);
+
+    /// <summary>Registers the CLR type that carries one element contract over this silo's channels.</summary>
+    /// <typeparam name="T">The element type.</typeparam>
+    /// <param name="element">The binding, declared once and handed to the authoring side as well.</param>
+    /// <returns>This builder, so registrations chain.</returns>
+    /// <exception cref="ArgumentNullException"><paramref name="element"/> is <see langword="null"/>.</exception>
+    /// <remarks>
+    /// The same reason a stream element is registered: a document names a contract and never a CLR type, so
+    /// the type has to come from the deployment. <typeparamref name="T"/> must satisfy Orleans
+    /// serialization, which is checked by Orleans at first use rather than here.
+    /// </remarks>
+    IOrleansDataflowBuilder AddBroadcastElement<T>(BroadcastElementBinding<T> element);
+
+    /// <summary>Publishes the .NET push-adapter vocabulary on this silo.</summary>
+    /// <returns>This builder, so registrations chain.</returns>
+    /// <remarks>
+    /// The runtime-neutral half of the vocabulary, registered here so that one declaration serves this silo
+    /// and a <see cref="LocalDataflowHost"/> alike. A silo that calls neither this nor
+    /// <see cref="AddObservable{T}"/> keeps exactly the catalog it wrote.
+    /// </remarks>
+    IOrleansDataflowBuilder AddDotnetStages();
+
+    /// <summary>Registers a named <see cref="IObservable{T}"/> that heads a graph.</summary>
+    /// <typeparam name="T">The element type the sequence produces.</typeparam>
+    /// <param name="source">The binding, declared once and handed to the authoring side as well.</param>
+    /// <returns>This builder, so registrations chain.</returns>
+    /// <exception cref="ArgumentNullException"><paramref name="source"/> is <see langword="null"/>.</exception>
+    /// <remarks>
+    /// The very binding a <see cref="LocalDataflowHost"/> is given, because an
+    /// <see cref="IObservable{T}"/> is not an Orleans concept and a deployment should not have to declare
+    /// it twice to run one document in two runtimes.
+    /// </remarks>
+    IOrleansDataflowBuilder AddObservable<T>(ObservableBinding<T> source);
 }

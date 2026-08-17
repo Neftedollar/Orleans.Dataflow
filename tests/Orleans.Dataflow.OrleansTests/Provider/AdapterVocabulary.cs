@@ -119,6 +119,39 @@ internal static class AdapterVocabulary
             static (grains, cancellationToken) =>
                 grains.GetGrain<IAdapterFeedGrain>("endless").EnumerateAsync(0, cancellationToken));
 
+    /// <summary>The name the awaiting broadcast channel provider is registered under.</summary>
+    internal const string BroadcastProvider = "dataflow-test-broadcast";
+
+    /// <summary>The name the fire-and-forget broadcast channel provider is registered under.</summary>
+    internal const string FireAndForgetBroadcastProvider = "dataflow-test-broadcast-ff";
+
+    /// <summary>The bridge external grain code pushes orders at.</summary>
+    internal static ObserverBridgeBinding<AdapterOrder> OrderBridge { get; } =
+        ObserverBridgeBinding.Create("orders-bridge", OrderContract);
+
+    /// <summary>A second bridge, so that two bindings in one run address two grains.</summary>
+    internal static ObserverBridgeBinding<AdapterOrder> NarrowBridge { get; } =
+        ObserverBridgeBinding.Create("orders-bridge-narrow", OrderContract);
+
+    /// <summary>The element contract this cluster's broadcast channels carry.</summary>
+    internal static BroadcastElementBinding<AdapterOrder> BroadcastOrder { get; } =
+        BroadcastElementBinding.Create(OrderContract);
+
+    /// <summary>The observable a silo publishes, proving one declaration serves both hosts.</summary>
+    /// <remarks>
+    /// The very shape a deployment writes: one <see cref="ObservableBinding{T}"/> handed to a silo and to
+    /// the authoring helpers, with nothing Orleans-specific anywhere in it. It replays a fixed sequence and
+    /// ends, so a cluster test can assert what a run of it produced without driving anything by hand.
+    /// </remarks>
+    internal static ObservableBinding<AdapterOrder> SharedOrders { get; } =
+        ObservableBinding.Create(
+            "shared-orders",
+            OrderContract,
+            static () => new ReplayObservable<AdapterOrder>(
+                new AdapterOrder("replay-1", 1),
+                new AdapterOrder("replay-2", 2),
+                new AdapterOrder("replay-3", 3)));
+
     /// <summary>The provider of the two stages that stand beside an adapter in these tests.</summary>
     internal static ProviderId Provider { get; } = ProviderId.Create("adapter-test");
 
@@ -129,6 +162,17 @@ internal static class AdapterVocabulary
     /// <summary>The flow that holds the run until a signal is raised.</summary>
     internal static StageRef Gate { get; } =
         StageRef.Create(Provider, StageId.Create("gate"), StageRef.FirstMajorVersion);
+
+    /// <summary>The same counting sink, on the port contract the .NET push adapters declare.</summary>
+    /// <remarks>
+    /// One stage per element contract is the documented cost of a specification declaring one contract per
+    /// port. A deployment's own stage that wants to consume a push source declares
+    /// <see cref="DotnetStages.ElementContract"/> exactly as one that wants to consume an Orleans adapter
+    /// declares <see cref="OrleansStages.ElementContract"/>, and this is that escape hatch exercised on the
+    /// other provider.
+    /// </remarks>
+    internal static StageRef DotnetCount { get; } =
+        StageRef.Create(Provider, StageId.Create("dotnet-count"), StageRef.FirstMajorVersion);
 
     /// <summary>The contract of the total the counting sink yields.</summary>
     internal static ResultContract<long> Total { get; } = ResultContract.For<long>("adapter-total", 1);
@@ -167,6 +211,13 @@ internal static class AdapterVocabulary
                 [],
                 GateParameters,
                 []),
+            StageSpecification.Create(
+                DotnetCount,
+                [InputPortSpecification.Create(PortId.Create("in"), DotnetStages.ElementContract)],
+                [],
+                [ResultPortSpecification.Create(PortId.Create("total"), Total.Reference)],
+                CountParameters,
+                []),
         ]);
 
     /// <summary>Writes the counting sink's payload.</summary>
@@ -196,3 +247,39 @@ public sealed record AdapterOrder([property: Id(0)] string Id, [property: Id(1)]
 /// <param name="Total">The total price.</param>
 [GenerateSerializer]
 public sealed record AdapterPrice([property: Id(0)] string Id, [property: Id(1)] long Total);
+
+/// <summary>An observable that hands every subscriber a fixed sequence and then ends.</summary>
+/// <typeparam name="T">The element type.</typeparam>
+/// <param name="items">The sequence.</param>
+/// <remarks>
+/// Cold and synchronous: each subscription replays the sequence on the subscribing thread and completes,
+/// so a run of it produces exactly what the fixture declares and a cluster test needs nothing to drive. The
+/// push happens inside <see cref="Subscribe"/>, which is legal and worth exercising — a producer that has
+/// already finished by the time the subscription is returned is the sharpest version of the lifetime rule.
+/// </remarks>
+internal sealed class ReplayObservable<T>(params T[] items) : IObservable<T>
+{
+    /// <inheritdoc/>
+    public IDisposable Subscribe(IObserver<T> observer)
+    {
+        ArgumentNullException.ThrowIfNull(observer);
+
+        foreach (T item in items)
+        {
+            observer.OnNext(item);
+        }
+
+        observer.OnCompleted();
+
+        return new Subscription();
+    }
+
+    /// <summary>The subscription to a producer that has already finished.</summary>
+    private sealed class Subscription : IDisposable
+    {
+        /// <inheritdoc/>
+        public void Dispose()
+        {
+        }
+    }
+}

@@ -20,7 +20,7 @@ internal sealed class AdapterStageFactory : IDataflowStageFactory
     {
         StageNode node = request.Node;
 
-        if (node.Stage == AdapterVocabulary.Count)
+        if (node.Stage == AdapterVocabulary.Count || node.Stage == AdapterVocabulary.DotnetCount)
         {
             JsonElement payload = node.Parameters.ToElement();
             string signal = payload.GetProperty("signal").GetString()!;

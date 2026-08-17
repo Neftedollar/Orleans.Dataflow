@@ -90,6 +90,7 @@ public static class OrleansDataflowSiloBuilderExtensions
         private readonly List<StageSpecification> _specifications = [];
         private readonly List<KeyValuePair<ProviderId, IStageRuntimeFactory>> _factories = [];
         private readonly OrleansAdapterRegistry.Builder _adapters = new();
+        private readonly DotnetRegistrations _dotnet = new();
         private OrleansAdapterRegistry? _registry;
         private StageCatalog? _catalog;
         private bool _anyCatalog;
@@ -162,6 +163,42 @@ public static class OrleansDataflowSiloBuilderExtensions
             return this;
         }
 
+        /// <inheritdoc/>
+        public IOrleansDataflowBuilder AddObserverBridge<T>(ObserverBridgeBinding<T> bridge)
+        {
+            ArgumentNullException.ThrowIfNull(bridge);
+
+            _adapters.Add((IObserverBridgeEntry)bridge);
+
+            return this;
+        }
+
+        /// <inheritdoc/>
+        public IOrleansDataflowBuilder AddBroadcastElement<T>(BroadcastElementBinding<T> element)
+        {
+            ArgumentNullException.ThrowIfNull(element);
+
+            _adapters.Add((IBroadcastSinkEntry)element);
+
+            return this;
+        }
+
+        /// <inheritdoc/>
+        public IOrleansDataflowBuilder AddDotnetStages()
+        {
+            _ = _dotnet.AddDotnetStages();
+
+            return this;
+        }
+
+        /// <inheritdoc/>
+        public IOrleansDataflowBuilder AddObservable<T>(ObservableBinding<T> source)
+        {
+            _ = _dotnet.AddObservable(source);
+
+            return this;
+        }
+
         /// <summary>Checks everything registered, and remembers what the check produced.</summary>
         /// <exception cref="ArgumentException">
         /// No catalog was registered, one stage reference was registered twice, one provider was, or one
@@ -181,6 +218,7 @@ public static class OrleansDataflowSiloBuilderExtensions
             }
 
             _registry = _adapters.Build();
+            _dotnet.Validate();
 
             List<StageSpecification> specifications = [.. _specifications];
             List<KeyValuePair<ProviderId, IStageRuntimeFactory>> keys = [.. _factories];
@@ -191,6 +229,12 @@ public static class OrleansDataflowSiloBuilderExtensions
                 keys.Add(new KeyValuePair<ProviderId, IStageRuntimeFactory>(
                     OrleansStages.Provider,
                     PlaceholderFactory.Instance));
+            }
+
+            if (_dotnet.Any)
+            {
+                specifications.AddRange(_dotnet.Specifications);
+                keys.Add(_dotnet.Factory);
             }
 
             _catalog = StageCatalog.Create(specifications);
@@ -212,6 +256,11 @@ public static class OrleansDataflowSiloBuilderExtensions
                         services,
                         services.GetRequiredService<IGrainFactory>(),
                         _registry!))));
+            }
+
+            if (_dotnet.Any)
+            {
+                factories.Add(_dotnet.Factory);
             }
 
             return new DataflowSiloRegistry(_catalog!, factories);

@@ -76,8 +76,13 @@ time.
    10.2.2, `PersistentStreamProvider`), on both silo and client. No rewind
    API is exposed yet; the source subscribes without a sequence token and
    reads only what arrives after subscription.
-2. `ReminderOptions.MinimumReminderPeriod` default and throw-vs-clamp —
-   probe in M3 phase 3.
+2. ~~`ReminderOptions.MinimumReminderPeriod`~~ **Resolved by probe
+   (phase 3)**: the type lives in `Orleans.Hosting` (not
+   `Orleans.Configuration`); default is one minute; enforcement is a THROW
+   (`ArgumentException` naming both periods) with no reminder registered
+   afterwards. The reminder-trigger adapter therefore validates the period
+   against the silo's configured floor at materialization. The probe test
+   re-asks the question of every Orleans version this repo builds against.
 3. ~~`TestingHost` package dependency closure~~ **Resolved by probe
    (phase 1)**: TestingHost 10.2.2 transitively carries the whole silo host
    (`Runtime`, plus `Persistence.Memory`, `Reminders`, `Streaming`), so a

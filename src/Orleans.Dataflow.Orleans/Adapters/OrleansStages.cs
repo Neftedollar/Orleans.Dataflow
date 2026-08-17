@@ -1,4 +1,5 @@
 using Orleans.Dataflow.Definition;
+using Orleans.Dataflow.Grains;
 using Orleans.Dataflow.Identity;
 using Orleans.Dataflow.Serialization;
 
@@ -10,11 +11,20 @@ namespace Orleans.Dataflow.Adapters;
 /// </summary>
 /// <remarks>
 /// <para>
-/// <b>Five stages and no more.</b> A subscription that feeds a run, a publication a run feeds, an awaited
-/// grain call in its transforming and its terminating form, and a grain enumeration that heads a run. Each
-/// is a real registered stage — named in a document, resolved from a silo's catalog by identity, built by a
-/// runtime factory — so a pipeline written with them carries no delegate, no CLR name, and nothing a
-/// document could not honestly say.
+/// <b>Eight stages and no more.</b> A stream subscription that feeds a run and a stream publication a run
+/// feeds; an awaited grain call in its transforming and its terminating form; a grain enumeration that
+/// heads a run; a cluster reminder whose ticks head one; a named bridge external grain code pushes at; and
+/// a Broadcast Channel publication. Each is a real registered stage — named in a document, resolved from a
+/// silo's catalog by identity, built by a runtime factory — so a pipeline written with them carries no
+/// delegate, no CLR name, and nothing a document could not honestly say.
+/// </para>
+/// <para>
+/// <b>The Broadcast Channel <em>source</em> is deliberately absent.</b> A channel's subscription is
+/// implicit — a grain type declares the namespaces it receives, and the runtime activates one grain per
+/// channel key — so a run cannot subscribe to one at all. Reaching it needs a delivery registry that maps
+/// live runs to the grains the runtime activates, which is the same machinery phase 4's keyed distribution
+/// needs, and building half of it here would fix its shape before that work exists. The sink is complete;
+/// the source is scheduled rather than approximated.
 /// </para>
 /// <para>
 /// <b>Declare once, use twice.</b> The bindings in this namespace are written once by deployment code and
@@ -77,6 +87,21 @@ public static class OrleansStages
     public static StageRef GrainEnumerableStage { get; } =
         StageRef.Create(Provider, StageId.Create("grain-enumerable"), StageRef.FirstMajorVersion);
 
+    /// <summary>Gets the reference of the cluster-reminder trigger source.</summary>
+    /// <value><c>orleans/reminder-trigger@v1</c>.</value>
+    public static StageRef ReminderTriggerStage { get; } =
+        StageRef.Create(Provider, StageId.Create("reminder-trigger"), StageRef.FirstMajorVersion);
+
+    /// <summary>Gets the reference of the observer bridge source.</summary>
+    /// <value><c>orleans/observer@v1</c>.</value>
+    public static StageRef ObserverBridgeStage { get; } =
+        StageRef.Create(Provider, StageId.Create("observer"), StageRef.FirstMajorVersion);
+
+    /// <summary>Gets the reference of the Broadcast Channel publication sink.</summary>
+    /// <value><c>orleans/broadcast-sink@v1</c>.</value>
+    public static StageRef BroadcastSinkStage { get; } =
+        StageRef.Create(Provider, StageId.Create("broadcast-sink"), StageRef.FirstMajorVersion);
+
     /// <summary>Gets the one element contract every Orleans adapter port declares.</summary>
     /// <value><c>orleans-element@v1</c>.</value>
     /// <remarks>
@@ -122,6 +147,38 @@ public static class OrleansStages
         ContractReference.Create(
             ContractId.Create("orleans-grain-enumerable-parameters"),
             ContractReference.FirstMajorVersion);
+
+    /// <summary>Gets the parameter contract a reminder trigger declares.</summary>
+    /// <value><c>orleans-reminder-trigger-parameters@v1</c>.</value>
+    public static ContractReference ReminderTriggerParameterContract { get; } =
+        ContractReference.Create(
+            ContractId.Create("orleans-reminder-trigger-parameters"),
+            ContractReference.FirstMajorVersion);
+
+    /// <summary>Gets the parameter contract an observer bridge declares.</summary>
+    /// <value><c>orleans-observer-parameters@v1</c>.</value>
+    public static ContractReference ObserverBridgeParameterContract { get; } =
+        ContractReference.Create(
+            ContractId.Create("orleans-observer-parameters"),
+            ContractReference.FirstMajorVersion);
+
+    /// <summary>Gets the parameter contract a broadcast sink declares.</summary>
+    /// <value><c>orleans-broadcast-sink-parameters@v1</c>.</value>
+    public static ContractReference BroadcastSinkParameterContract { get; } =
+        ContractReference.Create(
+            ContractId.Create("orleans-broadcast-sink-parameters"),
+            ContractReference.FirstMajorVersion);
+
+    /// <summary>Gets the contract every reminder tick is carried under.</summary>
+    /// <value>The adapters' opaque element contract, declared as <see cref="long"/>.</value>
+    /// <remarks>
+    /// A tick is a <see cref="long"/> index counting from zero within one run, and it is the same value in
+    /// every process: a reminder trigger addresses no element registration, so unlike every other adapter
+    /// here its element type is fixed by the stage rather than by a binding. The index counts the ticks
+    /// this run received and is never a wall-clock reading — and because missed ticks are not replayed, it
+    /// is a count of what arrived rather than of what the schedule implies.
+    /// </remarks>
+    public static ElementContract<long> Tick => Element<long>();
 
     /// <summary>Declares the adapters' opaque element contract as one CLR type's.</summary>
     /// <typeparam name="T">The CLR type that stands on the far side of an adapter's port.</typeparam>
@@ -346,6 +403,297 @@ public static class OrleansStages
         return RegisteredStage.Source(Catalog, GrainEnumerableStage, Element<T>());
     }
 
+    /// <summary>Declares a cluster reminder as the typed start of a graph.</summary>
+    /// <returns>The typed handle, producing the tick index.</returns>
+    /// <remarks>
+    /// <para>
+    /// <b>Acknowledgement</b>: none. A tick is generated rather than delivered, and what this adapter does
+    /// with it — offer it into the run's bounded ingress — is acknowledged by the offer's outcome and by
+    /// nothing further downstream.
+    /// </para>
+    /// <para>
+    /// <b>What survives, verbatim.</b> The reminder <em>definition</em> survives restarts; this run does
+    /// not. Missed ticks are never replayed: a reminder that should have fired while nothing was running
+    /// fires once when a silo picks it up again, and the ticks in between are gone. So the durable half of
+    /// this stage is a schedule and never a stream, and a document that needs every tick accounted for
+    /// needs a different design rather than a longer period.
+    /// </para>
+    /// <para>
+    /// <b>What happens when the run is not there.</b> This phase's runs live for one activation. If the run
+    /// grain is deactivated mid-run, the attempt is faulted — that is phase 1's stated durability contract
+    /// and nothing here changes it — and the reminder outlives it. The next tick finds no live attempt, and
+    /// the trigger unregisters the reminder and stops. There is no silent resume: the run stays exactly as
+    /// it ended, and a caller polling it sees the loss. Durable resume is M5's checkpoint work.
+    /// </para>
+    /// <para>
+    /// <b>Period</b>: whole milliseconds, and at least the cluster's configured
+    /// <c>ReminderOptions.MinimumReminderPeriod</c>. That option defaults to one minute in Orleans 10.2.2
+    /// and is enforced by a throw rather than by clamping — probed, not assumed — so a period below it is
+    /// refused. This adapter turns that refusal into a refusal of the start, naming the configured minimum,
+    /// rather than letting it surface when the trigger first registers.
+    /// </para>
+    /// <para>
+    /// <b>Backpressure</b>: the declared ingress bound, and a clock cannot be slowed. The overflow policy
+    /// may therefore not be <c>backpressure</c>: a tick that finds no room is dropped or fails by the
+    /// declared policy, and the reminder keeps its own schedule regardless of what the run is doing. That
+    /// is also what keeps the trigger's grain turn free — a tick forwarded into a full queue answers at
+    /// once instead of parking the activation that owns the cluster's reminder for this run, which is what
+    /// lets the teardown call that stops the trigger land promptly.
+    /// </para>
+    /// <para>
+    /// <b>The one wait a trigger can still take, measured.</b> If the run's process is gone without having
+    /// stopped the trigger, the tick's forwarding call neither answers nor fails until Orleans' own
+    /// response timeout expires — thirty seconds by default — and the trigger's turn is held for that long
+    /// before it removes the reminder. Observed rather than deduced. The cost is paid once, because a
+    /// trigger that could not reach its run removes the reminder rather than trying again.
+    /// </para>
+    /// <para>
+    /// <b>Elements</b>: <see cref="long"/> indices from zero, counting the ticks this run received.
+    /// </para>
+    /// <para>
+    /// <b>Cleanup</b>: the reminder is unregistered on every terminal path the run can still reach —
+    /// completion, a graceful shutdown, a cancellation, and the disposal a deactivating run grain performs.
+    /// A path that reaches none of them, such as a silo that stopped without running anything, is covered
+    /// by the tick-side cleanup above.
+    /// </para>
+    /// <para>
+    /// <b>The other asymmetry, stated.</b> The trigger's own activation holds the run's receiver, so an
+    /// activation recycled while its run is still executing ends that run's ticks: the next tick finds
+    /// nothing to forward to and removes the reminder, and the run keeps running with a source that has
+    /// gone quiet rather than one that ended or failed. Nothing links back from the trigger to the run, so
+    /// there is no honest way to tell it; a deployment that cannot tolerate a silently quiet trigger bounds
+    /// the run some other way until failover work makes the link recoverable.
+    /// </para>
+    /// </remarks>
+    public static RegisteredSource<long> ReminderTrigger() =>
+        RegisteredStage.Source(Catalog, ReminderTriggerStage, Tick);
+
+    /// <summary>Declares a named observer bridge as the typed start of a graph.</summary>
+    /// <typeparam name="T">The element type the bridge accepts.</typeparam>
+    /// <param name="bridge">The bridge binding this silo registered.</param>
+    /// <returns>The typed handle.</returns>
+    /// <exception cref="ArgumentNullException"><paramref name="bridge"/> is <see langword="null"/>.</exception>
+    /// <remarks>
+    /// <para>
+    /// <b>What a bridge is.</b> The run publishes a receiver under an address composed of its own identity
+    /// and this binding's name — <c>{graph}/{run}/{binding}</c>, the key of an
+    /// <see cref="Grains.IObserverBridgeGrain"/> — and grain code anywhere in the cluster pushes elements
+    /// at that address for as long as the run is listening. A caller holding the run's ticket can derive
+    /// the address without being told, which is what makes this usable without a directory of live runs.
+    /// Two runs of one graph therefore have two bridges and never share one.
+    /// </para>
+    /// <para>
+    /// <b>Best effort, and observably so.</b> There is no history, no replay, and no delivery to a run that
+    /// has not attached yet or has already ended. What this bridge adds over silence is that every push
+    /// answers with what became of it —
+    /// <see cref="Grains.DataflowPushOutcome.Accepted"/>,
+    /// <see cref="Grains.DataflowPushOutcome.Dropped"/>,
+    /// <see cref="Grains.DataflowPushOutcome.Closed"/>, or
+    /// <see cref="Grains.DataflowPushOutcome.Failed"/> — so a caller learns that a run stopped listening
+    /// rather than guessing.
+    /// </para>
+    /// <para>
+    /// <b>Acknowledgement</b>: the offer into the run's bounded ingress. An element a push accepted may
+    /// still be lost by a run that fails afterwards, exactly as a stream delivery may be.
+    /// </para>
+    /// <para>
+    /// <b>Backpressure, and who pays for it</b>: the declared ingress bound, and the pusher. Under the
+    /// backpressure policy a push waits for room, so the caller's grain call does not complete until the
+    /// run has taken an element — and because the bridge grain is not reentrant, every other pusher waits
+    /// behind it. That is backpressure applied to everyone sharing one bridge; a deployment that cannot pay
+    /// it declares a dropping policy instead. A wait long enough to exceed Orleans' response timeout
+    /// surfaces on the caller as a timed-out call, which is the ordinary cost of asking a grain to wait.
+    /// </para>
+    /// <para>
+    /// <b>Ordering</b>: one pusher's elements arrive in the order it sent them, because the bridge grain
+    /// serializes pushes and each caller awaits its own. Nothing is ordered across pushers.
+    /// </para>
+    /// <para>
+    /// <b>What a receiver that vanishes costs, measured.</b> A run whose process is gone without having
+    /// detached leaves a reference that neither answers nor fails: the push hangs until Orleans' own
+    /// response timeout expires — thirty seconds by default — and only then is reported as
+    /// <see cref="Grains.DataflowPushOutcome.Closed"/>, after which the bridge forgets the receiver and
+    /// every later push is refused at once. That was observed rather than deduced, and it is the reason the
+    /// bridge forgets a refusing receiver instead of asking it again: the cost is paid once per lost run
+    /// rather than once per push. A pusher that cannot wait that long shortens
+    /// <c>MessagingOptions.ResponseTimeout</c>, which is a cluster-wide decision and therefore not this
+    /// adapter's to make.
+    /// </para>
+    /// <para>
+    /// <b>Why not <c>IGrainObserver</c> subscriptions</b>: because the direction is the other way round.
+    /// This bridge is what a run offers to publishers, and the receiver it publishes <em>is</em> an Orleans
+    /// grain observer. A variant where the run subscribes to somebody else's observer list can layer on top
+    /// later; the semantics claimed here — best effort, no replay, delivery only while the run lives — are
+    /// the ones the capability matrix's observer row states, and they are the same either way.
+    /// </para>
+    /// </remarks>
+    public static RegisteredSource<T> ObserverBridge<T>(ObserverBridgeBinding<T> bridge)
+    {
+        ArgumentNullException.ThrowIfNull(bridge);
+
+        return RegisteredStage.Source(Catalog, ObserverBridgeStage, Element<T>());
+    }
+
+    /// <summary>Declares a Broadcast Channel publication as the typed end of a graph.</summary>
+    /// <typeparam name="T">The element type the channel carries in this process.</typeparam>
+    /// <param name="element">The broadcast element binding this silo registered.</param>
+    /// <returns>The typed handle.</returns>
+    /// <exception cref="ArgumentNullException"><paramref name="element"/> is <see langword="null"/>.</exception>
+    /// <remarks>
+    /// <para>
+    /// <b>Acknowledgement</b>: one awaited <c>Publish</c> per element, and what that awaits depends on the
+    /// provider's configuration. With <c>FireAndForgetDelivery</c> off, the publication completes when
+    /// every implicit subscriber has handled the element; with it on, it completes when the deliveries have
+    /// been dispatched and a subscriber that throws is never reported. Either way it is publication and
+    /// never end-to-end processing.
+    /// </para>
+    /// <para>
+    /// <b>The delivery mode is declared and checked, not chosen.</b> A channel's mode belongs to the
+    /// provider a silo registered, so a document cannot select it per publication. What the payload carries
+    /// is the mode the author wrote the document against, and a silo whose provider is configured the other
+    /// way refuses the run at materialization rather than quietly giving it different semantics.
+    /// </para>
+    /// <para>
+    /// <b>Subscription</b>: implicit only. A Broadcast Channel has no explicit subscription and no
+    /// subscriber list a publisher can see, so this sink cannot tell whether anybody is listening, and a
+    /// publication to a channel with no subscribers is a success. That is the capability matrix's
+    /// best-effort row and not a limitation of this adapter.
+    /// </para>
+    /// <para>
+    /// <b>History and replay</b>: none. A channel keeps nothing, so a subscriber that was not there is not
+    /// caught up afterwards.
+    /// </para>
+    /// <para>
+    /// <b>Ordering</b>: elements are published one at a time in the order the run produced them. What order
+    /// a subscriber observes across several publishers is the channel's business and is not promised here.
+    /// </para>
+    /// <para>
+    /// <b>Cancellation</b>: observed between elements. A terminal in this engine is a synchronous fold and
+    /// is handed no token, so a publication already in flight when a run is cancelled runs to its own end;
+    /// what a cancellation stops is the publication of the next element. That is a limit of the phase-1
+    /// terminal seam, stated rather than hidden.
+    /// </para>
+    /// <para>
+    /// <b>Completion</b>: a run that ends signals nothing on the channel. A channel has no end a publisher
+    /// can honestly declare, so saying one would tell every subscriber something about a channel this run
+    /// does not own.
+    /// </para>
+    /// </remarks>
+    public static RegisteredSink<T> BroadcastSink<T>(BroadcastElementBinding<T> element)
+    {
+        ArgumentNullException.ThrowIfNull(element);
+
+        return RegisteredStage.Sink(Catalog, BroadcastSinkStage, Element<T>());
+    }
+
+    /// <summary>Composes the address of one run's observer bridge.</summary>
+    /// <param name="graphId">The identity of the pipeline the run belongs to.</param>
+    /// <param name="runId">The identity of the run.</param>
+    /// <param name="bridge">The registered bridge's name.</param>
+    /// <returns>The key of the <see cref="Grains.IObserverBridgeGrain"/> that run publishes on.</returns>
+    /// <exception cref="ArgumentNullException">Any argument is <see langword="null"/>.</exception>
+    /// <remarks>
+    /// The one place the format is written down, so that the run composing its address and the caller
+    /// deriving it cannot disagree. Both halves are what they already have: a run knows its own grain key,
+    /// and a caller holds the ticket the coordinator issued.
+    /// </remarks>
+    public static string ObserverBridgeKey(string graphId, string runId, string bridge)
+    {
+        ArgumentNullException.ThrowIfNull(graphId);
+        ArgumentNullException.ThrowIfNull(runId);
+        ArgumentNullException.ThrowIfNull(bridge);
+
+        return $"{graphId}/{runId}/{bridge}";
+    }
+
+    /// <summary>Composes the address of one run's observer bridge from the ticket that started it.</summary>
+    /// <param name="ticket">The ticket the coordinator issued for the run.</param>
+    /// <param name="bridge">The registered bridge's name.</param>
+    /// <returns>The key of the <see cref="Grains.IObserverBridgeGrain"/> that run publishes on.</returns>
+    /// <exception cref="ArgumentNullException">Either argument is <see langword="null"/>.</exception>
+    public static string ObserverBridgeKey(PipelineRunTicket ticket, string bridge)
+    {
+        ArgumentNullException.ThrowIfNull(ticket);
+
+        return ObserverBridgeKey(ticket.GraphId, ticket.RunId, bridge);
+    }
+
+    /// <summary>Writes the payload of one reminder trigger occurrence.</summary>
+    /// <param name="period">The period between ticks; whole milliseconds and at least one.</param>
+    /// <param name="ingress">
+    /// The bounded ingress the ticks land in, whose overflow policy may not be
+    /// <see cref="OverflowPolicy.Backpressure"/>.
+    /// </param>
+    /// <returns>The canonical payload.</returns>
+    /// <exception cref="ArgumentNullException"><paramref name="ingress"/> is <see langword="null"/>.</exception>
+    /// <exception cref="ArgumentOutOfRangeException">
+    /// <paramref name="period"/> is below one millisecond or beyond <see cref="int.MaxValue"/>
+    /// milliseconds.
+    /// </exception>
+    /// <exception cref="ArgumentException">
+    /// <paramref name="ingress"/> declares the backpressuring policy, which a clock cannot honor.
+    /// </exception>
+    public static CanonicalJsonValue ReminderTriggerParameters(TimeSpan period, BufferOptions ingress)
+    {
+        ArgumentNullException.ThrowIfNull(ingress);
+        ArgumentOutOfRangeException.ThrowIfLessThan(period.TotalMilliseconds, 1, nameof(period));
+        ArgumentOutOfRangeException.ThrowIfGreaterThan(period.TotalMilliseconds, int.MaxValue, nameof(period));
+
+        if (ingress.OverflowPolicy is OverflowPolicy.Backpressure)
+        {
+            throw new ArgumentException(
+                "A reminder trigger cannot backpressure a cluster reminder: the schedule is the cluster's and a tick that finds no room is dropped or fails by policy. Declare one of the dropping policies or the failing one.",
+                nameof(ingress));
+        }
+
+        return ReminderTriggerPayload.Write(period, ingress);
+    }
+
+    /// <summary>Writes the payload of one observer bridge occurrence.</summary>
+    /// <typeparam name="T">The element type the bridge accepts.</typeparam>
+    /// <param name="bridge">The bridge binding this silo registered.</param>
+    /// <param name="ingress">The bounded ingress the pushes land in.</param>
+    /// <returns>The canonical payload.</returns>
+    /// <exception cref="ArgumentNullException">
+    /// <paramref name="bridge"/> or <paramref name="ingress"/> is <see langword="null"/>.
+    /// </exception>
+    public static CanonicalJsonValue ObserverBridgeParameters<T>(
+        ObserverBridgeBinding<T> bridge,
+        BufferOptions ingress)
+    {
+        ArgumentNullException.ThrowIfNull(bridge);
+        ArgumentNullException.ThrowIfNull(ingress);
+
+        return ObserverBridgePayload.Write(bridge.Name, bridge.Output.Reference.ToString(), ingress);
+    }
+
+    /// <summary>Writes the payload of one broadcast sink occurrence.</summary>
+    /// <typeparam name="T">The element type the channel carries.</typeparam>
+    /// <param name="element">The broadcast element binding this silo registered.</param>
+    /// <param name="channel">The channel to publish to.</param>
+    /// <param name="fireAndForgetDelivery">
+    /// The delivery mode this document is written against, checked against the silo's provider when the run
+    /// is materialized.
+    /// </param>
+    /// <returns>The canonical payload.</returns>
+    /// <exception cref="ArgumentNullException"><paramref name="element"/> is <see langword="null"/>.</exception>
+    /// <exception cref="ArgumentException"><paramref name="channel"/> is the default value.</exception>
+    public static CanonicalJsonValue BroadcastSinkParameters<T>(
+        BroadcastElementBinding<T> element,
+        OrleansStreamAddress channel,
+        bool fireAndForgetDelivery)
+    {
+        ArgumentNullException.ThrowIfNull(element);
+        RequireAddress(channel);
+
+        return BroadcastSinkPayload.Write(
+            element.Element.Reference.ToString(),
+            channel.Provider,
+            channel.Namespace,
+            channel.Key,
+            fireAndForgetDelivery);
+    }
+
     /// <summary>Writes the payload of one stream source occurrence.</summary>
     /// <typeparam name="T">The element type the stream carries.</typeparam>
     /// <param name="element">The stream element binding this silo registered.</param>
@@ -506,18 +854,49 @@ public static class OrleansStages
                 GrainEnumerableParameterContract,
                 [],
                 new OrleansStageValidator(registry, OrleansStageKind.GrainEnumerable)),
+            StageSpecification.Create(
+                ReminderTriggerStage,
+                [],
+                [OutputPortSpecification.Create(OutputPort, ElementContract)],
+                [],
+                ReminderTriggerParameterContract,
+                [],
+                new OrleansStageValidator(registry, OrleansStageKind.ReminderTrigger)),
+            StageSpecification.Create(
+                ObserverBridgeStage,
+                [],
+                [OutputPortSpecification.Create(OutputPort, ElementContract)],
+                [],
+                ObserverBridgeParameterContract,
+                [],
+                new OrleansStageValidator(registry, OrleansStageKind.ObserverBridge)),
+            StageSpecification.Create(
+                BroadcastSinkStage,
+                [InputPortSpecification.Create(InputPort, ElementContract)],
+                [],
+                [],
+                BroadcastSinkParameterContract,
+                [],
+                new OrleansStageValidator(registry, OrleansStageKind.BroadcastSink)),
         ]);
 
-    /// <summary>Refuses a stream address that addresses nothing.</summary>
-    /// <param name="stream">The address.</param>
-    /// <exception cref="ArgumentException"><paramref name="stream"/> is the default value.</exception>
-    private static void RequireAddress(OrleansStreamAddress stream)
+    /// <summary>Refuses an address that addresses nothing.</summary>
+    /// <param name="address">The address.</param>
+    /// <param name="parameter">The parameter name to report it under.</param>
+    /// <exception cref="ArgumentException"><paramref name="address"/> is the default value.</exception>
+    /// <remarks>
+    /// The parameter name is passed rather than inferred, because one address type serves a stream and a
+    /// channel and a refusal that named the wrong argument would send an author to the wrong line.
+    /// </remarks>
+    private static void RequireAddress(
+        OrleansStreamAddress address,
+        [System.Runtime.CompilerServices.CallerArgumentExpression(nameof(address))] string? parameter = null)
     {
-        if (stream.IsDefault)
+        if (address.IsDefault)
         {
             throw new ArgumentException(
-                $"A stream adapter's payload requires a created {nameof(OrleansStreamAddress)}; the default value addresses no stream.",
-                nameof(stream));
+                $"An Orleans adapter's payload requires a created {nameof(OrleansStreamAddress)}; the default value addresses nothing.",
+                parameter);
         }
     }
 

@@ -433,6 +433,333 @@ internal static class GrainEnumerablePayload
 internal sealed record GrainEnumerableDeclaration(string Source, string Output);
 
 /// <summary>
+/// How a reminder trigger states how often it fires and how much of a backlog the run will hold.
+/// </summary>
+/// <remarks>
+/// <para>
+/// Three members: the period, and the capacity and overflow policy of the bounded ingress the ticks land
+/// in. The policy is read through the very same parser a buffer's is, and refused for exactly one of the
+/// five values — a clock cannot be slowed, so <c>backpressure</c> would mean parking the grain turn that
+/// owns the cluster's reminder for this run, and a stage that did that would put every later tick behind
+/// the run it was meant to wake.
+/// </para>
+/// <para>
+/// The period is written in milliseconds and checked here only for being positive. Whether it clears the
+/// cluster's configured <c>ReminderOptions.MinimumReminderPeriod</c> is a property of a silo rather than of
+/// a document, and it is checked where that option can be read.
+/// </para>
+/// </remarks>
+internal static class ReminderTriggerPayload
+{
+    /// <summary>The payload member holding the ingress capacity.</summary>
+    internal const string CapacityMember = "capacity";
+
+    /// <summary>The payload member holding the period between ticks in milliseconds.</summary>
+    internal const string PeriodMember = "periodMilliseconds";
+
+    /// <summary>The payload member holding the ingress overflow policy.</summary>
+    internal const string PolicyMember = "overflowPolicy";
+
+    /// <summary>Writes the payload of one reminder trigger.</summary>
+    /// <param name="period">The period between ticks.</param>
+    /// <param name="ingress">The bounded ingress the ticks land in.</param>
+    /// <returns>The canonical payload.</returns>
+    internal static CanonicalJsonValue Write(TimeSpan period, BufferOptions ingress) =>
+        CanonicalJsonValue.Parse(string.Create(
+            CultureInfo.InvariantCulture,
+            $"{{\"{CapacityMember}\":{ingress.Capacity}," +
+            $"\"{PeriodMember}\":{(long)period.TotalMilliseconds}," +
+            $"\"{PolicyMember}\":\"{LocalBufferParameters.Spell(ingress.OverflowPolicy)}\"}}"));
+
+    /// <summary>Reads a payload back into what it declares.</summary>
+    /// <param name="parameters">The node's payload, in canonical form.</param>
+    /// <param name="declaration">
+    /// When this method returns <see langword="true"/>, what the payload declares; otherwise
+    /// <see langword="null"/>.
+    /// </param>
+    /// <param name="violations">
+    /// When this method returns <see langword="false"/>, one lower-case sentence fragment per violation.
+    /// </param>
+    /// <returns><see langword="true"/> when the payload is a valid reminder-trigger payload.</returns>
+    internal static bool TryRead(
+        CanonicalJsonValue parameters,
+        out ReminderTriggerDeclaration? declaration,
+        out IReadOnlyList<string> violations)
+    {
+        declaration = null;
+
+        if (!OrleansPayload.TryOpen(parameters, out JsonElement payload, out violations))
+        {
+            return false;
+        }
+
+        List<string> found = [];
+        int capacity = 0;
+        int period = 0;
+
+        if (LocalParameterPayload.TryReadPositiveInteger(payload, CapacityMember, found, out int bound))
+        {
+            capacity = bound;
+        }
+
+        if (LocalParameterPayload.TryReadPositiveInteger(payload, PeriodMember, found, out int declared))
+        {
+            period = declared;
+        }
+
+        OverflowPolicy policy = OrleansPayload.ReadPolicy(payload, PolicyMember, found);
+
+        if (policy is OverflowPolicy.Backpressure && found.Count == 0)
+        {
+            found.Add(
+                $"the member '{PolicyMember}' is 'backpressure', and a reminder trigger cannot backpressure a cluster reminder: a tick that finds no room is dropped or fails by policy, so declare one of 'drop-oldest', 'drop-newest', 'drop-buffer', and 'fail'");
+        }
+
+        LocalParameterPayload.ReportUnknownMembers(
+            payload,
+            [CapacityMember, PeriodMember, PolicyMember],
+            found);
+
+        if (found.Count > 0)
+        {
+            violations = found;
+
+            return false;
+        }
+
+        violations = [];
+        declaration = new ReminderTriggerDeclaration(
+            TimeSpan.FromMilliseconds(period),
+            new BufferOptions { Capacity = capacity, OverflowPolicy = policy });
+
+        return true;
+    }
+}
+
+/// <summary>What a reminder trigger's payload declares.</summary>
+/// <param name="Period">The period between ticks.</param>
+/// <param name="Ingress">The bounded ingress the ticks land in.</param>
+internal sealed record ReminderTriggerDeclaration(TimeSpan Period, BufferOptions Ingress);
+
+/// <summary>
+/// How an observer bridge states which registration it exposes and how much of it the run will hold.
+/// </summary>
+internal static class ObserverBridgePayload
+{
+    /// <summary>The payload member holding the registered bridge's name.</summary>
+    internal const string BridgeMember = "bridge";
+
+    /// <summary>The payload member holding the ingress capacity.</summary>
+    internal const string CapacityMember = "capacity";
+
+    /// <summary>The payload member holding the contract of the elements pushed at the bridge.</summary>
+    internal const string OutputMember = "output";
+
+    /// <summary>The payload member holding the ingress overflow policy.</summary>
+    internal const string PolicyMember = "overflowPolicy";
+
+    /// <summary>Writes the payload of one observer bridge.</summary>
+    /// <param name="bridge">The registered bridge's name.</param>
+    /// <param name="output">The contract text of the elements pushed at it.</param>
+    /// <param name="ingress">The bounded ingress the pushes land in.</param>
+    /// <returns>The canonical payload.</returns>
+    internal static CanonicalJsonValue Write(string bridge, string output, BufferOptions ingress) =>
+        CanonicalJsonValue.Parse(string.Create(
+            CultureInfo.InvariantCulture,
+            $"{{\"{BridgeMember}\":{JsonSerializer.Serialize(bridge)}," +
+            $"\"{CapacityMember}\":{ingress.Capacity}," +
+            $"\"{OutputMember}\":{JsonSerializer.Serialize(output)}," +
+            $"\"{PolicyMember}\":\"{LocalBufferParameters.Spell(ingress.OverflowPolicy)}\"}}"));
+
+    /// <summary>Reads a payload back into what it declares.</summary>
+    /// <param name="parameters">The node's payload, in canonical form.</param>
+    /// <param name="declaration">
+    /// When this method returns <see langword="true"/>, what the payload declares; otherwise
+    /// <see langword="null"/>.
+    /// </param>
+    /// <param name="violations">
+    /// When this method returns <see langword="false"/>, one lower-case sentence fragment per violation.
+    /// </param>
+    /// <returns><see langword="true"/> when the payload is a valid observer-bridge payload.</returns>
+    internal static bool TryRead(
+        CanonicalJsonValue parameters,
+        out ObserverBridgeDeclaration? declaration,
+        out IReadOnlyList<string> violations)
+    {
+        declaration = null;
+
+        if (!OrleansPayload.TryOpen(parameters, out JsonElement payload, out violations))
+        {
+            return false;
+        }
+
+        List<string> found = [];
+        int capacity = 0;
+
+        if (LocalParameterPayload.TryReadPositiveInteger(payload, CapacityMember, found, out int declared))
+        {
+            capacity = declared;
+        }
+
+        string? bridge = OrleansPayload.ReadText(payload, BridgeMember, found);
+        string? output = OrleansPayload.ReadText(payload, OutputMember, found);
+        OverflowPolicy policy = OrleansPayload.ReadPolicy(payload, PolicyMember, found);
+
+        LocalParameterPayload.ReportUnknownMembers(
+            payload,
+            [BridgeMember, CapacityMember, OutputMember, PolicyMember],
+            found);
+
+        if (found.Count > 0)
+        {
+            violations = found;
+
+            return false;
+        }
+
+        violations = [];
+        declaration = new ObserverBridgeDeclaration(
+            bridge!,
+            output!,
+            new BufferOptions { Capacity = capacity, OverflowPolicy = policy });
+
+        return true;
+    }
+}
+
+/// <summary>What an observer bridge's payload declares.</summary>
+/// <param name="Bridge">The registered bridge's name.</param>
+/// <param name="Output">The contract text of the elements pushed at it.</param>
+/// <param name="Ingress">The bounded ingress the pushes land in.</param>
+internal sealed record ObserverBridgeDeclaration(string Bridge, string Output, BufferOptions Ingress);
+
+/// <summary>
+/// How a Broadcast Channel sink states which channel it publishes to and what it expects of the provider.
+/// </summary>
+/// <remarks>
+/// Five members: the element contract, the three parts of the channel's address, and the delivery mode the
+/// author wrote the document against. The last one is a declaration rather than a setting — a channel's
+/// <c>FireAndForgetDelivery</c> is configured on the provider and cannot be chosen per publication — so
+/// what carrying it buys is a check: a silo whose provider is configured the other way refuses the document
+/// instead of quietly giving the run different semantics from the ones it was written for.
+/// </remarks>
+internal static class BroadcastSinkPayload
+{
+    /// <summary>The payload member holding the element contract the channel carries.</summary>
+    internal const string ElementMember = "element";
+
+    /// <summary>The payload member holding the delivery mode the author declared.</summary>
+    internal const string FireAndForgetMember = "fireAndForgetDelivery";
+
+    /// <summary>The payload member holding the channel key.</summary>
+    internal const string KeyMember = "key";
+
+    /// <summary>The payload member holding the channel namespace.</summary>
+    internal const string NamespaceMember = "namespace";
+
+    /// <summary>The payload member holding the broadcast provider's registration name.</summary>
+    internal const string ProviderMember = "provider";
+
+    /// <summary>Writes the payload of one broadcast sink.</summary>
+    /// <param name="element">The contract text of the elements the channel carries.</param>
+    /// <param name="provider">The broadcast provider's registration name.</param>
+    /// <param name="channelNamespace">The channel's namespace.</param>
+    /// <param name="key">The channel's key.</param>
+    /// <param name="fireAndForgetDelivery">The delivery mode the author declared.</param>
+    /// <returns>The canonical payload.</returns>
+    internal static CanonicalJsonValue Write(
+        string element,
+        string provider,
+        string channelNamespace,
+        string key,
+        bool fireAndForgetDelivery) =>
+        CanonicalJsonValue.Parse(
+            $"{{\"{ElementMember}\":{JsonSerializer.Serialize(element)}," +
+            $"\"{FireAndForgetMember}\":{(fireAndForgetDelivery ? "true" : "false")}," +
+            $"\"{KeyMember}\":{JsonSerializer.Serialize(key)}," +
+            $"\"{NamespaceMember}\":{JsonSerializer.Serialize(channelNamespace)}," +
+            $"\"{ProviderMember}\":{JsonSerializer.Serialize(provider)}}}");
+
+    /// <summary>Reads a payload back into what it declares.</summary>
+    /// <param name="parameters">The node's payload, in canonical form.</param>
+    /// <param name="declaration">
+    /// When this method returns <see langword="true"/>, what the payload declares; otherwise
+    /// <see langword="null"/>.
+    /// </param>
+    /// <param name="violations">
+    /// When this method returns <see langword="false"/>, one lower-case sentence fragment per violation.
+    /// </param>
+    /// <returns><see langword="true"/> when the payload is a valid broadcast-sink payload.</returns>
+    internal static bool TryRead(
+        CanonicalJsonValue parameters,
+        out BroadcastSinkDeclaration? declaration,
+        out IReadOnlyList<string> violations)
+    {
+        declaration = null;
+
+        if (!OrleansPayload.TryOpen(parameters, out JsonElement payload, out violations))
+        {
+            return false;
+        }
+
+        List<string> found = [];
+        string? element = OrleansPayload.ReadText(payload, ElementMember, found);
+        string? key = OrleansPayload.ReadText(payload, KeyMember, found);
+        string? channelNamespace = OrleansPayload.ReadText(payload, NamespaceMember, found);
+        string? provider = OrleansPayload.ReadText(payload, ProviderMember, found);
+        bool fireAndForget = false;
+
+        if (!payload.TryGetProperty(FireAndForgetMember, out JsonElement declared))
+        {
+            found.Add(LocalParameterPayload.DescribeMissing(FireAndForgetMember));
+        }
+        else if (declared.ValueKind is not JsonValueKind.True and not JsonValueKind.False)
+        {
+            found.Add(LocalParameterPayload.DescribeWrongKind(FireAndForgetMember, declared, "true or false"));
+        }
+        else
+        {
+            fireAndForget = declared.ValueKind is JsonValueKind.True;
+        }
+
+        LocalParameterPayload.ReportUnknownMembers(
+            payload,
+            [ElementMember, FireAndForgetMember, KeyMember, NamespaceMember, ProviderMember],
+            found);
+
+        if (found.Count > 0)
+        {
+            violations = found;
+
+            return false;
+        }
+
+        violations = [];
+        declaration = new BroadcastSinkDeclaration(
+            element!,
+            provider!,
+            channelNamespace!,
+            key!,
+            fireAndForget);
+
+        return true;
+    }
+}
+
+/// <summary>What a broadcast sink's payload declares.</summary>
+/// <param name="Element">The contract text of the elements the channel carries.</param>
+/// <param name="Provider">The broadcast provider's registration name.</param>
+/// <param name="Namespace">The channel's namespace.</param>
+/// <param name="Key">The channel's key.</param>
+/// <param name="FireAndForgetDelivery">The delivery mode the author declared.</param>
+internal sealed record BroadcastSinkDeclaration(
+    string Element,
+    string Provider,
+    string Namespace,
+    string Key,
+    bool FireAndForgetDelivery);
+
+/// <summary>
 /// The payload rules every Orleans adapter shares.
 /// </summary>
 /// <remarks>
@@ -499,5 +826,42 @@ internal static class OrleansPayload
         }
 
         return text;
+    }
+
+    /// <summary>Reads the overflow policy a bounded ingress declares.</summary>
+    /// <param name="payload">The payload object.</param>
+    /// <param name="member">The member name.</param>
+    /// <param name="violations">The report under construction, appended to when the member is wrong.</param>
+    /// <returns>The policy, or <see cref="OverflowPolicy.Backpressure"/> when the member is wrong.</returns>
+    /// <remarks>
+    /// The default on a failed read is the backpressuring policy for the same reason a
+    /// <see cref="BufferOptions"/> defaults to it: it is the policy that loses nothing, and a read that
+    /// reported a violation is never used to build a declaration anyway.
+    /// </remarks>
+    internal static OverflowPolicy ReadPolicy(JsonElement payload, string member, List<string> violations)
+    {
+        if (!payload.TryGetProperty(member, out JsonElement declared))
+        {
+            violations.Add(LocalParameterPayload.DescribeMissing(member));
+
+            return OverflowPolicy.Backpressure;
+        }
+
+        if (declared.ValueKind is not JsonValueKind.String)
+        {
+            violations.Add(LocalParameterPayload.DescribeWrongKind(member, declared, "one of five policy names"));
+
+            return OverflowPolicy.Backpressure;
+        }
+
+        if (!LocalBufferParameters.TryParse(declared.GetString()!, out OverflowPolicy policy))
+        {
+            violations.Add(
+                $"the member '{member}' is '{declared.GetString()}', and an overflow policy is one of 'backpressure', 'drop-oldest', 'drop-newest', 'drop-buffer', and 'fail'");
+
+            return OverflowPolicy.Backpressure;
+        }
+
+        return policy;
     }
 }

@@ -54,19 +54,22 @@ namespace Orleans.Dataflow.Runtime;
 internal static class LocalRunPlanner
 {
     /// <summary>Compiles a graph into the plan for one run.</summary>
-    /// <param name="graph">The closed graph, already validated against the local stage catalog.</param>
+    /// <param name="graph">The closed graph, already validated against the host's catalog.</param>
+    /// <param name="binder">The resolver of every node no local behavior is bound to.</param>
+    /// <param name="runIdentity">What the run this plan is for is called in this process.</param>
     /// <returns>The plan.</returns>
     /// <exception cref="InvalidOperationException">
     /// The document is not one linear chain, a node has no binding, a binding does not have the shape the
     /// stage it is bound to requires, or a parameterized stage carries a payload this runtime cannot read.
     /// </exception>
-    internal static LocalRunPlan Compile(RunnableGraph graph) =>
-        Compile(graph.Document, graph.LocalBindings, StageRuntimeBinder.None);
+    internal static LocalRunPlan Compile(RunnableGraph graph, StageRuntimeBinder binder, string runIdentity) =>
+        Compile(graph.Document, graph.LocalBindings, binder, runIdentity);
 
     /// <summary>Compiles a document into the plan for one run.</summary>
     /// <param name="document">The document, already validated against the host's catalog.</param>
     /// <param name="bindings">The authoring-side behavior of every locally bound node.</param>
     /// <param name="binder">The resolver of every node no local behavior is bound to.</param>
+    /// <param name="runIdentity">What the run this plan is for is called in this deployment.</param>
     /// <returns>The plan.</returns>
     /// <exception cref="InvalidOperationException">
     /// The document is not one linear chain, a node is neither locally bound nor resolvable through
@@ -84,7 +87,8 @@ internal static class LocalRunPlanner
     internal static LocalRunPlan Compile(
         GraphDocument document,
         IReadOnlyDictionary<NodeId, LocalStageDescriptor> bindings,
-        StageRuntimeBinder binder)
+        StageRuntimeBinder binder,
+        string runIdentity)
     {
         List<NodeId> order = LinearOrder(document);
         Dictionary<NodeId, StageNode> declarations = Declarations(document);
@@ -119,7 +123,7 @@ internal static class LocalRunPlanner
 
                         elements = context => LocalSequence.Async(
                             _ => new LocalAsyncCursor<object?>(
-                                open(new StageRunTokens(context.RunToken, context.StopToken))
+                                open(new StageRunTokens(runIdentity, context.RunToken, context.StopToken))
                                     .GetAsyncEnumerator(context.RunToken)),
                             context);
 

@@ -1,7 +1,8 @@
-using System.Diagnostics.CodeAnalysis;
 using System.Globalization;
 using System.Text;
 using Orleans.Dataflow.Compilation;
+using Orleans.Dataflow.Definition;
+using Orleans.Dataflow.Hosting;
 using Orleans.Dataflow.Runtime;
 
 namespace Orleans.Dataflow;
@@ -30,14 +31,57 @@ namespace Orleans.Dataflow;
 /// </remarks>
 public sealed class LocalDataflowHost
 {
+    private readonly IStageCatalog _catalog;
+    private readonly StageRuntimeBinder _binder;
+
     /// <summary>Initializes a new instance of the <see cref="LocalDataflowHost"/> class.</summary>
     /// <remarks>
-    /// The host has nothing to configure yet. Options that change how a run behaves belong to the run, so
-    /// they will arrive on materialization rather than here, where they would silently apply to graphs
-    /// materialized long after they were chosen.
+    /// The lambda-only host. It resolves exactly <see cref="LocalStageCatalog.Instance"/> and no registered
+    /// provider, so a graph containing a registered stage is refused by name rather than half-executed. A
+    /// host that has to run one takes the overload that registers the provider.
     /// </remarks>
     public LocalDataflowHost()
     {
+        _catalog = LocalStageCatalog.Instance;
+        _binder = StageRuntimeBinder.None;
+    }
+
+    /// <summary>Initializes a new instance of the <see cref="LocalDataflowHost"/> class with providers.</summary>
+    /// <param name="configure">The registration of this host's .NET push adapters.</param>
+    /// <exception cref="ArgumentNullException"><paramref name="configure"/> is <see langword="null"/>.</exception>
+    /// <exception cref="ArgumentException"><paramref name="configure"/> registered one name twice.</exception>
+    /// <remarks>
+    /// <para>
+    /// The local half of "declare once, use twice". The very bindings a silo is given are given to this
+    /// host, so one declaration serves both runtimes and a graph written against them runs in either — the
+    /// runtime-factory seam's own claim, made checkable in a process with no cluster in it.
+    /// </para>
+    /// <para>
+    /// The registrations are checked here, so a broken one stops the host from being constructed rather
+    /// than surfacing at the first graph. What they resolve to is one immutable catalog and one immutable
+    /// factory registry, shared by every graph this host materializes.
+    /// </para>
+    /// </remarks>
+    public LocalDataflowHost(Action<IDotnetDataflowBuilder> configure)
+    {
+        ArgumentNullException.ThrowIfNull(configure);
+
+        DotnetRegistrations registrations = new();
+
+        configure(registrations);
+        registrations.Validate();
+
+        if (!registrations.Any)
+        {
+            _catalog = LocalStageCatalog.Instance;
+            _binder = StageRuntimeBinder.None;
+
+            return;
+        }
+
+        _catalog = StageCatalog.Create(
+            [.. LocalStageCatalog.Instance.Specifications, .. registrations.Specifications]);
+        _binder = new StageRuntimeBinder(_catalog, new StageRuntimeRegistry([registrations.Factory]));
     }
 
     /// <summary>Materializes a graph into a running run.</summary>
@@ -68,22 +112,23 @@ public sealed class LocalDataflowHost
     /// run, not a failure of materialization.
     /// </para>
     /// </remarks>
-    [SuppressMessage(
-        "Performance",
-        "CA1822:Mark members as static",
-        Justification = "A host is an instance by contract: 'host.MaterializeAsync(graph, ct)' is the documented spelling, and the host is where the configuration a run is materialized under will live. A static method would fix that shape for good.")]
     public ValueTask<RunHandle> MaterializeAsync(RunnableGraph graph, CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(graph);
 
-        GraphValidationReport report = GraphCompiler.Validate(graph.Document, LocalStageCatalog.Instance);
+        GraphValidationReport report = GraphCompiler.Validate(graph.Document, _catalog);
 
         if (!report.IsValid)
         {
             throw new InvalidOperationException(Describe(report));
         }
 
-        LocalRunPlan plan = LocalRunPlanner.Compile(graph);
+        // A fresh identity per run rather than the graph's own, because two runs of one graph are two runs
+        // and a source that publishes itself under this name must not publish two runs under one.
+        LocalRunPlan plan = LocalRunPlanner.Compile(
+            graph,
+            _binder,
+            string.Create(CultureInfo.InvariantCulture, $"local/{Guid.NewGuid():n}"));
         LocalRun run = LocalRun.Start(plan, graph.Fingerprint, graph.AuthoringNonce, cancellationToken);
 
         return new ValueTask<RunHandle>(new RunHandle(run));

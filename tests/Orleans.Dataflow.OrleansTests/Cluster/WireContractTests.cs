@@ -193,7 +193,10 @@ public sealed class WireContractTests(DataflowCluster cluster)
 
         foreach (System.Reflection.MethodInfo member in typeof(IPipelineCoordinatorGrain)
             .GetMethods()
-            .Concat(typeof(IPipelineRunGrain).GetMethods()))
+            .Concat(typeof(IPipelineRunGrain).GetMethods())
+            .Concat(typeof(IReminderTriggerGrain).GetMethods())
+            .Concat(typeof(IObserverBridgeGrain).GetMethods())
+            .Concat(typeof(IDataflowPushReceiver).GetMethods()))
         {
             foreach (System.Reflection.ParameterInfo argument in member.GetParameters())
             {

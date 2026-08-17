@@ -65,7 +65,8 @@ public sealed class DataflowStageRuntime
         ArgumentNullException.ThrowIfNull(open);
 
         return new DataflowStageRuntime(
-            StageRuntime.Source(tokens => open(new DataflowRunTokens(tokens.RunToken, tokens.StopToken))));
+            StageRuntime.Source(tokens =>
+                open(new DataflowRunTokens(tokens.RunIdentity, tokens.RunToken, tokens.StopToken))));
     }
 
     /// <summary>Creates the runtime of a synchronous element stage.</summary>
@@ -161,10 +162,27 @@ public sealed class DataflowStageRuntime
 /// shutdown is asked for. A source released by this token alone ends its sequence as if it had run out,
 /// which is what makes a shutdown drain the run instead of abandoning it.
 /// </param>
+/// <param name="RunIdentity">
+/// What this run is called in the cluster — the run grain's own key, <c>{graph}/{run}</c> — and therefore
+/// unique among the runs a deployment has in flight. A source that has to be addressable from outside the
+/// run composes its address from this and its binding's name, so that the same address is derivable by a
+/// caller holding the run's ticket. Every other source ignores it.
+/// </param>
 /// <remarks>
-/// The pair states the difference between the two ways a run stops. Cancellation abandons the run and
-/// resolves nothing; shutdown stops production and lets everything already admitted flow to the terminal,
-/// so an aggregate resolves its slot with the state it accumulated. A source that watches only the first
-/// token is correct but blunt: it turns every shutdown into a wait for its next yield.
+/// <para>
+/// The pair of tokens states the difference between the two ways a run stops. Cancellation abandons the
+/// run and resolves nothing; shutdown stops production and lets everything already admitted flow to the
+/// terminal, so an aggregate resolves its slot with the state it accumulated. A source that watches only
+/// the first token is correct but blunt: it turns every shutdown into a wait for its next yield.
+/// </para>
+/// <para>
+/// The identity travels here rather than on <see cref="DataflowStageRequest"/>, and the distinction
+/// matters: a stage request is answered once per materialization and says what a stage is, while these are
+/// handed over once per run and say which run is opening it. A factory therefore still receives no run
+/// identity, and a stage's behavior still cannot depend on which graph it is standing in.
+/// </para>
 /// </remarks>
-public readonly record struct DataflowRunTokens(CancellationToken RunToken, CancellationToken StopToken);
+public readonly record struct DataflowRunTokens(
+    string RunIdentity,
+    CancellationToken RunToken,
+    CancellationToken StopToken);

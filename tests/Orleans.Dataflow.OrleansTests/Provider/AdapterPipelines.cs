@@ -207,6 +207,242 @@ internal static class AdapterPipelines
         return Close(graph, id);
     }
 
+    /// <summary>Builds a pipeline that counts the ticks a cluster reminder delivers.</summary>
+    /// <param name="id">The pipeline's identity.</param>
+    /// <param name="period">The period between ticks.</param>
+    /// <param name="ingress">The bounded ingress the ticks land in.</param>
+    /// <param name="signal">The signal the sink raises once it has seen enough.</param>
+    /// <param name="signalAt">How many ticks are enough.</param>
+    /// <returns>The pipeline and the slot its total resolves under.</returns>
+    internal static (PipelineDefinition Pipeline, ResultSlot<long> Slot) CountingReminder(
+        string id,
+        TimeSpan period,
+        BufferOptions ingress,
+        string signal,
+        int signalAt)
+    {
+        (RunnableGraph graph, ResultSlot<long> _) = Source
+            .FromRegistered(
+                OrleansStages.ReminderTrigger(),
+                "ticks",
+                OrleansStages.ReminderTriggerParameters(period, ingress))
+            .To(
+                RegisteredStage.SinkWithResult(
+                    AdapterVocabulary.Catalog(),
+                    AdapterVocabulary.Count,
+                    OrleansStages.Element<long>(),
+                    AdapterVocabulary.Total),
+                "counted",
+                AdapterVocabulary.CountPayload(signal, signalAt),
+                TotalSlot);
+
+        return Close(graph, id);
+    }
+
+    /// <summary>Builds a pipeline that counts what is pushed at an observer bridge.</summary>
+    /// <param name="id">The pipeline's identity.</param>
+    /// <param name="bridge">The bridge binding to publish.</param>
+    /// <param name="ingress">The bounded ingress the pushes land in.</param>
+    /// <param name="signal">The signal the sink raises once it has seen enough.</param>
+    /// <param name="signalAt">How many pushes are enough.</param>
+    /// <returns>The pipeline and the slot its total resolves under.</returns>
+    internal static (PipelineDefinition Pipeline, ResultSlot<long> Slot) CountingBridge(
+        string id,
+        ObserverBridgeBinding<AdapterOrder> bridge,
+        BufferOptions ingress,
+        string signal,
+        int signalAt)
+    {
+        (RunnableGraph graph, ResultSlot<long> _) = Source
+            .FromRegistered(
+                OrleansStages.ObserverBridge(bridge),
+                "pushed",
+                OrleansStages.ObserverBridgeParameters(bridge, ingress))
+            .To(
+                RegisteredStage.SinkWithResult(
+                    AdapterVocabulary.Catalog(),
+                    AdapterVocabulary.Count,
+                    OrleansStages.Element<AdapterOrder>(),
+                    AdapterVocabulary.Total),
+                "counted",
+                AdapterVocabulary.CountPayload(signal, signalAt),
+                TotalSlot);
+
+        return Close(graph, id);
+    }
+
+    /// <summary>Builds a pipeline headed by a .NET observable, with no Orleans concept in its source.</summary>
+    /// <param name="id">The pipeline's identity.</param>
+    /// <param name="source">The observable binding, registered on the silo and on the local host alike.</param>
+    /// <param name="ingress">The bounded ingress the notifications land in.</param>
+    /// <param name="signal">The signal the sink raises once it has seen enough.</param>
+    /// <param name="signalAt">How many elements are enough.</param>
+    /// <returns>The pipeline and the slot its total resolves under.</returns>
+    /// <remarks>
+    /// The cross-runtime claim made checkable: this document names <c>dotnet/observable@v1</c>, which the
+    /// main package publishes and which needs no cluster, and a silo runs it because a silo registered the
+    /// same binding a local host would.
+    /// </remarks>
+    internal static (PipelineDefinition Pipeline, ResultSlot<long> Slot) CountingObservable(
+        string id,
+        ObservableBinding<AdapterOrder> source,
+        BufferOptions ingress,
+        string signal,
+        int signalAt)
+    {
+        (RunnableGraph graph, ResultSlot<long> _) = Source
+            .FromRegistered(
+                DotnetStages.Observable(source),
+                "notes",
+                DotnetStages.ObservableParameters(source, ingress))
+            .To(
+                RegisteredStage.SinkWithResult(
+                    AdapterVocabulary.Catalog(),
+                    AdapterVocabulary.DotnetCount,
+                    DotnetStages.Element<AdapterOrder>(),
+                    AdapterVocabulary.Total),
+                "counted",
+                AdapterVocabulary.CountPayload(signal, signalAt),
+                TotalSlot);
+
+        return Close(graph, id);
+    }
+
+    /// <summary>Builds a pipeline that counts what is pushed at a bridge, behind a gate.</summary>
+    /// <param name="id">The pipeline's identity.</param>
+    /// <param name="bridge">The bridge binding to publish.</param>
+    /// <param name="ingress">The bounded ingress the pushes land in.</param>
+    /// <param name="entered">The signal the gate raises when its first element reaches it.</param>
+    /// <param name="release">The signal that releases it.</param>
+    /// <param name="signal">The signal the sink raises once it has seen enough.</param>
+    /// <param name="signalAt">How many pushes are enough.</param>
+    /// <returns>The pipeline and the slot its total resolves under.</returns>
+    internal static (PipelineDefinition Pipeline, ResultSlot<long> Slot) GatedBridge(
+        string id,
+        ObserverBridgeBinding<AdapterOrder> bridge,
+        BufferOptions ingress,
+        string entered,
+        string release,
+        string signal,
+        int signalAt)
+    {
+        (RunnableGraph graph, ResultSlot<long> _) = Source
+            .FromRegistered(
+                OrleansStages.ObserverBridge(bridge),
+                "pushed",
+                OrleansStages.ObserverBridgeParameters(bridge, ingress))
+            .Via(
+                RegisteredStage.Flow(
+                    AdapterVocabulary.Catalog(),
+                    AdapterVocabulary.Gate,
+                    OrleansStages.Element<AdapterOrder>(),
+                    OrleansStages.Element<AdapterOrder>()),
+                "gate",
+                AdapterVocabulary.GatePayload(entered, release))
+            .To(
+                RegisteredStage.SinkWithResult(
+                    AdapterVocabulary.Catalog(),
+                    AdapterVocabulary.Count,
+                    OrleansStages.Element<AdapterOrder>(),
+                    AdapterVocabulary.Total),
+                "counted",
+                AdapterVocabulary.CountPayload(signal, signalAt),
+                TotalSlot);
+
+        return Close(graph, id);
+    }
+
+    /// <summary>Builds a pipeline that reads a grain enumeration and publishes it to a channel.</summary>
+    /// <param name="id">The pipeline's identity.</param>
+    /// <param name="channel">The channel to publish to.</param>
+    /// <param name="fireAndForgetDelivery">The delivery mode the document declares.</param>
+    /// <returns>The pipeline.</returns>
+    internal static PipelineDefinition BroadcastFeed(
+        string id,
+        OrleansStreamAddress channel,
+        bool fireAndForgetDelivery)
+    {
+        RunnableGraph graph = Source
+            .FromRegistered(
+                OrleansStages.GrainEnumerable(AdapterVocabulary.Feed),
+                "feed",
+                OrleansStages.GrainEnumerableParameters(AdapterVocabulary.Feed))
+            .To(
+                OrleansStages.BroadcastSink(AdapterVocabulary.BroadcastOrder),
+                "published",
+                OrleansStages.BroadcastSinkParameters(
+                    AdapterVocabulary.BroadcastOrder,
+                    channel,
+                    fireAndForgetDelivery));
+
+        return graph.AsPipeline(GraphId.Create(id), GraphRevision.Create(1));
+    }
+
+    /// <summary>Addresses a broadcast channel nothing else in the suite uses.</summary>
+    /// <param name="provider">The broadcast provider's registration name.</param>
+    /// <param name="name">The test's own name for the channel.</param>
+    /// <returns>The address.</returns>
+    internal static OrleansStreamAddress Channel(string provider, string name) =>
+        OrleansStreamAddress.Create(provider, BroadcastObservations.ChannelNamespace, name);
+
+    /// <summary>Builds a pipeline whose reminder trigger carries a payload the test wrote by hand.</summary>
+    /// <param name="id">The pipeline's identity.</param>
+    /// <param name="payload">The payload.</param>
+    /// <returns>The pipeline.</returns>
+    internal static PipelineDefinition HandWrittenReminder(string id, CanonicalJsonValue payload)
+    {
+        (RunnableGraph graph, ResultSlot<long> _) = Source
+            .FromRegistered(OrleansStages.ReminderTrigger(), "ticks", payload)
+            .To(
+                RegisteredStage.SinkWithResult(
+                    AdapterVocabulary.Catalog(),
+                    AdapterVocabulary.Count,
+                    OrleansStages.Element<long>(),
+                    AdapterVocabulary.Total),
+                "counted",
+                AdapterVocabulary.CountPayload("unused", int.MaxValue),
+                TotalSlot);
+
+        return graph.AsPipeline(GraphId.Create(id), GraphRevision.Create(1));
+    }
+
+    /// <summary>Builds a pipeline whose observer bridge carries a payload the test wrote by hand.</summary>
+    /// <param name="id">The pipeline's identity.</param>
+    /// <param name="payload">The payload.</param>
+    /// <returns>The pipeline.</returns>
+    internal static PipelineDefinition HandWrittenBridge(string id, CanonicalJsonValue payload)
+    {
+        (RunnableGraph graph, ResultSlot<long> _) = Source
+            .FromRegistered(OrleansStages.ObserverBridge(AdapterVocabulary.OrderBridge), "pushed", payload)
+            .To(
+                RegisteredStage.SinkWithResult(
+                    AdapterVocabulary.Catalog(),
+                    AdapterVocabulary.Count,
+                    OrleansStages.Element<AdapterOrder>(),
+                    AdapterVocabulary.Total),
+                "counted",
+                AdapterVocabulary.CountPayload("unused", int.MaxValue),
+                TotalSlot);
+
+        return graph.AsPipeline(GraphId.Create(id), GraphRevision.Create(1));
+    }
+
+    /// <summary>Builds a pipeline whose broadcast sink carries a payload the test wrote by hand.</summary>
+    /// <param name="id">The pipeline's identity.</param>
+    /// <param name="payload">The payload.</param>
+    /// <returns>The pipeline.</returns>
+    internal static PipelineDefinition HandWrittenBroadcast(string id, CanonicalJsonValue payload)
+    {
+        RunnableGraph graph = Source
+            .FromRegistered(
+                OrleansStages.GrainEnumerable(AdapterVocabulary.Feed),
+                "feed",
+                OrleansStages.GrainEnumerableParameters(AdapterVocabulary.Feed))
+            .To(OrleansStages.BroadcastSink(AdapterVocabulary.BroadcastOrder), "published", payload);
+
+        return graph.AsPipeline(GraphId.Create(id), GraphRevision.Create(1));
+    }
+
     /// <summary>Builds a pipeline whose grain call carries a payload the test wrote by hand.</summary>
     /// <param name="id">The pipeline's identity.</param>
     /// <param name="payload">The payload.</param>

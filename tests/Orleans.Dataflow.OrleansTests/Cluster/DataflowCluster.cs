@@ -5,6 +5,7 @@ using Orleans.Dataflow.OrleansTests.Provider;
 using Orleans.Hosting;
 using Orleans.TestingHost;
 using Xunit;
+using ReminderOptions = Orleans.Hosting.ReminderOptions;
 
 namespace Orleans.Dataflow.OrleansTests.Cluster;
 
@@ -40,6 +41,14 @@ public sealed class DataflowCluster : IAsyncLifetime
     /// </remarks>
     internal const string PubSubStore = "PubSubStore";
 
+    /// <summary>The reminder period this cluster enforces as its floor.</summary>
+    /// <remarks>
+    /// One second, which is far below Orleans' own default of one minute and is what makes a reminder test
+    /// finish. The option is what the trigger adapter checks a document against, so lowering it here is not
+    /// a test convenience bolted on the side but the same knob a deployment turns.
+    /// </remarks>
+    internal static readonly TimeSpan MinimumReminderPeriod = TimeSpan.FromSeconds(1);
+
     /// <summary>Gets the deployed cluster.</summary>
     /// <value>The cluster, available from the moment the fixture has initialized.</value>
     internal InProcessTestCluster Cluster { get; private set; } = null!;
@@ -61,6 +70,22 @@ public sealed class DataflowCluster : IAsyncLifetime
             _ = silo.AddMemoryGrainStorage(PubSubStore);
             _ = silo.AddMemoryStreams(AdapterVocabulary.StreamProvider);
 
+            // Reminders, with a floor a test can live with. The in-memory table is non-durable, which is
+            // exactly what a single-silo test wants: the reminder definition survives an activation and
+            // nothing more, which is the only durability this phase claims.
+            _ = silo.UseInMemoryReminderService();
+            _ = silo.Configure<ReminderOptions>(options =>
+                options.MinimumReminderPeriod = MinimumReminderPeriod);
+
+            // Two broadcast channel providers with opposite delivery modes, so that the sink's declared
+            // mode is checked against something rather than against itself.
+            _ = silo.AddBroadcastChannel(
+                AdapterVocabulary.BroadcastProvider,
+                options => options.FireAndForgetDelivery = false);
+            _ = silo.AddBroadcastChannel(
+                AdapterVocabulary.FireAndForgetBroadcastProvider,
+                options => options.FireAndForgetDelivery = true);
+
             _ = silo.AddOrleansDataflow(dataflow => dataflow
                 .AddCatalog(TestVocabulary.Catalog())
                 .AddFactory(TestVocabulary.Provider, new TestStageFactory())
@@ -76,7 +101,11 @@ public sealed class DataflowCluster : IAsyncLifetime
                 .AddGrainCallSink(AdapterVocabulary.Recording)
                 .AddGrainCallSink(AdapterVocabulary.GatedRecording)
                 .AddGrainEnumerable(AdapterVocabulary.Feed)
-                .AddGrainEnumerable(AdapterVocabulary.EndlessFeed));
+                .AddGrainEnumerable(AdapterVocabulary.EndlessFeed)
+                .AddObserverBridge(AdapterVocabulary.OrderBridge)
+                .AddObserverBridge(AdapterVocabulary.NarrowBridge)
+                .AddBroadcastElement(AdapterVocabulary.BroadcastOrder)
+                .AddObservable(AdapterVocabulary.SharedOrders));
         });
 
         // The client-side registration, exercised the way a deployment writes it rather than by newing the

@@ -11,6 +11,14 @@
     <PackageReference Include="Microsoft.Orleans.Sdk" />
     <PackageReference Include="Microsoft.Orleans.Server" />
     <!--
+      Server is Runtime plus Persistence.Memory plus Sdk plus Core and carries neither reminders nor
+      broadcast channels, so the two trigger-and-bridge adapters name their own packages: Reminders for
+      IRemindable and the registry behind it, BroadcastChannel for the channel writer the sink publishes
+      through.
+    -->
+    <PackageReference Include="Microsoft.Orleans.BroadcastChannel" />
+    <PackageReference Include="Microsoft.Orleans.Reminders" />
+    <!--
       The stream adapters need the provider abstractions and the stream implementation types; Server is
       Runtime plus Persistence.Memory plus Sdk plus Core and deliberately carries no Streaming.
     -->

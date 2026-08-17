@@ -144,6 +144,46 @@ uses a mailbox as an unbounded buffer.
   different documents under one catalog fingerprint, stated rather than
   hidden.
 
+## Phase 3 — as implemented
+
+- **The `dotnet` provider lives in the main package** (timer and observable
+  bridges need no Orleans and run on both hosts); one binding declaration
+  serves `LocalDataflowHost(configure)` and `AddOrleansDataflow`. The
+  dotnet ports declare the local opaque contract, so `timer → Take →
+  Collect` composes on the local host out of the box; the cross-provider
+  seam to `orleans/*` stages needs the explicit element declaration, same
+  as every typed seam.
+- **Timer has no ingress at all** — the pull is the backpressure, so ticks
+  cannot accumulate and none is dropped; the stop token releases the wait
+  between ticks.
+- **The reminder trigger is its own grain** per occurrence (the seam hands
+  a factory no run identity by design; the trigger grain owns the reminder
+  and pushes into the run's ingress through a published receiver
+  reference). Backpressure is a refused policy for this stage: a clock
+  cannot be slowed, and a parking offer would hold the activation that owns
+  the cluster's reminder. A tick that reactivates the trigger with no live
+  run unregisters the reminder and the attempt stays faulted — no silent
+  resume before M5. The configured `MinimumReminderPeriod` floor is
+  validated at materialization because Orleans enforces it with a throw.
+- **The observer bridge** is a per-run grain addressed from run identity
+  (both sides derive the same key; two runs of one graph get distinct
+  bridges); every push answers `Accepted/Dropped/Closed/Failed`, making
+  best-effort observable. A receiver whose reference is gone would cost the
+  full 30 s response timeout per push — measured — so the bridge forgets a
+  refusing receiver after one refusal. Source openers now receive a
+  per-run `RunIdentity` alongside the two tokens; factories still receive
+  none.
+- **Broadcast sink** publishes via the provider's channel writer from the
+  engine threads (probed to work); `FireAndForgetDelivery` in the payload
+  is a checked declaration against the silo's provider options, not a
+  per-publication choice. **Broadcast SOURCE stays deferred to phase 4**:
+  implicit-only subscription means a run cannot subscribe at all; it needs
+  the delivery-registry design that belongs with distribution.
+- Teardown of adapter infrastructure never replaces how a run ended
+  (infrastructure release failures are swallowed; an author's disposal
+  failure still surfaces) — both bridges self-heal through refusal-driven
+  cleanup.
+
 ## Phasing
 
 1. **Hosting + coordinator + run grain** — DI registration, the

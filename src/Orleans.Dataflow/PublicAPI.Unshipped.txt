@@ -1,4 +1,9 @@
 #nullable enable
+Orleans.Dataflow.Adapters.DotnetStages
+Orleans.Dataflow.Adapters.ObservableBinding
+Orleans.Dataflow.Adapters.ObservableBinding<T>
+Orleans.Dataflow.Adapters.ObservableBinding<T>.Name.get -> string!
+Orleans.Dataflow.Adapters.ObservableBinding<T>.Output.get -> Orleans.Dataflow.ElementContract<T>
 Orleans.Dataflow.AsyncUnfoldGenerator<TState, T>
 Orleans.Dataflow.Authoring.GraphFragment
 Orleans.Dataflow.Authoring.GraphFragment.<Clone>$() -> Orleans.Dataflow.Authoring.GraphFragment!
@@ -61,12 +66,16 @@ Orleans.Dataflow.Flow<TIn, TOut>.TakeWhile(System.Func<TOut, bool>! predicate) -
 Orleans.Dataflow.Flow<TIn, TOut>.Via<TNext>(Orleans.Dataflow.Flow<TOut, TNext>! flow) -> Orleans.Dataflow.Flow<TIn, TNext>!
 Orleans.Dataflow.Flow<TIn, TOut>.Via<TNext>(Orleans.Dataflow.RegisteredFlow<TOut, TNext>! flow, string! occurrenceName, Orleans.Dataflow.Serialization.CanonicalJsonValue parameters) -> Orleans.Dataflow.Flow<TIn, TNext>!
 Orleans.Dataflow.Flow<TIn, TOut>.Where(System.Func<TOut, bool>! predicate) -> Orleans.Dataflow.Flow<TIn, TOut>!
+Orleans.Dataflow.Hosting.IDotnetDataflowBuilder
+Orleans.Dataflow.Hosting.IDotnetDataflowBuilder.AddDotnetStages() -> Orleans.Dataflow.Hosting.IDotnetDataflowBuilder!
+Orleans.Dataflow.Hosting.IDotnetDataflowBuilder.AddObservable<T>(Orleans.Dataflow.Adapters.ObservableBinding<T>! source) -> Orleans.Dataflow.Hosting.IDotnetDataflowBuilder!
 Orleans.Dataflow.IIngressQueue<T>
 Orleans.Dataflow.IIngressQueue<T>.Complete() -> void
 Orleans.Dataflow.IIngressQueue<T>.Fail(System.Exception! exception) -> void
 Orleans.Dataflow.IIngressQueue<T>.OfferAsync(T element, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.ValueTask<Orleans.Dataflow.QueueOfferOutcome>
 Orleans.Dataflow.LocalDataflowHost
 Orleans.Dataflow.LocalDataflowHost.LocalDataflowHost() -> void
+Orleans.Dataflow.LocalDataflowHost.LocalDataflowHost(System.Action<Orleans.Dataflow.Hosting.IDotnetDataflowBuilder!>! configure) -> void
 Orleans.Dataflow.LocalDataflowHost.MaterializeAsync(Orleans.Dataflow.RunnableGraph! graph, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.ValueTask<Orleans.Dataflow.RunHandle!>
 Orleans.Dataflow.LocalStageCatalog
 Orleans.Dataflow.OverflowPolicy
@@ -198,6 +207,7 @@ Orleans.Dataflow.UnfoldStep<TState, T>.UnfoldStep() -> void
 Orleans.Dataflow.UnfoldStep<TState, T>.UnfoldStep(T Value, TState Next) -> void
 Orleans.Dataflow.UnfoldStep<TState, T>.Value.get -> T
 Orleans.Dataflow.UnfoldStep<TState, T>.Value.init -> void
+override Orleans.Dataflow.Adapters.ObservableBinding<T>.ToString() -> string!
 override Orleans.Dataflow.Authoring.GraphFragment.Equals(object? obj) -> bool
 override Orleans.Dataflow.Authoring.GraphFragment.GetHashCode() -> int
 override Orleans.Dataflow.Authoring.GraphFragment.ToString() -> string!
@@ -232,6 +242,20 @@ override Orleans.Dataflow.SinkFactory<T>.ToString() -> string!
 override Orleans.Dataflow.SinkWithResult<TIn, TResult>.ToString() -> string!
 override Orleans.Dataflow.Source<T>.ToString() -> string!
 override Orleans.Dataflow.UnfoldStep<TState, T>.GetHashCode() -> int
+static Orleans.Dataflow.Adapters.DotnetStages.Catalog.get -> Orleans.Dataflow.Definition.StageCatalog!
+static Orleans.Dataflow.Adapters.DotnetStages.Element<T>() -> Orleans.Dataflow.ElementContract<T>
+static Orleans.Dataflow.Adapters.DotnetStages.ElementContract.get -> Orleans.Dataflow.Identity.ContractReference
+static Orleans.Dataflow.Adapters.DotnetStages.Observable<T>(Orleans.Dataflow.Adapters.ObservableBinding<T>! source) -> Orleans.Dataflow.RegisteredSource<T>!
+static Orleans.Dataflow.Adapters.DotnetStages.ObservableParameterContract.get -> Orleans.Dataflow.Identity.ContractReference
+static Orleans.Dataflow.Adapters.DotnetStages.ObservableParameters<T>(Orleans.Dataflow.Adapters.ObservableBinding<T>! source, Orleans.Dataflow.BufferOptions! ingress) -> Orleans.Dataflow.Serialization.CanonicalJsonValue
+static Orleans.Dataflow.Adapters.DotnetStages.ObservableStage.get -> Orleans.Dataflow.Identity.StageRef
+static Orleans.Dataflow.Adapters.DotnetStages.Provider.get -> Orleans.Dataflow.Identity.ProviderId
+static Orleans.Dataflow.Adapters.DotnetStages.Tick.get -> Orleans.Dataflow.ElementContract<long>
+static Orleans.Dataflow.Adapters.DotnetStages.Timer() -> Orleans.Dataflow.RegisteredSource<long>!
+static Orleans.Dataflow.Adapters.DotnetStages.TimerParameterContract.get -> Orleans.Dataflow.Identity.ContractReference
+static Orleans.Dataflow.Adapters.DotnetStages.TimerParameters(System.TimeSpan period, long tickLimit = 0) -> Orleans.Dataflow.Serialization.CanonicalJsonValue
+static Orleans.Dataflow.Adapters.DotnetStages.TimerStage.get -> Orleans.Dataflow.Identity.StageRef
+static Orleans.Dataflow.Adapters.ObservableBinding.Create<T>(string! name, Orleans.Dataflow.ElementContract<T> output, System.Func<System.IObservable<T>!>! open) -> Orleans.Dataflow.Adapters.ObservableBinding<T>!
 static Orleans.Dataflow.Authoring.GraphFragment.Create(System.Collections.Generic.IEnumerable<Orleans.Dataflow.Definition.StageNode!>! nodes, System.Collections.Generic.IEnumerable<Orleans.Dataflow.Definition.GraphEdge>! edges, System.Collections.Generic.IEnumerable<Orleans.Dataflow.Definition.PortAddress>! openInputs, System.Collections.Generic.IEnumerable<Orleans.Dataflow.Definition.PortAddress>! openOutputs) -> Orleans.Dataflow.Authoring.GraphFragment!
 static Orleans.Dataflow.Authoring.GraphFragment.OfStage(Orleans.Dataflow.Definition.StageNode! node, System.Collections.Generic.IEnumerable<Orleans.Dataflow.Identity.PortId>! openInputs, System.Collections.Generic.IEnumerable<Orleans.Dataflow.Identity.PortId>! openOutputs) -> Orleans.Dataflow.Authoring.GraphFragment!
 static Orleans.Dataflow.Authoring.GraphFragment.operator !=(Orleans.Dataflow.Authoring.GraphFragment? left, Orleans.Dataflow.Authoring.GraphFragment? right) -> bool

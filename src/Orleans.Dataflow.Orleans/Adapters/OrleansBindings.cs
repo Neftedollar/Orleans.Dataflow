@@ -1,3 +1,5 @@
+using Microsoft.Extensions.DependencyInjection;
+using Orleans.BroadcastChannel;
 using Orleans.Dataflow.Identity;
 using Orleans.Runtime;
 using Orleans.Streams;
@@ -124,6 +126,49 @@ internal interface IGrainEnumerableEntry
     /// <param name="cancellationToken">The run's own token.</param>
     /// <returns>The sequence, enumerated once and disposed on every terminal path of the run.</returns>
     IAsyncEnumerable<object?> Open(IGrainFactory grains, CancellationToken cancellationToken);
+}
+
+/// <summary>
+/// What one silo knows about a named observer bridge: which CLR type its pushes carry.
+/// </summary>
+internal interface IObserverBridgeEntry
+{
+    /// <summary>Gets the name a document addresses this bridge by.</summary>
+    string Name { get; }
+
+    /// <summary>Gets the contract of the elements pushed at this bridge.</summary>
+    ContractReference Output { get; }
+
+    /// <summary>Checks that a pushed element is the type this silo binds to the bridge.</summary>
+    /// <param name="element">The element as it arrived over the wire.</param>
+    /// <exception cref="ArgumentException">The element is of some other type.</exception>
+    void RequireElement(object? element);
+}
+
+/// <summary>
+/// What one silo knows about a named Broadcast Channel publication.
+/// </summary>
+internal interface IBroadcastSinkEntry
+{
+    /// <summary>Gets the contract the elements of this publication declare.</summary>
+    ContractReference Contract { get; }
+
+    /// <summary>Gets the CLR type this silo binds to <see cref="Contract"/>.</summary>
+    Type ElementType { get; }
+
+    /// <summary>Publishes one element to a channel.</summary>
+    /// <param name="services">The silo's container, which the named provider is resolved from.</param>
+    /// <param name="provider">The broadcast provider's registration name.</param>
+    /// <param name="channelNamespace">The channel's namespace.</param>
+    /// <param name="key">The channel's key.</param>
+    /// <param name="element">The element, which is an instance of <see cref="ElementType"/>.</param>
+    /// <returns>A task that completes when the provider has accepted the element.</returns>
+    Task PublishAsync(
+        IServiceProvider services,
+        string provider,
+        string channelNamespace,
+        string key,
+        object? element);
 }
 
 /// <summary>
@@ -515,6 +560,149 @@ public static class GrainEnumerableBinding
         OrleansBindingNames.RequireContract(output.IsDefault, nameof(output));
 
         return new GrainEnumerableBinding<T>(name, output, open);
+    }
+}
+
+/// <summary>
+/// One named observer bridge that heads a run, declared once and used twice.
+/// </summary>
+/// <typeparam name="T">The element type the bridge accepts in this process.</typeparam>
+/// <remarks>
+/// <para>
+/// A bridge registration says only two things, and neither of them is behavior: what the bridge is called,
+/// and what a push at it carries. There is nothing to bind to, because the code on the far side of a bridge
+/// is the caller's rather than the deployment's — which is exactly what makes a bridge a bridge and not a
+/// source.
+/// </para>
+/// <para>
+/// The element type is the check a caller cannot make for itself. A push arrives as
+/// <see cref="object"/> over the wire, so a caller pushing the wrong type would otherwise reach a cast
+/// somewhere inside the run; this registration is what turns that into a refusal that names both types at
+/// the push.
+/// </para>
+/// <para>
+/// <typeparamref name="T"/> must satisfy Orleans serialization, because a push crosses a grain boundary.
+/// That is checked by Orleans at first use rather than here.
+/// </para>
+/// </remarks>
+public sealed class ObserverBridgeBinding<T> : IObserverBridgeEntry
+{
+    /// <summary>Initializes a new instance of the <see cref="ObserverBridgeBinding{T}"/> class.</summary>
+    /// <param name="name">The validated bridge name.</param>
+    /// <param name="output">The validated element contract.</param>
+    internal ObserverBridgeBinding(string name, ElementContract<T> output)
+    {
+        Name = name;
+        Output = output;
+    }
+
+    /// <summary>Gets the name a document addresses this bridge by.</summary>
+    public string Name { get; }
+
+    /// <summary>Gets the contract of the elements pushed at this bridge.</summary>
+    public ElementContract<T> Output { get; }
+
+    /// <inheritdoc/>
+    ContractReference IObserverBridgeEntry.Output => Output.Reference;
+
+    /// <summary>Returns a one-line diagnostic summary of this declaration.</summary>
+    /// <returns>Text of the form <c>observer bridge 'orders' order@v1 as Order</c>.</returns>
+    /// <remarks>The method never throws.</remarks>
+    public override string ToString() => $"observer bridge '{Name}' {Output}";
+
+    /// <inheritdoc/>
+    void IObserverBridgeEntry.RequireElement(object? element)
+    {
+        if (element is T || (element is null && default(T) is null))
+        {
+            return;
+        }
+
+        throw new ArgumentException(
+            $"The observer bridge '{Name}' carries '{typeof(T).FullName}' in this silo, and the element pushed at it is '{element?.GetType().FullName ?? "null"}'.",
+            nameof(element));
+    }
+}
+
+/// <summary>
+/// The factory that declares a named observer bridge.
+/// </summary>
+public static class ObserverBridgeBinding
+{
+    /// <summary>Declares a named observer bridge that heads a graph.</summary>
+    /// <typeparam name="T">The element type the bridge accepts.</typeparam>
+    /// <param name="name">The name a document, and a caller's bridge address, carry.</param>
+    /// <param name="output">The contract of the elements pushed at the bridge.</param>
+    /// <returns>The binding.</returns>
+    /// <exception cref="ArgumentNullException"><paramref name="name"/> is <see langword="null"/>.</exception>
+    /// <exception cref="ArgumentException">
+    /// <paramref name="name"/> is empty or white space, or <paramref name="output"/> is the default value.
+    /// </exception>
+    public static ObserverBridgeBinding<T> Create<T>(string name, ElementContract<T> output)
+    {
+        OrleansBindingNames.Require(name);
+        OrleansBindingNames.RequireContract(output.IsDefault, nameof(output));
+
+        return new ObserverBridgeBinding<T>(name, output);
+    }
+}
+
+/// <summary>
+/// One element contract carried over an Orleans Broadcast Channel, declared once and used twice.
+/// </summary>
+/// <typeparam name="T">The CLR type that carries the contract in this process.</typeparam>
+/// <remarks>
+/// A separate declaration from <see cref="StreamElementBinding{T}"/> and not a reuse of it: a channel and a
+/// stream are different providers with different guarantees, and one registration that served both would
+/// make a deployment publishing to a channel look as though it had also registered a stream.
+/// </remarks>
+public sealed class BroadcastElementBinding<T> : IBroadcastSinkEntry
+{
+    /// <summary>Initializes a new instance of the <see cref="BroadcastElementBinding{T}"/> class.</summary>
+    /// <param name="contract">The validated element contract declaration.</param>
+    internal BroadcastElementBinding(ElementContract<T> contract) => Element = contract;
+
+    /// <summary>Gets the element contract this declaration binds to <typeparamref name="T"/>.</summary>
+    public ElementContract<T> Element { get; }
+
+    /// <inheritdoc/>
+    ContractReference IBroadcastSinkEntry.Contract => Element.Reference;
+
+    /// <inheritdoc/>
+    Type IBroadcastSinkEntry.ElementType => typeof(T);
+
+    /// <summary>Returns a one-line diagnostic summary of this declaration.</summary>
+    /// <returns>Text of the form <c>broadcast element order@v1 as Order</c>.</returns>
+    /// <remarks>The method never throws.</remarks>
+    public override string ToString() => $"broadcast element {Element}";
+
+    /// <inheritdoc/>
+    Task IBroadcastSinkEntry.PublishAsync(
+        IServiceProvider services,
+        string provider,
+        string channelNamespace,
+        string key,
+        object? element) =>
+        services.GetRequiredKeyedService<IBroadcastChannelProvider>(provider)
+            .GetChannelWriter<T>(ChannelId.Create(channelNamespace, key))
+            .Publish((T)element!);
+}
+
+/// <summary>
+/// The factory that declares an element contract carried over a Broadcast Channel.
+/// </summary>
+public static class BroadcastElementBinding
+{
+    /// <summary>Declares that a Broadcast Channel may carry one element contract, as one CLR type.</summary>
+    /// <typeparam name="T">The CLR type that carries the contract in this process.</typeparam>
+    /// <param name="element">The element contract declaration.</param>
+    /// <returns>The binding.</returns>
+    /// <exception cref="ArgumentException"><paramref name="element"/> is the default value.</exception>
+    public static BroadcastElementBinding<T> Create<T>(ElementContract<T> element)
+    {
+        OrleansBindingNames.RequireContract(element.IsDefault, nameof(element));
+
+        return new BroadcastElementBinding<T>(element);
     }
 }
 

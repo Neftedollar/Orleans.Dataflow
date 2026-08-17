@@ -281,13 +281,29 @@ internal enum StageRuntimeShape
 /// <paramref name="RunToken"/> ends its sequence as if it had run out, which is what makes a shutdown
 /// drain rather than abandon.
 /// </param>
+/// <param name="RunIdentity">
+/// What this run is called in this deployment, unique among the runs a deployment has in flight. A source
+/// that has to be addressable from outside the run — a bridge something else pushes into — composes its
+/// own identity from this and its binding's name; every other source ignores it.
+/// </param>
 /// <remarks>
-/// The pair is the same one <see cref="LocalRunContext"/> gives the local vocabulary's own waiting
-/// sources, handed across the seam because a registered source is exactly the kind that waits: a stream
-/// subscription, a queue, a grain enumeration. A provider that ignores both is a slow source and delays a
-/// stop until its next yield, which is the documented cooperative rule and not an oversight.
+/// <para>
+/// The pair of tokens is the same one <see cref="LocalRunContext"/> gives the local vocabulary's own
+/// waiting sources, handed across the seam because a registered source is exactly the kind that waits: a
+/// stream subscription, a queue, a grain enumeration. A provider that ignores both is a slow source and
+/// delays a stop until its next yield, which is the documented cooperative rule and not an oversight.
+/// </para>
+/// <para>
+/// The identity travels with the tokens rather than with the node, and the distinction is the seam's:
+/// a <see cref="StageRuntimeRequest"/> is answered once per materialization and says what a stage is,
+/// while these are handed over once per run and say which run is opening it. A factory therefore still
+/// receives no run identity — the run announces itself when it asks the source to open.
+/// </para>
 /// </remarks>
-internal readonly record struct StageRunTokens(CancellationToken RunToken, CancellationToken StopToken);
+internal readonly record struct StageRunTokens(
+    string RunIdentity,
+    CancellationToken RunToken,
+    CancellationToken StopToken);
 
 /// <summary>
 /// Opens one enumeration of a registered source's elements.

@@ -47,6 +47,10 @@ internal static class PipelineMaterializer
     /// <param name="fingerprint">The fingerprint of that document's canonical bytes.</param>
     /// <param name="catalog">The host's stage catalog.</param>
     /// <param name="factories">The host's runtime factories, keyed by provider.</param>
+    /// <param name="runIdentity">
+    /// What this run is called in the deployment, which is the run grain's own key: a source that has to be
+    /// addressable from outside the run composes its identity from it.
+    /// </param>
     /// <param name="cancellationToken">A token that cancels the run this call starts.</param>
     /// <returns>The started run.</returns>
     /// <exception cref="ArgumentNullException">Any reference argument is <see langword="null"/>.</exception>
@@ -65,11 +69,13 @@ internal static class PipelineMaterializer
         GraphFingerprint fingerprint,
         IStageCatalog catalog,
         StageRuntimeRegistry factories,
+        string runIdentity,
         CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(document);
         ArgumentNullException.ThrowIfNull(catalog);
         ArgumentNullException.ThrowIfNull(factories);
+        ArgumentNullException.ThrowIfNull(runIdentity);
 
         GraphValidationReport report = GraphCompiler.Validate(document, catalog);
 
@@ -81,7 +87,8 @@ internal static class PipelineMaterializer
         LocalRunPlan plan = LocalRunPlanner.Compile(
             document,
             new Dictionary<Identity.NodeId, Authoring.LocalStageDescriptor>(),
-            new StageRuntimeBinder(catalog, factories));
+            new StageRuntimeBinder(catalog, factories),
+            runIdentity);
 
         return LocalRun.Start(plan, fingerprint, PipelineNonce, cancellationToken);
     }

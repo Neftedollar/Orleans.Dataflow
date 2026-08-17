@@ -1,8 +1,12 @@
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Options;
+using Orleans.BroadcastChannel;
 using Orleans.Dataflow.Definition;
+using Orleans.Dataflow.Grains;
 using Orleans.Dataflow.Hosting;
 using Orleans.Dataflow.Runtime;
 using Orleans.Dataflow.Serialization;
+using Orleans.Hosting;
 using Orleans.Runtime;
 using Orleans.Streams;
 
@@ -70,6 +74,21 @@ internal sealed class OrleansStageFactory(
         if (node.Stage == OrleansStages.GrainEnumerableStage)
         {
             return GrainEnumerable(node);
+        }
+
+        if (node.Stage == OrleansStages.ReminderTriggerStage)
+        {
+            return ReminderTrigger(node);
+        }
+
+        if (node.Stage == OrleansStages.ObserverBridgeStage)
+        {
+            return ObserverBridge(node);
+        }
+
+        if (node.Stage == OrleansStages.BroadcastSinkStage)
+        {
+            return BroadcastSink(node);
         }
 
         throw new InvalidOperationException(
@@ -273,6 +292,271 @@ internal sealed class OrleansStageFactory(
         return DataflowStageRuntime.Source(tokens => source!.Open(grains, tokens.RunToken));
     }
 
+    /// <summary>Builds the reminder trigger source.</summary>
+    /// <param name="node">The node.</param>
+    /// <returns>The runtime.</returns>
+    /// <remarks>
+    /// The period is checked against this silo's configured minimum here and nowhere else. Which floor a
+    /// cluster enforces is not a property of a payload, so no parameter validator could see it; and Orleans
+    /// enforces it by throwing rather than by clamping — probed, not assumed — so a period below it would
+    /// otherwise surface as an <see cref="ArgumentException"/> from the trigger's first registration, long
+    /// after the run was accepted. Failing here makes it a refusal of the start that names the number.
+    /// </remarks>
+    private DataflowStageRuntime ReminderTrigger(StageNode node)
+    {
+        ReminderTriggerDeclaration declaration = Read<ReminderTriggerDeclaration>(
+            node,
+            ReminderTriggerPayload.TryRead);
+        TimeSpan minimum = services.GetRequiredService<IOptions<ReminderOptions>>().Value.MinimumReminderPeriod;
+
+        if (declaration.Period < minimum)
+        {
+            throw new InvalidOperationException(
+                $"The node '{node.Id}', an occurrence of '{node.Stage}', declares a period of {declaration.Period} and this silo's ReminderOptions.MinimumReminderPeriod is {minimum}. Orleans refuses a shorter reminder outright rather than rounding it up, so the run is refused here rather than failing at its first tick.");
+        }
+
+        // The node's own identifier completes the key, so a graph that one day heads two chains with two
+        // triggers gives each its own grain. Today a chain has one source, so the identifier is the only
+        // part of the key that is not already the run's.
+        string occurrence = node.Id.ToString();
+
+        return DataflowStageRuntime.Source(tokens =>
+            Ticks(grains, $"{tokens.RunIdentity}/{occurrence}", declaration, tokens));
+    }
+
+    /// <summary>Registers a reminder for one run and yields the ticks it delivers.</summary>
+    /// <param name="grains">The silo's grain factory.</param>
+    /// <param name="key">The trigger grain's key, composed from the run's identity and the node's.</param>
+    /// <param name="declaration">The period and the ingress the ticks land in.</param>
+    /// <param name="tokens">The run's tokens.</param>
+    /// <returns>The sequence of tick indices.</returns>
+    /// <remarks>
+    /// <para>
+    /// The receiver is created here rather than in the trigger grain because only here can it be created:
+    /// Orleans refuses <c>CreateObjectReference</c> from inside a grain, and this runs on the run's own
+    /// source thread, which is not inside one. It is deleted in the same <c>finally</c> that stops the
+    /// trigger, so nothing about the bridge outlives the enumeration that holds it.
+    /// </para>
+    /// <para>
+    /// The ingress is ended before the trigger is stopped, and the order matters for the same reason it
+    /// does everywhere else here: ending it makes every later offer answer at once, so a tick that arrives
+    /// during the teardown is refused rather than left waiting on a run that has gone — and the refusal is
+    /// what tells the trigger to unregister even if this call to stop it never lands.
+    /// </para>
+    /// </remarks>
+    private static async IAsyncEnumerable<object?> Ticks(
+        IGrainFactory grains,
+        string key,
+        ReminderTriggerDeclaration declaration,
+        DataflowRunTokens tokens)
+    {
+        LocalIngressQueue queue = new(declaration.Ingress.Capacity, declaration.Ingress.OverflowPolicy);
+        IReminderTriggerGrain trigger = grains.GetGrain<IReminderTriggerGrain>(key);
+        IDataflowPushReceiver receiver = grains.CreateObjectReference<IDataflowPushReceiver>(
+            new PushReceiver(queue, element: null));
+
+        try
+        {
+            await trigger.StartAsync(receiver, (long)declaration.Period.TotalMilliseconds)
+                .ConfigureAwait(false);
+        }
+        catch (Exception)
+        {
+            queue.EndRun();
+            grains.DeleteObjectReference<IDataflowPushReceiver>(receiver);
+
+            throw;
+        }
+
+        try
+        {
+            await foreach (object? tick in queue
+                .ElementsAsync(tokens.RunToken, tokens.StopToken)
+                .ConfigureAwait(false))
+            {
+                yield return tick;
+            }
+        }
+        finally
+        {
+            queue.EndRun();
+
+            await Release(trigger.StopAsync, grains, receiver).ConfigureAwait(false);
+        }
+    }
+
+    /// <summary>Builds the observer bridge source.</summary>
+    /// <param name="node">The node.</param>
+    /// <returns>The runtime.</returns>
+    private DataflowStageRuntime ObserverBridge(StageNode node)
+    {
+        ObserverBridgeDeclaration declaration = Read<ObserverBridgeDeclaration>(
+            node,
+            ObserverBridgePayload.TryRead);
+
+        if (!registry.TryGetBridge(declaration.Bridge, out IObserverBridgeEntry? bridge))
+        {
+            throw Unregistered(node, "observer bridge", declaration.Bridge);
+        }
+
+        return DataflowStageRuntime.Source(tokens => Pushes(
+            grains,
+            $"{tokens.RunIdentity}/{declaration.Bridge}",
+            bridge!,
+            declaration.Ingress,
+            tokens));
+    }
+
+    /// <summary>Publishes one run's receiver on a bridge grain and yields what is pushed at it.</summary>
+    /// <param name="grains">The silo's grain factory.</param>
+    /// <param name="key">The bridge grain's key, composed from the run's identity and the binding's name.</param>
+    /// <param name="bridge">The registered binding, which types the pushes.</param>
+    /// <param name="ingress">The bound and policy of the ingress.</param>
+    /// <param name="tokens">The run's tokens.</param>
+    /// <returns>The sequence the run pulls.</returns>
+    /// <remarks>
+    /// The attachment is made when the run first pulls and dropped in the <c>finally</c> the engine reaches
+    /// on every terminal path, so a bridge is listening exactly while its run is. The ingress is ended
+    /// first, which releases a pusher parked for room with a refusal instead of leaving its grain call
+    /// waiting on a run that has gone.
+    /// </remarks>
+    private static async IAsyncEnumerable<object?> Pushes(
+        IGrainFactory grains,
+        string key,
+        IObserverBridgeEntry bridge,
+        BufferOptions ingress,
+        DataflowRunTokens tokens)
+    {
+        LocalIngressQueue queue = new(ingress.Capacity, ingress.OverflowPolicy);
+        IObserverBridgeGrain grain = grains.GetGrain<IObserverBridgeGrain>(key);
+        IDataflowPushReceiver receiver = grains.CreateObjectReference<IDataflowPushReceiver>(
+            new PushReceiver(queue, bridge));
+
+        try
+        {
+            await grain.AttachAsync(receiver).ConfigureAwait(false);
+        }
+        catch (Exception)
+        {
+            queue.EndRun();
+            grains.DeleteObjectReference<IDataflowPushReceiver>(receiver);
+
+            throw;
+        }
+
+        try
+        {
+            await foreach (object? pushed in queue
+                .ElementsAsync(tokens.RunToken, tokens.StopToken)
+                .ConfigureAwait(false))
+            {
+                yield return pushed;
+            }
+        }
+        finally
+        {
+            queue.EndRun();
+
+            await Release(grain.DetachAsync, grains, receiver).ConfigureAwait(false);
+        }
+    }
+
+    /// <summary>Tears one bridge down without letting the teardown replace how the run ended.</summary>
+    /// <param name="release">The grain call that stops the bridge.</param>
+    /// <param name="grains">The silo's grain factory.</param>
+    /// <param name="receiver">The receiver reference to delete.</param>
+    /// <returns>A task that completes when the teardown has been attempted.</returns>
+    /// <remarks>
+    /// <para>
+    /// A <c>finally</c> that throws replaces the exception it was running under, so a grain call made while
+    /// a silo is stopping would turn a cancelled run into a messaging failure and a completed one into a
+    /// failed one. This package's own plumbing is not worth that, and the author's code is: an author's
+    /// disposal still surfaces, and these two calls do not.
+    /// </para>
+    /// <para>
+    /// Swallowing is safe here because both bridges heal themselves. The ingress has already ended, so a
+    /// push or a tick that reaches a receiver whose run is gone is refused, and the refusal is exactly what
+    /// makes the trigger unregister its reminder and the bridge forget its receiver. A teardown that never
+    /// landed therefore costs at most one more tick or one more push.
+    /// </para>
+    /// </remarks>
+    private static async Task Release(
+        Func<Task> release,
+        IGrainFactory grains,
+        IDataflowPushReceiver receiver)
+    {
+        try
+        {
+            await release().ConfigureAwait(false);
+        }
+        catch (Exception)
+        {
+            // The bridge heals itself at the next tick or push; how the run ended is the run's to report.
+        }
+
+        try
+        {
+            grains.DeleteObjectReference<IDataflowPushReceiver>(receiver);
+        }
+        catch (Exception)
+        {
+            // Local bookkeeping in a client that may already be shutting down.
+        }
+    }
+
+    /// <summary>Builds the Broadcast Channel publication sink.</summary>
+    /// <param name="node">The node.</param>
+    /// <returns>The runtime.</returns>
+    /// <remarks>
+    /// Two things are checked here that no parameter validator could see: that this silo registers a
+    /// broadcast provider under the name the document gave, and that the provider's delivery mode is the
+    /// one the document was written against. The second is what makes the payload's flag a contract rather
+    /// than a decoration — a channel's mode is the provider's and cannot be chosen per publication, so the
+    /// honest thing a document can do with it is declare what it assumed and be refused when that is wrong.
+    /// </remarks>
+    private DataflowStageRuntime BroadcastSink(StageNode node)
+    {
+        BroadcastSinkDeclaration declaration = Read<BroadcastSinkDeclaration>(node, BroadcastSinkPayload.TryRead);
+
+        if (!registry.TryGetBroadcast(declaration.Element, out IBroadcastSinkEntry? element))
+        {
+            throw Unregistered(node, "broadcast element contract", declaration.Element);
+        }
+
+        if (services.GetKeyedService<IBroadcastChannelProvider>(declaration.Provider) is null)
+        {
+            throw new InvalidOperationException(
+                $"The node '{node.Id}', an occurrence of '{node.Stage}', names the broadcast provider '{declaration.Provider}', and this silo registers no broadcast channel under that name. A broadcast sink needs the provider registered on the silo, such as by AddBroadcastChannel(\"{declaration.Provider}\").");
+        }
+
+        bool configured = services
+            .GetRequiredService<IOptionsMonitor<BroadcastChannelOptions>>()
+            .Get(declaration.Provider)
+            .FireAndForgetDelivery;
+
+        if (configured != declaration.FireAndForgetDelivery)
+        {
+            throw new InvalidOperationException(
+                $"The node '{node.Id}', an occurrence of '{node.Stage}', declares FireAndForgetDelivery={declaration.FireAndForgetDelivery} and this silo configures the broadcast provider '{declaration.Provider}' with FireAndForgetDelivery={configured}. The mode belongs to the provider rather than to a publication, so the document was written against different delivery semantics from the ones this silo would give it.");
+        }
+
+        return DataflowStageRuntime.Terminal(
+            static () => null,
+            (state, published) =>
+            {
+                element!.PublishAsync(
+                    services,
+                    declaration.Provider,
+                    declaration.Namespace,
+                    declaration.Key,
+                    published).GetAwaiter().GetResult();
+
+                return state;
+            },
+            finish: null,
+            producesResult: false);
+    }
+
     /// <summary>Resolves a stream element binding or says the silo has none.</summary>
     /// <param name="node">The node.</param>
     /// <param name="contract">The contract text the payload carried.</param>
@@ -337,6 +621,47 @@ internal sealed class OrleansStageFactory(
 
         /// <inheritdoc/>
         public void Fail(Exception failure) => queue.Fail(failure);
+    }
+
+    /// <summary>The object a run publishes as a grain reference so that a bridge grain can reach it.</summary>
+    /// <param name="queue">The run's ingress.</param>
+    /// <param name="element">
+    /// The binding that types the pushes, or <see langword="null"/> for a trigger whose elements this
+    /// runtime produces itself and therefore cannot get wrong.
+    /// </param>
+    /// <remarks>
+    /// <para>
+    /// The whole of the bridge, and deliberately no more: the offer's outcome is returned rather than
+    /// swallowed, so what a caller learns is exactly what the run's declared policy did with the element.
+    /// The offer carries no token for the same reason a stream delivery does not — every way the queue
+    /// stops accepting releases a parked offer with a refusal, and raising a cancellation into a caller's
+    /// grain call would turn the ordinary end of a run into a delivery error.
+    /// </para>
+    /// <para>
+    /// The type check happens here rather than on the caller's side because only the silo executing the run
+    /// knows what its registry binds to the name. A mismatch is thrown rather than reported as an outcome:
+    /// it is a programming error and not one of the four ways an element can fare.
+    /// </para>
+    /// </remarks>
+    private sealed class PushReceiver(LocalIngressQueue queue, IObserverBridgeEntry? element)
+        : IDataflowPushReceiver
+    {
+        /// <inheritdoc/>
+        public async Task<DataflowPushOutcome> PushAsync(object? pushed)
+        {
+            element?.RequireElement(pushed);
+
+            QueueOfferOutcome outcome = await queue.OfferAsync(pushed, CancellationToken.None)
+                .ConfigureAwait(false);
+
+            return outcome switch
+            {
+                QueueOfferOutcome.Accepted => DataflowPushOutcome.Accepted,
+                QueueOfferOutcome.Dropped => DataflowPushOutcome.Dropped,
+                QueueOfferOutcome.Failed => DataflowPushOutcome.Failed,
+                _ => DataflowPushOutcome.Closed,
+            };
+        }
     }
 }
 

@@ -138,9 +138,9 @@ C# names should follow .NET expectations where possible. If the Akka.NET behavio
 | Controlled grain group source | P1 | M3 | Research | A coordinator enumerates bounded keys/partitions; never an implicit cluster-wide grain scan. |
 | One-way grain-call sink | P2 | M3 | Research | Explicit best-effort adapter; never the default durable sink. |
 | Grain `IAsyncEnumerable<T>` source | P1 | M3 | Implemented | Call-scoped backpressure and cancellation; no implicit resume. |
-| Timer source | P1 | M3 | Research | Activation-scoped and non-durable. |
-| Reminder trigger source | P1 | M3 | Research | Definition survives restart, but missed ticks are not replayed. |
-| Observer bridge | P2 | M3 | Research | Best-effort, resubscription, randomized observer identity, no replay. |
+| Timer source | P1 | M3 | Implemented | Run-scoped and non-durable (the run is the activation of this model); pull is the backpressure - no ingress, no drops. |
+| Reminder trigger source | P1 | M3 | Implemented | Definition survives restart, but missed ticks are not replayed; a tick reactivating a grain with no live run unregisters the reminder. |
+| Observer bridge | P2 | M3 | Implemented | Best-effort made observable: every push answers Accepted/Dropped/Closed/Failed; per-run bridge identity; no replay. |
 | Broadcast Channel bridge | P2 | M3 | Research | Best-effort and no history are surfaced in capability metadata. |
 | Durable graph coordinator | P0 | M3 | Research | Single logical ownership, failover fencing, and run state transitions. |
 | Checkpointed stage state | P1 | M5 | Research | Schema version, atomicity boundary, and migration policy. |
@@ -156,7 +156,7 @@ C# names should follow .NET expectations where possible. If the Akka.NET behavio
 | Kafka source/sink | P1 | M4 | Research | Optional provider; partition/offset/commit contract required. |
 | Azure Queue/Event Hubs | P2 | M4 | Research | Prefer Orleans provider integration where it preserves semantics. |
 | Relational database/outbox/change feed | P1 | M4 | Research | Provider-specific optional package; no generic “database sink” promise. |
-| `IObservable<T>` and .NET events | P2 | M3 | Research | Explicit bounded buffer and overflow; source cannot create backpressure upstream. |
+| `IObservable<T>` and .NET events | P2 | M3 | Implemented | Explicit bounded buffer and overflow; the notification thread pays backpressure; the event spelling is a documented one-line IObservable wrap, deliberately not a second stage. |
 | Reactive Streams interop | P2 | M4+ | Research | Protocol bridge and TCK expectations required. |
 
 ## Testing and observability

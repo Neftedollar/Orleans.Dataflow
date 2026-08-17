@@ -24,22 +24,30 @@ internal sealed class OrleansAdapterRegistry
     private readonly Dictionary<string, IGrainCallEntry> _calls;
     private readonly Dictionary<string, IGrainCallSinkEntry> _callSinks;
     private readonly Dictionary<string, IGrainEnumerableEntry> _enumerables;
+    private readonly Dictionary<string, IObserverBridgeEntry> _bridges;
+    private readonly Dictionary<string, IBroadcastSinkEntry> _broadcasts;
 
     /// <summary>Initializes a new instance of the <see cref="OrleansAdapterRegistry"/> class.</summary>
     /// <param name="elements">The stream element bindings, keyed by contract text.</param>
     /// <param name="calls">The transforming call bindings, keyed by name.</param>
     /// <param name="callSinks">The terminating call bindings, keyed by name.</param>
     /// <param name="enumerables">The enumeration bindings, keyed by name.</param>
+    /// <param name="bridges">The observer bridge bindings, keyed by name.</param>
+    /// <param name="broadcasts">The broadcast element bindings, keyed by contract text.</param>
     private OrleansAdapterRegistry(
         Dictionary<string, IStreamElementEntry> elements,
         Dictionary<string, IGrainCallEntry> calls,
         Dictionary<string, IGrainCallSinkEntry> callSinks,
-        Dictionary<string, IGrainEnumerableEntry> enumerables)
+        Dictionary<string, IGrainEnumerableEntry> enumerables,
+        Dictionary<string, IObserverBridgeEntry> bridges,
+        Dictionary<string, IBroadcastSinkEntry> broadcasts)
     {
         _elements = elements;
         _calls = calls;
         _callSinks = callSinks;
         _enumerables = enumerables;
+        _bridges = bridges;
+        _broadcasts = broadcasts;
     }
 
     /// <summary>Gets the registry that holds nothing.</summary>
@@ -47,12 +55,17 @@ internal sealed class OrleansAdapterRegistry
     /// The registry an authoring process validates against: it can check the shape of a payload and
     /// nothing about which names a silo publishes, which is exactly the split between a catalog and a host.
     /// </value>
-    internal static OrleansAdapterRegistry Empty { get; } = new([], [], [], []);
+    internal static OrleansAdapterRegistry Empty { get; } = new([], [], [], [], [], []);
 
     /// <summary>Gets a value indicating whether this registry checks names at all.</summary>
     /// <value><see langword="true"/> for <see cref="Empty"/> and for a silo that registered nothing.</value>
     internal bool IsEmpty =>
-        _elements.Count == 0 && _calls.Count == 0 && _callSinks.Count == 0 && _enumerables.Count == 0;
+        _elements.Count == 0 &&
+        _calls.Count == 0 &&
+        _callSinks.Count == 0 &&
+        _enumerables.Count == 0 &&
+        _bridges.Count == 0 &&
+        _broadcasts.Count == 0;
 
     /// <summary>Resolves a stream element contract by its canonical text.</summary>
     /// <param name="contract">The contract text a payload carries.</param>
@@ -97,6 +110,28 @@ internal sealed class OrleansAdapterRegistry
     /// <returns>The names.</returns>
     internal IReadOnlyList<string> Enumerables => Sorted(_enumerables.Keys);
 
+    /// <summary>Resolves an observer bridge by name.</summary>
+    /// <param name="name">The name a payload carries.</param>
+    /// <param name="bridge">When this method returns <see langword="true"/>, the binding.</param>
+    /// <returns><see langword="true"/> when this silo registers that bridge.</returns>
+    internal bool TryGetBridge(string name, out IObserverBridgeEntry? bridge) =>
+        _bridges.TryGetValue(name, out bridge);
+
+    /// <summary>Lists the observer bridge names this silo publishes, in ordinal order.</summary>
+    /// <returns>The names.</returns>
+    internal IReadOnlyList<string> Bridges => Sorted(_bridges.Keys);
+
+    /// <summary>Resolves a broadcast element contract by its canonical text.</summary>
+    /// <param name="contract">The contract text a payload carries.</param>
+    /// <param name="element">When this method returns <see langword="true"/>, the binding.</param>
+    /// <returns><see langword="true"/> when this silo binds a CLR type to that contract for channels.</returns>
+    internal bool TryGetBroadcast(string contract, out IBroadcastSinkEntry? element) =>
+        _broadcasts.TryGetValue(contract, out element);
+
+    /// <summary>Lists the broadcast element contracts this silo publishes, in ordinal order.</summary>
+    /// <returns>The contract texts.</returns>
+    internal IReadOnlyList<string> Broadcasts => Sorted(_broadcasts.Keys);
+
     /// <summary>Sorts a key set so a diagnostic reads the same on every run.</summary>
     /// <param name="keys">The keys.</param>
     /// <returns>The sorted keys.</returns>
@@ -121,6 +156,8 @@ internal sealed class OrleansAdapterRegistry
         private readonly Dictionary<string, IGrainCallEntry> _calls = new(StringComparer.Ordinal);
         private readonly Dictionary<string, IGrainCallSinkEntry> _callSinks = new(StringComparer.Ordinal);
         private readonly Dictionary<string, IGrainEnumerableEntry> _enumerables = new(StringComparer.Ordinal);
+        private readonly Dictionary<string, IObserverBridgeEntry> _bridges = new(StringComparer.Ordinal);
+        private readonly Dictionary<string, IBroadcastSinkEntry> _broadcasts = new(StringComparer.Ordinal);
         private readonly List<string> _violations = [];
 
         /// <summary>Gets a value indicating whether anything at all has been registered.</summary>
@@ -186,6 +223,34 @@ internal sealed class OrleansAdapterRegistry
             }
         }
 
+        /// <summary>Registers one observer bridge binding.</summary>
+        /// <param name="bridge">The binding.</param>
+        internal void Add(IObserverBridgeEntry bridge)
+        {
+            Any = true;
+
+            if (!_bridges.TryAdd(bridge.Name, bridge))
+            {
+                _violations.Add(
+                    $"the observer bridge '{bridge.Name}' is registered more than once, and a document addressing that name would have two answers");
+            }
+        }
+
+        /// <summary>Registers one broadcast element binding.</summary>
+        /// <param name="element">The binding.</param>
+        internal void Add(IBroadcastSinkEntry element)
+        {
+            Any = true;
+
+            string contract = element.Contract.ToString();
+
+            if (!_broadcasts.TryAdd(contract, element))
+            {
+                _violations.Add(
+                    $"the broadcast element contract '{contract}' is registered more than once, and one contract is carried by one CLR type in one silo");
+            }
+        }
+
         /// <summary>Resolves everything registered into the value the silo reads.</summary>
         /// <returns>The registry.</returns>
         /// <exception cref="ArgumentException">One name or contract was registered twice.</exception>
@@ -193,7 +258,7 @@ internal sealed class OrleansAdapterRegistry
             _violations.Count > 0
                 ? throw new ArgumentException(
                     $"The Orleans adapter registration breaks {_violations.Count} invariant{(_violations.Count == 1 ? string.Empty : "s")}: {string.Join("; ", _violations)}.")
-                : new OrleansAdapterRegistry(_elements, _calls, _callSinks, _enumerables);
+                : new OrleansAdapterRegistry(_elements, _calls, _callSinks, _enumerables, _bridges, _broadcasts);
     }
 }
 
@@ -233,7 +298,10 @@ internal sealed class OrleansStageValidator(OrleansAdapterRegistry registry, Orl
         OrleansStageKind.StreamSink => StreamSink(parameters),
         OrleansStageKind.GrainCall => GrainCall(parameters),
         OrleansStageKind.GrainCallSink => GrainCallSink(parameters),
-        _ => GrainEnumerable(parameters),
+        OrleansStageKind.GrainEnumerable => GrainEnumerable(parameters),
+        OrleansStageKind.ReminderTrigger => ReminderTrigger(parameters),
+        OrleansStageKind.ObserverBridge => ObserverBridge(parameters),
+        _ => BroadcastSink(parameters),
     };
 
     /// <summary>Reports every way an unregistered name is wrong.</summary>
@@ -403,9 +471,76 @@ internal sealed class OrleansStageValidator(OrleansAdapterRegistry registry, Orl
             ? []
             : [Mismatch(GrainEnumerablePayload.OutputMember, declaration.Source, declaration.Output, output)];
     }
+
+    /// <summary>Checks a reminder trigger's payload.</summary>
+    /// <param name="parameters">The payload.</param>
+    /// <returns>The violations.</returns>
+    /// <remarks>
+    /// Shape only, and deliberately: whether a period clears the cluster's configured floor is a property
+    /// of a silo's <c>ReminderOptions</c> rather than of the payload, and it is checked where that option
+    /// can be read — when the run is materialized, so that the answer is a refusal of the start naming the
+    /// configured minimum rather than a failure at the first tick.
+    /// </remarks>
+    private static IReadOnlyList<string> ReminderTrigger(CanonicalJsonValue parameters) =>
+        ReminderTriggerPayload.TryRead(parameters, out ReminderTriggerDeclaration? _, out IReadOnlyList<string> violations)
+            ? []
+            : violations;
+
+    /// <summary>Checks an observer bridge's payload.</summary>
+    /// <param name="parameters">The payload.</param>
+    /// <returns>The violations.</returns>
+    private IReadOnlyList<string> ObserverBridge(CanonicalJsonValue parameters)
+    {
+        if (!ObserverBridgePayload.TryRead(
+            parameters,
+            out ObserverBridgeDeclaration? declaration,
+            out IReadOnlyList<string> violations))
+        {
+            return violations;
+        }
+
+        if (registry.IsEmpty)
+        {
+            return [];
+        }
+
+        if (!registry.TryGetBridge(declaration!.Bridge, out IObserverBridgeEntry? bridge))
+        {
+            return [Unregistered("observer bridge", declaration.Bridge, registry.Bridges)];
+        }
+
+        string output = bridge!.Output.ToString();
+
+        return string.Equals(output, declaration.Output, StringComparison.Ordinal)
+            ? []
+            : [Mismatch(ObserverBridgePayload.OutputMember, declaration.Bridge, declaration.Output, output)];
+    }
+
+    /// <summary>Checks a broadcast sink's payload.</summary>
+    /// <param name="parameters">The payload.</param>
+    /// <returns>The violations.</returns>
+    private IReadOnlyList<string> BroadcastSink(CanonicalJsonValue parameters)
+    {
+        if (!BroadcastSinkPayload.TryRead(
+            parameters,
+            out BroadcastSinkDeclaration? declaration,
+            out IReadOnlyList<string> violations))
+        {
+            return violations;
+        }
+
+        if (registry.IsEmpty)
+        {
+            return [];
+        }
+
+        return registry.TryGetBroadcast(declaration!.Element, out IBroadcastSinkEntry? _)
+            ? []
+            : [Unregistered("broadcast element contract", declaration.Element, registry.Broadcasts)];
+    }
 }
 
-/// <summary>Which of the five Orleans adapters a validator or a factory is dealing with.</summary>
+/// <summary>Which of the eight Orleans adapters a validator or a factory is dealing with.</summary>
 internal enum OrleansStageKind
 {
     /// <summary>A subscription that feeds a run's bounded ingress.</summary>
@@ -422,4 +557,13 @@ internal enum OrleansStageKind
 
     /// <summary>A grain enumeration that heads a run.</summary>
     GrainEnumerable,
+
+    /// <summary>A cluster reminder whose ticks head a run.</summary>
+    ReminderTrigger,
+
+    /// <summary>A named bridge external grain code pushes elements at.</summary>
+    ObserverBridge,
+
+    /// <summary>A publication to a Broadcast Channel.</summary>
+    BroadcastSink,
 }

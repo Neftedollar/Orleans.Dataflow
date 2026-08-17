@@ -1,4 +1,7 @@
 #nullable enable
+Orleans.Dataflow.Adapters.BroadcastElementBinding
+Orleans.Dataflow.Adapters.BroadcastElementBinding<T>
+Orleans.Dataflow.Adapters.BroadcastElementBinding<T>.Element.get -> Orleans.Dataflow.ElementContract<T>
 Orleans.Dataflow.Adapters.GrainCallBinding
 Orleans.Dataflow.Adapters.GrainCallBinding<TIn, TOut>
 Orleans.Dataflow.Adapters.GrainCallBinding<TIn, TOut>.Input.get -> Orleans.Dataflow.ElementContract<TIn>
@@ -16,6 +19,10 @@ Orleans.Dataflow.Adapters.GrainEnumerableBinding
 Orleans.Dataflow.Adapters.GrainEnumerableBinding<T>
 Orleans.Dataflow.Adapters.GrainEnumerableBinding<T>.Name.get -> string!
 Orleans.Dataflow.Adapters.GrainEnumerableBinding<T>.Output.get -> Orleans.Dataflow.ElementContract<T>
+Orleans.Dataflow.Adapters.ObserverBridgeBinding
+Orleans.Dataflow.Adapters.ObserverBridgeBinding<T>
+Orleans.Dataflow.Adapters.ObserverBridgeBinding<T>.Name.get -> string!
+Orleans.Dataflow.Adapters.ObserverBridgeBinding<T>.Output.get -> Orleans.Dataflow.ElementContract<T>
 Orleans.Dataflow.Adapters.OrleansStages
 Orleans.Dataflow.Adapters.OrleansStreamAddress
 Orleans.Dataflow.Adapters.OrleansStreamAddress.Equals(Orleans.Dataflow.Adapters.OrleansStreamAddress other) -> bool
@@ -27,6 +34,18 @@ Orleans.Dataflow.Adapters.OrleansStreamAddress.Provider.get -> string!
 Orleans.Dataflow.Adapters.StreamElementBinding
 Orleans.Dataflow.Adapters.StreamElementBinding<T>
 Orleans.Dataflow.Adapters.StreamElementBinding<T>.Element.get -> Orleans.Dataflow.ElementContract<T>
+Orleans.Dataflow.Grains.DataflowPushOutcome
+Orleans.Dataflow.Grains.DataflowPushOutcome.Accepted = 0 -> Orleans.Dataflow.Grains.DataflowPushOutcome
+Orleans.Dataflow.Grains.DataflowPushOutcome.Closed = 2 -> Orleans.Dataflow.Grains.DataflowPushOutcome
+Orleans.Dataflow.Grains.DataflowPushOutcome.Dropped = 1 -> Orleans.Dataflow.Grains.DataflowPushOutcome
+Orleans.Dataflow.Grains.DataflowPushOutcome.Failed = 3 -> Orleans.Dataflow.Grains.DataflowPushOutcome
+Orleans.Dataflow.Grains.IDataflowPushReceiver
+Orleans.Dataflow.Grains.IDataflowPushReceiver.PushAsync(object? element) -> System.Threading.Tasks.Task<Orleans.Dataflow.Grains.DataflowPushOutcome>!
+Orleans.Dataflow.Grains.IObserverBridgeGrain
+Orleans.Dataflow.Grains.IObserverBridgeGrain.AttachAsync(Orleans.Dataflow.Grains.IDataflowPushReceiver! receiver) -> System.Threading.Tasks.Task!
+Orleans.Dataflow.Grains.IObserverBridgeGrain.DetachAsync() -> System.Threading.Tasks.Task!
+Orleans.Dataflow.Grains.IObserverBridgeGrain.IsListeningAsync() -> System.Threading.Tasks.Task<bool>!
+Orleans.Dataflow.Grains.IObserverBridgeGrain.PushAsync(object? element) -> System.Threading.Tasks.Task<Orleans.Dataflow.Grains.DataflowPushOutcome>!
 Orleans.Dataflow.Grains.IPipelineCoordinatorGrain
 Orleans.Dataflow.Grains.IPipelineCoordinatorGrain.CancelRunAsync(string! runId, long epoch) -> System.Threading.Tasks.Task!
 Orleans.Dataflow.Grains.IPipelineCoordinatorGrain.GetStatusAsync(string! runId, long epoch) -> System.Threading.Tasks.Task<Orleans.Dataflow.Grains.RunStatusSnapshot!>!
@@ -38,6 +57,10 @@ Orleans.Dataflow.Grains.IPipelineRunGrain.GetResultAsync(long epoch, string! slo
 Orleans.Dataflow.Grains.IPipelineRunGrain.GetStatusAsync(long epoch) -> System.Threading.Tasks.Task<Orleans.Dataflow.Grains.RunStatusSnapshot!>!
 Orleans.Dataflow.Grains.IPipelineRunGrain.ShutdownAsync(long epoch) -> System.Threading.Tasks.Task!
 Orleans.Dataflow.Grains.IPipelineRunGrain.StartAsync(byte[]! canonicalDocument, long epoch) -> System.Threading.Tasks.Task!
+Orleans.Dataflow.Grains.IReminderTriggerGrain
+Orleans.Dataflow.Grains.IReminderTriggerGrain.IsScheduledAsync() -> System.Threading.Tasks.Task<bool>!
+Orleans.Dataflow.Grains.IReminderTriggerGrain.StartAsync(Orleans.Dataflow.Grains.IDataflowPushReceiver! receiver, long periodMilliseconds) -> System.Threading.Tasks.Task!
+Orleans.Dataflow.Grains.IReminderTriggerGrain.StopAsync() -> System.Threading.Tasks.Task!
 Orleans.Dataflow.Grains.OrleansDataflowStorage
 Orleans.Dataflow.Grains.PipelineFencingException
 Orleans.Dataflow.Grains.PipelineFencingException.CallerEpoch.get -> long
@@ -109,9 +132,11 @@ Orleans.Dataflow.Grains.RunStatusSnapshot.Phase.set -> void
 Orleans.Dataflow.Grains.RunStatusSnapshot.RunStatusSnapshot() -> void
 Orleans.Dataflow.Hosting.DataflowRunTokens
 Orleans.Dataflow.Hosting.DataflowRunTokens.DataflowRunTokens() -> void
-Orleans.Dataflow.Hosting.DataflowRunTokens.DataflowRunTokens(System.Threading.CancellationToken RunToken, System.Threading.CancellationToken StopToken) -> void
-Orleans.Dataflow.Hosting.DataflowRunTokens.Deconstruct(out System.Threading.CancellationToken RunToken, out System.Threading.CancellationToken StopToken) -> void
+Orleans.Dataflow.Hosting.DataflowRunTokens.DataflowRunTokens(string! RunIdentity, System.Threading.CancellationToken RunToken, System.Threading.CancellationToken StopToken) -> void
+Orleans.Dataflow.Hosting.DataflowRunTokens.Deconstruct(out string! RunIdentity, out System.Threading.CancellationToken RunToken, out System.Threading.CancellationToken StopToken) -> void
 Orleans.Dataflow.Hosting.DataflowRunTokens.Equals(Orleans.Dataflow.Hosting.DataflowRunTokens other) -> bool
+Orleans.Dataflow.Hosting.DataflowRunTokens.RunIdentity.get -> string!
+Orleans.Dataflow.Hosting.DataflowRunTokens.RunIdentity.init -> void
 Orleans.Dataflow.Hosting.DataflowRunTokens.RunToken.get -> System.Threading.CancellationToken
 Orleans.Dataflow.Hosting.DataflowRunTokens.RunToken.init -> void
 Orleans.Dataflow.Hosting.DataflowRunTokens.StopToken.get -> System.Threading.CancellationToken
@@ -129,11 +154,15 @@ Orleans.Dataflow.Hosting.DataflowStageRuntime
 Orleans.Dataflow.Hosting.IDataflowStageFactory
 Orleans.Dataflow.Hosting.IDataflowStageFactory.Create(Orleans.Dataflow.Hosting.DataflowStageRequest request) -> Orleans.Dataflow.Hosting.DataflowStageRuntime!
 Orleans.Dataflow.Hosting.IOrleansDataflowBuilder
+Orleans.Dataflow.Hosting.IOrleansDataflowBuilder.AddBroadcastElement<T>(Orleans.Dataflow.Adapters.BroadcastElementBinding<T>! element) -> Orleans.Dataflow.Hosting.IOrleansDataflowBuilder!
 Orleans.Dataflow.Hosting.IOrleansDataflowBuilder.AddCatalog(Orleans.Dataflow.Definition.IStageCatalog! catalog) -> Orleans.Dataflow.Hosting.IOrleansDataflowBuilder!
+Orleans.Dataflow.Hosting.IOrleansDataflowBuilder.AddDotnetStages() -> Orleans.Dataflow.Hosting.IOrleansDataflowBuilder!
 Orleans.Dataflow.Hosting.IOrleansDataflowBuilder.AddFactory(Orleans.Dataflow.Identity.ProviderId provider, Orleans.Dataflow.Hosting.IDataflowStageFactory! factory) -> Orleans.Dataflow.Hosting.IOrleansDataflowBuilder!
 Orleans.Dataflow.Hosting.IOrleansDataflowBuilder.AddGrainCall<TIn, TOut>(Orleans.Dataflow.Adapters.GrainCallBinding<TIn, TOut>! binding) -> Orleans.Dataflow.Hosting.IOrleansDataflowBuilder!
 Orleans.Dataflow.Hosting.IOrleansDataflowBuilder.AddGrainCallSink<TIn>(Orleans.Dataflow.Adapters.GrainCallSinkBinding<TIn>! binding) -> Orleans.Dataflow.Hosting.IOrleansDataflowBuilder!
 Orleans.Dataflow.Hosting.IOrleansDataflowBuilder.AddGrainEnumerable<T>(Orleans.Dataflow.Adapters.GrainEnumerableBinding<T>! source) -> Orleans.Dataflow.Hosting.IOrleansDataflowBuilder!
+Orleans.Dataflow.Hosting.IOrleansDataflowBuilder.AddObservable<T>(Orleans.Dataflow.Adapters.ObservableBinding<T>! source) -> Orleans.Dataflow.Hosting.IOrleansDataflowBuilder!
+Orleans.Dataflow.Hosting.IOrleansDataflowBuilder.AddObserverBridge<T>(Orleans.Dataflow.Adapters.ObserverBridgeBinding<T>! bridge) -> Orleans.Dataflow.Hosting.IOrleansDataflowBuilder!
 Orleans.Dataflow.Hosting.IOrleansDataflowBuilder.AddStreamElement<T>(Orleans.Dataflow.Adapters.StreamElementBinding<T>! element) -> Orleans.Dataflow.Hosting.IOrleansDataflowBuilder!
 Orleans.Dataflow.Hosting.OrleansDataflowClientExtensions
 Orleans.Dataflow.Hosting.OrleansDataflowClientOptions
@@ -154,18 +183,26 @@ Orleans.Dataflow.Hosting.OrleansRunHandle.RunId.get -> string!
 Orleans.Dataflow.Hosting.OrleansRunHandle.ShutdownAsync() -> System.Threading.Tasks.Task!
 Orleans.Dataflow.Hosting.OrleansRunHandle.Ticket.get -> Orleans.Dataflow.Grains.PipelineRunTicket!
 const Orleans.Dataflow.Grains.OrleansDataflowStorage.CoordinatorProviderName = "orleans-dataflow-coordinator" -> string!
+override Orleans.Dataflow.Adapters.BroadcastElementBinding<T>.ToString() -> string!
 override Orleans.Dataflow.Adapters.GrainCallBinding<TIn, TOut>.ToString() -> string!
 override Orleans.Dataflow.Adapters.GrainCallSinkBinding<TIn>.ToString() -> string!
 override Orleans.Dataflow.Adapters.GrainEnumerableBinding<T>.ToString() -> string!
+override Orleans.Dataflow.Adapters.ObserverBridgeBinding<T>.ToString() -> string!
 override Orleans.Dataflow.Adapters.OrleansStreamAddress.GetHashCode() -> int
 override Orleans.Dataflow.Adapters.OrleansStreamAddress.ToString() -> string!
 override Orleans.Dataflow.Adapters.StreamElementBinding<T>.ToString() -> string!
 override Orleans.Dataflow.Hosting.DataflowRunTokens.GetHashCode() -> int
 override Orleans.Dataflow.Hosting.DataflowStageRequest.GetHashCode() -> int
 override Orleans.Dataflow.Hosting.OrleansRunHandle.ToString() -> string!
+static Orleans.Dataflow.Adapters.BroadcastElementBinding.Create<T>(Orleans.Dataflow.ElementContract<T> element) -> Orleans.Dataflow.Adapters.BroadcastElementBinding<T>!
 static Orleans.Dataflow.Adapters.GrainCallBinding.Create<TIn, TOut>(string! name, Orleans.Dataflow.ElementContract<TIn> input, Orleans.Dataflow.ElementContract<TOut> output, System.Func<Orleans.IGrainFactory!, TIn, System.Threading.CancellationToken, System.Threading.Tasks.Task<TOut>!>! call) -> Orleans.Dataflow.Adapters.GrainCallBinding<TIn, TOut>!
 static Orleans.Dataflow.Adapters.GrainCallSinkBinding.Create<TIn>(string! name, Orleans.Dataflow.ElementContract<TIn> input, System.Func<Orleans.IGrainFactory!, TIn, System.Threading.CancellationToken, System.Threading.Tasks.Task!>! call) -> Orleans.Dataflow.Adapters.GrainCallSinkBinding<TIn>!
 static Orleans.Dataflow.Adapters.GrainEnumerableBinding.Create<T>(string! name, Orleans.Dataflow.ElementContract<T> output, System.Func<Orleans.IGrainFactory!, System.Threading.CancellationToken, System.Collections.Generic.IAsyncEnumerable<T>!>! open) -> Orleans.Dataflow.Adapters.GrainEnumerableBinding<T>!
+static Orleans.Dataflow.Adapters.ObserverBridgeBinding.Create<T>(string! name, Orleans.Dataflow.ElementContract<T> output) -> Orleans.Dataflow.Adapters.ObserverBridgeBinding<T>!
+static Orleans.Dataflow.Adapters.OrleansStages.BroadcastSink<T>(Orleans.Dataflow.Adapters.BroadcastElementBinding<T>! element) -> Orleans.Dataflow.RegisteredSink<T>!
+static Orleans.Dataflow.Adapters.OrleansStages.BroadcastSinkParameterContract.get -> Orleans.Dataflow.Identity.ContractReference
+static Orleans.Dataflow.Adapters.OrleansStages.BroadcastSinkParameters<T>(Orleans.Dataflow.Adapters.BroadcastElementBinding<T>! element, Orleans.Dataflow.Adapters.OrleansStreamAddress channel, bool fireAndForgetDelivery) -> Orleans.Dataflow.Serialization.CanonicalJsonValue
+static Orleans.Dataflow.Adapters.OrleansStages.BroadcastSinkStage.get -> Orleans.Dataflow.Identity.StageRef
 static Orleans.Dataflow.Adapters.OrleansStages.Catalog.get -> Orleans.Dataflow.Definition.StageCatalog!
 static Orleans.Dataflow.Adapters.OrleansStages.Element<T>() -> Orleans.Dataflow.ElementContract<T>
 static Orleans.Dataflow.Adapters.OrleansStages.ElementContract.get -> Orleans.Dataflow.Identity.ContractReference
@@ -181,7 +218,17 @@ static Orleans.Dataflow.Adapters.OrleansStages.GrainEnumerable<T>(Orleans.Datafl
 static Orleans.Dataflow.Adapters.OrleansStages.GrainEnumerableParameterContract.get -> Orleans.Dataflow.Identity.ContractReference
 static Orleans.Dataflow.Adapters.OrleansStages.GrainEnumerableParameters<T>(Orleans.Dataflow.Adapters.GrainEnumerableBinding<T>! source) -> Orleans.Dataflow.Serialization.CanonicalJsonValue
 static Orleans.Dataflow.Adapters.OrleansStages.GrainEnumerableStage.get -> Orleans.Dataflow.Identity.StageRef
+static Orleans.Dataflow.Adapters.OrleansStages.ObserverBridge<T>(Orleans.Dataflow.Adapters.ObserverBridgeBinding<T>! bridge) -> Orleans.Dataflow.RegisteredSource<T>!
+static Orleans.Dataflow.Adapters.OrleansStages.ObserverBridgeKey(Orleans.Dataflow.Grains.PipelineRunTicket! ticket, string! bridge) -> string!
+static Orleans.Dataflow.Adapters.OrleansStages.ObserverBridgeKey(string! graphId, string! runId, string! bridge) -> string!
+static Orleans.Dataflow.Adapters.OrleansStages.ObserverBridgeParameterContract.get -> Orleans.Dataflow.Identity.ContractReference
+static Orleans.Dataflow.Adapters.OrleansStages.ObserverBridgeParameters<T>(Orleans.Dataflow.Adapters.ObserverBridgeBinding<T>! bridge, Orleans.Dataflow.BufferOptions! ingress) -> Orleans.Dataflow.Serialization.CanonicalJsonValue
+static Orleans.Dataflow.Adapters.OrleansStages.ObserverBridgeStage.get -> Orleans.Dataflow.Identity.StageRef
 static Orleans.Dataflow.Adapters.OrleansStages.Provider.get -> Orleans.Dataflow.Identity.ProviderId
+static Orleans.Dataflow.Adapters.OrleansStages.ReminderTrigger() -> Orleans.Dataflow.RegisteredSource<long>!
+static Orleans.Dataflow.Adapters.OrleansStages.ReminderTriggerParameterContract.get -> Orleans.Dataflow.Identity.ContractReference
+static Orleans.Dataflow.Adapters.OrleansStages.ReminderTriggerParameters(System.TimeSpan period, Orleans.Dataflow.BufferOptions! ingress) -> Orleans.Dataflow.Serialization.CanonicalJsonValue
+static Orleans.Dataflow.Adapters.OrleansStages.ReminderTriggerStage.get -> Orleans.Dataflow.Identity.StageRef
 static Orleans.Dataflow.Adapters.OrleansStages.StreamSink<T>(Orleans.Dataflow.Adapters.StreamElementBinding<T>! element) -> Orleans.Dataflow.RegisteredSink<T>!
 static Orleans.Dataflow.Adapters.OrleansStages.StreamSinkParameterContract.get -> Orleans.Dataflow.Identity.ContractReference
 static Orleans.Dataflow.Adapters.OrleansStages.StreamSinkParameters<T>(Orleans.Dataflow.Adapters.StreamElementBinding<T>! element, Orleans.Dataflow.Adapters.OrleansStreamAddress stream) -> Orleans.Dataflow.Serialization.CanonicalJsonValue
@@ -190,6 +237,7 @@ static Orleans.Dataflow.Adapters.OrleansStages.StreamSource<T>(Orleans.Dataflow.
 static Orleans.Dataflow.Adapters.OrleansStages.StreamSourceParameterContract.get -> Orleans.Dataflow.Identity.ContractReference
 static Orleans.Dataflow.Adapters.OrleansStages.StreamSourceParameters<T>(Orleans.Dataflow.Adapters.StreamElementBinding<T>! element, Orleans.Dataflow.Adapters.OrleansStreamAddress stream, Orleans.Dataflow.BufferOptions! ingress) -> Orleans.Dataflow.Serialization.CanonicalJsonValue
 static Orleans.Dataflow.Adapters.OrleansStages.StreamSourceStage.get -> Orleans.Dataflow.Identity.StageRef
+static Orleans.Dataflow.Adapters.OrleansStages.Tick.get -> Orleans.Dataflow.ElementContract<long>
 static Orleans.Dataflow.Adapters.OrleansStreamAddress.Create(string! provider, string! streamNamespace, System.Guid key) -> Orleans.Dataflow.Adapters.OrleansStreamAddress
 static Orleans.Dataflow.Adapters.OrleansStreamAddress.Create(string! provider, string! streamNamespace, string! key) -> Orleans.Dataflow.Adapters.OrleansStreamAddress
 static Orleans.Dataflow.Adapters.OrleansStreamAddress.operator !=(Orleans.Dataflow.Adapters.OrleansStreamAddress left, Orleans.Dataflow.Adapters.OrleansStreamAddress right) -> bool
