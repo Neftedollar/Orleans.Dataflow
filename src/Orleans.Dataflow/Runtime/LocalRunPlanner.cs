@@ -67,11 +67,13 @@ internal static class LocalRunPlanner
         List<LocalSegment> segments = [];
         List<LocalBoundary> boundaries = [];
         List<LocalElementStage> stages = [];
-        IEnumerable? elements = null;
+        Dictionary<NodeId, (LocalIngressQueue Queue, object Handle)> queues = [];
+        LocalSource? elements = null;
         LocalAsyncStage? head = null;
         LocalBoundary? pending = null;
         LocalTerminal? terminal = null;
         object? seed = null;
+        Func<object?>? seedFactory = null;
         bool produces = false;
         int completesAtStart = -1;
 
@@ -85,31 +87,143 @@ internal static class LocalRunPlanner
             switch (descriptor.Kind)
             {
                 case LocalStageKind.FromEnumerable when first && !last:
-                    elements = LocalDelegateAdapter.Elements(descriptor.Behavior);
+                {
+                    IEnumerable sequence = LocalDelegateAdapter.Elements(descriptor.Behavior, descriptor.Kind);
+
+                    elements = _ => sequence;
+
                     break;
+                }
+
                 case LocalStageKind.Empty when first && !last:
-                    elements = LocalSequence.Empty();
+                    elements = static _ => LocalSequence.Empty();
                     break;
                 case LocalStageKind.Single when first && !last:
-                    elements = LocalSequence.Single(descriptor.Behavior);
+                {
+                    object? value = descriptor.Behavior;
+
+                    elements = _ => LocalSequence.Single(value);
+
                     break;
+                }
+
                 case LocalStageKind.Repeat when first && !last:
-                    elements = LocalSequence.Repeat(descriptor.Behavior, Count(declaration));
+                {
+                    object? value = descriptor.Behavior;
+                    int count = Count(declaration);
+
+                    elements = _ => LocalSequence.Repeat(value, count);
+
                     break;
+                }
+
                 case LocalStageKind.Range when first && !last:
-                    elements = Range(declaration);
+                {
+                    (int start, int count) = Range(declaration);
+
+                    elements = _ => LocalSequence.Range(start, count);
+
                     break;
+                }
+
                 case LocalStageKind.FromTask when first && !last:
-                    elements = LocalSequence.Deferred(LocalDelegateAdapter.TaskValue(descriptor.Behavior));
+                {
+                    Func<object?> value = LocalDelegateAdapter.TaskValue(descriptor.Behavior);
+
+                    elements = _ => LocalSequence.Deferred(value);
+
                     break;
+                }
+
                 case LocalStageKind.Failed when first && !last:
-                    elements = LocalSequence.Failed(LocalDelegateAdapter.Failure(descriptor.Behavior));
+                {
+                    Exception failure = LocalDelegateAdapter.Failure(descriptor.Behavior);
+
+                    elements = _ => LocalSequence.Failed(failure);
+
                     break;
+                }
+
                 case LocalStageKind.Unfold when first && !last:
-                    elements = LocalSequence.Unfold(
-                        descriptor.Seed,
-                        LocalDelegateAdapter.Generator(descriptor.Behavior));
+                {
+                    object? state = descriptor.Seed;
+                    LocalGenerator generator = LocalDelegateAdapter.Generator(descriptor.Behavior);
+
+                    elements = _ => LocalSequence.Unfold(state, generator);
+
                     break;
+                }
+
+                case LocalStageKind.FromAsyncEnumerable when first && !last:
+                {
+                    LocalAsyncCursorFactory open = LocalDelegateAdapter.AsyncCursors(descriptor.Behavior);
+
+                    elements = context => LocalSequence.Async(open, context);
+
+                    break;
+                }
+
+                case LocalStageKind.FromFactory when first && !last:
+                {
+                    Func<object?> factory = LocalDelegateAdapter.Factory(descriptor.Behavior);
+
+                    elements = _ => LocalSequence.Deferred(factory);
+
+                    break;
+                }
+
+                case LocalStageKind.FromAsyncFactory when first && !last:
+                {
+                    Func<CancellationToken, object?> factory =
+                        LocalDelegateAdapter.AsyncFactory(descriptor.Behavior);
+
+                    elements = context => LocalSequence.Deferred(() => factory(context.RunToken));
+
+                    break;
+                }
+
+                case LocalStageKind.Never when first && !last:
+                    elements = static context => LocalSequence.Never(context);
+                    break;
+                case LocalStageKind.Cycle when first && !last:
+                {
+                    IEnumerable cycled = LocalDelegateAdapter.Elements(descriptor.Behavior, descriptor.Kind);
+
+                    elements = _ => LocalSequence.Cycle(cycled);
+
+                    break;
+                }
+
+                case LocalStageKind.UnfoldAsync when first && !last:
+                {
+                    object? state = descriptor.Seed;
+                    LocalAsyncGenerator generator = LocalDelegateAdapter.AsyncGenerator(descriptor.Behavior);
+
+                    elements = context => LocalSequence.UnfoldAsync(state, generator, context);
+
+                    break;
+                }
+
+                case LocalStageKind.Queue when first && !last:
+                {
+                    LocalIngressQueue queue = Ingress(declaration);
+                    object handle = LocalDelegateAdapter.QueueFacade(descriptor.Behavior)(queue);
+
+                    queues.Add(order[index], (queue, handle));
+                    elements = queue.Elements;
+
+                    break;
+                }
+
+                case LocalStageKind.FromChannel when first && !last:
+                {
+                    LocalChannelSource reader = LocalDelegateAdapter.ChannelSource(descriptor.Behavior);
+
+                    elements = context => LocalSequence.Channel(reader, context);
+
+                    break;
+                }
+
                 case LocalStageKind.Select when !first && !last:
                     Fuse(LocalElementStage.Select(LocalDelegateAdapter.Selector(descriptor.Behavior)));
                     break;
@@ -179,6 +293,24 @@ internal static class LocalRunPlanner
                     seed = descriptor.Seed;
                     produces = true;
                     break;
+                case LocalStageKind.Last or LocalStageKind.LastOrDefault when last:
+                    Settle();
+                    terminal = LocalTerminal.LastElement(descriptor.Kind is LocalStageKind.Last);
+                    seed = descriptor.Seed;
+                    produces = true;
+                    break;
+                case LocalStageKind.Collect when last:
+                    Settle();
+                    terminal = LocalTerminal.Collecting(
+                        Collected(declaration),
+                        LocalDelegateAdapter.Freeze(descriptor.Behavior));
+                    seedFactory = static () => new List<object?>();
+                    produces = true;
+                    break;
+                case LocalStageKind.ToChannel when last:
+                    Settle();
+                    terminal = LocalTerminal.Channel(LocalDelegateAdapter.ChannelSink(descriptor.Behavior));
+                    break;
                 default:
                     throw Foreign(
                         $"the node '{order[index]}' is a '{descriptor.Kind}' stage at position {index + 1} of {order.Count}, where that shape cannot stand");
@@ -192,11 +324,15 @@ internal static class LocalRunPlanner
             throw Foreign("the chain does not begin with a source");
         }
 
+        (ResultSlotId? slot, LocalControl[] controls) = Slots(graph.Document, order[^1], produces, queues);
+
         return new LocalRunPlan(
             segments,
             boundaries,
             seed,
-            Slot(graph.Document, order[^1], produces),
+            seedFactory,
+            slot,
+            controls,
             completesAtStart);
 
         // Adds one synchronous stage to the segment under construction, opening the segment a pending
@@ -306,15 +442,40 @@ internal static class LocalRunPlanner
             : throw Foreign(
                 $"the node '{node.Id}' carries parameters this runtime cannot read: {string.Join("; ", violations)}");
 
-    /// <summary>Reads a range node's payload as the sequence it declares.</summary>
+    /// <summary>Reads a range node's payload as the bounds it declares.</summary>
     /// <param name="node">The node as the document declares it.</param>
-    /// <returns>The sequence of integers.</returns>
+    /// <returns>The first integer and how many follow it.</returns>
     /// <exception cref="InvalidOperationException">The payload is not a range payload.</exception>
-    private static IEnumerable Range(StageNode node) =>
+    private static (int Start, int Count) Range(StageNode node) =>
         LocalRangeParameters.TryRead(node.Parameters, out int start, out int count, out IReadOnlyList<string> violations)
-            ? LocalSequence.Range(start, count)
+            ? (start, count)
             : throw Foreign(
                 $"the range '{node.Id}' carries parameters this runtime cannot read: {string.Join("; ", violations)}");
+
+    /// <summary>Reads a collecting node's payload as the element bound it declares.</summary>
+    /// <param name="node">The node as the document declares it.</param>
+    /// <returns>The greatest number of elements the sink collects.</returns>
+    /// <exception cref="InvalidOperationException">The payload is not a collect payload.</exception>
+    private static int Collected(StageNode node) =>
+        LocalCollectParameters.TryRead(node.Parameters, out CollectOptions? options, out IReadOnlyList<string> violations)
+            ? options!.MaxElements
+            : throw Foreign(
+                $"the collecting sink '{node.Id}' carries parameters this runtime cannot read: {string.Join("; ", violations)}");
+
+    /// <summary>Builds the ingress queue one run offers into, from the node's declared bounds.</summary>
+    /// <param name="node">The node as the document declares it.</param>
+    /// <returns>The queue, which belongs to this materialization and to no other.</returns>
+    /// <exception cref="InvalidOperationException">The payload is not a buffer payload.</exception>
+    /// <remarks>
+    /// A queue carries a buffer's payload under a buffer's contract, because its capacity and its overflow
+    /// policy are exactly a buffer's; the stage reference is what says that this one stands at the head of
+    /// a chain rather than in the middle of it.
+    /// </remarks>
+    private static LocalIngressQueue Ingress(StageNode node) =>
+        LocalBufferParameters.TryRead(node.Parameters, out BufferOptions? options, out IReadOnlyList<string> violations)
+            ? new LocalIngressQueue(options!.Capacity, options.OverflowPolicy)
+            : throw Foreign(
+                $"the queue '{node.Id}' carries parameters this runtime cannot read: {string.Join("; ", violations)}");
 
     /// <summary>Reads a distinct node's payload as the key bound it declares.</summary>
     /// <param name="node">The node as the document declares it.</param>
@@ -434,31 +595,78 @@ internal static class LocalRunPlanner
                 $"its {document.Nodes.Count} nodes do not form one chain, and following the edges from '{head}' reached {order.Count} of them");
     }
 
-    /// <summary>Reads the result slot the terminal produces.</summary>
+    /// <summary>Sorts the document's declared slots into the terminal's result and the run's controls.</summary>
     /// <param name="document">The document being compiled.</param>
     /// <param name="terminal">The identifier of the last node of the chain.</param>
-    /// <param name="folds">Whether the terminal is a fold, which is the only shape with a result port.</param>
-    /// <returns>The slot name, or <see langword="null"/> when the document declares no result.</returns>
+    /// <param name="produces">Whether the terminal declares a result port.</param>
+    /// <param name="queues">The ingress queues this plan built, keyed by node identifier.</param>
+    /// <returns>The terminal's slot name, if any, and one control per queue.</returns>
     /// <exception cref="InvalidOperationException">
-    /// The document declares more than one result, or declares one that the terminal does not produce.
+    /// The document declares a slot no node of this chain produces, declares two on one producer, or leaves
+    /// a queue without one.
     /// </exception>
-    private static ResultSlotId? Slot(GraphDocument document, NodeId terminal, bool folds)
+    /// <remarks>
+    /// <para>
+    /// Two kinds of slot and one mechanism. A control slot is produced by a queue's <c>control</c> port and
+    /// its value exists from the start of the run; the terminal's slot is produced by the last node's
+    /// <c>result</c> port and its value exists at the end. Everything else about them is the same, which is
+    /// why they travel together in one document and resolve through one handle.
+    /// </para>
+    /// <para>
+    /// A queue with no control slot is rejected rather than run. Nothing else can offer it an element, so
+    /// such a run would wait for a producer that cannot exist — a hang, which is a worse answer than a
+    /// sentence. It is unreachable through the authoring API, where declaring the queue is what names the
+    /// control.
+    /// </para>
+    /// </remarks>
+    private static (ResultSlotId? Slot, LocalControl[] Controls) Slots(
+        GraphDocument document,
+        NodeId terminal,
+        bool produces,
+        Dictionary<NodeId, (LocalIngressQueue Queue, object Handle)> queues)
     {
-        if (document.ResultSlots.Count == 0)
+        ResultSlotId? result = null;
+        Dictionary<NodeId, LocalControl> controls = [];
+
+        foreach (ResultSlotDefinition declared in document.ResultSlots)
         {
-            return null;
+            if (declared.Producer.Port == LocalVocabulary.ControlPort &&
+                queues.TryGetValue(declared.Producer.Node, out (LocalIngressQueue Queue, object Handle) queue))
+            {
+                if (!controls.TryAdd(declared.Producer.Node, new LocalControl(declared.Id, queue.Handle, queue.Queue)))
+                {
+                    throw Foreign($"the queue '{declared.Producer.Node}' declares more than one control slot");
+                }
+
+                continue;
+            }
+
+            if (produces && declared.Producer.Node == terminal)
+            {
+                if (result is not null)
+                {
+                    throw Foreign($"the terminal '{terminal}' declares more than one result slot");
+                }
+
+                result = declared.Id;
+
+                continue;
+            }
+
+            throw Foreign(
+                $"the result '{declared.Id}' is produced by '{declared.Producer}', which is neither the terminal of the chain nor the control port of one of its queues");
         }
 
-        if (document.ResultSlots.Count > 1)
+        foreach (NodeId node in queues.Keys)
         {
-            throw Foreign($"it declares {document.ResultSlots.Count} results, and a linear chain produces at most one");
+            if (!controls.ContainsKey(node))
+            {
+                throw Foreign(
+                    $"the queue '{node}' declares no control slot, so nothing could ever offer it an element");
+            }
         }
 
-        ResultSlotDefinition declared = document.ResultSlots[0];
-
-        return folds && declared.Producer.Node == terminal
-            ? declared.Id
-            : throw Foreign($"the result '{declared.Id}' is produced by '{declared.Producer}', which does not terminate the chain");
+        return (result, [.. controls.Values]);
     }
 
     /// <summary>Builds the exception for a document this runtime cannot execute.</summary>

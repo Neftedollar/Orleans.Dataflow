@@ -190,6 +190,59 @@ checkpoint-2 rule; none introduces a boundary.
   timing group) brings the clock abstraction with it; nothing in
   checkpoint 3 reads a clock.
 
+## Checkpoint 4 contract (asynchronous ingress and adapters) — as implemented
+
+- **Two stop signals.** A run carries a RunToken (cancellation) and a
+  StopToken (cancellation or shutdown). Only the runtime's own waits observe
+  StopToken — the ingress queue, the channel reader, `Never` — so shutdown
+  releases them; author-owned waits (`FromTask`, `FromAsyncEnumerable`,
+  `UnfoldAsync`, `FromAsyncFactory`) receive RunToken alone, preserving the
+  slow-source rule: a source that ignores its token delays the stop until it
+  yields.
+- **`Source.FromAsyncEnumerable<T>`**: fresh `GetAsyncEnumerator(runToken)`
+  per run; `DisposeAsync` awaited on every terminal path; cooperative
+  cancellation.
+- **Control slots.** `Source.Queue<T>(BufferOptions, controlName)` declares
+  a control result slot on the queue node's `control` port
+  (`local-control@v1`). `RunnableGraph.Control<TControl>(name)` /
+  `TryGetControl` recover the typed slot against an authoring-side type
+  registry (mismatches name both types). The general rule, now stated on
+  `GetValueAsync`: a slot's task completes when its value becomes
+  available — terminal results at the end of the run, controls at its
+  start. A control task never faults: a run that dies at start still hands
+  out its queue, whose every later offer answers `Closed` — the truth a
+  producer needs.
+- **`IIngressQueue<T>`**: `OfferAsync` returns `QueueOfferOutcome` and never
+  throws for queue state — `Accepted`, `Dropped`, `Closed`, `Failed` are
+  values. The outcome describes the offered element: `DropOldest` and
+  `DropBuffer` evict queued elements and admit this one (`Accepted`; the
+  loss lands on the run's drop counter), `Dropped` is `DropNewest`'s
+  answer, `Backpressure` waits. `Complete()` ends the source normally and
+  drains what was queued; `Fail(exception)` faults the run and abandons —
+  the drain-versus-abandon split one level down. `OverflowPolicy.Fail`
+  answers `Failed` and faults the run with `BufferOverflowException`.
+- **`Source.FromChannel<T>`**: the reader is external state; two runs of one
+  channel-reader graph compete for elements, the split is undefined, and
+  that is the author's channel to own (union and non-duplication are the
+  guarantees). Channel completion completes the run; a faulted channel
+  faults it.
+- **`Sink.ToChannel<T>`**: `WriteAsync` per element (the writer's
+  backpressure is the sink's), `TryComplete(writer)` on completion — early
+  termination included — and `TryComplete(writer, exception)` on failure.
+  Write-accepted is not consumed. A teardown that throws (a hostile
+  writer's `TryComplete`) is guarded: it faults an otherwise-successful run
+  and never replaces an existing outcome or hangs `Completion`.
+- **Other sources**: `FromFactory`/`FromAsyncFactory` invoke per
+  materialization; `Never` parks on a kernel wait; `Cycle` uses a fresh
+  enumerator per lap (disposed per lap and on every terminal path) and
+  faults on an empty sequence rather than looping silently; `UnfoldAsync`
+  takes `Task<UnfoldStep<TState, T>?>` (a named delegate and a nullable
+  step record — the async position cannot use the sync try-shape, and both
+  type arguments are written once at the call site).
+- **Sinks**: `Last`/`LastOrDefault` (First-style empty semantics),
+  `Collect(CollectOptions)` with a required element cap that faults with
+  `CollectOverflowException` rather than truncating.
+
 **Terminal semantics extend unchanged**: shutdown drains boundaries (a
 buffer's contents are delivered, in-flight async callbacks are awaited,
 then the run completes with what it has); cancellation abandons buffered

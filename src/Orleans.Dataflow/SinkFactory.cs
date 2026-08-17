@@ -1,3 +1,5 @@
+using System.Threading.Channels;
+
 namespace Orleans.Dataflow;
 
 /// <summary>
@@ -88,6 +90,38 @@ public sealed class SinkFactory<T>
     /// <summary>Creates a sink that counts the elements and exposes the count.</summary>
     /// <returns>The result-bearing sink.</returns>
     public SinkWithResult<T, long> Count() => Sink.Count<T>();
+
+    /// <summary>Creates a sink that exposes the last element the stream delivered.</summary>
+    /// <returns>The result-bearing sink.</returns>
+    /// <remarks>
+    /// A run whose stream ends without an element faults with an
+    /// <see cref="InvalidOperationException"/>; <see cref="LastOrDefault"/> is the variant that answers
+    /// with the element type's default value instead.
+    /// </remarks>
+    public SinkWithResult<T, T> Last() => Sink.Last<T>();
+
+    /// <summary>Creates a sink that exposes the last element, or the default value when there was none.</summary>
+    /// <returns>The result-bearing sink.</returns>
+    public SinkWithResult<T, T?> LastOrDefault() => Sink.LastOrDefault<T>();
+
+    /// <summary>Creates a sink that collects the elements into a list, up to a declared bound.</summary>
+    /// <param name="options">The greatest number of elements to collect.</param>
+    /// <returns>The result-bearing sink.</returns>
+    /// <exception cref="ArgumentNullException"><paramref name="options"/> is <see langword="null"/>.</exception>
+    /// <exception cref="ArgumentOutOfRangeException">
+    /// <see cref="CollectOptions.MaxElements"/> is below one.
+    /// </exception>
+    /// <remarks>
+    /// The element after the bound faults the run with a <see cref="CollectOverflowException"/>; the sink
+    /// never truncates.
+    /// </remarks>
+    public SinkWithResult<T, IReadOnlyList<T>> Collect(CollectOptions options) => Sink.Collect<T>(options);
+
+    /// <summary>Creates a sink that writes every element into a channel the author owns.</summary>
+    /// <param name="writer">The writer to fill.</param>
+    /// <returns>The sink.</returns>
+    /// <exception cref="ArgumentNullException"><paramref name="writer"/> is <see langword="null"/>.</exception>
+    public Sink<T> ToChannel(ChannelWriter<T> writer) => Sink.ToChannel(writer);
 
     /// <summary>Returns a one-line diagnostic summary of this factory.</summary>
     /// <returns>The literal <c>sink factory</c>.</returns>

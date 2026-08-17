@@ -56,6 +56,36 @@ internal enum LocalStageKind
     /// <summary>Emits what a generator produces from a state it carries; one output port, no input port.</summary>
     Unfold,
 
+    /// <summary>Emits the elements of an asynchronous sequence; one output port, no input port.</summary>
+    FromAsyncEnumerable,
+
+    /// <summary>Emits one element a factory produces per run; one output port, no input port.</summary>
+    FromFactory,
+
+    /// <summary>Emits one element an asynchronous factory produces per run; one output port, no input port.</summary>
+    FromAsyncFactory,
+
+    /// <summary>Emits nothing and never ends of its own accord; one output port, no input port.</summary>
+    Never,
+
+    /// <summary>Repeats an in-memory sequence for as long as it is pulled; one output port, no input port.</summary>
+    Cycle,
+
+    /// <summary>
+    /// Emits what an asynchronous generator produces from a state it carries; one output port, no input
+    /// port.
+    /// </summary>
+    UnfoldAsync,
+
+    /// <summary>
+    /// Emits what producers offer to a bounded queue of its own; one output port, one control result port,
+    /// no input port.
+    /// </summary>
+    Queue,
+
+    /// <summary>Emits the elements of a channel the author owns; one output port, no input port.</summary>
+    FromChannel,
+
     /// <summary>Maps every element through a function; one input port and one output port.</summary>
     Select,
 
@@ -144,4 +174,23 @@ internal enum LocalStageKind
 
     /// <summary>Counts every element; one input port and one result port.</summary>
     Count,
+
+    /// <summary>
+    /// Keeps the last element and requires that there was one; one input port and one result port.
+    /// </summary>
+    Last,
+
+    /// <summary>
+    /// Keeps the last element, resolving the element type's default value when there was none; one input
+    /// port and one result port.
+    /// </summary>
+    LastOrDefault,
+
+    /// <summary>
+    /// Collects up to a declared number of elements into a list; one input port and one result port.
+    /// </summary>
+    Collect,
+
+    /// <summary>Writes every element into a channel the author owns; one input port and nothing else.</summary>
+    ToChannel,
 }

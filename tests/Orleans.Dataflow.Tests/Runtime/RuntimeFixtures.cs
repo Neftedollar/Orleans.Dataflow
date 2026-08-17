@@ -74,15 +74,22 @@ internal static class RuntimeFixtures
     /// <summary>Builds a graph directly from a document and a binding table.</summary>
     /// <param name="document">The document.</param>
     /// <param name="bindings">The behavior of each node, keyed by node identifier.</param>
+    /// <param name="controls">
+    /// The type of each runtime control the graph declares, keyed by name; omitted for the graphs that
+    /// declare none.
+    /// </param>
     /// <returns>The graph, fingerprinted the way closing one would have fingerprinted it.</returns>
     /// <remarks>
     /// This is the back door the authoring API deliberately does not have. It exists so that the runtime's
-    /// defenses against a document it did not build can be tested at all.
+    /// defenses against a document it did not build can be tested at all. The control registry is supplied
+    /// the same way the binding table is, and for the same reason: a CLR type is not durable topology, so a
+    /// document alone never says what type a control is.
     /// </remarks>
     internal static RunnableGraph Graph(
         GraphDocument document,
-        IReadOnlyDictionary<NodeId, LocalStageDescriptor> bindings) =>
-        new(document, GraphDocumentSerializer.Fingerprint(document), bindings);
+        IReadOnlyDictionary<NodeId, LocalStageDescriptor> bindings,
+        IReadOnlyDictionary<ResultSlotId, Type>? controls = null) =>
+        new(document, GraphDocumentSerializer.Fingerprint(document), bindings, controls);
 
     /// <summary>Builds a document over local nodes with the capabilities every local document declares.</summary>
     /// <param name="nodes">The nodes.</param>

@@ -1,7 +1,9 @@
 using System.Diagnostics.CodeAnalysis;
 using System.Globalization;
+using System.Threading.Channels;
 using Orleans.Dataflow.Authoring;
 using Orleans.Dataflow.Identity;
+using Orleans.Dataflow.Runtime;
 using Orleans.Dataflow.Serialization;
 
 namespace Orleans.Dataflow;
@@ -649,19 +651,8 @@ public sealed class Source<T>
     /// the parameter name is corrected, because the author wrote a slot name and not a
     /// <see cref="ResultSlotId"/> value.
     /// </remarks>
-    private static ResultSlotId ParseSlotName(string slotName)
-    {
-        ArgumentNullException.ThrowIfNull(slotName);
-
-        try
-        {
-            return ResultSlotId.Create(slotName);
-        }
-        catch (ArgumentException failure)
-        {
-            throw new ArgumentException(failure.Message, nameof(slotName), failure);
-        }
-    }
+    private static ResultSlotId ParseSlotName(string slotName) =>
+        LocalOptionGuard.SlotName(slotName, nameof(slotName));
 
     /// <summary>Closes this source with a result-bearing sink under a candidate name.</summary>
     /// <typeparam name="TResult">The type of the declared result.</typeparam>
@@ -930,6 +921,251 @@ public static class Source
         ArgumentNullException.ThrowIfNull(generator);
 
         return new Source<T>(LocalStageChain.Of(LocalStageDescriptor.Unfold(seed, generator)));
+    }
+
+    /// <summary>Starts a source that emits the elements of an asynchronous sequence.</summary>
+    /// <typeparam name="T">The element type.</typeparam>
+    /// <param name="elements">The sequence to emit.</param>
+    /// <returns>The source, ready to be extended with operators.</returns>
+    /// <exception cref="ArgumentNullException"><paramref name="elements"/> is <see langword="null"/>.</exception>
+    /// <remarks>
+    /// <para>
+    /// One enumeration per run, opened with that run's own cancellation token — the token
+    /// <c>WithCancellation</c> would have supplied, handed over directly because the run is what has one.
+    /// The enumeration is disposed on every terminal path, and disposing it means awaiting its
+    /// <c>DisposeAsync</c> rather than starting it: a sequence that closes a file or a subscription has not
+    /// closed it until that task finishes, and the run does not end before it has.
+    /// </para>
+    /// <para>
+    /// The run waits for each element inside its pull, on the segment's own dedicated thread, exactly as it
+    /// waits for a slow synchronous sequence. That is the blocking-source model this runtime is built on
+    /// and it is stated rather than hidden: an asynchronous source buys ordinary <c>await</c> inside the
+    /// author's sequence, not a run that occupies no thread.
+    /// </para>
+    /// <para>
+    /// Cancellation is cooperative. A sequence that ignores the token it was opened with delays the run's
+    /// stop until it next yields or finishes, which is the same slow-source rule a blocking synchronous
+    /// sequence follows; an element the sequence was already producing when the run was cancelled is
+    /// awaited to its outcome rather than abandoned.
+    /// </para>
+    /// </remarks>
+    public static Source<T> FromAsyncEnumerable<T>(IAsyncEnumerable<T> elements)
+    {
+        ArgumentNullException.ThrowIfNull(elements);
+
+        LocalAsyncCursorFactory open = token => new LocalAsyncCursor<T>(elements.GetAsyncEnumerator(token));
+
+        return new Source<T>(LocalStageChain.Of(LocalStageDescriptor.FromAsyncEnumerable(open)));
+    }
+
+    /// <summary>Starts a source that emits one element a factory produces.</summary>
+    /// <typeparam name="T">The element type.</typeparam>
+    /// <param name="factory">The function producing the element.</param>
+    /// <returns>The source, ready to be extended with operators.</returns>
+    /// <exception cref="ArgumentNullException"><paramref name="factory"/> is <see langword="null"/>.</exception>
+    /// <remarks>
+    /// <para>
+    /// The factory is invoked once per run and never while the graph is being built, which is the whole
+    /// difference from <see cref="Single{T}"/>: a single source captures a value two runs then share, and
+    /// this one produces a fresh value for every run. Building the graph starts nothing at all.
+    /// </para>
+    /// <para>
+    /// An exception the factory throws faults the run with that very instance, unwrapped, exactly as a
+    /// stage's does. It runs inside the run's first pull, on the segment's own thread, so a factory that
+    /// takes a long time is an ordinary slow source.
+    /// </para>
+    /// </remarks>
+    public static Source<T> FromFactory<T>(Func<T> factory)
+    {
+        ArgumentNullException.ThrowIfNull(factory);
+
+        return new Source<T>(LocalStageChain.Of(LocalStageDescriptor.FromFactory(factory)));
+    }
+
+    /// <summary>Starts a source that emits one element an asynchronous factory produces.</summary>
+    /// <typeparam name="T">The element type.</typeparam>
+    /// <param name="factory">The function producing the element.</param>
+    /// <returns>The source, ready to be extended with operators.</returns>
+    /// <exception cref="ArgumentNullException"><paramref name="factory"/> is <see langword="null"/>.</exception>
+    /// <remarks>
+    /// <para>
+    /// The asynchronous sibling of <see cref="FromFactory{T}"/> and the deferred sibling of
+    /// <see cref="FromTask{T}"/>: a task is started once and replayed into every run, and this is started
+    /// once per run. That is the difference an author reaches for when the work must not begin until the
+    /// graph does, or must not be shared between two runs.
+    /// </para>
+    /// <para>
+    /// The factory receives the run's own token and the run waits for its task inside the first pull. A
+    /// task that fails faults the run with its exception unwrapped; a task cancelled by anything other than
+    /// the run's own token faults it too, because a source that cannot produce its element is a source that
+    /// failed, whatever the reason.
+    /// </para>
+    /// </remarks>
+    public static Source<T> FromAsyncFactory<T>(Func<CancellationToken, Task<T>> factory)
+    {
+        ArgumentNullException.ThrowIfNull(factory);
+
+        return new Source<T>(LocalStageChain.Of(LocalStageDescriptor.FromAsyncFactory(factory)));
+    }
+
+    /// <summary>Starts a source that emits nothing and never ends of its own accord.</summary>
+    /// <typeparam name="T">The element type the graph downstream of it is typed by.</typeparam>
+    /// <returns>The source, ready to be extended with operators.</returns>
+    /// <remarks>
+    /// <para>
+    /// The opposite of <see cref="Empty{T}"/> along the one axis that matters: an empty source completes at
+    /// once with no elements, and this one has no elements and never completes. It is what a graph is
+    /// tested against when the question is what stopping does to a run that would otherwise wait forever,
+    /// and it is what a conditional composition yields when a stream is meant to stay open.
+    /// </para>
+    /// <para>
+    /// A run of it waits rather than spins: the thread is parked until the run is stopped, and it costs no
+    /// processor time at all. Shutting the run down completes it successfully with whatever downstream had
+    /// accumulated, which for a graph whose only source is this one is an aggregate's seed; cancelling it
+    /// cancels the run and resolves nothing.
+    /// </para>
+    /// </remarks>
+    public static Source<T> Never<T>() => new(LocalStageChain.Of(LocalStageDescriptor.Never()));
+
+    /// <summary>Starts a source that repeats an in-memory sequence for as long as it is pulled.</summary>
+    /// <typeparam name="T">The element type.</typeparam>
+    /// <param name="elements">The sequence to repeat.</param>
+    /// <returns>The source, ready to be extended with operators.</returns>
+    /// <exception cref="ArgumentNullException"><paramref name="elements"/> is <see langword="null"/>.</exception>
+    /// <remarks>
+    /// <para>
+    /// Endless by construction and bounded by the author: a cycle ends where a <c>Take</c>, a
+    /// <c>TakeWhile</c>, or a first-element sink downstream of it ends, and nowhere else. That is the same
+    /// bargain <see cref="Unfold{TState, T}"/> makes, and it is why <see cref="Repeat{T}"/> — which counts —
+    /// is a different factory rather than an overload.
+    /// </para>
+    /// <para>
+    /// Each lap enumerates the sequence again from the start, with an enumerator of its own that is
+    /// released at the end of the lap and again if the run stops in the middle of one. A sequence that
+    /// cannot be enumerated twice is therefore the author's to know about, exactly as it is for a sequence
+    /// handed to two runs.
+    /// </para>
+    /// <para>
+    /// A lap that produces nothing faults the run with an <see cref="InvalidOperationException"/>. A cycle
+    /// over an empty sequence is not an empty stream: it is a loop that emits nothing and never ends, and a
+    /// run that hung on one would be indistinguishable from a run waiting on a slow source.
+    /// </para>
+    /// </remarks>
+    public static Source<T> Cycle<T>(IEnumerable<T> elements)
+    {
+        ArgumentNullException.ThrowIfNull(elements);
+
+        return new Source<T>(LocalStageChain.Of(LocalStageDescriptor.Cycle(elements)));
+    }
+
+    /// <summary>Starts a source that produces its elements asynchronously from a state it carries.</summary>
+    /// <typeparam name="TState">The type of the state carried between elements.</typeparam>
+    /// <typeparam name="T">The element type.</typeparam>
+    /// <param name="seed">The state the first call receives.</param>
+    /// <param name="generator">The function producing the next step, or nothing to end the source.</param>
+    /// <returns>The source, ready to be extended with operators.</returns>
+    /// <exception cref="ArgumentNullException"><paramref name="generator"/> is <see langword="null"/>.</exception>
+    /// <remarks>
+    /// <para>
+    /// The asynchronous sibling of <see cref="Unfold{TState, T}"/>, with the same contract: every run
+    /// starts from <paramref name="seed"/> again, the generator decides when the source ends, and an
+    /// endless one is bounded downstream by <c>Take</c>. The generator receives the run's own token, and
+    /// the run waits for each step inside its pull.
+    /// </para>
+    /// <para>
+    /// The shape differs because it has to. An <see langword="async"/> method has no <see langword="out"/>
+    /// parameters, so the try-shape that makes <see cref="Unfold{TState, T}"/> infer both of its type
+    /// arguments is unavailable here; a step is returned instead, and <see langword="null"/> ends the
+    /// source. The cost is that both type arguments have to be written at the call site, because a
+    /// conditional expression over a step and <see langword="null"/> has no natural type for inference to
+    /// start from. Written that way, everything inside the lambda is target-typed and the spelling stays
+    /// short:
+    /// </para>
+    /// <code>
+    /// Source.UnfoldAsync&lt;int, string&gt;(1, async (state, token) =&gt;
+    ///     state &lt;= 1024 ? new(await RenderAsync(state, token), state * 2) : null);
+    /// </code>
+    /// </remarks>
+    public static Source<T> UnfoldAsync<TState, T>(TState seed, AsyncUnfoldGenerator<TState, T> generator)
+    {
+        ArgumentNullException.ThrowIfNull(generator);
+
+        return new Source<T>(LocalStageChain.Of(LocalStageDescriptor.UnfoldAsync(seed, generator)));
+    }
+
+    /// <summary>Starts a source that emits what producers offer to a bounded queue of its own.</summary>
+    /// <typeparam name="T">The element type.</typeparam>
+    /// <param name="options">The capacity of the queue and what it does when it is full.</param>
+    /// <param name="controlName">The author-stable name to expose the queue under.</param>
+    /// <returns>The source, ready to be extended with operators.</returns>
+    /// <exception cref="ArgumentNullException">
+    /// <paramref name="options"/> or <paramref name="controlName"/> is <see langword="null"/>.
+    /// </exception>
+    /// <exception cref="ArgumentOutOfRangeException">
+    /// <see cref="BufferOptions.Capacity"/> is below one, or
+    /// <see cref="BufferOptions.OverflowPolicy"/> is not a declared member of its enumeration.
+    /// </exception>
+    /// <exception cref="ArgumentException">
+    /// <paramref name="controlName"/> is not a valid <see cref="ResultSlotId"/>.
+    /// </exception>
+    /// <remarks>
+    /// <para>
+    /// Every other source is pulled: the run asks for the next element and the source produces it. A
+    /// producer that pushes cannot be asked, so this source owns a bounded queue and the author's producers
+    /// offer into it. The options are a buffer's options for the same reason: a full ingress queue and a
+    /// full buffer are one situation seen from the two ends of a graph.
+    /// </para>
+    /// <para>
+    /// The queue is a per-run control rather than part of the graph, and it is reached by name. Closing the
+    /// graph declares a result slot under <paramref name="controlName"/>, <see cref="RunnableGraph.Control{TControl}"/>
+    /// turns that name back into a typed <see cref="ResultSlot{TResult}"/> of
+    /// <see cref="IIngressQueue{T}"/>, and <see cref="RunHandle.GetValueAsync{TResult}"/> resolves it
+    /// against one run. The name is written here rather than at <c>To</c> because the queue belongs to a
+    /// stage at the head of the chain, and a chain has one closing call at its other end.
+    /// </para>
+    /// <para>
+    /// The control resolves at the start of a run, not at its end: producers push into a run that is
+    /// already running. Two runs of one graph therefore have two queues, and an element offered to one is
+    /// never seen by the other.
+    /// </para>
+    /// </remarks>
+    public static Source<T> Queue<T>(BufferOptions options, string controlName)
+    {
+        ArgumentNullException.ThrowIfNull(options);
+
+        BufferOptions bounded = LocalOptionGuard.Buffer(options, nameof(options));
+        ResultSlotId control = LocalOptionGuard.SlotName(controlName, nameof(controlName));
+        Func<LocalIngressQueue, object> facade = static queue => new IngressQueue<T>(queue);
+
+        return new Source<T>(LocalStageChain.Of(
+            LocalStageDescriptor.Queue(bounded, control, typeof(IIngressQueue<T>), facade)));
+    }
+
+    /// <summary>Starts a source that emits the elements of a channel the author owns.</summary>
+    /// <typeparam name="T">The element type.</typeparam>
+    /// <param name="reader">The reader to drain.</param>
+    /// <returns>The source, ready to be extended with operators.</returns>
+    /// <exception cref="ArgumentNullException"><paramref name="reader"/> is <see langword="null"/>.</exception>
+    /// <remarks>
+    /// <para>
+    /// The run reads until the channel is completed and empty, and then completes; a channel completed with
+    /// an exception faults the run with that exception, unwrapped. The channel's own bound is the
+    /// backpressure, and the run neither completes the reader nor resets it, because a run does not own
+    /// what it was handed.
+    /// </para>
+    /// <para>
+    /// This is the one source that is not fresh per run, and the honest consequence is stated rather than
+    /// hidden: a reader is not re-enumerable, so two runs of one graph <em>compete</em> for its elements.
+    /// Each element goes to exactly one of them, no element is lost or duplicated, and which run gets which
+    /// element is not defined. An author who wants two independent streams creates two channels;
+    /// <see cref="Queue{T}"/> is the source that gives every run an ingress of its own.
+    /// </para>
+    /// </remarks>
+    public static Source<T> FromChannel<T>(ChannelReader<T> reader)
+    {
+        ArgumentNullException.ThrowIfNull(reader);
+
+        return new Source<T>(LocalStageChain.Of(LocalStageDescriptor.FromChannel(reader)));
     }
 
     /// <summary>Starts a source at one named occurrence of a registered stage.</summary>

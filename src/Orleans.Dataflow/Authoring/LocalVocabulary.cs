@@ -94,6 +94,38 @@ internal static class LocalVocabulary
     internal static readonly StageRef Unfold =
         StageRef.Create(Provider, StageId.Create("unfold"), StageRef.FirstMajorVersion);
 
+    /// <summary>The stage reference of a source over an asynchronous sequence.</summary>
+    internal static readonly StageRef FromAsyncEnumerable =
+        StageRef.Create(Provider, StageId.Create("from-async-enumerable"), StageRef.FirstMajorVersion);
+
+    /// <summary>The stage reference of a source over a factory of one element.</summary>
+    internal static readonly StageRef FromFactory =
+        StageRef.Create(Provider, StageId.Create("from-factory"), StageRef.FirstMajorVersion);
+
+    /// <summary>The stage reference of a source over an asynchronous factory of one element.</summary>
+    internal static readonly StageRef FromAsyncFactory =
+        StageRef.Create(Provider, StageId.Create("from-async-factory"), StageRef.FirstMajorVersion);
+
+    /// <summary>The stage reference of a source that emits nothing and never ends.</summary>
+    internal static readonly StageRef Never =
+        StageRef.Create(Provider, StageId.Create("never"), StageRef.FirstMajorVersion);
+
+    /// <summary>The stage reference of a source that repeats a sequence endlessly.</summary>
+    internal static readonly StageRef Cycle =
+        StageRef.Create(Provider, StageId.Create("cycle"), StageRef.FirstMajorVersion);
+
+    /// <summary>The stage reference of a source driven by an asynchronous generator over its own state.</summary>
+    internal static readonly StageRef UnfoldAsync =
+        StageRef.Create(Provider, StageId.Create("unfold-async"), StageRef.FirstMajorVersion);
+
+    /// <summary>The stage reference of a source over a bounded ingress queue of its own.</summary>
+    internal static readonly StageRef Queue =
+        StageRef.Create(Provider, StageId.Create("queue"), StageRef.FirstMajorVersion);
+
+    /// <summary>The stage reference of a source over a channel the author owns.</summary>
+    internal static readonly StageRef FromChannel =
+        StageRef.Create(Provider, StageId.Create("from-channel"), StageRef.FirstMajorVersion);
+
     /// <summary>The stage reference of a mapping stage.</summary>
     internal static readonly StageRef Select =
         StageRef.Create(Provider, StageId.Create("select"), StageRef.FirstMajorVersion);
@@ -170,6 +202,22 @@ internal static class LocalVocabulary
     internal static readonly StageRef Count =
         StageRef.Create(Provider, StageId.Create("count"), StageRef.FirstMajorVersion);
 
+    /// <summary>The stage reference of a sink that keeps the last element and requires one.</summary>
+    internal static readonly StageRef Last =
+        StageRef.Create(Provider, StageId.Create("last"), StageRef.FirstMajorVersion);
+
+    /// <summary>The stage reference of a sink that keeps the last element or the default value.</summary>
+    internal static readonly StageRef LastOrDefault =
+        StageRef.Create(Provider, StageId.Create("last-or-default"), StageRef.FirstMajorVersion);
+
+    /// <summary>The stage reference of a bounded collecting sink.</summary>
+    internal static readonly StageRef Collect =
+        StageRef.Create(Provider, StageId.Create("collect"), StageRef.FirstMajorVersion);
+
+    /// <summary>The stage reference of a sink that writes into a channel the author owns.</summary>
+    internal static readonly StageRef ToChannel =
+        StageRef.Create(Provider, StageId.Create("to-channel"), StageRef.FirstMajorVersion);
+
     /// <summary>The one element contract every local port declares.</summary>
     /// <remarks>
     /// One opaque contract for every local element type is the honest encoding of a graph whose element
@@ -240,6 +288,16 @@ internal static class LocalVocabulary
             ContractId.Create("local-distinct-parameters"),
             ContractReference.FirstMajorVersion);
 
+    /// <summary>The parameter contract a collecting sink declares.</summary>
+    /// <remarks>
+    /// The bound on collected elements is configuration and is written down; the element type is not, for
+    /// the reason no local contract names one. <see cref="LocalCollectParameters"/> owns the shape.
+    /// </remarks>
+    internal static readonly ContractReference CollectParameterContract =
+        ContractReference.Create(
+            ContractId.Create("local-collect-parameters"),
+            ContractReference.FirstMajorVersion);
+
     /// <summary>The result contract the <c>result</c> port of a local fold declares.</summary>
     internal static readonly ContractReference FoldResultContract =
         ContractReference.Create(ContractId.Create("local-fold-result"), ContractReference.FirstMajorVersion);
@@ -261,8 +319,27 @@ internal static class LocalVocabulary
     /// <summary>The output port name of every local stage that produces elements.</summary>
     internal static readonly PortId OutputPort = PortId.Create("out");
 
+    /// <summary>The result contract the <c>control</c> port of a local ingress queue declares.</summary>
+    /// <remarks>
+    /// A third result identity rather than a reuse of <see cref="ResultContract"/>, because a control is
+    /// not a result: its value exists at the start of a run rather than at its end, and a document that
+    /// said the two were one contract would lose the only statement it makes about when a slot resolves.
+    /// The value itself stays opaque for the reason every local contract is opaque — its type lives in the
+    /// C# type system and never in the document.
+    /// </remarks>
+    internal static readonly ContractReference ControlContract =
+        ContractReference.Create(ContractId.Create("local-control"), ContractReference.FirstMajorVersion);
+
     /// <summary>The result port name of every local sink that produces a result.</summary>
     internal static readonly PortId ResultPort = PortId.Create("result");
+
+    /// <summary>The result port name of every local stage that produces a runtime control.</summary>
+    /// <remarks>
+    /// A port of its own beside <see cref="ResultPort"/>, so that a node can one day declare both and so
+    /// that a reader of a document can tell a control from a result without knowing which stage produced
+    /// it.
+    /// </remarks>
+    internal static readonly PortId ControlPort = PortId.Create("control");
 
     /// <summary>The parameter payload a local stage whose whole behavior is a delegate carries.</summary>
     /// <remarks>
@@ -324,6 +401,14 @@ internal static class LocalVocabulary
         LocalStageKind.FromTask => FromTask,
         LocalStageKind.Failed => Failed,
         LocalStageKind.Unfold => Unfold,
+        LocalStageKind.FromAsyncEnumerable => FromAsyncEnumerable,
+        LocalStageKind.FromFactory => FromFactory,
+        LocalStageKind.FromAsyncFactory => FromAsyncFactory,
+        LocalStageKind.Never => Never,
+        LocalStageKind.Cycle => Cycle,
+        LocalStageKind.UnfoldAsync => UnfoldAsync,
+        LocalStageKind.Queue => Queue,
+        LocalStageKind.FromChannel => FromChannel,
         LocalStageKind.Select => Select,
         LocalStageKind.Where => Where,
         LocalStageKind.Scan => Scan,
@@ -343,6 +428,10 @@ internal static class LocalVocabulary
         LocalStageKind.First => First,
         LocalStageKind.FirstOrDefault => FirstOrDefault,
         LocalStageKind.Count => Count,
+        LocalStageKind.Last => Last,
+        LocalStageKind.LastOrDefault => LastOrDefault,
+        LocalStageKind.Collect => Collect,
+        LocalStageKind.ToChannel => ToChannel,
         _ => throw new ArgumentOutOfRangeException(nameof(kind)),
     };
 
@@ -357,19 +446,27 @@ internal static class LocalVocabulary
     /// </remarks>
     internal static ContractReference ParameterContractOf(LocalStageKind kind) => kind switch
     {
-        LocalStageKind.Buffer => BufferParameterContract,
+        LocalStageKind.Buffer or LocalStageKind.Queue => BufferParameterContract,
         LocalStageKind.SelectAsync or
             LocalStageKind.SelectAsyncUnordered or
             LocalStageKind.ForEachAsync => ParallelismParameterContract,
         LocalStageKind.Take or LocalStageKind.Skip or LocalStageKind.Repeat => CountParameterContract,
         LocalStageKind.Range => RangeParameterContract,
         LocalStageKind.Distinct => DistinctParameterContract,
+        LocalStageKind.Collect => CollectParameterContract,
         LocalStageKind.FromEnumerable or
             LocalStageKind.Empty or
             LocalStageKind.Single or
             LocalStageKind.FromTask or
             LocalStageKind.Failed or
             LocalStageKind.Unfold or
+            LocalStageKind.FromAsyncEnumerable or
+            LocalStageKind.FromFactory or
+            LocalStageKind.FromAsyncFactory or
+            LocalStageKind.Never or
+            LocalStageKind.Cycle or
+            LocalStageKind.UnfoldAsync or
+            LocalStageKind.FromChannel or
             LocalStageKind.Select or
             LocalStageKind.Where or
             LocalStageKind.Scan or
@@ -381,7 +478,10 @@ internal static class LocalVocabulary
             LocalStageKind.ForEach or
             LocalStageKind.First or
             LocalStageKind.FirstOrDefault or
-            LocalStageKind.Count => ParameterContract,
+            LocalStageKind.Count or
+            LocalStageKind.Last or
+            LocalStageKind.LastOrDefault or
+            LocalStageKind.ToChannel => ParameterContract,
         _ => throw new ArgumentOutOfRangeException(nameof(kind)),
     };
 
@@ -406,6 +506,7 @@ internal static class LocalVocabulary
             _ when contract == CountParameterContract => LocalCountParameters.Validator,
             _ when contract == RangeParameterContract => LocalRangeParameters.Validator,
             _ when contract == DistinctParameterContract => LocalDistinctParameters.Validator,
+            _ when contract == CollectParameterContract => LocalCollectParameters.Validator,
             _ => null,
         };
     }
@@ -429,7 +530,15 @@ internal static class LocalVocabulary
             LocalStageKind.Range or
             LocalStageKind.FromTask or
             LocalStageKind.Failed or
-            LocalStageKind.Unfold => LocalStagePlace.Source,
+            LocalStageKind.Unfold or
+            LocalStageKind.FromAsyncEnumerable or
+            LocalStageKind.FromFactory or
+            LocalStageKind.FromAsyncFactory or
+            LocalStageKind.Never or
+            LocalStageKind.Cycle or
+            LocalStageKind.UnfoldAsync or
+            LocalStageKind.Queue or
+            LocalStageKind.FromChannel => LocalStagePlace.Source,
         LocalStageKind.Select or
             LocalStageKind.Where or
             LocalStageKind.Scan or
@@ -448,7 +557,11 @@ internal static class LocalVocabulary
             LocalStageKind.ForEachAsync or
             LocalStageKind.First or
             LocalStageKind.FirstOrDefault or
-            LocalStageKind.Count => LocalStagePlace.Terminal,
+            LocalStageKind.Count or
+            LocalStageKind.Last or
+            LocalStageKind.LastOrDefault or
+            LocalStageKind.Collect or
+            LocalStageKind.ToChannel => LocalStagePlace.Terminal,
         _ => throw new ArgumentOutOfRangeException(nameof(kind)),
     };
 
@@ -466,11 +579,18 @@ internal static class LocalVocabulary
     internal static bool ProducesElements(LocalStageKind kind) =>
         PlaceOf(kind) is not LocalStagePlace.Terminal;
 
-    /// <summary>Returns the result contract an occurrence of <paramref name="kind"/> produces.</summary>
+    /// <summary>Returns the result port an occurrence of <paramref name="kind"/> declares.</summary>
     /// <param name="kind">The stage shape.</param>
-    /// <returns>The contract, or <see langword="null"/> when the shape declares no result port.</returns>
+    /// <returns>The port and its contract, or <see langword="null"/> when the shape declares neither.</returns>
     /// <exception cref="ArgumentOutOfRangeException"><paramref name="kind"/> is not a declared member.</exception>
-    internal static ContractReference? ResultContractOf(LocalStageKind kind)
+    /// <remarks>
+    /// Two kinds of value are declared here and the port name is what tells them apart. A sink's
+    /// <c>result</c> is what the run accumulated and resolves when the run ends; a queue's <c>control</c>
+    /// is the handle producers push through and resolves when the run starts. Both are result slots, which
+    /// is what ADR 0002 said when it listed a queue control beside a fold result, and both travel through
+    /// the same declaration in a document.
+    /// </remarks>
+    internal static ResultPortSpecification? ResultPortOf(LocalStageKind kind)
     {
         // Asked for its rejection rather than for its answer: a value no member declares is not a shape
         // with no result, and returning null for one would let a cast from an arbitrary integer become a
@@ -479,8 +599,14 @@ internal static class LocalVocabulary
 
         return kind switch
         {
-            LocalStageKind.Fold => FoldResultContract,
-            LocalStageKind.First or LocalStageKind.FirstOrDefault or LocalStageKind.Count => ResultContract,
+            LocalStageKind.Fold => ResultPortSpecification.Create(ResultPort, FoldResultContract),
+            LocalStageKind.First or
+                LocalStageKind.FirstOrDefault or
+                LocalStageKind.Count or
+                LocalStageKind.Last or
+                LocalStageKind.LastOrDefault or
+                LocalStageKind.Collect => ResultPortSpecification.Create(ResultPort, ResultContract),
+            LocalStageKind.Queue => ResultPortSpecification.Create(ControlPort, ControlContract),
             _ => null,
         };
     }

@@ -1,3 +1,4 @@
+using System.Collections.ObjectModel;
 using System.Globalization;
 using System.Text;
 using Orleans.Dataflow.Authoring;
@@ -42,6 +43,10 @@ public sealed class RunnableGraph
     /// <param name="document">The closed, validated document.</param>
     /// <param name="fingerprint">The fingerprint of that document's canonical bytes.</param>
     /// <param name="localBindings">The authoring-side behavior of every node, keyed by node identifier.</param>
+    /// <param name="controls">
+    /// The type of every runtime control the graph declares, keyed by the name it is declared under; or
+    /// <see langword="null"/> for a graph that declares none.
+    /// </param>
     /// <remarks>
     /// The constructor takes the fingerprint rather than computing it, so that the caller that closed the
     /// document also decides when it is serialized; the two are always derived from the same value.
@@ -49,11 +54,13 @@ public sealed class RunnableGraph
     internal RunnableGraph(
         GraphDocument document,
         GraphFingerprint fingerprint,
-        IReadOnlyDictionary<NodeId, LocalStageDescriptor> localBindings)
+        IReadOnlyDictionary<NodeId, LocalStageDescriptor> localBindings,
+        IReadOnlyDictionary<ResultSlotId, Type>? controls = null)
     {
         Document = document;
         Fingerprint = fingerprint;
         LocalBindings = localBindings;
+        Controls = controls ?? ReadOnlyDictionary<ResultSlotId, Type>.Empty;
         AuthoringNonce = Guid.NewGuid();
 
         ResultSlotId[] slots = new ResultSlotId[document.ResultSlots.Count];
@@ -99,6 +106,16 @@ public sealed class RunnableGraph
     /// </remarks>
     internal IReadOnlyDictionary<NodeId, LocalStageDescriptor> LocalBindings { get; }
 
+    /// <summary>Gets the type of every runtime control this graph declares.</summary>
+    /// <value>The control types, keyed by the name each is declared under; empty for most graphs.</value>
+    /// <remarks>
+    /// Internal, and never part of a document: a CLR type is not durable topology, exactly as a delegate is
+    /// not. What a document says about a control is its name, its port, and its contract; this is what lets
+    /// <see cref="Control{TControl}"/> hand back a typed slot for a name the author wrote, instead of
+    /// making the author assert the type and discover a wrong one inside a run.
+    /// </remarks>
+    internal IReadOnlyDictionary<ResultSlotId, Type> Controls { get; }
+
     /// <summary>Gets the per-instance identity of this built graph.</summary>
     /// <value>A nonce allocated when the graph was closed.</value>
     /// <remarks>
@@ -109,6 +126,83 @@ public sealed class RunnableGraph
     /// The nonce never enters the document and plays no part in serialization or fingerprints.
     /// </remarks>
     internal Guid AuthoringNonce { get; }
+
+    /// <summary>Resolves the typed slot of one runtime control this graph declares.</summary>
+    /// <typeparam name="TControl">The type of the control, which must be the one the graph declared.</typeparam>
+    /// <param name="name">The name the control was declared under.</param>
+    /// <returns>The slot, which a run of this graph resolves at its start.</returns>
+    /// <exception cref="ArgumentNullException"><paramref name="name"/> is <see langword="null"/>.</exception>
+    /// <exception cref="ArgumentException">
+    /// <paramref name="name"/> is not a valid <see cref="ResultSlotId"/>, names no control of this graph,
+    /// or names one of a different type. The message lists the controls this graph declares, or names both
+    /// types when only the type disagreed.
+    /// </exception>
+    /// <remarks>
+    /// <para>
+    /// A control is written on the stage that produces it rather than handed back from a closing call,
+    /// because it belongs to a stage in the middle of a chain and a chain has one <c>To</c> at its end.
+    /// This is where the name the author wrote becomes a typed slot again, and it is checked against what
+    /// the graph actually declared, so a misspelled name and a wrong type argument are both diagnostics
+    /// rather than a run that resolves nothing.
+    /// </para>
+    /// <para>
+    /// The type check is exact rather than assignable. A control is resolved by name, and a name is meant
+    /// to identify one thing; accepting a base type would let two different controls answer to one
+    /// spelling and would move the failure from here into the cast a run performs.
+    /// </para>
+    /// </remarks>
+    public ResultSlot<TControl> Control<TControl>(string name)
+    {
+        if (TryGetControl(name, out ResultSlot<TControl> slot))
+        {
+            return slot;
+        }
+
+        ResultSlotId? parsed = Parse(name);
+
+        if (parsed is { } declared && Controls.TryGetValue(declared, out Type? actual))
+        {
+            throw new ArgumentException(
+                $"The control '{declared}' of this graph is a '{actual}', and it was asked for as a '{typeof(TControl)}'. Ask for the type the stage that declared the control produces.",
+                nameof(name));
+        }
+
+        throw new ArgumentException(
+            $"This graph declares no runtime control named '{name}'. {DescribeControls()}",
+            nameof(name));
+    }
+
+    /// <summary>Resolves the typed slot of one runtime control, if this graph declares it under that type.</summary>
+    /// <typeparam name="TControl">The type of the control.</typeparam>
+    /// <param name="name">The name the control was declared under.</param>
+    /// <param name="slot">
+    /// When this method returns <see langword="true"/>, the slot; otherwise the default value.
+    /// </param>
+    /// <returns><see langword="true"/> when this graph declares that control under that type.</returns>
+    /// <exception cref="ArgumentNullException"><paramref name="name"/> is <see langword="null"/>.</exception>
+    /// <remarks>
+    /// The non-throwing form, for code that asks whether a graph it did not build has a control rather than
+    /// asserting that it does. A name that is not even a valid identifier is answered with
+    /// <see langword="false"/> rather than an exception, because no graph could declare it and "no" is the
+    /// whole answer this method promises.
+    /// </remarks>
+    public bool TryGetControl<TControl>(string name, out ResultSlot<TControl> slot)
+    {
+        ArgumentNullException.ThrowIfNull(name);
+
+        slot = default;
+
+        if (Parse(name) is not { } declared ||
+            !Controls.TryGetValue(declared, out Type? actual) ||
+            actual != typeof(TControl))
+        {
+            return false;
+        }
+
+        slot = ResultSlot<TControl>.Create(declared, Fingerprint, AuthoringNonce);
+
+        return true;
+    }
 
     /// <summary>Declares this graph as one revision of one durable pipeline.</summary>
     /// <param name="id">The identity of the graph lineage this pipeline belongs to.</param>
@@ -207,6 +301,36 @@ public sealed class RunnableGraph
             CultureInfo.InvariantCulture,
             $"graph {Fingerprint} ({nodes} {(nodes == 1 ? "node" : "nodes")}, {slots} {(slots == 1 ? "result slot" : "result slots")})");
     }
+
+    /// <summary>Reads a candidate control name as a slot identifier, without raising for a bad one.</summary>
+    /// <param name="name">The candidate name.</param>
+    /// <returns>The identifier, or <see langword="null"/> when the text is not one.</returns>
+    /// <exception cref="ArgumentNullException"><paramref name="name"/> is <see langword="null"/>.</exception>
+    /// <remarks>
+    /// The grammar belongs to <see cref="ResultSlotId"/> and is not restated here. A name that breaks it
+    /// names no control either, so both callers treat it as a miss and only the throwing one turns that
+    /// into a sentence.
+    /// </remarks>
+    private static ResultSlotId? Parse(string name)
+    {
+        ArgumentNullException.ThrowIfNull(name);
+
+        try
+        {
+            return ResultSlotId.Create(name);
+        }
+        catch (ArgumentException)
+        {
+            return null;
+        }
+    }
+
+    /// <summary>Renders the controls this graph declares, for the message of a lookup that missed.</summary>
+    /// <returns>A sentence naming every declared control and its type, or saying there are none.</returns>
+    private string DescribeControls() =>
+        Controls.Count == 0
+            ? "It declares no controls at all; a control is declared by a stage that produces one, such as a queue source."
+            : $"The controls it declares are: {string.Join(", ", Controls.OrderBy(control => control.Key).Select(control => $"'{control.Key}' ({control.Value})"))}.";
 
     /// <summary>Renders the collected deployability violations as one numbered list.</summary>
     /// <param name="violations">The violations, in the order they were found.</param>

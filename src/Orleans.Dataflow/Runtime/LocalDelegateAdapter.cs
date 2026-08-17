@@ -1,5 +1,6 @@
 using System.Collections;
 using System.Reflection;
+using System.Threading.Channels;
 using Orleans.Dataflow.Authoring;
 
 namespace Orleans.Dataflow.Runtime;
@@ -58,18 +59,34 @@ internal static class LocalDelegateAdapter
     /// <summary>The template closed to read the value of a task.</summary>
     private static readonly MethodInfo TaskValueTemplate = Template(nameof(BoxTaskValue));
 
+    /// <summary>The template closed to wrap a deferred element factory.</summary>
+    private static readonly MethodInfo FactoryTemplate = Template(nameof(BoxFactory));
+
+    /// <summary>The template closed to wrap an asynchronous deferred element factory.</summary>
+    private static readonly MethodInfo AsyncFactoryTemplate = Template(nameof(BoxAsyncFactory));
+
+    /// <summary>The template closed to wrap an asynchronous unfold generator.</summary>
+    private static readonly MethodInfo AsyncGeneratorTemplate = Template(nameof(BoxAsyncGenerator));
+
+    /// <summary>The template closed to bridge a channel reader.</summary>
+    private static readonly MethodInfo ChannelSourceTemplate = Template(nameof(BoxChannelSource));
+
+    /// <summary>The template closed to bridge a channel writer.</summary>
+    private static readonly MethodInfo ChannelSinkTemplate = Template(nameof(BoxChannelSink));
+
     /// <summary>Reads a source binding as a sequence the run loop can enumerate.</summary>
     /// <param name="behavior">The bound sequence, as the authoring value received it.</param>
+    /// <param name="kind">The stage shape, for the diagnostic.</param>
     /// <returns>The sequence, viewed through the non-generic interface every sequence implements.</returns>
     /// <exception cref="InvalidOperationException"><paramref name="behavior"/> is not a sequence.</exception>
     /// <remarks>
     /// The non-generic view is what makes the source reflection-free: every <c>IEnumerable&lt;T&gt;</c> is
     /// an <see cref="IEnumerable"/>, and the run loop only ever needs elements as <see cref="object"/>.
     /// </remarks>
-    internal static IEnumerable Elements(object? behavior) =>
+    internal static IEnumerable Elements(object? behavior, LocalStageKind kind) =>
         behavior as IEnumerable ??
         throw new InvalidOperationException(
-            $"A '{LocalStageKind.FromEnumerable}' stage must be bound to a sequence, and this one is bound to {Describe(behavior)}.");
+            $"A '{kind}' stage must be bound to a sequence, and this one is bound to {Describe(behavior)}.");
 
     /// <summary>Wraps a mapping delegate into one over boxed elements.</summary>
     /// <param name="behavior">The bound <c>Func&lt;TIn, TOut&gt;</c>.</param>
@@ -189,25 +206,11 @@ internal static class LocalDelegateAdapter
     /// that compared the constructed type would accept <c>Task.FromResult</c> and reject every task an
     /// author actually awaits.
     /// </remarks>
-    internal static Func<object?> TaskValue(object? behavior)
-    {
-        const string Expected = "Task<T>";
-
-        if (behavior is null)
-        {
-            throw Mismatch(behavior, LocalStageKind.FromTask, Expected);
-        }
-
-        for (Type? type = behavior.GetType(); type is not null; type = type.BaseType)
-        {
-            if (type.IsGenericType && type.GetGenericTypeDefinition() == typeof(Task<>))
-            {
-                return (Func<object?>)Close(TaskValueTemplate, [type.GetGenericArguments()[0]], behavior);
-            }
-        }
-
-        throw Mismatch(behavior, LocalStageKind.FromTask, Expected);
-    }
+    internal static Func<object?> TaskValue(object? behavior) =>
+        (Func<object?>)Close(
+            TaskValueTemplate,
+            [Derived(behavior, typeof(Task<>), LocalStageKind.FromTask, "Task<T>")],
+            behavior);
 
     /// <summary>Wraps an asynchronous mapping delegate into one over boxed elements.</summary>
     /// <param name="behavior">The bound <c>Func&lt;TIn, CancellationToken, Task&lt;TOut&gt;&gt;</c>.</param>
@@ -273,6 +276,119 @@ internal static class LocalDelegateAdapter
             behavior);
     }
 
+    /// <summary>Wraps a deferred element factory into one over boxed elements.</summary>
+    /// <param name="behavior">The bound <c>Func&lt;T&gt;</c>.</param>
+    /// <returns>The wrapped factory.</returns>
+    /// <exception cref="InvalidOperationException"><paramref name="behavior"/> is not a no-argument function.</exception>
+    internal static Func<object?> Factory(object? behavior)
+    {
+        Type[] arguments = Arguments(behavior, typeof(Func<>), LocalStageKind.FromFactory, "Func<T>");
+
+        return (Func<object?>)Close(FactoryTemplate, [arguments[0]], behavior);
+    }
+
+    /// <summary>Wraps an asynchronous deferred element factory into one over boxed elements.</summary>
+    /// <param name="behavior">The bound <c>Func&lt;CancellationToken, Task&lt;T&gt;&gt;</c>.</param>
+    /// <returns>The wrapped factory, which blocks the calling thread until the task settles.</returns>
+    /// <exception cref="InvalidOperationException">
+    /// <paramref name="behavior"/> is not a one-argument function taking a
+    /// <see cref="CancellationToken"/> and returning a <see cref="Task{TResult}"/>.
+    /// </exception>
+    internal static Func<CancellationToken, object?> AsyncFactory(object? behavior)
+    {
+        const string Expected = "Func<CancellationToken, Task<T>>";
+
+        Type[] arguments = Arguments(behavior, typeof(Func<,>), LocalStageKind.FromAsyncFactory, Expected);
+
+        if (arguments[0] != typeof(CancellationToken) ||
+            !arguments[1].IsGenericType ||
+            arguments[1].GetGenericTypeDefinition() != typeof(Task<>))
+        {
+            throw Mismatch(behavior, LocalStageKind.FromAsyncFactory, Expected);
+        }
+
+        return (Func<CancellationToken, object?>)Close(
+            AsyncFactoryTemplate,
+            [arguments[1].GetGenericArguments()[0]],
+            behavior);
+    }
+
+    /// <summary>Wraps an asynchronous unfold generator into one over boxed state and boxed elements.</summary>
+    /// <param name="behavior">The bound <c>AsyncUnfoldGenerator&lt;TState, T&gt;</c>.</param>
+    /// <returns>The wrapped generator.</returns>
+    /// <exception cref="InvalidOperationException">
+    /// <paramref name="behavior"/> is not an <see cref="AsyncUnfoldGenerator{TState, T}"/>.
+    /// </exception>
+    internal static LocalAsyncGenerator AsyncGenerator(object? behavior)
+    {
+        Type[] arguments = Arguments(
+            behavior,
+            typeof(AsyncUnfoldGenerator<,>),
+            LocalStageKind.UnfoldAsync,
+            "AsyncUnfoldGenerator<TState, T>");
+
+        return (LocalAsyncGenerator)Close(AsyncGeneratorTemplate, [arguments[0], arguments[1]], behavior);
+    }
+
+    /// <summary>Reads a source binding as the opener of an asynchronous sequence.</summary>
+    /// <param name="behavior">The bound opener, which the authoring surface closed over the element type.</param>
+    /// <returns>The opener.</returns>
+    /// <exception cref="InvalidOperationException"><paramref name="behavior"/> is not an opener.</exception>
+    /// <remarks>
+    /// The one source binding that is not the author's own value and is not recovered by reflection either.
+    /// <see cref="IAsyncEnumerable{T}"/> is an interface, and one class may implement it for two element
+    /// types, so the bound object's own type is not a statement of which of them the graph means; the type
+    /// argument the author wrote is, and closing the opener over it at authoring time is how that statement
+    /// is kept.
+    /// </remarks>
+    internal static LocalAsyncCursorFactory AsyncCursors(object? behavior) =>
+        behavior as LocalAsyncCursorFactory ??
+        throw new InvalidOperationException(
+            $"A '{LocalStageKind.FromAsyncEnumerable}' stage must be bound to an opener of an asynchronous sequence, and this one is bound to {Describe(behavior)}.");
+
+    /// <summary>Reads a source binding as the facade factory of an ingress queue.</summary>
+    /// <param name="behavior">The bound factory, which the authoring surface closed over the element type.</param>
+    /// <returns>The factory.</returns>
+    /// <exception cref="InvalidOperationException"><paramref name="behavior"/> is not such a factory.</exception>
+    /// <remarks>
+    /// Pinned at authoring for the same reason an asynchronous sequence's opener is: the queue the runtime
+    /// builds works in boxed elements, and the typed handle an author receives can only be built by code
+    /// that has the type argument.
+    /// </remarks>
+    internal static Func<LocalIngressQueue, object> QueueFacade(object? behavior) =>
+        behavior as Func<LocalIngressQueue, object> ??
+        throw new InvalidOperationException(
+            $"A '{LocalStageKind.Queue}' stage must be bound to a factory of its typed control, and this one is bound to {Describe(behavior)}.");
+
+    /// <summary>Reads a sink binding as the projection of a collected list into its result type.</summary>
+    /// <param name="behavior">The bound projection, which the authoring surface closed over the element type.</param>
+    /// <returns>The projection.</returns>
+    /// <exception cref="InvalidOperationException"><paramref name="behavior"/> is not such a projection.</exception>
+    internal static Func<object?, object?> Freeze(object? behavior) =>
+        behavior as Func<object?, object?> ??
+        throw new InvalidOperationException(
+            $"A '{LocalStageKind.Collect}' stage must be bound to a projection of its collected elements, and this one is bound to {Describe(behavior)}.");
+
+    /// <summary>Bridges a channel reader into the boxed vocabulary a pull loop speaks.</summary>
+    /// <param name="behavior">The bound <c>ChannelReader&lt;T&gt;</c>.</param>
+    /// <returns>The bridge.</returns>
+    /// <exception cref="InvalidOperationException"><paramref name="behavior"/> is not a channel reader.</exception>
+    internal static LocalChannelSource ChannelSource(object? behavior) =>
+        (LocalChannelSource)Close(
+            ChannelSourceTemplate,
+            [Derived(behavior, typeof(ChannelReader<>), LocalStageKind.FromChannel, "ChannelReader<T>")],
+            behavior);
+
+    /// <summary>Bridges a channel writer into the boxed vocabulary a terminal speaks.</summary>
+    /// <param name="behavior">The bound <c>ChannelWriter&lt;T&gt;</c>.</param>
+    /// <returns>The bridge.</returns>
+    /// <exception cref="InvalidOperationException"><paramref name="behavior"/> is not a channel writer.</exception>
+    internal static LocalChannelSink ChannelSink(object? behavior) =>
+        (LocalChannelSink)Close(
+            ChannelSinkTemplate,
+            [Derived(behavior, typeof(ChannelWriter<>), LocalStageKind.ToChannel, "ChannelWriter<T>")],
+            behavior);
+
     /// <summary>Reads one of this type's private generic templates.</summary>
     /// <param name="name">The template method's name.</param>
     /// <returns>The generic method definition.</returns>
@@ -298,6 +414,38 @@ internal static class LocalDelegateAdapter
         return type.IsGenericType && type.GetGenericTypeDefinition() == definition
             ? type.GetGenericArguments()
             : throw Mismatch(behavior, kind, expected);
+    }
+
+    /// <summary>Reads the one type argument of a generic base class a bound value derives from.</summary>
+    /// <param name="behavior">The bound value.</param>
+    /// <param name="definition">The generic base class definition the stage requires.</param>
+    /// <param name="kind">The stage shape, for the diagnostic.</param>
+    /// <param name="expected">The required type as text, for the diagnostic.</param>
+    /// <returns>The base class's type argument.</returns>
+    /// <exception cref="InvalidOperationException">The binding does not derive from that base class.</exception>
+    /// <remarks>
+    /// The base types are walked rather than the bound object's own type compared, because the useful
+    /// instances of these abstractions are all private classes deriving from them: a channel's reader and
+    /// writer, and the task an <see langword="async"/> method returns. Walking a base chain is also exact
+    /// where searching interfaces would not be — a class has one base at each level, so there is never a
+    /// second candidate to choose between.
+    /// </remarks>
+    private static Type Derived(object? behavior, Type definition, LocalStageKind kind, string expected)
+    {
+        if (behavior is null)
+        {
+            throw Mismatch(behavior, kind, expected);
+        }
+
+        for (Type? type = behavior.GetType(); type is not null; type = type.BaseType)
+        {
+            if (type.IsGenericType && type.GetGenericTypeDefinition() == definition)
+            {
+                return type.GetGenericArguments()[0];
+            }
+        }
+
+        throw Mismatch(behavior, kind, expected);
     }
 
     /// <summary>Closes a template over the recovered type arguments and invokes it.</summary>
@@ -441,4 +589,78 @@ internal static class LocalDelegateAdapter
     /// </remarks>
     private static Func<object?> BoxTaskValue<T>(Task<T> task) =>
         () => task.GetAwaiter().GetResult();
+
+    /// <summary>Wraps a typed deferred factory into one over boxed elements.</summary>
+    /// <typeparam name="T">The element type the factory produces.</typeparam>
+    /// <param name="factory">The author's delegate.</param>
+    /// <returns>The wrapper.</returns>
+    /// <remarks>Invoked only by reflection, over the type argument recovered from the delegate itself.</remarks>
+    private static Func<object?> BoxFactory<T>(Func<T> factory) => () => factory();
+
+    /// <summary>Wraps a typed asynchronous deferred factory into one over boxed elements.</summary>
+    /// <typeparam name="T">The element type the factory produces.</typeparam>
+    /// <param name="factory">The author's delegate.</param>
+    /// <returns>The wrapper, which blocks the calling thread until the task settles.</returns>
+    /// <remarks>
+    /// Invoked only by reflection, over the type argument recovered from the delegate itself. The value is
+    /// read through the awaiter rather than through <see cref="Task{TResult}.Result"/>, which is what makes
+    /// a failing factory fault the run with the author's own exception instead of with the
+    /// <see cref="AggregateException"/> a task wraps it in. A factory that returns no task at all is
+    /// reported as a sentence rather than dereferenced.
+    /// </remarks>
+    private static Func<CancellationToken, object?> BoxAsyncFactory<T>(Func<CancellationToken, Task<T>> factory) =>
+        token =>
+        {
+            Task<T> pending = factory(token) ??
+                throw new InvalidOperationException(
+                    "The factory of a deferred source returned no task. A factory a graph is bound to has to produce something to await.");
+
+            return pending.GetAwaiter().GetResult();
+        };
+
+    /// <summary>Wraps a typed asynchronous unfold generator into one over boxed state and boxed elements.</summary>
+    /// <typeparam name="TState">The state type the generator carries.</typeparam>
+    /// <typeparam name="T">The element type the generator produces.</typeparam>
+    /// <param name="generator">The author's delegate.</param>
+    /// <returns>The wrapper.</returns>
+    /// <remarks>
+    /// Invoked only by reflection, over the type arguments recovered from the delegate itself. A step that
+    /// is absent ends the source and leaves both outputs at their default, which the caller ignores; the
+    /// value is read through the awaiter so that a failing generator faults the run with the author's own
+    /// exception, unwrapped.
+    /// </remarks>
+    private static LocalAsyncGenerator BoxAsyncGenerator<TState, T>(AsyncUnfoldGenerator<TState, T> generator) =>
+        (object? state, CancellationToken token, out object? value, out object? next) =>
+        {
+            Task<UnfoldStep<TState, T>?> pending = generator((TState)state!, token) ??
+                throw new InvalidOperationException(
+                    "The generator of an asynchronous unfold returned no task. A generator a graph is bound to has to produce something to await.");
+
+            if (pending.GetAwaiter().GetResult() is not { } step)
+            {
+                value = null;
+                next = null;
+
+                return false;
+            }
+
+            value = step.Value;
+            next = step.Next;
+
+            return true;
+        };
+
+    /// <summary>Bridges a typed channel reader.</summary>
+    /// <typeparam name="T">The element type the channel carries.</typeparam>
+    /// <param name="reader">The author's reader.</param>
+    /// <returns>The bridge.</returns>
+    /// <remarks>Invoked only by reflection, over the type argument recovered from the reader's base type.</remarks>
+    private static LocalChannelSource<T> BoxChannelSource<T>(ChannelReader<T> reader) => new(reader);
+
+    /// <summary>Bridges a typed channel writer.</summary>
+    /// <typeparam name="T">The element type the channel carries.</typeparam>
+    /// <param name="writer">The author's writer.</param>
+    /// <returns>The bridge.</returns>
+    /// <remarks>Invoked only by reflection, over the type argument recovered from the writer's base type.</remarks>
+    private static LocalChannelSink<T> BoxChannelSink<T>(ChannelWriter<T> writer) => new(writer);
 }

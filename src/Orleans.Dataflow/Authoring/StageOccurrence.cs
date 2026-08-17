@@ -65,6 +65,30 @@ internal abstract class StageOccurrence
     /// </value>
     internal abstract ResultPortSpecification? ResultPort { get; }
 
+    /// <summary>Gets the name this occurrence declares its runtime control under.</summary>
+    /// <value>
+    /// The slot name the author supplied when they wrote the stage, or <see langword="null"/> for every
+    /// occurrence that produces no control.
+    /// </value>
+    /// <remarks>
+    /// A control is named where it is written rather than where the graph is closed, because it belongs to
+    /// a stage in the middle of a chain and there is no <c>To</c> to hand it back from. The builder reads
+    /// this while it is already walking the chain and declares one more result slot for it, which is why a
+    /// control needs no new closing overload and no second slot mechanism.
+    /// </remarks>
+    internal virtual ResultSlotId? ControlSlot => null;
+
+    /// <summary>Gets the type of the runtime control this occurrence produces.</summary>
+    /// <value>
+    /// The closed generic interface an author receives, or <see langword="null"/> when there is no control.
+    /// </value>
+    /// <remarks>
+    /// Recorded so that a closed graph can hand back a typed slot for a name without the author asserting
+    /// the type: asking for the wrong one is then a diagnostic naming both types rather than a cast that
+    /// fails inside a run.
+    /// </remarks>
+    internal virtual Type? ControlType => null;
+
     /// <summary>Gets the capability tokens a document containing this occurrence has to declare.</summary>
     /// <value>
     /// The tokens the occurrence's stage specification requires; every local stage requires

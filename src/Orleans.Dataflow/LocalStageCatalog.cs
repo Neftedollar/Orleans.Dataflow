@@ -46,11 +46,14 @@ public static class LocalStageCatalog
     /// <summary>Gets the catalog of the local stage vocabulary.</summary>
     /// <value>
     /// A catalog holding one specification for each local stage: the sources <c>from-enumerable</c>,
-    /// <c>empty</c>, <c>single</c>, <c>repeat</c>, <c>range</c>, <c>from-task</c>, <c>failed</c>, and
-    /// <c>unfold</c>; the operators <c>select</c>, <c>where</c>, <c>scan</c>, <c>take</c>, <c>skip</c>,
-    /// <c>take-while</c>, <c>take-through</c>, <c>skip-while</c>, <c>distinct</c>, <c>buffer</c>,
-    /// <c>select-async</c>, and <c>select-async-unordered</c>; and the sinks <c>fold</c>, <c>ignore</c>,
-    /// <c>for-each</c>, <c>for-each-async</c>, <c>first</c>, <c>first-or-default</c>, and <c>count</c>.
+    /// <c>empty</c>, <c>single</c>, <c>repeat</c>, <c>range</c>, <c>from-task</c>, <c>failed</c>,
+    /// <c>unfold</c>, <c>from-async-enumerable</c>, <c>from-factory</c>, <c>from-async-factory</c>,
+    /// <c>never</c>, <c>cycle</c>, <c>unfold-async</c>, <c>queue</c>, and <c>from-channel</c>; the
+    /// operators <c>select</c>, <c>where</c>, <c>scan</c>, <c>take</c>, <c>skip</c>, <c>take-while</c>,
+    /// <c>take-through</c>, <c>skip-while</c>, <c>distinct</c>, <c>buffer</c>, <c>select-async</c>, and
+    /// <c>select-async-unordered</c>; and the sinks <c>fold</c>, <c>ignore</c>, <c>for-each</c>,
+    /// <c>for-each-async</c>, <c>first</c>, <c>first-or-default</c>, <c>count</c>, <c>last</c>,
+    /// <c>last-or-default</c>, <c>collect</c>, and <c>to-channel</c>.
     /// </value>
     /// <remarks>
     /// The catalog is immutable and stateless, so one instance serves every caller; a
@@ -89,8 +92,8 @@ public static class LocalStageCatalog
         {
             InputPortSpecification[] inputs = LocalVocabulary.ConsumesElements(kind) ? [input] : [];
             OutputPortSpecification[] outputs = LocalVocabulary.ProducesElements(kind) ? [output] : [];
-            ResultPortSpecification[] results = LocalVocabulary.ResultContractOf(kind) is { } contract
-                ? [ResultPortSpecification.Create(LocalVocabulary.ResultPort, contract)]
+            ResultPortSpecification[] results = LocalVocabulary.ResultPortOf(kind) is { } result
+                ? [result]
                 : [];
 
             return LocalVocabulary.ParameterValidatorOf(kind) is { } validator

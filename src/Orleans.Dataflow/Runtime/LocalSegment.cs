@@ -1,5 +1,3 @@
-using System.Collections;
-
 namespace Orleans.Dataflow.Runtime;
 
 /// <summary>
@@ -24,12 +22,12 @@ namespace Orleans.Dataflow.Runtime;
 internal sealed class LocalSegment
 {
     /// <summary>Initializes a new instance of the <see cref="LocalSegment"/> class.</summary>
-    /// <param name="elements">The sequence to pull from, or <see langword="null"/>.</param>
+    /// <param name="elements">The factory of the sequence to pull from, or <see langword="null"/>.</param>
     /// <param name="async">The asynchronous stage that heads this segment, or <see langword="null"/>.</param>
     /// <param name="stages">The fused synchronous stages, in flow order.</param>
     /// <param name="terminal">What the graph's terminal does with an element, or <see langword="null"/>.</param>
     internal LocalSegment(
-        IEnumerable? elements,
+        LocalSource? elements,
         LocalAsyncStage? async,
         IReadOnlyList<LocalElementStage> stages,
         LocalTerminal? terminal)
@@ -40,16 +38,18 @@ internal sealed class LocalSegment
         Terminal = terminal;
     }
 
-    /// <summary>Gets the sequence this segment pulls from.</summary>
+    /// <summary>Gets the factory of the sequence this segment pulls from.</summary>
     /// <value>
-    /// The very sequence the author handed to <see cref="Source.From{T}"/> for the first segment of a
-    /// plan; <see langword="null"/> for every segment that reads a channel instead.
+    /// The factory that opens the source for one run — the very sequence the author handed to
+    /// <see cref="Source.From{T}"/>, or an enumeration built for this run over a queue, a channel, or an
+    /// asynchronous sequence; <see langword="null"/> for every segment that reads a boundary instead.
     /// </value>
     /// <remarks>
-    /// The sequence is not enumerated here. A run obtains its own enumerator when it starts, which is what
-    /// makes two materializations of one graph two independent enumerations.
+    /// Nothing is opened here. A run invokes the factory and obtains its own enumerator at its first pull,
+    /// which is what makes two materializations of one graph two independent enumerations and what keeps a
+    /// run stopped before its first element from touching its source at all.
     /// </remarks>
-    internal IEnumerable? Elements { get; }
+    internal LocalSource? Elements { get; }
 
     /// <summary>Gets the asynchronous stage that heads this segment.</summary>
     /// <value>The stage, or <see langword="null"/> when this segment has no asynchronous head.</value>

@@ -107,13 +107,13 @@ C# names should follow .NET expectations where possible. If the Akka.NET behavio
 
 | Source family | Tier | Target | Status | Boundary |
 |---|---:|---:|---|---|
-| Empty, single, failed, never, repeat, cycle | P0 | M2 | Research | Pure lifecycle and constant sources. |
-| Enumerable and async enumerable | P0 | M2 | Research | Iterator ownership, cancellation, and disposal. |
-| Task and deferred factory | P0 | M2 | Research | Factory invocation occurs per materialization. |
-| Unfold and async unfold | P1 | M2 | Research | State is per materialization; completion is explicit. |
+| Empty, single, failed, never, repeat, cycle | P0 | M2 | Implemented | Pure lifecycle and constant sources. |
+| Enumerable and async enumerable | P0 | M2 | Implemented | Iterator ownership, cancellation, and disposal. |
+| Task and deferred factory | P0 | M2 | Implemented | Factory invocation occurs per materialization. |
+| Unfold and async unfold | P1 | M2 | Implemented | State is per materialization; completion is explicit. |
 | Resource unfold | P1 | M2 | Research | Resource closes on every terminal path. |
-| Bounded ingress queue | P0 | M2 | Research | Offer result distinguishes accepted, dropped, closed, and failed. |
-| Bounded channel | P1 | M2 | Research | Channel completion is not durability. |
+| Bounded ingress queue | P0 | M2 | Implemented | Offer result distinguishes accepted, dropped, closed, and failed. |
+| Bounded channel | P1 | M2 | Implemented | Channel completion is not durability. |
 | Tick/clock source | P1 | M2 | Research | Slow-consumer behavior and missed ticks are explicit. |
 
 ## Core sinks
@@ -121,11 +121,11 @@ C# names should follow .NET expectations where possible. If the Akka.NET behavio
 | Sink family | Tier | Target | Status | Boundary |
 |---|---:|---:|---|---|
 | Ignore and completion | P0 | M2 | Research | Materializes graph completion. |
-| First/last/optional first/last | P0 | M2 | Research | Early cancellation and empty behavior are explicit. |
-| Collect to bounded result | P1 | M2 | Research | Maximum element/byte bound is required. |
+| First/last/optional first/last | P0 | M2 | Implemented | Early cancellation and empty behavior are explicit. |
+| Collect to bounded result | P1 | M2 | Implemented | Maximum element/byte bound is required. |
 | Fold/reduce/sum | P1 | M2 | Research | Final result and overflow behavior are specified. |
 | Sequential and bounded-parallel callback | P0 | M2 | Implemented | Ordering and exception behavior are explicit. |
-| Bounded channel/queue output | P1 | M2 | Research | Write acceptance and downstream consumption are distinct. |
+| Bounded channel/queue output | P1 | M2 | Implemented | Write acceptance and downstream consumption are distinct. |
 
 ## Orleans-native capabilities
 

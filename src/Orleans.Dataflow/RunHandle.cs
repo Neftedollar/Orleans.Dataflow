@@ -93,6 +93,17 @@ public sealed class RunHandle : IAsyncDisposable
     /// only; the run keeps going and a later call still resolves.
     /// </para>
     /// <para>
+    /// A slot's task completes when its value becomes available, and a graph declares two kinds of slot
+    /// whose values become available at different moments. A <em>result</em> — a fold's state, a first or
+    /// last element, a collected list — exists only once the stream has ended, so its task completes when
+    /// the run does and carries the run's outcome: it faults when the run fails and cancels when the run
+    /// cancels. A <em>control</em> — an ingress queue — exists as soon as the run does, because producers
+    /// push into a run that is already running; its task is therefore already complete when this handle is
+    /// handed over, and how the run ends never changes it. A run that fails immediately still resolves its
+    /// controls, and the queue behind one answers every later offer with the refusal that says the run has
+    /// ended.
+    /// </para>
+    /// <para>
     /// A slot is accepted only when it was declared by the very graph instance this is a run of. The
     /// document fingerprint is checked first and identifies shape; the built graph's instance identity is
     /// checked after it, because two lambda graphs of one shape share a fingerprint whatever their

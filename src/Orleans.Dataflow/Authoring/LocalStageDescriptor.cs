@@ -45,16 +45,22 @@ internal sealed class LocalStageDescriptor : StageOccurrence
     /// <param name="behavior">The bound delegate, sequence, or value, or <see langword="null"/> when the shape has none.</param>
     /// <param name="seed">The initial state, which is meaningful only for the shapes that carry one.</param>
     /// <param name="parameters">The parameter payload the node carries.</param>
+    /// <param name="controlSlot">The name of the runtime control the shape produces, when it produces one.</param>
+    /// <param name="controlType">The type of that control, when there is one.</param>
     private LocalStageDescriptor(
         LocalStageKind kind,
         object? behavior,
         object? seed,
-        CanonicalJsonValue parameters)
+        CanonicalJsonValue parameters,
+        ResultSlotId? controlSlot = null,
+        Type? controlType = null)
     {
         Kind = kind;
         Behavior = behavior;
         Seed = seed;
         Parameters = parameters;
+        ControlSlot = controlSlot;
+        ControlType = controlType;
     }
 
     /// <summary>Gets the stage shape.</summary>
@@ -120,11 +126,17 @@ internal sealed class LocalStageDescriptor : StageOccurrence
         LocalVocabulary.ProducesElements(Kind) ? LocalVocabulary.OutputPort : null;
 
     /// <inheritdoc/>
-    /// <value>The result port of a result-bearing sink; <see langword="null"/> for every other shape.</value>
-    internal override ResultPortSpecification? ResultPort =>
-        LocalVocabulary.ResultContractOf(Kind) is { } contract
-            ? ResultPortSpecification.Create(LocalVocabulary.ResultPort, contract)
-            : null;
+    /// <value>
+    /// The result port of a result-bearing sink, the control port of an ingress queue, or
+    /// <see langword="null"/> for every other shape.
+    /// </value>
+    internal override ResultPortSpecification? ResultPort => LocalVocabulary.ResultPortOf(Kind);
+
+    /// <inheritdoc/>
+    internal override ResultSlotId? ControlSlot { get; }
+
+    /// <inheritdoc/>
+    internal override Type? ControlType { get; }
 
     /// <inheritdoc/>
     /// <value>
@@ -194,6 +206,82 @@ internal sealed class LocalStageDescriptor : StageOccurrence
     /// <returns>The descriptor.</returns>
     internal static LocalStageDescriptor Unfold(object? seed, object generator) =>
         new(LocalStageKind.Unfold, generator, seed, LocalVocabulary.EmptyParameters);
+
+    /// <summary>Creates a source over an asynchronous sequence.</summary>
+    /// <param name="open">
+    /// The opener the authoring surface built, already closed over the element type.
+    /// </param>
+    /// <returns>The descriptor.</returns>
+    /// <remarks>
+    /// The binding is an opener rather than the author's own sequence, because
+    /// <see cref="IAsyncEnumerable{T}"/> is an interface and one class may implement it for two element
+    /// types; nothing in a document names which of them the graph means, and the type argument the author
+    /// wrote is the only statement of it. This is the same reason a deduplicating stage is bound to the
+    /// element type's comparer rather than to the element type.
+    /// </remarks>
+    internal static LocalStageDescriptor FromAsyncEnumerable(object open) =>
+        new(LocalStageKind.FromAsyncEnumerable, open, seed: null, LocalVocabulary.EmptyParameters);
+
+    /// <summary>Creates a source over a factory of one element.</summary>
+    /// <param name="factory">The factory delegate, as the authoring value received it.</param>
+    /// <returns>The descriptor.</returns>
+    internal static LocalStageDescriptor FromFactory(object factory) =>
+        new(LocalStageKind.FromFactory, factory, seed: null, LocalVocabulary.EmptyParameters);
+
+    /// <summary>Creates a source over an asynchronous factory of one element.</summary>
+    /// <param name="factory">The factory delegate, as the authoring value received it.</param>
+    /// <returns>The descriptor.</returns>
+    internal static LocalStageDescriptor FromAsyncFactory(object factory) =>
+        new(LocalStageKind.FromAsyncFactory, factory, seed: null, LocalVocabulary.EmptyParameters);
+
+    /// <summary>Creates a source that emits nothing and never ends.</summary>
+    /// <returns>The descriptor.</returns>
+    internal static LocalStageDescriptor Never() =>
+        new(LocalStageKind.Never, behavior: null, seed: null, LocalVocabulary.EmptyParameters);
+
+    /// <summary>Creates a source that repeats an in-memory sequence endlessly.</summary>
+    /// <param name="elements">The sequence, as the authoring value received it.</param>
+    /// <returns>The descriptor.</returns>
+    internal static LocalStageDescriptor Cycle(object elements) =>
+        new(LocalStageKind.Cycle, elements, seed: null, LocalVocabulary.EmptyParameters);
+
+    /// <summary>Creates a source driven by an asynchronous generator over its own state.</summary>
+    /// <param name="seed">The initial state, which may legitimately be <see langword="null"/>.</param>
+    /// <param name="generator">The generator delegate, as the authoring value received it.</param>
+    /// <returns>The descriptor.</returns>
+    internal static LocalStageDescriptor UnfoldAsync(object? seed, object generator) =>
+        new(LocalStageKind.UnfoldAsync, generator, seed, LocalVocabulary.EmptyParameters);
+
+    /// <summary>Creates a source over a bounded ingress queue of its own.</summary>
+    /// <param name="options">The validated capacity and overflow policy.</param>
+    /// <param name="controlSlot">The validated name the control is declared under.</param>
+    /// <param name="controlType">The closed generic type of the control an author receives.</param>
+    /// <param name="facade">The factory that wraps a run's queue into that typed control.</param>
+    /// <returns>The descriptor.</returns>
+    /// <remarks>
+    /// The payload is a buffer's payload, under a buffer's contract, because a queue's capacity and
+    /// overflow policy are a buffer's capacity and overflow policy seen from the other side of a graph. The
+    /// stage reference is what says which of them a node is, exactly as it does for the three stages that
+    /// share a count.
+    /// </remarks>
+    internal static LocalStageDescriptor Queue(
+        BufferOptions options,
+        ResultSlotId controlSlot,
+        Type controlType,
+        object facade) =>
+        new(
+            LocalStageKind.Queue,
+            facade,
+            seed: null,
+            LocalBufferParameters.Write(options),
+            controlSlot,
+            controlType);
+
+    /// <summary>Creates a source over a channel the author owns.</summary>
+    /// <param name="reader">The reader, as the authoring value received it.</param>
+    /// <returns>The descriptor.</returns>
+    internal static LocalStageDescriptor FromChannel(object reader) =>
+        new(LocalStageKind.FromChannel, reader, seed: null, LocalVocabulary.EmptyParameters);
 
     /// <summary>Creates a mapping stage.</summary>
     /// <param name="selector">The mapping delegate, as the authoring value received it.</param>
@@ -336,6 +424,39 @@ internal sealed class LocalStageDescriptor : StageOccurrence
     /// </remarks>
     internal static LocalStageDescriptor Count() =>
         new(LocalStageKind.Count, behavior: null, 0L, LocalVocabulary.EmptyParameters);
+
+    /// <summary>Creates a sink that keeps the last element and requires one.</summary>
+    /// <returns>The descriptor.</returns>
+    internal static LocalStageDescriptor Last() =>
+        new(LocalStageKind.Last, behavior: null, seed: null, LocalVocabulary.EmptyParameters);
+
+    /// <summary>Creates a sink that keeps the last element or the element type's default value.</summary>
+    /// <param name="defaultValue">
+    /// The value to resolve when the sink saw no element, which is <c>default(T)</c> boxed by the caller.
+    /// </param>
+    /// <returns>The descriptor.</returns>
+    internal static LocalStageDescriptor LastOrDefault(object? defaultValue) =>
+        new(LocalStageKind.LastOrDefault, behavior: null, defaultValue, LocalVocabulary.EmptyParameters);
+
+    /// <summary>Creates a bounded collecting sink.</summary>
+    /// <param name="options">The validated element bound.</param>
+    /// <param name="freeze">
+    /// The projection the authoring surface built, which turns the run's boxed elements into the typed list
+    /// the author asked for.
+    /// </param>
+    /// <returns>The descriptor.</returns>
+    /// <remarks>
+    /// The bound is payload, because it is a number that changes what the graph does; the projection is
+    /// binding, because it is the one part that needs an element type, and a document never names one.
+    /// </remarks>
+    internal static LocalStageDescriptor Collect(CollectOptions options, object freeze) =>
+        new(LocalStageKind.Collect, freeze, seed: null, LocalCollectParameters.Write(options));
+
+    /// <summary>Creates a sink that writes every element into a channel the author owns.</summary>
+    /// <param name="writer">The writer, as the authoring value received it.</param>
+    /// <returns>The descriptor.</returns>
+    internal static LocalStageDescriptor ToChannel(object writer) =>
+        new(LocalStageKind.ToChannel, writer, seed: null, LocalVocabulary.EmptyParameters);
 
     /// <summary>Returns a one-line diagnostic summary of this occurrence.</summary>
     /// <returns>The stage reference text, such as <c>local:select@1</c>.</returns>

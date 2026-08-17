@@ -112,9 +112,43 @@ internal static class LocalGraphBuilder
             LocalVocabulary.AnonymousGraph,
             LocalVocabulary.FirstRevision,
             Capabilities(stages),
-            Slots(stages[^1], ids[^1], slotId));
+            Slots(stages, ids, slotId));
 
-        return new RunnableGraph(document, GraphDocumentSerializer.Fingerprint(document), bindings);
+        return new RunnableGraph(
+            document,
+            GraphDocumentSerializer.Fingerprint(document),
+            bindings,
+            Controls(stages));
+    }
+
+    /// <summary>Collects the type of every runtime control the chain declares, by name.</summary>
+    /// <param name="stages">The occurrences in authoring order.</param>
+    /// <returns>The control types, keyed by the name each is declared under.</returns>
+    /// <exception cref="ArgumentException">
+    /// Two occurrences declare a control under one name. Reported here rather than by the document, whose
+    /// own uniqueness rule would report it as a repeated slot without saying that both were controls.
+    /// </exception>
+    /// <remarks>
+    /// The registry never enters the document, exactly as the binding table never does: a CLR type is not
+    /// durable topology. What the document says about a control is its name, its port, and its contract;
+    /// what this says is which type an author may ask for it as, so that asking for the wrong one is a
+    /// diagnostic naming both types instead of a cast that fails inside a run.
+    /// </remarks>
+    private static Dictionary<ResultSlotId, Type> Controls(IReadOnlyList<StageOccurrence> stages)
+    {
+        Dictionary<ResultSlotId, Type> controls = [];
+
+        for (int index = 0; index < stages.Count; index++)
+        {
+            if (stages[index] is { ControlSlot: { } slot, ControlType: { } type } &&
+                !controls.TryAdd(slot, type))
+            {
+                throw new ArgumentException(
+                    $"Two stages of this chain declare a runtime control named '{slot}', and a name resolves one control. Give each control a name of its own; the names are what a run handle resolves them by.");
+            }
+        }
+
+        return controls;
     }
 
     /// <summary>Allocates the node identifier of every occurrence of a chain.</summary>
@@ -190,36 +224,63 @@ internal static class LocalGraphBuilder
         return [.. declared];
     }
 
-    /// <summary>Builds the result slot a closed graph declares, when it declares one.</summary>
-    /// <param name="terminal">The occurrence the author closed the graph with.</param>
-    /// <param name="id">The identifier allocated to it.</param>
+    /// <summary>Builds every result slot a closed graph declares.</summary>
+    /// <param name="stages">The occurrences in authoring order.</param>
+    /// <param name="ids">The identifiers allocated to them, in the same positions.</param>
     /// <param name="slotId">The slot name, or <see langword="null"/> when the graph declares no result.</param>
-    /// <returns>The one slot, or an empty list.</returns>
+    /// <returns>The slots: one per runtime control, and one more for the terminal's result when it has one.</returns>
     /// <exception cref="InvalidOperationException">
     /// A slot name was supplied for a terminal that declares no result port. That is unreachable through
     /// the authoring types, whose result-bearing overloads accept only a result-bearing sink, and it is a
     /// defect in this assembly rather than a mistake the author could make.
     /// </exception>
     /// <remarks>
-    /// The port and the contract come from the terminal's own declaration rather than from a constant,
+    /// <para>
+    /// A control is a result slot and is declared here beside the terminal's, which is what ADR 0002 meant
+    /// by listing a queue control next to a fold result. The only difference is where the name came from:
+    /// a terminal's is an argument of <c>To</c>, and a control's was written on the stage that produces it,
+    /// because there is no closing call in the middle of a chain to hand one back from.
+    /// </para>
+    /// <para>
+    /// The port and the contract come from each occurrence's own declaration rather than from a constant,
     /// because a registered stage names its result port and its result contract whatever it likes, and a
     /// slot whose contract did not match the port's would be a <c>result-contract-mismatch</c> the moment
     /// the document met the catalog.
+    /// </para>
     /// </remarks>
-    private static ResultSlotDefinition[] Slots(StageOccurrence terminal, NodeId id, ResultSlotId? slotId)
+    private static ResultSlotDefinition[] Slots(
+        IReadOnlyList<StageOccurrence> stages,
+        NodeId[] ids,
+        ResultSlotId? slotId)
     {
+        List<ResultSlotDefinition> slots = [];
+
+        for (int index = 0; index < stages.Count; index++)
+        {
+            if (stages[index] is { ControlSlot: { } control, ResultPort: { } port })
+            {
+                slots.Add(
+                    ResultSlotDefinition.Create(
+                        control,
+                        port.ResultContract,
+                        PortAddress.Create(ids[index], port.Id)));
+            }
+        }
+
         if (slotId is not { } declared)
         {
-            return [];
+            return [.. slots];
         }
 
-        if (terminal.ResultPort is not { } port)
+        if (stages[^1].ResultPort is not { } result)
         {
             throw new InvalidOperationException(
-                $"The graph was closed under the result name '{declared}' by an occurrence of '{terminal.Stage}', which declares no result port to expose.");
+                $"The graph was closed under the result name '{declared}' by an occurrence of '{stages[^1].Stage}', which declares no result port to expose.");
         }
 
-        return [ResultSlotDefinition.Create(declared, port.ResultContract, PortAddress.Create(id, port.Id))];
+        slots.Add(ResultSlotDefinition.Create(declared, result.ResultContract, PortAddress.Create(ids[^1], result.Id)));
+
+        return [.. slots];
     }
 
     /// <summary>

@@ -40,7 +40,11 @@ internal sealed class LocalRunPlan
     /// <param name="segments">The segments in flow order; at least one.</param>
     /// <param name="boundaries">The channels between them, one fewer than there are segments.</param>
     /// <param name="seed">The terminal's initial state, meaningful only when the last segment has one.</param>
+    /// <param name="seedFactory">
+    /// The maker of the terminal's initial state, for a terminal whose state is mutable.
+    /// </param>
     /// <param name="slot">The result slot the terminal's final state resolves, or <see langword="null"/>.</param>
+    /// <param name="controls">The runtime controls this plan built, in document order.</param>
     /// <param name="completesAtStart">
     /// The segment whose stream is over before the run begins, or minus one when none is.
     /// </param>
@@ -48,13 +52,17 @@ internal sealed class LocalRunPlan
         IReadOnlyList<LocalSegment> segments,
         IReadOnlyList<LocalBoundary> boundaries,
         object? seed,
+        Func<object?>? seedFactory,
         ResultSlotId? slot,
+        IReadOnlyList<LocalControl> controls,
         int completesAtStart)
     {
         Segments = segments;
         Boundaries = boundaries;
         Seed = seed;
+        SeedFactory = seedFactory;
         Slot = slot;
+        Controls = controls;
         CompletesAtStart = completesAtStart;
     }
 
@@ -77,6 +85,29 @@ internal sealed class LocalRunPlan
     /// value decides whether a state exists at all.
     /// </value>
     internal object? Seed { get; }
+
+    /// <summary>Gets the maker of the terminal's initial state, when the state cannot be shared.</summary>
+    /// <value>
+    /// The factory for a collecting sink, whose state is a list a run appends to; <see langword="null"/>
+    /// for every terminal whose seed is a value two runs may hold at once.
+    /// </value>
+    /// <remarks>
+    /// A plan outlives no run and is shared by none, but it is built once and a run reads
+    /// <see cref="Seed"/> from it, so a mutable seed would be one object two runs both appended to. The
+    /// factory is what keeps "fresh state per run" true for a terminal that accumulates rather than
+    /// replaces.
+    /// </remarks>
+    internal Func<object?>? SeedFactory { get; }
+
+    /// <summary>Gets the runtime controls this plan built for its run.</summary>
+    /// <value>
+    /// One control per ingress queue in the graph, or an empty list for a graph with none.
+    /// </value>
+    /// <remarks>
+    /// Built when the plan is compiled, which is once per materialization: a control is per run in exactly
+    /// the way an enumerator and a fold state are, and two runs of one graph offer into two queues.
+    /// </remarks>
+    internal IReadOnlyList<LocalControl> Controls { get; }
 
     /// <summary>Gets the segment whose stream is over before the run begins.</summary>
     /// <value>

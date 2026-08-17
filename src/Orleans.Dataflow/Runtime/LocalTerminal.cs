@@ -6,39 +6,56 @@ namespace Orleans.Dataflow.Runtime;
 /// </summary>
 /// <remarks>
 /// <para>
-/// Every terminal the local vocabulary has is one fold over the run's state and at most two extra facts:
-/// whether the first element is enough, and whether there had to be one. A discarding sink is the absence
-/// of a terminal rather than a terminal that does nothing, and so is an asynchronous callback sink, whose
-/// whole work is the callback its segment already drives.
+/// Every terminal the local vocabulary has is one fold over the run's state and a few extra facts: whether
+/// the first element is enough, whether there had to be one, what the accumulated state becomes when the
+/// run succeeds, and what has to be closed when the run ends however it ends. A discarding sink is the
+/// absence of a terminal rather than a terminal that does nothing, and so is an asynchronous callback sink,
+/// whose whole work is the callback its segment already drives.
+/// </para>
+/// <para>
+/// The fold receives the run's token because a terminal may wait: a sink that writes into a bounded channel
+/// holds the segment's thread until there is room, which is the same backpressure a slow synchronous
+/// callback applies. Every other terminal ignores it, and passing it to all of them keeps the element path
+/// one shape rather than one shape plus a special case.
 /// </para>
 /// <para>
 /// The state itself is not here. It belongs to the run, because a run is what a state is fresh per, and a
-/// plan is shared by none: <see cref="LocalRunPlan.Seed"/> is where a run starts and this is what moves it.
+/// plan is shared by none: <see cref="LocalRunPlan.Seed"/> and <see cref="LocalRunPlan.SeedFactory"/> are
+/// where a run starts and this is what moves it.
 /// </para>
 /// </remarks>
 internal sealed class LocalTerminal
 {
     /// <summary>Initializes a new instance of the <see cref="LocalTerminal"/> class.</summary>
-    /// <param name="folder">The fold over boxed state and boxed elements.</param>
+    /// <param name="folder">The fold over boxed state, boxed elements, and the run's token.</param>
     /// <param name="completesOnFirstElement">Whether one element is the whole of what this terminal wants.</param>
     /// <param name="requiresElement">Whether a stream that ended with no element is a failure.</param>
+    /// <param name="element">Which element this terminal is about, when it requires one.</param>
+    /// <param name="finisher">The projection of the final state into the result, when there is one.</param>
+    /// <param name="closing">What to release when the run ends, when there is anything.</param>
     private LocalTerminal(
-        Func<object?, object?, object?> folder,
+        Func<object?, object?, CancellationToken, object?> folder,
         bool completesOnFirstElement,
-        bool requiresElement)
+        bool requiresElement,
+        string element = "first",
+        Func<object?, object?>? finisher = null,
+        Action<Exception?>? closing = null)
     {
         Folder = folder;
         CompletesOnFirstElement = completesOnFirstElement;
         RequiresElement = requiresElement;
+        Element = element;
+        Finisher = finisher;
+        Closing = closing;
     }
 
     /// <summary>Gets the fold this terminal applies to every element that reaches it.</summary>
     /// <value>
     /// The author's own folder for an aggregate, the increment of a count, the callback of a synchronous
-    /// per-element sink written as a fold that keeps its state, or the replacement of the state by the
-    /// element for a first-element sink.
+    /// per-element sink written as a fold that keeps its state, the replacement of the state by the element
+    /// for a first-or-last-element sink, the append of a collecting one, and the write of a channel sink.
     /// </value>
-    internal Func<object?, object?, object?> Folder { get; }
+    internal Func<object?, object?, CancellationToken, object?> Folder { get; }
 
     /// <summary>Gets a value indicating whether the first element completes the run.</summary>
     /// <value>
@@ -49,17 +66,50 @@ internal sealed class LocalTerminal
 
     /// <summary>Gets a value indicating whether a stream that ended with no element is a failure.</summary>
     /// <value>
-    /// <see langword="true"/> only for the strict first-element sink. The honest variant resolves the
-    /// default value it was given as its seed, and every other terminal has a state that already means
-    /// something when nothing arrived.
+    /// <see langword="true"/> for the strict first-element and last-element sinks. The honest variants
+    /// resolve the default value they were given as their seed, and every other terminal has a state that
+    /// already means something when nothing arrived.
     /// </value>
     internal bool RequiresElement { get; }
+
+    /// <summary>Gets which element of the stream this terminal is about.</summary>
+    /// <value>The word <c>first</c> or the word <c>last</c>, read only when <see cref="RequiresElement"/>.</value>
+    /// <remarks>
+    /// The failure of an empty stream names the element the author asked for and the sink that answers
+    /// honestly instead, and those two sentences differ by this word alone.
+    /// </remarks>
+    internal string Element { get; }
+
+    /// <summary>Gets the projection of the accumulated state into the value the result slot resolves.</summary>
+    /// <value>
+    /// The projection, or <see langword="null"/> when the accumulated state is already the result.
+    /// </value>
+    /// <remarks>
+    /// Only a collecting sink has one. The run accumulates boxed elements in a list it can build without a
+    /// type argument, and the author asked for a list of their element type; the projection is where the
+    /// two meet, and it is closed over that type by the authoring surface because the runtime has no type
+    /// argument to close it over.
+    /// </remarks>
+    internal Func<object?, object?>? Finisher { get; }
+
+    /// <summary>Gets what this terminal releases when the run ends, however it ends.</summary>
+    /// <value>
+    /// The release, which receives the run's failure or <see langword="null"/> for a run that succeeded; or
+    /// <see langword="null"/> when this terminal holds nothing that outlives the run.
+    /// </value>
+    /// <remarks>
+    /// Only a channel sink has one, and what it releases is the author's writer. It is called exactly once,
+    /// after every segment has stopped, on every terminal path including a run cancelled before its first
+    /// element — because a consumer waiting on the other side of that channel has to be told the stream is
+    /// over whichever way it ended.
+    /// </remarks>
+    internal Action<Exception?>? Closing { get; }
 
     /// <summary>Creates the terminal of a folding sink.</summary>
     /// <param name="folder">The author's fold over boxed state and boxed elements.</param>
     /// <returns>The terminal.</returns>
     internal static LocalTerminal Folding(Func<object?, object?, object?> folder) =>
-        new(folder, completesOnFirstElement: false, requiresElement: false);
+        new((state, element, _) => folder(state, element), completesOnFirstElement: false, requiresElement: false);
 
     /// <summary>Creates the terminal of a counting sink.</summary>
     /// <returns>The terminal.</returns>
@@ -89,5 +139,65 @@ internal sealed class LocalTerminal
     /// the stream is over, and everything upstream is stopped and released.
     /// </remarks>
     internal static LocalTerminal FirstElement(bool requiresElement) =>
-        new(static (_, element) => element, completesOnFirstElement: true, requiresElement);
+        new(static (_, element, _) => element, completesOnFirstElement: true, requiresElement);
+
+    /// <summary>Creates the terminal of a last-element sink.</summary>
+    /// <param name="requiresElement">Whether a stream that ended with no element is a failure.</param>
+    /// <returns>The terminal.</returns>
+    /// <remarks>
+    /// The same fold as a first-element sink and the opposite lifetime: every element replaces the state,
+    /// and the stream has to end for the answer to exist. That is why a last-element sink completes no run
+    /// early and why it holds exactly one element rather than accumulating.
+    /// </remarks>
+    internal static LocalTerminal LastElement(bool requiresElement) =>
+        new(static (_, element, _) => element, completesOnFirstElement: false, requiresElement, element: "last");
+
+    /// <summary>Creates the terminal of a collecting sink.</summary>
+    /// <param name="maxElements">The greatest number of elements to collect; at least one.</param>
+    /// <param name="finisher">The projection of the collected elements into the author's result type.</param>
+    /// <returns>The terminal.</returns>
+    /// <remarks>
+    /// The bound is checked before the element is added, so a run that delivers exactly the bound succeeds
+    /// with all of it and the element after it is what fails. The failure travels to the run loop like any
+    /// other terminal's; truncating instead would produce a shorter list nothing downstream could tell from
+    /// a complete one.
+    /// </remarks>
+    internal static LocalTerminal Collecting(int maxElements, Func<object?, object?> finisher) =>
+        new(
+            (state, element, _) =>
+            {
+                List<object?> collected = (List<object?>)state!;
+
+                if (collected.Count >= maxElements)
+                {
+                    throw CollectOverflowException.Exceeded(maxElements);
+                }
+
+                collected.Add(element);
+
+                return collected;
+            },
+            completesOnFirstElement: false,
+            requiresElement: false,
+            finisher: finisher);
+
+    /// <summary>Creates the terminal of a sink that writes into a channel the author owns.</summary>
+    /// <param name="channel">The bridge over the author's writer.</param>
+    /// <returns>The terminal.</returns>
+    /// <remarks>
+    /// The write is the backpressure and the completion is the contract: the writer is completed when the
+    /// run ends, with the run's failure when it had one, so a consumer reading the other side learns both
+    /// that the stream is over and why.
+    /// </remarks>
+    internal static LocalTerminal Channel(LocalChannelSink channel) =>
+        new(
+            (state, element, token) =>
+            {
+                channel.Write(element, token);
+
+                return state;
+            },
+            completesOnFirstElement: false,
+            requiresElement: false,
+            closing: channel.Close);
 }

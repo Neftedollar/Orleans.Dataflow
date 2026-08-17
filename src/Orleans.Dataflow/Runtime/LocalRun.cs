@@ -51,9 +51,12 @@ internal sealed class LocalRun
 {
     private readonly LocalRunPlan _plan;
     private readonly CancellationTokenSource _cancellation;
+    private readonly CancellationTokenSource _stopping;
     private readonly CancellationToken _token;
+    private readonly LocalRunContext _context;
     private readonly TaskCompletionSource _completion = new(TaskCreationOptions.RunContinuationsAsynchronously);
     private readonly TaskCompletionSource<object?>? _result;
+    private readonly Dictionary<ResultSlotId, Task<object?>> _controls;
     private readonly Lock _gate = new();
     private readonly Channel<object?>[] _channels;
     private int _running;
@@ -78,14 +81,30 @@ internal sealed class LocalRun
         CancellationToken cancellationToken)
     {
         _plan = plan;
-        _state = plan.Seed;
+        _state = plan.SeedFactory is { } make ? make() : plan.Seed;
         _cancellation = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
         _token = _cancellation.Token;
+        _stopping = CancellationTokenSource.CreateLinkedTokenSource(_token);
+        _context = new LocalRunContext(_token, _stopping.Token);
         _result = plan.Slot is null
             ? null
             : new TaskCompletionSource<object?>(TaskCreationOptions.RunContinuationsAsynchronously);
         _running = plan.Segments.Count;
         _channels = new Channel<object?>[plan.Boundaries.Count];
+
+        // A control is a slot whose value exists as soon as the run does, which is what makes it a control
+        // rather than a result: producers push into a run that is already running, so the handle cannot
+        // wait for the run to end. The task is therefore already completed here, and how the run ends never
+        // changes it — a run that fails or is cancelled a moment later still hands back a queue, and that
+        // queue answers every later offer with the refusal that says so.
+        _controls = new Dictionary<ResultSlotId, Task<object?>>(plan.Controls.Count);
+
+        for (int index = 0; index < plan.Controls.Count; index++)
+        {
+            LocalControl control = plan.Controls[index];
+
+            _controls.Add(control.Slot, Task.FromResult<object?>(control.Handle));
+        }
 
         for (int index = 0; index < _channels.Length; index++)
         {
@@ -121,7 +140,20 @@ internal sealed class LocalRun
     /// upstream of a completed stream are not drops and are not counted: nothing discarded them, the stream
     /// they were travelling to had ended.
     /// </remarks>
-    internal long DroppedElements => Interlocked.Read(ref _dropped);
+    internal long DroppedElements
+    {
+        get
+        {
+            long dropped = Interlocked.Read(ref _dropped);
+
+            for (int index = 0; index < _plan.Controls.Count; index++)
+            {
+                dropped += _plan.Controls[index].Queue.Dropped;
+            }
+
+            return dropped;
+        }
+    }
 
     /// <summary>Compiles nothing and starts everything: builds a run of a plan and sets its segments going.</summary>
     /// <param name="plan">The compiled plan.</param>
@@ -154,9 +186,18 @@ internal sealed class LocalRun
     /// <remarks>
     /// One task per slot, shared by every caller: two callers asking for one result observe one outcome,
     /// and asking after the run ended is answered from the settled task rather than by re-reading state.
+    /// A control's task is complete before this run's handle exists, and a terminal result's completes when
+    /// the run does; the difference is when the value became available and nothing else.
     /// </remarks>
-    internal Task<object?>? Result(ResultSlotId slot) =>
-        _plan.Slot is { } declared && declared == slot ? _result?.Task : null;
+    internal Task<object?>? Result(ResultSlotId slot)
+    {
+        if (_plan.Slot is { } declared && declared == slot)
+        {
+            return _result?.Task;
+        }
+
+        return _controls.TryGetValue(slot, out Task<object?>? control) ? control : null;
+    }
 
     /// <summary>Stops pulling new elements and completes the run as if the source had ended.</summary>
     /// <returns>A task that completes when the run has stopped and its resources are released.</returns>
@@ -167,11 +208,15 @@ internal sealed class LocalRun
     /// accumulated from all of it, and <see cref="Completion"/> reports success. That is the whole
     /// difference from cancellation, which resolves nothing and abandons what is queued. The request is
     /// observed between elements, so a source that blocks inside a pull, or that is waiting for room in a
-    /// full buffer, delays the stop until it can proceed.
+    /// full buffer, delays the stop until it can proceed. The runtime's own waits are the exception and are
+    /// released at once: a source that waits for an offer, for a channel, or for nothing at all is this
+    /// runtime's code rather than the author's, and a request to stop producing reaches it directly.
     /// </remarks>
     internal async ValueTask ShutdownAsync()
     {
         _shutdownRequested = true;
+
+        RequestStop();
 
         await DrainAsync().ConfigureAwait(false);
     }
@@ -294,7 +339,7 @@ internal sealed class LocalRun
     /// <summary>Pulls the head segment's sequence until it ends or the run stops.</summary>
     /// <param name="segment">The segment being executed.</param>
     /// <param name="index">Its position in the plan.</param>
-    /// <param name="source">The sequence to enumerate.</param>
+    /// <param name="source">The factory that opens the sequence to enumerate.</param>
     /// <param name="elements">
     /// The enumerator, assigned as soon as it is obtained so that the caller releases it whatever happens
     /// next.
@@ -304,10 +349,11 @@ internal sealed class LocalRun
     /// Cancellation is examined once per element, before the pull, so an element already in flight is
     /// finished rather than abandoned halfway through a chain; the same point observes a shutdown request
     /// and the end of a stream something downstream completed, and cancellation is examined first, so a run
-    /// that is asked to do both ends canceled. The enumerator is obtained at the first pull rather than
-    /// before the loop, so a run stopped before its first element never touches the source at all.
+    /// that is asked to do both ends canceled. The source is opened and its enumerator obtained at the
+    /// first pull rather than before the loop, so a run stopped before its first element never touches the
+    /// source at all.
     /// </remarks>
-    private bool Pull(LocalSegment segment, int index, IEnumerable source, ref IEnumerator? elements)
+    private bool Pull(LocalSegment segment, int index, LocalSource source, ref IEnumerator? elements)
     {
         while (true)
         {
@@ -321,7 +367,7 @@ internal sealed class LocalRun
                 return false;
             }
 
-            elements ??= source.GetEnumerator() ??
+            elements ??= source(_context).GetEnumerator() ??
                 throw new InvalidOperationException(
                     "The source sequence produced no enumerator. A sequence a graph is bound to has to be enumerable more than in name.");
 
@@ -675,7 +721,7 @@ internal sealed class LocalRun
         else if (segment.Terminal is { } terminal)
         {
             _observed = true;
-            _state = terminal.Folder(_state, element);
+            _state = terminal.Folder(_state, element, _token);
             completing |= terminal.CompletesOnFirstElement;
         }
 
@@ -891,36 +937,140 @@ internal sealed class LocalRun
 
     /// <summary>Settles the result slot and the completion task with the run's outcome.</summary>
     /// <remarks>
-    /// The order is fixed and observable: the link to the caller's token is released, then the result, then
-    /// completion. Every transition is a <c>TrySet</c>, so a terminal state, once reached, is the run's
-    /// answer forever. Failure is examined before cancellation because a failure cancels the run itself,
-    /// and reporting that self-inflicted cancellation instead of the exception would hide the thing worth
-    /// reading; a terminal that needed an element and never saw one is examined after both, because it is
-    /// a statement about a stream that ended and neither a cancelled nor a failed run has one.
+    /// <para>
+    /// The order is fixed and observable: every queue is told the run will read no more, what the terminal
+    /// holds beyond the run is released with the outcome, the link to the caller's token is released, then
+    /// the result, then completion. Every transition is a <c>TrySet</c>, so a terminal state, once reached,
+    /// is the run's answer forever — a control, whose task was already complete when the run began, is
+    /// therefore untouched by all of this.
+    /// </para>
+    /// <para>
+    /// Failure is examined before cancellation because a failure cancels the run itself, and reporting that
+    /// self-inflicted cancellation instead of the exception would hide the thing worth reading; a terminal
+    /// that needed an element and never saw one is examined after both, because it is a statement about a
+    /// stream that ended and neither a cancelled nor a failed run has one.
+    /// </para>
+    /// <para>
+    /// Nothing here is allowed to throw past this method. This is the one place that publishes a run's
+    /// outcome, and it runs on the last segment's thread with nobody left to catch anything: an exception
+    /// escaping it would leave <see cref="Completion"/> pending forever, which is the one failure mode
+    /// worse than any exception. The two things it calls that are not this runtime's own code — an author's
+    /// channel writer and a projection from a binding table — are therefore run inside a <c>try</c>, and
+    /// what they throw becomes the run's failure by the same rule a failing enumerator release follows:
+    /// only when nothing else had already gone wrong.
+    /// </para>
     /// </remarks>
     private void Settle()
     {
+        for (int index = 0; index < _plan.Controls.Count; index++)
+        {
+            _plan.Controls[index].Queue.EndRun();
+        }
+
+        Exception? failure = _failure;
+        bool canceled = failure is null && _canceled;
+        object? result = null;
+
+        if (failure is null && !canceled)
+        {
+            failure = Missing() ?? Project(out result);
+        }
+
+        Exception? released = Close(failure ?? (canceled ? new OperationCanceledException(_token) : null));
+
+        if (failure is null && !canceled)
+        {
+            failure = released;
+        }
+
         ReleaseCancellation();
 
-        if (_failure is { } failure)
+        if (failure is { } reported)
         {
-            _result?.TrySetException(failure);
-            _completion.TrySetException(failure);
+            _result?.TrySetException(reported);
+            _completion.TrySetException(reported);
         }
-        else if (_canceled)
+        else if (canceled)
         {
             _result?.TrySetCanceled(_token);
             _completion.TrySetCanceled(_token);
         }
-        else if (Missing() is { } missing)
-        {
-            _result?.TrySetException(missing);
-            _completion.TrySetException(missing);
-        }
         else
         {
-            _result?.TrySetResult(_state);
+            _result?.TrySetResult(result);
             _completion.TrySetResult();
+        }
+    }
+
+    /// <summary>Releases what the terminal holds beyond this run, with the outcome it should report.</summary>
+    /// <param name="failure">
+    /// The exception the run ended with, or <see langword="null"/> when it ended successfully.
+    /// </param>
+    /// <returns>The failure the release raised, or <see langword="null"/>.</returns>
+    /// <remarks>
+    /// <para>
+    /// Only a channel sink has anything here, and what it has is the author's writer: a consumer reading
+    /// the other side has to learn that the stream is over and why, whichever way the run ended. A
+    /// cancellation is reported as the <see cref="OperationCanceledException"/> it is, so the consumer sees
+    /// the same three outcomes the run's own completion has rather than an unexplained end.
+    /// </para>
+    /// <para>
+    /// Called once, from the one place that settles a run, and before the cancellation link is released and
+    /// the result is published: a caller that awaits completion and then reads the channel finds it already
+    /// completed.
+    /// </para>
+    /// </remarks>
+    private Exception? Close(Exception? failure)
+    {
+        if (_plan.Segments[^1].Terminal?.Closing is not { } closing)
+        {
+            return null;
+        }
+
+        try
+        {
+            closing(failure);
+
+            return null;
+        }
+        catch (Exception error)
+        {
+            // Deliberately every exception: what is being released is an author's own channel writer, and
+            // a writer whose completion throws must fault the run rather than strand it. This is the same
+            // rule a sequence that throws while being released follows.
+            return error;
+        }
+    }
+
+    /// <summary>Projects the accumulated state into the value the result slot resolves.</summary>
+    /// <param name="result">The projected result, when this method returns <see langword="null"/>.</param>
+    /// <returns>The failure the projection raised, or <see langword="null"/>.</returns>
+    /// <remarks>
+    /// Only a collecting sink projects anything; every other terminal's state is already its result. The
+    /// projection runs on the successful path alone, because a failed or cancelled run resolves no value to
+    /// project, and it runs inside a <c>try</c> because a projection comes from a binding table: the one
+    /// this authoring surface writes cannot fail, and a hand-built one is not this run's to trust.
+    /// </remarks>
+    private Exception? Project(out object? result)
+    {
+        if (_plan.Segments[^1].Terminal?.Finisher is not { } finisher)
+        {
+            result = _state;
+
+            return null;
+        }
+
+        try
+        {
+            result = finisher(_state);
+
+            return null;
+        }
+        catch (Exception error)
+        {
+            result = null;
+
+            return error;
         }
     }
 
@@ -941,7 +1091,7 @@ internal sealed class LocalRun
     /// </remarks>
     private InvalidOperationException? Missing()
     {
-        if (_plan.Segments[^1].Terminal is not { RequiresElement: true } || _observed)
+        if (_plan.Segments[^1].Terminal is not { RequiresElement: true } terminal || _observed)
         {
             return null;
         }
@@ -949,7 +1099,7 @@ internal sealed class LocalRun
         string result = _plan.Slot is { } slot ? $"the result '{slot}'" : "this run's result";
 
         return new InvalidOperationException(
-            $"Sequence contains no elements: the stream ended without one, and {result} is its first element. Close the graph with a first-or-default sink to resolve the element type's default value instead of failing.");
+            $"Sequence contains no elements: the stream ended without one, and {result} is its {terminal.Element} element. Close the graph with a {terminal.Element}-or-default sink to resolve the element type's default value instead of failing.");
     }
 
     /// <summary>Waits for the run to stop without reporting how it stopped.</summary>
@@ -984,11 +1134,31 @@ internal sealed class LocalRun
         }
     }
 
+    /// <summary>Asks the run's own waits to stop producing, without cancelling anything.</summary>
+    /// <remarks>
+    /// The half of shutdown a flag cannot deliver. A source parked in one of this runtime's own waits — for
+    /// an offer, for a channel, for nothing at all — would never look at a flag again, so a graceful stop
+    /// has to reach it as a cancelled wait that it then reports as the end of its sequence. The author's
+    /// own code never sees this token, which is why a slow enumerable still delays a shutdown.
+    /// </remarks>
+    private void RequestStop()
+    {
+        lock (_gate)
+        {
+            if (!_cancellationReleased)
+            {
+                _stopping.Cancel();
+            }
+        }
+    }
+
     /// <summary>Releases the run's link to the caller's cancellation token.</summary>
     /// <remarks>
     /// A linked source holds a registration on the caller's token, so a run that ended without releasing it
     /// would stay reachable for as long as the caller's token source lives. Releasing it here is what makes
-    /// every terminal path release its registrations, not only its enumerator.
+    /// every terminal path release its registrations, not only its enumerator. The stop source is linked to
+    /// this run's own token and is released first, and both are safe to release here because every segment
+    /// has stopped by the time this runs: nothing is left waiting on either handle.
     /// </remarks>
     private void ReleaseCancellation()
     {
@@ -1000,6 +1170,7 @@ internal sealed class LocalRun
             }
 
             _cancellationReleased = true;
+            _stopping.Dispose();
             _cancellation.Dispose();
         }
     }

@@ -132,7 +132,9 @@ public sealed class CatalogValidationTests
         Assert.Equal(
             [
                 LocalStage("buffer"),
+                LocalStage("collect"),
                 LocalStage("count"),
+                LocalStage("cycle"),
                 LocalStage("distinct"),
                 LocalStage("empty"),
                 LocalStage("failed"),
@@ -141,9 +143,17 @@ public sealed class CatalogValidationTests
                 LocalStage("fold"),
                 LocalStage("for-each"),
                 LocalStage("for-each-async"),
+                LocalStage("from-async-enumerable"),
+                LocalStage("from-async-factory"),
+                LocalStage("from-channel"),
                 LocalStage("from-enumerable"),
+                LocalStage("from-factory"),
                 LocalStage("from-task"),
                 LocalStage("ignore"),
+                LocalStage("last"),
+                LocalStage("last-or-default"),
+                LocalStage("never"),
+                LocalStage("queue"),
                 LocalStage("range"),
                 LocalStage("repeat"),
                 LocalStage("scan"),
@@ -156,7 +166,9 @@ public sealed class CatalogValidationTests
                 LocalStage("take"),
                 LocalStage("take-through"),
                 LocalStage("take-while"),
+                LocalStage("to-channel"),
                 LocalStage("unfold"),
+                LocalStage("unfold-async"),
                 LocalStage("where"),
             ],
             LocalStageCatalog.Instance.Specifications.Select(specification => specification.Stage));
@@ -170,9 +182,38 @@ public sealed class CatalogValidationTests
         // everything else does both. A shape that moved between the three would keep validating and start
         // executing somewhere it cannot stand.
         string[] sources =
-            ["empty", "failed", "from-enumerable", "from-task", "range", "repeat", "single", "unfold"];
+        [
+            "cycle",
+            "empty",
+            "failed",
+            "from-async-enumerable",
+            "from-async-factory",
+            "from-channel",
+            "from-enumerable",
+            "from-factory",
+            "from-task",
+            "never",
+            "queue",
+            "range",
+            "repeat",
+            "single",
+            "unfold",
+            "unfold-async",
+        ];
         string[] sinks =
-            ["count", "first", "first-or-default", "fold", "for-each", "for-each-async", "ignore"];
+        [
+            "collect",
+            "count",
+            "first",
+            "first-or-default",
+            "fold",
+            "for-each",
+            "for-each-async",
+            "ignore",
+            "last",
+            "last-or-default",
+            "to-channel",
+        ];
 
         foreach (StageSpecification specification in LocalStageCatalog.Instance.Specifications)
         {
@@ -228,7 +269,9 @@ public sealed class CatalogValidationTests
             new Dictionary<string, string>(StringComparer.Ordinal)
             {
                 ["buffer"] = "local-buffer-parameters",
+                ["collect"] = "local-collect-parameters",
                 ["count"] = "local-parameters",
+                ["cycle"] = "local-parameters",
                 ["distinct"] = "local-distinct-parameters",
                 ["empty"] = "local-parameters",
                 ["failed"] = "local-parameters",
@@ -237,9 +280,17 @@ public sealed class CatalogValidationTests
                 ["fold"] = "local-parameters",
                 ["for-each"] = "local-parameters",
                 ["for-each-async"] = "local-parallelism-parameters",
+                ["from-async-enumerable"] = "local-parameters",
+                ["from-async-factory"] = "local-parameters",
+                ["from-channel"] = "local-parameters",
                 ["from-enumerable"] = "local-parameters",
+                ["from-factory"] = "local-parameters",
                 ["from-task"] = "local-parameters",
                 ["ignore"] = "local-parameters",
+                ["last"] = "local-parameters",
+                ["last-or-default"] = "local-parameters",
+                ["never"] = "local-parameters",
+                ["queue"] = "local-buffer-parameters",
                 ["range"] = "local-range-parameters",
                 ["repeat"] = "local-count-parameters",
                 ["scan"] = "local-parameters",
@@ -252,7 +303,9 @@ public sealed class CatalogValidationTests
                 ["take"] = "local-count-parameters",
                 ["take-through"] = "local-parameters",
                 ["take-while"] = "local-parameters",
+                ["to-channel"] = "local-parameters",
                 ["unfold"] = "local-parameters",
+                ["unfold-async"] = "local-parameters",
                 ["where"] = "local-parameters",
             },
             contracts);
@@ -292,19 +345,24 @@ public sealed class CatalogValidationTests
                     Assert.False(port.IsIgnorable);
                 });
 
-            // Two opaque result contracts and not one: 'local-fold-result' is the identity a fold's result
-            // port has always declared, and a durable contract identifier is not renamed to cover sinks
-            // that do not fold, so the sinks that arrived later declare the general one instead.
+            // Three opaque result contracts and not one. 'local-fold-result' is the identity a fold's
+            // result port has always declared, and a durable contract identifier is not renamed to cover
+            // sinks that do not fold, so the sinks that arrived later declare the general one instead;
+            // 'local-control' is a third identity because a control is not a result at all — its value
+            // exists when the run starts rather than when it ends, and the port name says so.
             Assert.All(
                 specification.ResultPorts,
                 port =>
                 {
-                    Assert.Equal("result", port.Id.Value);
-                    Assert.Equal(
-                        specification.Stage.Stage.Value == "fold"
-                            ? Contract("local-fold-result")
-                            : Contract("local-result"),
-                        port.ResultContract);
+                    (string expectedPort, string expectedContract) = specification.Stage.Stage.Value switch
+                    {
+                        "fold" => ("result", "local-fold-result"),
+                        "queue" => ("control", "local-control"),
+                        _ => ("result", "local-result"),
+                    };
+
+                    Assert.Equal(expectedPort, port.Id.Value);
+                    Assert.Equal(Contract(expectedContract), port.ResultContract);
                 });
         }
     }
@@ -321,7 +379,9 @@ public sealed class CatalogValidationTests
             new Dictionary<string, int>(StringComparer.Ordinal)
             {
                 ["buffer"] = 0,
+                ["collect"] = 1,
                 ["count"] = 1,
+                ["cycle"] = 0,
                 ["distinct"] = 0,
                 ["empty"] = 0,
                 ["failed"] = 0,
@@ -330,9 +390,17 @@ public sealed class CatalogValidationTests
                 ["fold"] = 1,
                 ["for-each"] = 0,
                 ["for-each-async"] = 0,
+                ["from-async-enumerable"] = 0,
+                ["from-async-factory"] = 0,
+                ["from-channel"] = 0,
                 ["from-enumerable"] = 0,
+                ["from-factory"] = 0,
                 ["from-task"] = 0,
                 ["ignore"] = 0,
+                ["last"] = 1,
+                ["last-or-default"] = 1,
+                ["never"] = 0,
+                ["queue"] = 1,
                 ["range"] = 0,
                 ["repeat"] = 0,
                 ["scan"] = 0,
@@ -345,7 +413,9 @@ public sealed class CatalogValidationTests
                 ["take"] = 0,
                 ["take-through"] = 0,
                 ["take-while"] = 0,
+                ["to-channel"] = 0,
                 ["unfold"] = 0,
+                ["unfold-async"] = 0,
                 ["where"] = 0,
             },
             resultPorts);

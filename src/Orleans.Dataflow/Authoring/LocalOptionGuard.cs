@@ -1,4 +1,5 @@
 using System.Globalization;
+using Orleans.Dataflow.Identity;
 
 namespace Orleans.Dataflow.Authoring;
 
@@ -54,6 +55,34 @@ internal static class LocalOptionGuard
         }
 
         return options;
+    }
+
+    /// <summary>Checks a name a slot or a control is to be declared under.</summary>
+    /// <param name="name">The name the author supplied.</param>
+    /// <param name="parameterName">The name of the operator's parameter the name arrived in.</param>
+    /// <returns>The validated identifier.</returns>
+    /// <exception cref="ArgumentNullException"><paramref name="name"/> is <see langword="null"/>.</exception>
+    /// <exception cref="ArgumentException"><paramref name="name"/> is not a valid identifier segment.</exception>
+    /// <remarks>
+    /// <see cref="ResultSlotId"/> owns the segment grammar and the diagnostic for breaking it, so the
+    /// message is reused verbatim rather than restated; restating it would let the two drift apart. Only
+    /// the parameter name is corrected, because the author wrote a name and not a
+    /// <see cref="ResultSlotId"/> value.
+    /// </remarks>
+    internal static ResultSlotId SlotName(string name, string parameterName)
+    {
+        // The caller's parameter name is passed rather than inferred, here as well as below: inferring it
+        // would name this method's own parameter, and the author wrote the operator's.
+        ArgumentNullException.ThrowIfNull(name, parameterName);
+
+        try
+        {
+            return ResultSlotId.Create(name);
+        }
+        catch (ArgumentException failure)
+        {
+            throw new ArgumentException(failure.Message, parameterName, failure);
+        }
     }
 
     /// <summary>Checks the count of a stage counted in elements.</summary>
@@ -114,6 +143,21 @@ internal static class LocalOptionGuard
                 parameterName,
                 options.MaxTrackedKeys,
                 $"A deduplicating stage remembers at least one key, so {nameof(DistinctOptions.MaxTrackedKeys)} must be 1 or more. There is no spelling for unbounded key tracking: what a stream of unrepeated elements would accumulate is unbounded memory, and a stage that could remember nothing could not pass its first element.");
+
+    /// <summary>Checks the options of a collecting sink.</summary>
+    /// <param name="options">The options the author supplied, already known to be non-null.</param>
+    /// <param name="parameterName">The name of the factory's parameter the options arrived in.</param>
+    /// <returns>The same options.</returns>
+    /// <exception cref="ArgumentOutOfRangeException">
+    /// <see cref="CollectOptions.MaxElements"/> is below one.
+    /// </exception>
+    internal static CollectOptions Collect(CollectOptions options, string parameterName) =>
+        options.MaxElements >= 1
+            ? options
+            : throw new ArgumentOutOfRangeException(
+                parameterName,
+                options.MaxElements,
+                $"A collecting sink holds at least one element, so {nameof(CollectOptions.MaxElements)} must be 1 or more. There is no spelling for an unbounded collection: what a long stream would accumulate is unbounded memory, and a sink bounded at zero could not accept its first element.");
 
     /// <summary>Checks the options of an asynchronous stage.</summary>
     /// <param name="options">The options the author supplied, already known to be non-null.</param>
