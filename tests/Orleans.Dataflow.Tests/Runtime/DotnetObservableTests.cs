@@ -227,8 +227,20 @@ public sealed class DotnetObservableTests
         await run.Completion;
 
         Assert.Equal(3L, await run.GetValueAsync(counted, TestToken));
-        Assert.Equal("folded a", order.First());
-        Assert.Equal("pushed c", order.Last());
+
+        // What the hold proves is relative, and the assertion is kept relative on purpose: the producer's
+        // push could not return before the run took an element, so "pushed c" comes after "folded a". It is
+        // NOT asserted to come last — once the queue has room, the producer's thread and the run's fold of
+        // the remaining elements run concurrently, and which of them enqueues its marker first is a
+        // scheduling accident this test has no business pinning. It lost that coin flip about once in forty
+        // quiet runs when it asserted Last().
+        List<string> recorded = [.. order];
+
+        Assert.Equal("folded a", recorded[0]);
+        Assert.Contains("pushed c", recorded);
+        Assert.True(
+            recorded.IndexOf("pushed c") > recorded.IndexOf("folded a"),
+            $"the push returned before the run took an element; recorded: {string.Join(", ", recorded)}");
     }
 
     [Fact]
