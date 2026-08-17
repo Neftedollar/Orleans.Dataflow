@@ -61,11 +61,15 @@ public sealed class KeyedOrderingProbeTests(DataflowCluster cluster)
 
     /// <summary>How many rounds the verdict is taken over.</summary>
     /// <remarks>
-    /// The measured behavior was to reorder in every round of every shape, so one round would do. Five are
-    /// taken and one is enough to pass, because the claim being recorded is "this can happen" and a probe
-    /// that demanded it happen every time would be asserting a stronger fact than was observed.
+    /// One reordered round is enough to pass, because the claim being recorded is "this can happen" and a
+    /// probe that demanded it happen every time would be asserting a stronger fact than was observed. The
+    /// count is set by the failure side rather than the success side: a single round arrives in send order
+    /// roughly two times in five — measured across suite runs, not assumed from the first session, where
+    /// every round happened to reorder — so five rounds failed spuriously about once in seventy suite runs.
+    /// Twenty puts the odds of all rounds landing in order below one in ten million, which is the margin a
+    /// probe needs to mean "Orleans changed" rather than "the scheduler had a calm morning".
     /// </remarks>
-    private const int Rounds = 5;
+    private const int Rounds = 20;
 
     /// <summary>Gets the token that cancels a hung test rather than letting it block the suite.</summary>
     private static CancellationToken Token => TestContext.Current.CancellationToken;
