@@ -138,6 +138,33 @@ internal static class LocalDelegateAdapter
         return halves;
     }
 
+    /// <summary>Reads a junction's binding as the combiner that builds one row from its inputs' elements.</summary>
+    /// <param name="behavior">The bound combiner, which the authoring surface closed over the element types.</param>
+    /// <param name="kind">The stage shape, for the diagnostic.</param>
+    /// <returns>The combiner.</returns>
+    /// <exception cref="InvalidOperationException"><paramref name="behavior"/> is not such a combiner.</exception>
+    /// <remarks>
+    /// <para>
+    /// Pinned at authoring rather than recovered by reflection, which is where this differs from
+    /// <see cref="Halves"/>. An unzip's projections are one-argument functions whose two type arguments the
+    /// delegate itself names, so they can be recovered; a combiner takes one argument per wired input, so
+    /// recovering it would mean one template per arity up to the fan-in ceiling, and a graph that joined
+    /// nine streams would have no delegate shape at all. The authoring surface holds the element types and
+    /// hands over a function in the boxed vocabulary the run loop speaks, exactly as a collecting sink's
+    /// projection and a queue's facade do.
+    /// </para>
+    /// <para>
+    /// Nothing here checks how many elements the combiner expects, because a
+    /// <c>Func&lt;object?[], object?&gt;</c> does not say: the array it receives is as long as the junction
+    /// has wired inputs, and a combiner built for a different number is the author's own mismatch, reported
+    /// as whatever their code raises when the run reaches it.
+    /// </para>
+    /// </remarks>
+    internal static Func<object?[], object?> Combiner(object? behavior, LocalStageKind kind) =>
+        behavior as Func<object?[], object?> ??
+        throw new InvalidOperationException(
+            $"A '{kind}' stage must be bound to a combiner of its inputs' elements into one row, and this one is bound to {Describe(behavior)}.");
+
     /// <summary>Reads a source binding as the exception the run is to fail with.</summary>
     /// <param name="behavior">The bound exception, as the authoring value received it.</param>
     /// <returns>The exception.</returns>

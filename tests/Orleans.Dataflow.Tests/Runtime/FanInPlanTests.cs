@@ -117,8 +117,10 @@ public sealed class FanInPlanTests
         // Recorded as a test because it is a decision rather than an omission. How many streams a junction
         // joins is stated by its edges, so no junction writes an arity down; how many elements a rotation
         // takes from one of them before moving on is not an edge at all, so the one junction that rotates
-        // on a count writes that count down and the other two carry the empty payload.
-        foreach (string stage in (string[])["merge", "concat", "interleave"])
+        // on a count writes that count down and the other four carry the empty payload. The two
+        // row-building junctions are the sharpest case of the rule: what they emit is built by a combiner,
+        // and a combiner is behavior, so there is nothing at all for their documents to state.
+        foreach (string stage in (string[])["merge", "concat", "interleave", "zip", "combine-latest"])
         {
             Assert.True(
                 LocalStageCatalog.Instance.TryGetSpecification(
@@ -266,6 +268,39 @@ public sealed class FanInPlanTests
 
         Assert.Contains("the interleave 'stage-3' carries parameters", refused.Message, StringComparison.Ordinal);
         Assert.Contains("'segmentSize' is missing", refused.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task AZipBoundToSomethingThatIsNotACombinerIsRefused()
+    {
+        // The other half of the two-plane split, on the junction that has behavior rather than payload. A
+        // combiner is not durable topology, so nothing in the document says what shape it has; a binding
+        // table built by hand can therefore carry anything, and what it carries is checked where the
+        // mismatch is rather than in the middle of a run. Unreachable through the authoring API, whose
+        // generic signatures build the combiner for the author.
+        RunnableGraph graph = Graph(
+            Declaring(
+                [
+                    Node("stage-1", "from-enumerable"),
+                    Node("stage-2", "from-enumerable"),
+                    Node("stage-3", "zip"),
+                    Node("stage-4", "ignore"),
+                ],
+                [Into("stage-1", "stage-3", 0), Into("stage-2", "stage-3", 1), Edge("stage-3", "stage-4")],
+                []),
+            Bindings(
+                ("stage-1", LocalStageDescriptor.FromEnumerable(new RecordingEnumerable<int>(1))),
+                ("stage-2", LocalStageDescriptor.FromEnumerable(new RecordingEnumerable<int>(2))),
+                ("stage-3", LocalStageDescriptor.Zip((Func<int, int>)(value => value))),
+                ("stage-4", LocalStageDescriptor.Ignore())));
+
+        InvalidOperationException refused =
+            await Assert.ThrowsAsync<InvalidOperationException>(async () => await Host.MaterializeAsync(graph, TestToken));
+
+        Assert.Contains(
+            "must be bound to a combiner of its inputs' elements into one row",
+            refused.Message,
+            StringComparison.Ordinal);
     }
 
     [Fact]

@@ -354,8 +354,9 @@ depended on the plan being linear — and a probe attaches to an edge.
    resolving per-terminal. Proves the plan model and the FanOut pump.
 2. **Simple fan-in** — *as implemented, see below*: merge, concat, interleave —
    the FanIn pump with strategies that never hold a partial row.
-3. **Row-building fan-in**: zip and combine-latest — held rows, eager
-   completion for zip, frozen-leg semantics for combine-latest.
+3. **Row-building fan-in** — *as implemented, see below*: zip and
+   combine-latest — held rows, eager completion for zip, frozen-leg
+   semantics for combine-latest.
 4. **Partition and cycles**: the routed-element hold, out-of-range
    failure, SCC detection at validation, a legal cycle executing and
    completing from outside in.
@@ -584,3 +585,142 @@ refused only because it has no segment size to read, and a `broadcast` node
 bound to a balance has been executing as a balance since checkpoint 1. The
 binding table is the statement of behavior by design; that it can disagree with
 the document about *which* junction a node is has not been made a diagnostic.
+
+## M4.1 checkpoint 3 (row-building fan-in) — as implemented
+
+The plan above is what was built; what follows is where it needed a decision
+it did not already contain, where a sentence of the design turned out to be
+looser than it sounds, and what this checkpoint does not do.
+
+**A second joining pump rather than two more strategies in the first.** The
+design offered the choice and this is the answer: what a pump *is* is how
+many reads stand between two deliveries, and that is exactly what these two
+junctions change. A merge, a concat, and an interleave deliver the element
+they read and hold nothing between elements, so one loop with one read and
+one delivery is all three of them; a zip delivers one element for every N it
+reads and a combine-latest delivers zero or one for every one, and both of
+them therefore hold a row *across* passes. A loop that carries only a cursor
+cannot do that, and a loop that carried a row and a cursor and a flag saying
+which of the two loops it was would be two loops written on top of each
+other. What the two shapes genuinely share is shared as code and not as
+prose: the wait-any with its cached per-input waits, the room check, the
+pause bracket, and the delivery path are the very ones the simple fan-in
+uses, so there is one place where a wait is taken on the run token and one
+place where an offer applies a boundary's policy.
+
+**The combiner is behavior, and the arity is still the edges.** A junction
+that builds a row needs to know how to build it, and which member of a row
+each input contributes is a statement about element types, which never
+appear in a local document — the same reason an unzip's halves are a
+binding. So zip and combine-latest carry a combiner and no payload at all,
+and how many inputs it receives is stated by the edges exactly as it is for
+every other junction. The combiner's shape is `Func<object?[], object?>`,
+pinned at authoring rather than recovered by reflection the way an unzip's
+projections are, and the difference is the arity: a projection is a
+one-argument function whose type arguments the delegate names, while a
+combiner would need one delegate shape per number of inputs, so a graph
+joining nine streams would have no shape at all. The array is fresh per row,
+copied out of the junction's own slots, because those slots keep changing —
+a zip releases them the moment the row is placed and a combine-latest writes
+over one of them on every arrival — and an author who kept the array they
+were handed would otherwise watch a row they had already been given empty or
+change. That is a promise a combiner cannot check from inside itself, so it
+is tested by keeping every row and reading them all after the run is over.
+
+**Room first, read second, with the row as the unit of demand.** The rule is
+the one every junction here follows and it is sharpest in this shape: a zip
+reads one element from every input against one unit of downstream demand. An
+input that has already given the pending row its column is not read again
+until that row is emitted, which is what makes the elements of one row the
+i-th of every input rather than whatever arrived; and because the room is
+secured before any of the reads, a junction that has nowhere to deliver
+holds a partial row and does not start filling another. Both halves are
+counted the way the buffer and fan-in suites count — how far a held source
+gets, read after the run is over. With the sink parked, four elements leave
+each input and no fifth: one in the row that reached the sink, one in the
+row in the junction's output channel, one in the input's own channel, one in
+the source's hand, and nothing at all inside the junction. With three inputs
+and the slowest one held, four elements leave each fast input and no fifth:
+one in the emitted row, one in the column being held, one in the channel,
+one in the hand — two columns held at once, which is N−1 for three inputs,
+and a fifth element would be the same input pulled twice for one row.
+
+**Eager completion discards the partial row, by name.** A zip completes as
+soon as an input it still needs has ended, and the columns it was holding
+are cleared where the completion is decided rather than left to fall out of
+scope: a row missing a column can never be completed, and a junction that
+kept the other columns would be holding elements for a delivery that cannot
+happen. Completing is also what releases the inputs that were still live —
+the junction closes every channel it reads, which stops the segments feeding
+them exactly as a completion arriving from downstream does, and an endless
+input on the other leg of a zip whose short leg ran out has its enumerator
+released rather than its thread parked forever. Two things about "eager" are
+worth stating rather than discovering. A completed input whose element is
+*already in the pending row* does not end the row: `zip([1,2],[1])` emits
+`(1,1)` and then completes, which is Rx's answer, and it falls out of the
+pump reading a column before it ever asks whether that input has more. And
+"as soon as" means at the junction's next look at an input it still needs:
+when one needed input ends while another needed input is merely silent, the
+junction is asleep on both and acts on the end when the silent one answers,
+consuming one element it then discards with the row. That element stays
+inside the N−1 bound and nothing observable about the run's outcome changes,
+so the looseness is recorded here rather than paid for with a wait that
+returns on every end and costs the merge a pass; a run parked on such an
+input could not settle in any case, because a source asleep in one of this
+runtime's own waits is released by shutdown and cancellation and not by a
+completion below it.
+
+**Combine-latest is Rx's operator and not Akka's `zipLatest`.** Nothing is
+emitted until every input has produced at least once — an arrival before
+that updates the junction's state and leaves nothing at all, which is
+provable as an input that produces everything it has and ends while the sink
+has still received nothing. After that every arrival emits one row carrying
+the latest element of every input, and an input that completes freezes its
+last element into every later row: one element produced once appears in nine
+rows, which is the operator holding N by construction rather than by
+counting. The junction completes when *every* input has, which is the whole
+of what separates it from a zip standing in the same place — a graph in
+which a zip emits one row and completes gives this junction three. And an
+input that completes without ever producing means no row can ever be built:
+such a run reads the inputs that are live to their end, emits nothing at
+all, and completes cleanly rather than failing or stopping early.
+
+**A split feeding a zip needs nothing between them, and that is not luck.**
+The head-of-line hazard checkpoint 2 documented has a cousin here and the
+cousin is benign, which is worth stating as loudly as the hazard was. A
+broadcast pulls only when every live leg has room and then gives the same
+element to all of them, so each leg receives exactly one element per element
+pulled. A concat wants one leg drained to its end and an interleave with a
+segment above one wants several elements from one leg before it touches
+another, and the split cannot supply them while the other leg is undrained —
+a wait only the waiter could release, resolved by a declared buffer as deep
+as the head-of-line depth. A zip wants exactly one element from every leg
+per row, which is the same number the split supplies, and it never waits on
+one leg while refusing to drain another: the two contracts are one shape
+read from opposite ends. So the diamond runs on handoffs of one element with
+no buffer anywhere, and its output is an exact sequence rather than the
+multiset a merge could report — which is also what finally proves the unzip
+row's claim end to end: a row split into halves, each half transformed on
+its own, and the halves zipped back together realign positionally with no
+skew. A combine-latest below a broadcast is easier still, because it takes
+whichever leg has something and no leg ever waits behind another; what it
+emits there is genuinely a scheduling question and the test says so rather
+than asserting a sequence it could not promise.
+
+**What this checkpoint does not do.** There is still no authoring spelling
+for any junction: the C# graph builder is M4.2, and the tests here build
+documents and binding tables directly. Nothing checks that a combiner
+expects as many elements as the junction has wired inputs, because a
+`Func<object?[], object?>` does not say — a combiner built for a different
+number is the author's own mismatch and is reported as whatever their code
+raises; the generic signatures of the builder are what will make it
+unreachable. There is no partition and there are no cycles. The control
+plane is proven to work across these two junctions rather than proven in
+general: a pause reaches a zip holding a partial row and a combine-latest
+that cannot emit yet — the states only these pumps have — a shutdown drains
+both, a cancellation ends both, and the general statement is still
+checkpoint 5. And the bounds are proven as the greatest number of elements a
+run absorbed, not as a measurement of the junction's own memory: N−1 and N
+are what the counting on the source side implies given where every other
+element in the run must be, which is the same argument every bounded-memory
+test in this suite makes.

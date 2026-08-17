@@ -465,6 +465,35 @@ internal sealed class LocalStageDescriptor : StageOccurrence
             seed: null,
             LocalInterleaveParameters.Write(segmentSize));
 
+    /// <summary>Creates a junction that emits one row per element from each of its inputs.</summary>
+    /// <param name="combiner">
+    /// The combiner of a row from the inputs' elements in port order, as the authoring value received it.
+    /// </param>
+    /// <returns>The descriptor.</returns>
+    /// <remarks>
+    /// The combiner is behavior for the reason an unzip's halves are: which member of a row each input
+    /// contributes is a statement about element types, and an element type never appears in a local
+    /// document. What the document states is that this node joins several streams into one, which is the
+    /// part that is topology — and it states how many through its edges, so a zip carries no payload at all.
+    /// </remarks>
+    internal static LocalStageDescriptor Zip(object combiner) =>
+        new(LocalStageKind.Zip, combiner, seed: null, LocalVocabulary.EmptyParameters);
+
+    /// <summary>Creates a junction that emits a row of every input's latest element on every arrival.</summary>
+    /// <param name="combiner">
+    /// The combiner of a row from the inputs' latest elements in port order, as the authoring value received
+    /// it.
+    /// </param>
+    /// <returns>The descriptor.</returns>
+    /// <remarks>
+    /// The same split a zip makes, and for the same reason. What separates the two is not anything either
+    /// writes down but what its pump does with the elements it reads, which is why they are two stage
+    /// references rather than one with a mode: a mode would be a parameter, and the difference between
+    /// pairing positionally and remembering the latest is not configuration.
+    /// </remarks>
+    internal static LocalStageDescriptor CombineLatest(object combiner) =>
+        new(LocalStageKind.CombineLatest, combiner, seed: null, LocalVocabulary.EmptyParameters);
+
     /// <summary>Creates a folding sink.</summary>
     /// <param name="seed">The initial state, which may be <see langword="null"/>.</param>
     /// <param name="folder">The folding delegate, as the authoring value received it.</param>

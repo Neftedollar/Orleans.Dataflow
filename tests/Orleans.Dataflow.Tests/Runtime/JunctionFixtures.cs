@@ -167,6 +167,32 @@ internal static class JunctionFixtures
     internal static LocalStageDescriptor Calling(Action<int> callback) =>
         LocalStageDescriptor.ForEach(callback);
 
+    /// <summary>Builds the combiner a row-building junction is bound to, which renders a row as text.</summary>
+    /// <returns>The combiner, in the boxed vocabulary the runtime speaks.</returns>
+    /// <remarks>
+    /// Text rather than a tuple, and for a reason worth stating: a combiner receives one element per wired
+    /// input, so a tuple would need one shape per arity and the eight-input case would have none at all.
+    /// Rendering the parts joined by a dash keeps one fixture honest for every arity and makes the assertion
+    /// read as the row it is — <c>"1-10"</c> is the first element of each of two inputs, and nothing about
+    /// the rendering is what is under test.
+    /// </remarks>
+    internal static Func<object?[], object?> Rows() => parts => string.Join('-', parts);
+
+    /// <summary>Builds the binding of a collecting sink over the rows a junction emits.</summary>
+    /// <param name="maxElements">The bound the binding declares, which the document overrides.</param>
+    /// <returns>The descriptor.</returns>
+    internal static LocalStageDescriptor CollectingRows(int maxElements) =>
+        LocalStageDescriptor.Collect(
+            new CollectOptions { MaxElements = maxElements },
+            (Func<object?, object?>)(state =>
+                ((List<object?>)state!).Select(element => (string)element!).ToArray()));
+
+    /// <summary>Builds the binding of a synchronous per-element sink over the rows a junction emits.</summary>
+    /// <param name="callback">What to do with each row.</param>
+    /// <returns>The descriptor.</returns>
+    internal static LocalStageDescriptor CallingRows(Action<string> callback) =>
+        LocalStageDescriptor.ForEach(callback);
+
     /// <summary>Opens gates when the scope ends, however it ends.</summary>
     /// <param name="gates">The gates to open.</param>
     /// <returns>The scope, to be declared after the run handle so that it is disposed before it.</returns>

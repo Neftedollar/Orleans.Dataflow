@@ -51,7 +51,9 @@ namespace Orleans.Dataflow.Runtime;
 /// stated per segment and per channel rather than per position, which is what lets a junction be one more
 /// segment instead of one more model. Four things follow. A fan-out pump reads one channel and writes
 /// several under the rule its strategy states, and a fan-in pump reads several and writes one under the
-/// rule of its own; both hold one element while they place it and neither holds one between elements. A
+/// rule of its own; every one of them secures room before it reads, so what it holds is what its contract
+/// says and never what the scheduler allowed — one element for the pumps that deliver what they read, the
+/// columns of a partial row for a zip, and one element per input for a combine-latest. A
 /// completion walks upstream edge by edge and stops at a junction that still has a live leg, so a finished
 /// branch stops feeding without stopping the world. A graph may begin in several places, because inputs
 /// that converge through a fan-in are one stream and not several runs — every head is a segment of the
@@ -394,10 +396,12 @@ internal sealed class LocalRun
     /// <summary>Runs one segment to its end and reports how it ended to the run.</summary>
     /// <param name="index">The segment's position in the plan.</param>
     /// <remarks>
-    /// The five loop shapes are chosen here and the outcome of all of them is folded here, so that what a
-    /// failure, a cancellation and a clean end mean is stated once for every segment rather than five
+    /// The six loop shapes are chosen here and the outcome of all of them is folded here, so that what a
+    /// failure, a cancellation and a clean end mean is stated once for every segment rather than six
     /// times. An enumerator obtained by a head segment is released on every path, including the ones
-    /// where obtaining or reading it is what went wrong, which is why it is held in this frame.
+    /// where obtaining or reading it is what went wrong, which is why it is held in this frame. A joining
+    /// junction is two of the six: one that emits the element it read, and one that builds a row out of
+    /// several, told apart by whether the junction carries something to build a row with.
     /// </remarks>
     private void Execute(int index)
     {
@@ -415,7 +419,9 @@ internal sealed class LocalRun
                     : segment.FanOut is { } splitting
                         ? Fan(segment, index, splitting)
                         : segment.FanIn is { } joining
-                            ? Join(segment, index, joining)
+                            ? joining.Combiner is { } combining
+                                ? Row(segment, index, joining, combining)
+                                : Join(segment, index, joining)
                             : Push(segment, index);
         }
         catch (OperationCanceledException) when (_token.IsCancellationRequested)
@@ -1297,7 +1303,7 @@ internal sealed class LocalRun
 
                 if (chosen < 0)
                 {
-                    if (!Waiting(inputs, ended, pending))
+                    if (!Waiting(inputs, ended, pending, held: null))
                     {
                         return false;
                     }
@@ -1358,22 +1364,299 @@ internal sealed class LocalRun
         }
     }
 
+    /// <summary>Drives a row-building junction: secures room below, fills a row from its inputs, emits it.</summary>
+    /// <param name="segment">The segment being executed.</param>
+    /// <param name="index">Its position in the plan.</param>
+    /// <param name="junction">The strategy that decides how a row is filled and when it is emitted.</param>
+    /// <param name="combining">The author's combiner, which turns a filled row into the element to emit.</param>
+    /// <returns><see langword="true"/> when the loop stopped because the run was canceled.</returns>
+    /// <remarks>
+    /// <para>
+    /// <b>A second joining pump rather than two more strategies in the first.</b> What a loop is is how many
+    /// reads stand between two deliveries, and that is exactly what these two junctions change: a merge, a
+    /// concat and an interleave deliver the element they read and hold nothing between elements, while a zip
+    /// delivers one element for every N it reads and a combine-latest delivers zero or one for every one. A
+    /// junction here therefore holds a row across passes, which no arrangement of a loop that carries only a
+    /// cursor can do. Everything the two shapes really share — the wait discipline, the pause bracket, the
+    /// room rule, the failure rule — is shared as code and not as prose: the waiting is
+    /// <see cref="Waiting"/>, and the room is <see cref="Vacancy"/>, both of them the very ones the other
+    /// pump uses.
+    /// </para>
+    /// <para>
+    /// <b>Room first, read second</b>, as everywhere else, and here it is the demand rule in its sharpest
+    /// form: a zip reads one element from every input against one unit of downstream demand, which is what
+    /// makes the row the unit of demand rather than the element. An input that has already given the pending
+    /// row its column is not read again until that row is emitted — that is why the read loop skips the
+    /// filled slots — so the elements of one row are the i-th of every input and the junction cannot run
+    /// ahead on a fast input at all.
+    /// </para>
+    /// <para>
+    /// <b>The bounds are what the junction holds between elements.</b> A zip holds the columns it has
+    /// already read, which is at most N−1: the arrival that fills the last slot is not held at all, it is
+    /// combined and placed, and the slots are released before the row is offered, so a zip parked with
+    /// nowhere to deliver is holding a partial row and nothing else. A combine-latest holds N, one element
+    /// per input, and holds them for as long as it runs, because remembering the latest of every input is
+    /// what the operator is.
+    /// </para>
+    /// <para>
+    /// <b>Completion is the whole of the difference between the two.</b> A zip completes as soon as any
+    /// input does, and the partial row it was holding at that moment is discarded — explicitly, below,
+    /// rather than by falling out of scope — because a row missing a column can never be completed and
+    /// holding the other columns open would buffer forever for nobody. Completing is also what releases the
+    /// inputs that were still live: the junction closes every channel it reads, which stops the segments
+    /// feeding them exactly as a completion arriving from downstream does. A combine-latest does the
+    /// opposite and completes only when every input has: an input that ends leaves its last element frozen
+    /// in the row, later arrivals on the inputs that are still live keep emitting rows that contain it, and
+    /// an input that ends without ever producing means no row can ever be built — such a run emits nothing
+    /// and ends cleanly when the last input ends, which is Rx's answer and ADR 0005's.
+    /// </para>
+    /// <para>
+    /// <b>The park points are the ordinary ones.</b> Between rows, once before the reads and once after the
+    /// row is full: a column read from a wait that began before the pause is held rather than combined, the
+    /// author's combiner is not called while the run is paused, and the room secured for the row is still
+    /// there when the run resumes, because a junction is the only writer to its own output.
+    /// </para>
+    /// </remarks>
+    private bool Row(
+        LocalSegment segment,
+        int index,
+        LocalFanIn junction,
+        Func<object?[], object?> combining)
+    {
+        IReadOnlyList<int> inputs = segment.Inputs;
+        int output = segment.Outputs[0];
+        bool pairing = junction.Kind is LocalFanInKind.Zip;
+
+        // One pending element-wait per input at most, kept across passes for the reason every wait-any in
+        // this runtime keeps its waits: a wait-any consumes the one task it picked and abandons the rest, so
+        // the rest have to be the very tasks the next pass waits on again.
+        Task<bool>?[] pending = new Task<bool>?[inputs.Count];
+        bool[] ended = new bool[inputs.Count];
+
+        // The row and which of its slots have a value. For a zip that is the partial row and its columns,
+        // cleared when the row is emitted; for a combine-latest it is the latest element of every input and
+        // which inputs have produced one, and neither is ever cleared.
+        object?[] row = new object?[inputs.Count];
+        bool[] filled = new bool[inputs.Count];
+        int cursor = 0;
+
+        while (true)
+        {
+            if (_token.IsCancellationRequested)
+            {
+                return true;
+            }
+
+            if (Stopping(index))
+            {
+                return false;
+            }
+
+            if (_pause.Park())
+            {
+                continue;
+            }
+
+            if (Closed(output) || !Vacancy(output))
+            {
+                Complete(index);
+
+                return false;
+            }
+
+            // A pause that arrived while this junction was waiting for room is observed before the reads,
+            // not after them: securing room takes no step the run can see, and reading would take one.
+            if (_pause.IsPaused)
+            {
+                continue;
+            }
+
+            if (pairing)
+            {
+                for (int input = 0; input < inputs.Count; input++)
+                {
+                    if (filled[input])
+                    {
+                        continue;
+                    }
+
+                    if (_channels[inputs[input]].Reader.TryRead(out object? column))
+                    {
+                        row[input] = column;
+                        filled[input] = true;
+                    }
+                }
+
+                if (!Full(filled))
+                {
+                    // Waiting only on the inputs this row is still missing, which is why it is given the
+                    // filled slots: an input that has already given its column has an element nobody is
+                    // waiting for, and waiting for it would answer at once and spin.
+                    bool readable = Waiting(inputs, ended, pending, filled);
+
+                    if (readable && !Any(ended))
+                    {
+                        continue;
+                    }
+
+                    // The partial row is discarded here, by name. An input has ended, so this row can never
+                    // be completed; the columns already read have no row to belong to and no other place to
+                    // go, and a junction that kept them would be holding elements for a delivery that cannot
+                    // happen. Completing then closes every input this junction reads, which releases the
+                    // sources of the inputs that were still live.
+                    Array.Clear(row);
+                    Array.Clear(filled);
+                    Complete(index);
+
+                    return false;
+                }
+            }
+            else
+            {
+                int chosen = -1;
+                object? arrived = null;
+
+                for (int step = 0; step < inputs.Count && chosen < 0; step++)
+                {
+                    int input = cursor + step >= inputs.Count ? cursor + step - inputs.Count : cursor + step;
+
+                    if (!ended[input] && _channels[inputs[input]].Reader.TryRead(out arrived))
+                    {
+                        chosen = input;
+                    }
+                }
+
+                if (chosen < 0)
+                {
+                    // Every live input at once, and the filled slots are deliberately not passed: an input
+                    // whose latest element this junction already knows is an input whose next element it is
+                    // still waiting for, which is the difference between remembering a value and holding a
+                    // column.
+                    if (!Waiting(inputs, ended, pending, held: null))
+                    {
+                        return false;
+                    }
+
+                    continue;
+                }
+
+                // The rotation a merge uses, for the reason a merge uses it: an input that has already
+                // produced must not wait behind one that merely produces faster.
+                cursor = chosen + 1 == inputs.Count ? 0 : chosen + 1;
+                row[chosen] = arrived;
+                filled[chosen] = true;
+
+                if (!Full(filled))
+                {
+                    // Every arrival emits a row, once there is a row to emit: before every input has
+                    // produced once, an arrival updates the state and nothing leaves the junction.
+                    continue;
+                }
+            }
+
+            while (_pause.Park())
+            {
+                if (_token.IsCancellationRequested)
+                {
+                    return true;
+                }
+            }
+
+            // A copy rather than the junction's own array, because the combiner is the author's code and the
+            // array is this junction's state: a combine-latest goes on writing into its slots, and an author
+            // who kept the array they were handed would watch a row they had already been given change.
+            object?[] emitted = new object?[row.Length];
+
+            Array.Copy(row, emitted, row.Length);
+
+            if (pairing)
+            {
+                // Released before the row is offered, so that a zip parked in a full boundary is holding the
+                // row it is placing and nothing besides — which is the same "one element in hand" every
+                // other pump keeps, with the row in the place of the element.
+                Array.Clear(row);
+                Array.Clear(filled);
+            }
+
+            if (!Deliver(segment, index, combining(emitted)))
+            {
+                return false;
+            }
+        }
+    }
+
+    /// <summary>Reports whether every slot of a row has a value.</summary>
+    /// <param name="slots">The filled slots.</param>
+    /// <returns><see langword="true"/> when a row can be emitted.</returns>
+    private static bool Full(bool[] slots)
+    {
+        for (int slot = 0; slot < slots.Length; slot++)
+        {
+            if (!slots[slot])
+            {
+                return false;
+            }
+        }
+
+        return true;
+    }
+
+    /// <summary>Reports whether any input of a junction has ended.</summary>
+    /// <param name="ended">The inputs that have completed and been drained.</param>
+    /// <returns><see langword="true"/> when at least one has.</returns>
+    /// <remarks>
+    /// A zip's completion rule and nobody else's: the first input to end ends the junction, whether or not
+    /// it was the one being waited for and whether or not the others still have elements. The scan is over
+    /// at most the fan-in ceiling and runs once per pass that had to wait.
+    /// </remarks>
+    private static bool Any(bool[] ended)
+    {
+        for (int input = 0; input < ended.Length; input++)
+        {
+            if (ended[input])
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
     /// <summary>Waits until one of a joining junction's live inputs has an element or ends.</summary>
     /// <param name="inputs">The channels this junction reads.</param>
     /// <param name="ended">The inputs that have completed and been drained, updated here.</param>
     /// <param name="pending">The per-input element-waits kept across passes.</param>
+    /// <param name="held">
+    /// The inputs this pass is not waiting for because it already has what it needs from them, or
+    /// <see langword="null"/> when every live input is waited for.
+    /// </param>
     /// <returns>
     /// <see langword="true"/> when an input may have something to read; <see langword="false"/> when every
-    /// input has ended and there is nothing left to join.
+    /// input this pass was waiting for has ended.
     /// </returns>
     /// <exception cref="OperationCanceledException">The run was cancelled.</exception>
     /// <remarks>
-    /// The merge's wait and nobody else's: a concat and an interleave wait on the one input whose turn it
-    /// is, which is an ordinary <see cref="Arrival"/>. The shape is the fan-out balance arm's, and the
-    /// cached waits matter for the same reason — a wait-any consumes one of the tasks it was given and
-    /// abandons the rest, so the rest have to be the very tasks the next pass waits on again.
+    /// <para>
+    /// The wait of a merge and of both row-building junctions; a concat and an interleave wait on the one
+    /// input whose turn it is, which is an ordinary <see cref="Arrival"/>. The shape is the fan-out balance
+    /// arm's, and the cached waits matter for the same reason — a wait-any consumes one of the tasks it was
+    /// given and abandons the rest, so the rest have to be the very tasks the next pass waits on again.
+    /// </para>
+    /// <para>
+    /// A held input is skipped and its wait is deliberately left where it is. Skipping it is what keeps a
+    /// zip from spinning: an input whose column the pending row already has would answer "there is
+    /// something to read" at once and the pass that woke on it would find nothing it is allowed to take.
+    /// Leaving its wait alone is what keeps the discipline intact: an input that has ended has no waiter to
+    /// abandon, but a held one may have a live waiter on its channel, and dropping that would leak exactly
+    /// the waiter the caching exists to avoid.
+    /// </para>
+    /// <para>
+    /// "Every input has ended" is therefore answered against the inputs this pass was waiting for and not
+    /// against all of them, which is what each caller means by it: for a merge and a combine-latest they are
+    /// the same set, and for a zip it means that no input this row is still missing can ever produce again.
+    /// </para>
     /// </remarks>
-    private bool Waiting(IReadOnlyList<int> inputs, bool[] ended, Task<bool>?[] pending)
+    private bool Waiting(IReadOnlyList<int> inputs, bool[] ended, Task<bool>?[] pending, bool[]? held)
     {
         while (true)
         {
@@ -1386,6 +1669,11 @@ internal sealed class LocalRun
                 {
                     pending[input] = null;
 
+                    continue;
+                }
+
+                if (held is not null && held[input])
+                {
                     continue;
                 }
 

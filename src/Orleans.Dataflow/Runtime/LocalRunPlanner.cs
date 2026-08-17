@@ -721,8 +721,8 @@ internal static class LocalRunPlanner
                         $"the junction '{node.Id}' is fed by nothing at the port '{entry}', and a junction joins at least {LocalVocabulary.MinFanIn} inputs");
                 }
 
-                LocalStageKind kind = bindings[node.Id].Kind;
-                IReadOnlyList<InputPortSpecification> ports = LocalVocabulary.InputPortsOf(kind);
+                LocalStageDescriptor joining = bindings[node.Id];
+                IReadOnlyList<InputPortSpecification> ports = LocalVocabulary.InputPortsOf(joining.Kind);
                 int arrival = -1;
 
                 for (int input = 0; input < ports.Count && arrival < 0; input++)
@@ -793,7 +793,7 @@ internal static class LocalRunPlanner
                     elements: null,
                     async: null,
                     fanOut: null,
-                    Joining(node, kind),
+                    Joining(node, joining),
                     [],
                     terminal: null,
                     streams,
@@ -833,11 +833,17 @@ internal static class LocalRunPlanner
 
         // Builds the strategy of one joining junction. The rotation's segment size is read from the
         // document rather than from the binding, for the reason every number is: what the catalog validates
-        // has to be exactly what the runtime executes.
-        LocalFanIn Joining(StageNode node, LocalStageKind kind) => kind switch
+        // has to be exactly what the runtime executes. The combiner of a row-building junction comes the
+        // other way, from the binding, for the reason every projection does: it is a statement about element
+        // types, and a document never names one.
+        LocalFanIn Joining(StageNode node, LocalStageDescriptor descriptor) => descriptor.Kind switch
         {
             LocalStageKind.Merge => LocalFanIn.Merge(),
             LocalStageKind.Concat => LocalFanIn.Concat(),
+            LocalStageKind.Zip => LocalFanIn.Zip(
+                LocalDelegateAdapter.Combiner(descriptor.Behavior, descriptor.Kind)),
+            LocalStageKind.CombineLatest => LocalFanIn.CombineLatest(
+                LocalDelegateAdapter.Combiner(descriptor.Behavior, descriptor.Kind)),
             _ => LocalFanIn.Interleave(Interleaved(node)),
         };
     }

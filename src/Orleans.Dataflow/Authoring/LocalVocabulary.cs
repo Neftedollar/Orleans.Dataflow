@@ -248,6 +248,14 @@ internal static class LocalVocabulary
     internal static readonly StageRef Interleave =
         StageRef.Create(Provider, StageId.Create("interleave"), StageRef.FirstMajorVersion);
 
+    /// <summary>The stage reference of a junction that emits one row per element from each input.</summary>
+    internal static readonly StageRef Zip =
+        StageRef.Create(Provider, StageId.Create("zip"), StageRef.FirstMajorVersion);
+
+    /// <summary>The stage reference of a junction that emits a row of every input's latest element.</summary>
+    internal static readonly StageRef CombineLatest =
+        StageRef.Create(Provider, StageId.Create("combine-latest"), StageRef.FirstMajorVersion);
+
     /// <summary>The stage reference of a folding sink.</summary>
     internal static readonly StageRef Fold =
         StageRef.Create(Provider, StageId.Create("fold"), StageRef.FirstMajorVersion);
@@ -567,6 +575,8 @@ internal static class LocalVocabulary
         LocalStageKind.Merge => Merge,
         LocalStageKind.Concat => Concat,
         LocalStageKind.Interleave => Interleave,
+        LocalStageKind.Zip => Zip,
+        LocalStageKind.CombineLatest => CombineLatest,
         LocalStageKind.Fold => Fold,
         LocalStageKind.Ignore => Ignore,
         LocalStageKind.ForEach => ForEach,
@@ -623,6 +633,8 @@ internal static class LocalVocabulary
             LocalStageKind.Unzip or
             LocalStageKind.Merge or
             LocalStageKind.Concat or
+            LocalStageKind.Zip or
+            LocalStageKind.CombineLatest or
             LocalStageKind.Where or
             LocalStageKind.Scan or
             LocalStageKind.TakeWhile or
@@ -715,7 +727,9 @@ internal static class LocalVocabulary
             LocalStageKind.Unzip => LocalStagePlace.FanOut,
         LocalStageKind.Merge or
             LocalStageKind.Concat or
-            LocalStageKind.Interleave => LocalStagePlace.FanIn,
+            LocalStageKind.Interleave or
+            LocalStageKind.Zip or
+            LocalStageKind.CombineLatest => LocalStagePlace.FanIn,
         LocalStageKind.Fold or
             LocalStageKind.Ignore or
             LocalStageKind.ForEach or

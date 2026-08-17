@@ -27,12 +27,13 @@ namespace Orleans.Dataflow.Authoring;
 /// which is what makes fusion the default and a queue something an author asked for.
 /// </para>
 /// <para>
-/// Six of the shapes are junctions. <see cref="Broadcast"/>, <see cref="Balance"/>, and <see cref="Unzip"/>
-/// each declare several output ports; <see cref="Merge"/>, <see cref="Concat"/>, and
-/// <see cref="Interleave"/> each declare several input ports. Every one of them is a boundary on every port
-/// it declares, and none of them fuses with anything, because a junction's pump shape — several channels on
-/// one side, one on the other, and a rule about which of them moves next — is the whole of what it is. Their
-/// contracts are ADR 0005's two tables, and the runtime holds them per junction rather than per graph.
+/// Eight of the shapes are junctions. <see cref="Broadcast"/>, <see cref="Balance"/>, and
+/// <see cref="Unzip"/> each declare several output ports; <see cref="Merge"/>, <see cref="Concat"/>,
+/// <see cref="Interleave"/>, <see cref="Zip"/>, and <see cref="CombineLatest"/> each declare several input
+/// ports. Every one of them is a boundary on every port it declares, and none of them fuses with anything,
+/// because a junction's pump shape — several channels on one side, one on the other, and a rule about which
+/// of them moves next — is the whole of what it is. Their contracts are ADR 0005's two tables, and the
+/// runtime holds them per junction rather than per graph.
 /// </para>
 /// <para>
 /// <see cref="SinkProbe"/> is the one shape no author-facing operator of this package builds: it is the
@@ -209,6 +210,19 @@ internal enum LocalStageKind
     /// output port.
     /// </summary>
     Interleave,
+
+    /// <summary>
+    /// Emits one row per element from every input, pairing them positionally, and completes as soon as any
+    /// input has; between two and <see cref="LocalVocabulary.MaxFanIn"/> input ports and one output port.
+    /// </summary>
+    Zip,
+
+    /// <summary>
+    /// Emits a row of the latest element of every input on every arrival, once every input has produced
+    /// one, and completes when every input has; between two and <see cref="LocalVocabulary.MaxFanIn"/>
+    /// input ports and one output port.
+    /// </summary>
+    CombineLatest,
 
     /// <summary>Folds every element into a state value; one input port and one result port.</summary>
     Fold,

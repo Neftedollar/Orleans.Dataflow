@@ -154,6 +154,7 @@ public sealed class CatalogValidationTests
                 LocalStage("broadcast"),
                 LocalStage("buffer"),
                 LocalStage("collect"),
+                LocalStage("combine-latest"),
                 LocalStage("concat"),
                 LocalStage("count"),
                 LocalStage("cycle"),
@@ -198,6 +199,7 @@ public sealed class CatalogValidationTests
                 LocalStage("unfold-async"),
                 LocalStage("unzip"),
                 LocalStage("where"),
+                LocalStage("zip"),
             ],
             LocalStageCatalog.Instance.Specifications.Select(specification => specification.Stage));
     }
@@ -218,9 +220,11 @@ public sealed class CatalogValidationTests
         };
         Dictionary<string, int> joins = new(StringComparer.Ordinal)
         {
+            ["combine-latest"] = 8,
             ["concat"] = 8,
             ["interleave"] = 8,
             ["merge"] = 8,
+            ["zip"] = 8,
         };
         string[] sources =
         [
@@ -367,6 +371,7 @@ public sealed class CatalogValidationTests
                 ["broadcast"] = "local-parameters",
                 ["buffer"] = "local-buffer-parameters",
                 ["collect"] = "local-collect-parameters",
+                ["combine-latest"] = "local-parameters",
                 ["concat"] = "local-parameters",
                 ["count"] = "local-parameters",
                 ["cycle"] = "local-parameters",
@@ -411,6 +416,7 @@ public sealed class CatalogValidationTests
                 ["unfold-async"] = "local-parameters",
                 ["unzip"] = "local-parameters",
                 ["where"] = "local-parameters",
+                ["zip"] = "local-parameters",
             },
             contracts);
 
@@ -433,7 +439,8 @@ public sealed class CatalogValidationTests
         {
             // A joining junction's inputs are the one place a local input port is named anything but "in"
             // and the one place an input is optional, for the reason its mirror gives below.
-            bool join = specification.Stage.Stage.Value is "merge" or "concat" or "interleave";
+            bool join = specification.Stage.Stage.Value is
+                "merge" or "concat" or "interleave" or "zip" or "combine-latest";
 
             Assert.All(
                 specification.InputPorts,
@@ -503,6 +510,7 @@ public sealed class CatalogValidationTests
                 ["broadcast"] = 0,
                 ["buffer"] = 0,
                 ["collect"] = 1,
+                ["combine-latest"] = 0,
                 ["concat"] = 0,
                 ["count"] = 1,
                 ["cycle"] = 0,
@@ -547,6 +555,7 @@ public sealed class CatalogValidationTests
                 ["unfold-async"] = 0,
                 ["unzip"] = 0,
                 ["where"] = 0,
+                ["zip"] = 0,
             },
             resultPorts);
     }
