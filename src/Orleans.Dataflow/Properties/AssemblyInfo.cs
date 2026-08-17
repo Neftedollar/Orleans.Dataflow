@@ -6,6 +6,17 @@ using System.Runtime.CompilerServices;
 // binds exactly the delegates the author supplied, keyed by the node identifiers the document declares.
 [assembly: InternalsVisibleTo("Orleans.Dataflow.Tests")]
 
+// The Orleans hosting package is the runtime-factory seam's one consumer in this repository, and the seam
+// is internal on purpose: what a provider hands the engine is the engine's own executor vocabulary, and
+// publishing that vocabulary would fix the M4 provider SDK's shape by accident. The two packages ship in
+// lockstep from one repository, so friend access is the honest spelling of a boundary they already share.
+[assembly: InternalsVisibleTo("Orleans.Dataflow.Orleans")]
+
+// The cluster tests write runtime factories directly against that seam, exactly as the unit tests assert
+// against the binding table: both are statements about internals that no public API can observe, and both
+// would otherwise force a public surface into existence to let a test exist.
+[assembly: InternalsVisibleTo("Orleans.Dataflow.OrleansTests")]
+
 // The testing package is a second authoring frontend over part of this one's vocabulary rather than a
 // consumer of its public API: a probe declares a local stage, binds a per-run object to it, and reads the
 // demand accounting of the queue behind it, none of which is public and none of which should become public

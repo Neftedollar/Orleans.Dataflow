@@ -184,6 +184,29 @@ internal sealed class LocalTerminal
             requiresElement: false,
             finisher: finisher);
 
+    /// <summary>Creates the terminal a runtime factory built for a registered sink.</summary>
+    /// <param name="folder">The provider's fold over boxed state and boxed elements.</param>
+    /// <param name="finisher">
+    /// The provider's projection of the final state into the value a slot resolves, or
+    /// <see langword="null"/> when the state is already that value.
+    /// </param>
+    /// <returns>The terminal.</returns>
+    /// <remarks>
+    /// The most general of the factories here and the only one open to code outside this assembly, which
+    /// is why it fixes the two answers a provider must not be allowed to give: a registered sink never
+    /// completes the run on its first element and never fails a stream that carried none. Both of those
+    /// change what the stream itself means rather than what the sink does with it, so they belong to the
+    /// engine's own vocabulary and not to a provider's payload.
+    /// </remarks>
+    internal static LocalTerminal Provided(
+        Func<object?, object?, object?> folder,
+        Func<object?, object?>? finisher) =>
+        new(
+            (state, element, _) => folder(state, element),
+            completesOnFirstElement: false,
+            requiresElement: false,
+            finisher: finisher);
+
     /// <summary>Creates the terminal of a sink that writes into a channel the author owns.</summary>
     /// <param name="channel">The bridge over the author's writer.</param>
     /// <returns>The terminal.</returns>

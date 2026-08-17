@@ -85,6 +85,7 @@ Orleans.Dataflow.PipelineDefinition
 Orleans.Dataflow.PipelineDefinition.Document.get -> Orleans.Dataflow.Definition.GraphDocument!
 Orleans.Dataflow.PipelineDefinition.Fingerprint.get -> Orleans.Dataflow.Definition.GraphFingerprint
 Orleans.Dataflow.PipelineDefinition.Id.get -> Orleans.Dataflow.Identity.GraphId
+Orleans.Dataflow.PipelineDefinition.ResultSlot<TResult>(string! name, Orleans.Dataflow.ResultContract<TResult> contract) -> Orleans.Dataflow.ResultSlot<TResult>
 Orleans.Dataflow.PipelineDefinition.Revision.get -> Orleans.Dataflow.Identity.GraphRevision
 Orleans.Dataflow.QueueOfferOutcome
 Orleans.Dataflow.QueueOfferOutcome.Accepted = 0 -> Orleans.Dataflow.QueueOfferOutcome

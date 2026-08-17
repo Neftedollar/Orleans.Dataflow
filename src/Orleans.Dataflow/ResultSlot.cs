@@ -21,8 +21,16 @@ namespace Orleans.Dataflow;
 /// never records what its delegates compute, so two graphs of one shape share a fingerprint whatever
 /// their lambdas do. The nonce closes exactly that gap — a slot resolves only against a run of the very
 /// graph instance that declared it, so misuse fails loudly instead of silently reading a graph that
-/// merely looks the same. Registered stages carry their identity and parameters in the document; slots of
-/// deployable pipelines will bind by fingerprint and lineage once those exist.
+/// merely looks the same.
+/// </para>
+/// <para>
+/// A slot of a <see cref="PipelineDefinition"/> carries no nonce, and says so by carrying the reserved
+/// value <see cref="Guid.Empty"/>. Registered stages carry their identity and their parameters in the
+/// document, so a pipeline's content identity means something on its own and a per-instance nonce would
+/// distinguish nothing (ADR 0004 section 4). The reserved value is not an absence: it is what makes the
+/// two worlds tellable apart, so a run of a pipeline refuses a built graph's slot and a run of a built
+/// graph refuses a pipeline's, each naming which world the slot came from rather than reporting two
+/// fingerprints that happen to differ.
 /// </para>
 /// <para>
 /// Equality is over three components, and each one is load-bearing: the slot <see cref="Id"/>, because a
@@ -79,6 +87,21 @@ public readonly record struct ResultSlot<TResult>
     /// materialization has a use for it.
     /// </remarks>
     internal Guid AuthoringNonce => IsDefault ? throw DefaultAccess() : _authoringNonce;
+
+    /// <summary>Gets a value indicating whether this slot was declared by a pipeline rather than a built graph.</summary>
+    /// <value>
+    /// <see langword="true"/> when the declaring value was a <see cref="PipelineDefinition"/>;
+    /// <see langword="false"/> when it was a <see cref="RunnableGraph"/> instance.
+    /// </value>
+    /// <exception cref="InvalidOperationException">This instance is the default value.</exception>
+    /// <remarks>
+    /// The two worlds are told apart by the reserved nonce <see cref="Guid.Empty"/>, which
+    /// <see cref="PipelineDefinition.ResultSlot{TResult}"/> stamps and <see cref="RunnableGraph"/> never
+    /// produces because it allocates its nonce with <see cref="Guid.NewGuid"/>. Which world a slot belongs
+    /// to is a categorical fact about it, checked before which graph declared it, so a caller who crossed
+    /// the two planes is told that rather than being told two fingerprints differ.
+    /// </remarks>
+    internal bool IsPipelineSlot => AuthoringNonce == Guid.Empty;
 
     /// <summary>Gets a value indicating whether this instance is the uninitialized default.</summary>
     /// <value><see langword="true"/> when the instance names no slot.</value>

@@ -1,0 +1,142 @@
+#nullable enable
+Orleans.Dataflow.Grains.IPipelineCoordinatorGrain
+Orleans.Dataflow.Grains.IPipelineCoordinatorGrain.CancelRunAsync(string! runId, long epoch) -> System.Threading.Tasks.Task!
+Orleans.Dataflow.Grains.IPipelineCoordinatorGrain.GetStatusAsync(string! runId, long epoch) -> System.Threading.Tasks.Task<Orleans.Dataflow.Grains.RunStatusSnapshot!>!
+Orleans.Dataflow.Grains.IPipelineCoordinatorGrain.ShutdownRunAsync(string! runId, long epoch) -> System.Threading.Tasks.Task!
+Orleans.Dataflow.Grains.IPipelineCoordinatorGrain.StartRunAsync(byte[]! canonicalDocument) -> System.Threading.Tasks.Task<Orleans.Dataflow.Grains.PipelineRunTicket!>!
+Orleans.Dataflow.Grains.IPipelineRunGrain
+Orleans.Dataflow.Grains.IPipelineRunGrain.CancelAsync(long epoch) -> System.Threading.Tasks.Task!
+Orleans.Dataflow.Grains.IPipelineRunGrain.GetResultAsync(long epoch, string! slotName, string! graphFingerprint) -> System.Threading.Tasks.Task<Orleans.Dataflow.Grains.ResultEnvelope!>!
+Orleans.Dataflow.Grains.IPipelineRunGrain.GetStatusAsync(long epoch) -> System.Threading.Tasks.Task<Orleans.Dataflow.Grains.RunStatusSnapshot!>!
+Orleans.Dataflow.Grains.IPipelineRunGrain.ShutdownAsync(long epoch) -> System.Threading.Tasks.Task!
+Orleans.Dataflow.Grains.IPipelineRunGrain.StartAsync(byte[]! canonicalDocument, long epoch) -> System.Threading.Tasks.Task!
+Orleans.Dataflow.Grains.OrleansDataflowStorage
+Orleans.Dataflow.Grains.PipelineFencingException
+Orleans.Dataflow.Grains.PipelineFencingException.CallerEpoch.get -> long
+Orleans.Dataflow.Grains.PipelineFencingException.CallerEpoch.init -> void
+Orleans.Dataflow.Grains.PipelineFencingException.CurrentEpoch.get -> long
+Orleans.Dataflow.Grains.PipelineFencingException.CurrentEpoch.init -> void
+Orleans.Dataflow.Grains.PipelineFencingException.PipelineFencingException() -> void
+Orleans.Dataflow.Grains.PipelineFencingException.PipelineFencingException(long currentEpoch, long callerEpoch) -> void
+Orleans.Dataflow.Grains.PipelineFencingException.PipelineFencingException(string? message) -> void
+Orleans.Dataflow.Grains.PipelineFencingException.PipelineFencingException(string? message, System.Exception? innerException) -> void
+Orleans.Dataflow.Grains.PipelineRejectedException
+Orleans.Dataflow.Grains.PipelineRejectedException.PipelineRejectedException() -> void
+Orleans.Dataflow.Grains.PipelineRejectedException.PipelineRejectedException(string? message) -> void
+Orleans.Dataflow.Grains.PipelineRejectedException.PipelineRejectedException(string? message, System.Exception? innerException) -> void
+Orleans.Dataflow.Grains.PipelineRunFailedException
+Orleans.Dataflow.Grains.PipelineRunFailedException.FailureMessage.get -> string?
+Orleans.Dataflow.Grains.PipelineRunFailedException.FailureMessage.init -> void
+Orleans.Dataflow.Grains.PipelineRunFailedException.FailureType.get -> string?
+Orleans.Dataflow.Grains.PipelineRunFailedException.FailureType.init -> void
+Orleans.Dataflow.Grains.PipelineRunFailedException.PipelineRunFailedException() -> void
+Orleans.Dataflow.Grains.PipelineRunFailedException.PipelineRunFailedException(string? failureType, string? failureMessage, string? runId) -> void
+Orleans.Dataflow.Grains.PipelineRunFailedException.PipelineRunFailedException(string? message) -> void
+Orleans.Dataflow.Grains.PipelineRunFailedException.PipelineRunFailedException(string? message, System.Exception? innerException) -> void
+Orleans.Dataflow.Grains.PipelineRunFailedException.RunId.get -> string?
+Orleans.Dataflow.Grains.PipelineRunFailedException.RunId.init -> void
+Orleans.Dataflow.Grains.PipelineRunLostException
+Orleans.Dataflow.Grains.PipelineRunLostException.PipelineRunLostException() -> void
+Orleans.Dataflow.Grains.PipelineRunLostException.PipelineRunLostException(string? message) -> void
+Orleans.Dataflow.Grains.PipelineRunLostException.PipelineRunLostException(string? message, System.Exception? innerException) -> void
+Orleans.Dataflow.Grains.PipelineRunTicket
+Orleans.Dataflow.Grains.PipelineRunTicket.CatalogFingerprint.get -> string!
+Orleans.Dataflow.Grains.PipelineRunTicket.CatalogFingerprint.set -> void
+Orleans.Dataflow.Grains.PipelineRunTicket.Epoch.get -> long
+Orleans.Dataflow.Grains.PipelineRunTicket.Epoch.set -> void
+Orleans.Dataflow.Grains.PipelineRunTicket.GraphFingerprint.get -> string!
+Orleans.Dataflow.Grains.PipelineRunTicket.GraphFingerprint.set -> void
+Orleans.Dataflow.Grains.PipelineRunTicket.GraphId.get -> string!
+Orleans.Dataflow.Grains.PipelineRunTicket.GraphId.set -> void
+Orleans.Dataflow.Grains.PipelineRunTicket.PipelineRunTicket() -> void
+Orleans.Dataflow.Grains.PipelineRunTicket.RunId.get -> string!
+Orleans.Dataflow.Grains.PipelineRunTicket.RunId.set -> void
+Orleans.Dataflow.Grains.ResultEnvelope
+Orleans.Dataflow.Grains.ResultEnvelope.FailureMessage.get -> string?
+Orleans.Dataflow.Grains.ResultEnvelope.FailureMessage.set -> void
+Orleans.Dataflow.Grains.ResultEnvelope.FailureType.get -> string?
+Orleans.Dataflow.Grains.ResultEnvelope.FailureType.set -> void
+Orleans.Dataflow.Grains.ResultEnvelope.HasValue.get -> bool
+Orleans.Dataflow.Grains.ResultEnvelope.HasValue.set -> void
+Orleans.Dataflow.Grains.ResultEnvelope.Phase.get -> Orleans.Dataflow.Grains.RunPhase
+Orleans.Dataflow.Grains.ResultEnvelope.Phase.set -> void
+Orleans.Dataflow.Grains.ResultEnvelope.ResultEnvelope() -> void
+Orleans.Dataflow.Grains.ResultEnvelope.Value.get -> object?
+Orleans.Dataflow.Grains.ResultEnvelope.Value.set -> void
+Orleans.Dataflow.Grains.RunPhase
+Orleans.Dataflow.Grains.RunPhase.Canceled = 4 -> Orleans.Dataflow.Grains.RunPhase
+Orleans.Dataflow.Grains.RunPhase.Completed = 2 -> Orleans.Dataflow.Grains.RunPhase
+Orleans.Dataflow.Grains.RunPhase.Faulted = 3 -> Orleans.Dataflow.Grains.RunPhase
+Orleans.Dataflow.Grains.RunPhase.NotStarted = 0 -> Orleans.Dataflow.Grains.RunPhase
+Orleans.Dataflow.Grains.RunPhase.Running = 1 -> Orleans.Dataflow.Grains.RunPhase
+Orleans.Dataflow.Grains.RunStatusSnapshot
+Orleans.Dataflow.Grains.RunStatusSnapshot.Epoch.get -> long
+Orleans.Dataflow.Grains.RunStatusSnapshot.Epoch.set -> void
+Orleans.Dataflow.Grains.RunStatusSnapshot.FailureMessage.get -> string?
+Orleans.Dataflow.Grains.RunStatusSnapshot.FailureMessage.set -> void
+Orleans.Dataflow.Grains.RunStatusSnapshot.FailureType.get -> string?
+Orleans.Dataflow.Grains.RunStatusSnapshot.FailureType.set -> void
+Orleans.Dataflow.Grains.RunStatusSnapshot.Phase.get -> Orleans.Dataflow.Grains.RunPhase
+Orleans.Dataflow.Grains.RunStatusSnapshot.Phase.set -> void
+Orleans.Dataflow.Grains.RunStatusSnapshot.RunStatusSnapshot() -> void
+Orleans.Dataflow.Hosting.DataflowRunTokens
+Orleans.Dataflow.Hosting.DataflowRunTokens.DataflowRunTokens() -> void
+Orleans.Dataflow.Hosting.DataflowRunTokens.DataflowRunTokens(System.Threading.CancellationToken RunToken, System.Threading.CancellationToken StopToken) -> void
+Orleans.Dataflow.Hosting.DataflowRunTokens.Deconstruct(out System.Threading.CancellationToken RunToken, out System.Threading.CancellationToken StopToken) -> void
+Orleans.Dataflow.Hosting.DataflowRunTokens.Equals(Orleans.Dataflow.Hosting.DataflowRunTokens other) -> bool
+Orleans.Dataflow.Hosting.DataflowRunTokens.RunToken.get -> System.Threading.CancellationToken
+Orleans.Dataflow.Hosting.DataflowRunTokens.RunToken.init -> void
+Orleans.Dataflow.Hosting.DataflowRunTokens.StopToken.get -> System.Threading.CancellationToken
+Orleans.Dataflow.Hosting.DataflowRunTokens.StopToken.init -> void
+Orleans.Dataflow.Hosting.DataflowStageRequest
+Orleans.Dataflow.Hosting.DataflowStageRequest.DataflowStageRequest() -> void
+Orleans.Dataflow.Hosting.DataflowStageRequest.DataflowStageRequest(Orleans.Dataflow.Definition.StageNode! Node, Orleans.Dataflow.Definition.StageSpecification! Specification) -> void
+Orleans.Dataflow.Hosting.DataflowStageRequest.Deconstruct(out Orleans.Dataflow.Definition.StageNode! Node, out Orleans.Dataflow.Definition.StageSpecification! Specification) -> void
+Orleans.Dataflow.Hosting.DataflowStageRequest.Equals(Orleans.Dataflow.Hosting.DataflowStageRequest other) -> bool
+Orleans.Dataflow.Hosting.DataflowStageRequest.Node.get -> Orleans.Dataflow.Definition.StageNode!
+Orleans.Dataflow.Hosting.DataflowStageRequest.Node.init -> void
+Orleans.Dataflow.Hosting.DataflowStageRequest.Specification.get -> Orleans.Dataflow.Definition.StageSpecification!
+Orleans.Dataflow.Hosting.DataflowStageRequest.Specification.init -> void
+Orleans.Dataflow.Hosting.DataflowStageRuntime
+Orleans.Dataflow.Hosting.IDataflowStageFactory
+Orleans.Dataflow.Hosting.IDataflowStageFactory.Create(Orleans.Dataflow.Hosting.DataflowStageRequest request) -> Orleans.Dataflow.Hosting.DataflowStageRuntime!
+Orleans.Dataflow.Hosting.IOrleansDataflowBuilder
+Orleans.Dataflow.Hosting.IOrleansDataflowBuilder.AddCatalog(Orleans.Dataflow.Definition.IStageCatalog! catalog) -> Orleans.Dataflow.Hosting.IOrleansDataflowBuilder!
+Orleans.Dataflow.Hosting.IOrleansDataflowBuilder.AddFactory(Orleans.Dataflow.Identity.ProviderId provider, Orleans.Dataflow.Hosting.IDataflowStageFactory! factory) -> Orleans.Dataflow.Hosting.IOrleansDataflowBuilder!
+Orleans.Dataflow.Hosting.OrleansDataflowClientExtensions
+Orleans.Dataflow.Hosting.OrleansDataflowClientOptions
+Orleans.Dataflow.Hosting.OrleansDataflowClientOptions.OrleansDataflowClientOptions() -> void
+Orleans.Dataflow.Hosting.OrleansDataflowClientOptions.PollInterval.get -> System.TimeSpan
+Orleans.Dataflow.Hosting.OrleansDataflowClientOptions.PollInterval.set -> void
+Orleans.Dataflow.Hosting.OrleansDataflowHost
+Orleans.Dataflow.Hosting.OrleansDataflowHost.MaterializeAsync(Orleans.Dataflow.PipelineDefinition! pipeline, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task<Orleans.Dataflow.Hosting.OrleansRunHandle!>!
+Orleans.Dataflow.Hosting.OrleansDataflowHost.OrleansDataflowHost(Orleans.IGrainFactory! grains) -> void
+Orleans.Dataflow.Hosting.OrleansDataflowHost.OrleansDataflowHost(Orleans.IGrainFactory! grains, Orleans.Dataflow.Hosting.OrleansDataflowClientOptions! options) -> void
+Orleans.Dataflow.Hosting.OrleansDataflowSiloBuilderExtensions
+Orleans.Dataflow.Hosting.OrleansRunHandle
+Orleans.Dataflow.Hosting.OrleansRunHandle.Completion.get -> System.Threading.Tasks.Task!
+Orleans.Dataflow.Hosting.OrleansRunHandle.DisposeAsync() -> System.Threading.Tasks.ValueTask
+Orleans.Dataflow.Hosting.OrleansRunHandle.Epoch.get -> long
+Orleans.Dataflow.Hosting.OrleansRunHandle.GetValueAsync<TResult>(Orleans.Dataflow.ResultSlot<TResult> slot, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task<TResult>!
+Orleans.Dataflow.Hosting.OrleansRunHandle.RunId.get -> string!
+Orleans.Dataflow.Hosting.OrleansRunHandle.ShutdownAsync() -> System.Threading.Tasks.Task!
+Orleans.Dataflow.Hosting.OrleansRunHandle.Ticket.get -> Orleans.Dataflow.Grains.PipelineRunTicket!
+const Orleans.Dataflow.Grains.OrleansDataflowStorage.CoordinatorProviderName = "orleans-dataflow-coordinator" -> string!
+override Orleans.Dataflow.Hosting.DataflowRunTokens.GetHashCode() -> int
+override Orleans.Dataflow.Hosting.DataflowStageRequest.GetHashCode() -> int
+override Orleans.Dataflow.Hosting.OrleansRunHandle.ToString() -> string!
+static Orleans.Dataflow.Hosting.DataflowRunTokens.operator !=(Orleans.Dataflow.Hosting.DataflowRunTokens left, Orleans.Dataflow.Hosting.DataflowRunTokens right) -> bool
+static Orleans.Dataflow.Hosting.DataflowRunTokens.operator ==(Orleans.Dataflow.Hosting.DataflowRunTokens left, Orleans.Dataflow.Hosting.DataflowRunTokens right) -> bool
+static Orleans.Dataflow.Hosting.DataflowStageRequest.operator !=(Orleans.Dataflow.Hosting.DataflowStageRequest left, Orleans.Dataflow.Hosting.DataflowStageRequest right) -> bool
+static Orleans.Dataflow.Hosting.DataflowStageRequest.operator ==(Orleans.Dataflow.Hosting.DataflowStageRequest left, Orleans.Dataflow.Hosting.DataflowStageRequest right) -> bool
+static Orleans.Dataflow.Hosting.DataflowStageRuntime.Element(System.Func<object?, object?>! map) -> Orleans.Dataflow.Hosting.DataflowStageRuntime!
+static Orleans.Dataflow.Hosting.DataflowStageRuntime.ElementAsync(System.Func<object?, System.Threading.CancellationToken, System.Threading.Tasks.ValueTask<object?>>! map, int maxConcurrency, bool ordered) -> Orleans.Dataflow.Hosting.DataflowStageRuntime!
+static Orleans.Dataflow.Hosting.DataflowStageRuntime.Source(System.Func<Orleans.Dataflow.Hosting.DataflowRunTokens, System.Collections.Generic.IAsyncEnumerable<object?>!>! open) -> Orleans.Dataflow.Hosting.DataflowStageRuntime!
+static Orleans.Dataflow.Hosting.DataflowStageRuntime.Terminal(System.Func<object?>! seed, System.Func<object?, object?, object?>! fold, System.Func<object?, object?>? finish, bool producesResult) -> Orleans.Dataflow.Hosting.DataflowStageRuntime!
+static Orleans.Dataflow.Hosting.OrleansDataflowClientExtensions.AddOrleansDataflowClient(this Microsoft.Extensions.DependencyInjection.IServiceCollection! services, System.Action<Orleans.Dataflow.Hosting.OrleansDataflowClientOptions!>? configure = null) -> Microsoft.Extensions.DependencyInjection.IServiceCollection!
+static Orleans.Dataflow.Hosting.OrleansDataflowSiloBuilderExtensions.AddOrleansDataflow(this Orleans.Hosting.ISiloBuilder! builder, System.Action<Orleans.Dataflow.Hosting.IOrleansDataflowBuilder!>! configure) -> Orleans.Hosting.ISiloBuilder!
+static readonly Orleans.Dataflow.Hosting.OrleansDataflowClientOptions.DefaultPollInterval -> System.TimeSpan
+~override Orleans.Dataflow.Hosting.DataflowRunTokens.Equals(object obj) -> bool
+~override Orleans.Dataflow.Hosting.DataflowRunTokens.ToString() -> string
+~override Orleans.Dataflow.Hosting.DataflowStageRequest.Equals(object obj) -> bool
+~override Orleans.Dataflow.Hosting.DataflowStageRequest.ToString() -> string

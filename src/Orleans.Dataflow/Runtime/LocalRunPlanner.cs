@@ -60,10 +60,34 @@ internal static class LocalRunPlanner
     /// The document is not one linear chain, a node has no binding, a binding does not have the shape the
     /// stage it is bound to requires, or a parameterized stage carries a payload this runtime cannot read.
     /// </exception>
-    internal static LocalRunPlan Compile(RunnableGraph graph)
+    internal static LocalRunPlan Compile(RunnableGraph graph) =>
+        Compile(graph.Document, graph.LocalBindings, StageRuntimeBinder.None);
+
+    /// <summary>Compiles a document into the plan for one run.</summary>
+    /// <param name="document">The document, already validated against the host's catalog.</param>
+    /// <param name="bindings">The authoring-side behavior of every locally bound node.</param>
+    /// <param name="binder">The resolver of every node no local behavior is bound to.</param>
+    /// <returns>The plan.</returns>
+    /// <exception cref="InvalidOperationException">
+    /// The document is not one linear chain, a node is neither locally bound nor resolvable through
+    /// <paramref name="binder"/>, a binding does not have the shape the stage it is bound to requires, a
+    /// resolved stage's shape cannot stand where the node does, or a parameterized stage carries a payload
+    /// this runtime cannot read.
+    /// </exception>
+    /// <remarks>
+    /// The two halves of a chain are read the same way whichever plane a node comes from: the document
+    /// decides order and configuration, and behavior comes either from the binding table or from a runtime
+    /// factory. A mixed document is therefore not a special case here — each node is asked of the table
+    /// first and of the binder second, which is exactly the precedence the local vocabulary needs, because
+    /// only the local stages are in the table at all.
+    /// </remarks>
+    internal static LocalRunPlan Compile(
+        GraphDocument document,
+        IReadOnlyDictionary<NodeId, LocalStageDescriptor> bindings,
+        StageRuntimeBinder binder)
     {
-        List<NodeId> order = LinearOrder(graph.Document);
-        Dictionary<NodeId, StageNode> declarations = Declarations(graph.Document);
+        List<NodeId> order = LinearOrder(document);
+        Dictionary<NodeId, StageNode> declarations = Declarations(document);
         List<LocalSegment> segments = [];
         List<LocalBoundary> boundaries = [];
         List<LocalElementStage> stages = [];
@@ -80,9 +104,51 @@ internal static class LocalRunPlanner
         for (int index = 0; index < order.Count; index++)
         {
             StageNode declaration = declarations[order[index]];
-            LocalStageDescriptor descriptor = Binding(graph, declaration);
             bool first = index == 0;
             bool last = index == order.Count - 1;
+
+            if (!bindings.TryGetValue(declaration.Id, out LocalStageDescriptor? descriptor))
+            {
+                StageRuntime provided = Provided(binder, declaration);
+
+                switch (provided.Shape)
+                {
+                    case StageRuntimeShape.Source when first && !last:
+                    {
+                        StageSourceOpener open = provided.Opener!;
+
+                        elements = context => LocalSequence.Async(
+                            _ => new LocalAsyncCursor<object?>(
+                                open(new StageRunTokens(context.RunToken, context.StopToken))
+                                    .GetAsyncEnumerator(context.RunToken)),
+                            context);
+
+                        break;
+                    }
+
+                    case StageRuntimeShape.Element when !first && !last:
+                        Fuse(LocalElementStage.Select(provided.Map!));
+                        break;
+                    case StageRuntimeShape.ElementAsync when !first && !last:
+                        Cut(pending ?? LocalBoundary.Handoff);
+                        head = new LocalAsyncStage(
+                            provided.AsAsyncCallback(),
+                            provided.MaxConcurrency,
+                            provided.Ordered);
+                        break;
+                    case StageRuntimeShape.Terminal when last && !first:
+                        Settle();
+                        terminal = LocalTerminal.Provided(provided.Fold!, provided.Finish);
+                        seedFactory = provided.Seed;
+                        produces = provided.ProducesResult;
+                        break;
+                    default:
+                        throw Foreign(
+                            $"the node '{declaration.Id}' is an occurrence of the stage '{declaration.Stage}', whose runtime factory built a '{provided.Shape}' shape, and that shape cannot stand at position {index + 1} of {order.Count}");
+                }
+
+                continue;
+            }
 
             switch (descriptor.Kind)
             {
@@ -339,7 +405,7 @@ internal static class LocalRunPlanner
             throw Foreign("the chain does not begin with a source");
         }
 
-        (ResultSlotId? slot, LocalControl[] declared) = Slots(graph.Document, order[^1], produces, controls);
+        (ResultSlotId? slot, LocalControl[] declared) = Slots(document, order[^1], produces, controls);
 
         return new LocalRunPlan(
             segments,
@@ -387,24 +453,26 @@ internal static class LocalRunPlanner
         }
     }
 
-    /// <summary>Reads the behavior bound to one node.</summary>
-    /// <param name="graph">The graph being compiled.</param>
+    /// <summary>Resolves a node no local behavior is bound to through the runtime-factory seam.</summary>
+    /// <param name="binder">The resolver this compilation was given.</param>
     /// <param name="node">The node as the document declares it.</param>
-    /// <returns>The occurrence's descriptor.</returns>
-    /// <exception cref="InvalidOperationException">The node has no binding.</exception>
+    /// <returns>The executable form of the node.</returns>
+    /// <exception cref="InvalidOperationException">
+    /// The node's stage does not resolve in the host's catalog, its provider has no registered factory, or
+    /// the factory refused to build it.
+    /// </exception>
     /// <remarks>
     /// The message names the stage rather than only the node, because there are two ways to reach it and
     /// the stage is what tells them apart: a document from somewhere else naming stages this process never
-    /// bound anything to, and a registered occurrence, whose behavior is deliberately not in the binding
-    /// table at all. The second is the runtime-factory seam: resolving a registered stage into something
-    /// executable needs a factory registered beside the catalog, which this runtime does not yet have, so
-    /// a graph holding one is rejected here rather than half-executed.
+    /// bound anything to, and a registered occurrence whose behavior is deliberately not in the binding
+    /// table at all. The second is what the seam exists for, and a host without the matching factory says
+    /// exactly that rather than half-executing the graph.
     /// </remarks>
-    private static LocalStageDescriptor Binding(RunnableGraph graph, StageNode node) =>
-        graph.LocalBindings.TryGetValue(node.Id, out LocalStageDescriptor? descriptor)
-            ? descriptor
+    private static StageRuntime Provided(StageRuntimeBinder binder, StageNode node) =>
+        binder.TryCreate(node, out StageRuntime? runtime, out string? refusal)
+            ? runtime
             : throw Foreign(
-                $"the node '{node.Id}' is an occurrence of the stage '{node.Stage}', and no local behavior is bound to it; a registered stage resolves through a runtime factory this runtime does not have");
+                $"the node '{node.Id}' is an occurrence of the stage '{node.Stage}', and no local behavior is bound to it; {refusal}");
 
     /// <summary>Indexes a document's nodes by identifier.</summary>
     /// <param name="document">The document being compiled.</param>

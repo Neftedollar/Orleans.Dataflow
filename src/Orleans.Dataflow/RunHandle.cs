@@ -128,6 +128,15 @@ public sealed class RunHandle : IAsyncDisposable
                 nameof(slot));
         }
 
+        if (slot.IsPipelineSlot != (_run.AuthoringNonce == Guid.Empty))
+        {
+            throw new ArgumentException(
+                slot.IsPipelineSlot
+                    ? $"The slot '{slot.Id}' belongs to a different world: it was declared by a {nameof(PipelineDefinition)}, which binds its slots by fingerprint and lineage alone, and this is a run of a built {nameof(RunnableGraph)} instance, whose slots additionally bind to that instance. Resolve a pipeline's slot against a run the pipeline was materialized into."
+                    : $"The slot '{slot.Id}' belongs to a different world: it was declared by a built {nameof(RunnableGraph)} instance and binds to that instance, and this is a run of a {nameof(PipelineDefinition)}, whose slots bind by fingerprint and lineage alone. Recover the pipeline's own slot with {nameof(PipelineDefinition)}.{nameof(PipelineDefinition.ResultSlot)}.",
+                nameof(slot));
+        }
+
         if (slot.Graph != _run.Graph)
         {
             throw new ArgumentException(

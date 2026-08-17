@@ -1,0 +1,93 @@
+using Microsoft.Extensions.DependencyInjection;
+using Orleans.Dataflow.Grains;
+using Orleans.Dataflow.Hosting;
+using Orleans.Dataflow.OrleansTests.Provider;
+using Orleans.Hosting;
+using Orleans.TestingHost;
+using Xunit;
+
+namespace Orleans.Dataflow.OrleansTests.Cluster;
+
+/// <summary>
+/// One in-process cluster running Orleans.Dataflow with the test vocabulary registered, shared by every
+/// test in the collection.
+/// </summary>
+/// <remarks>
+/// <para>
+/// <see cref="InProcessTestCluster"/> rather than the out-of-process one: phase 1 is about a run executing
+/// in a cluster at all, and every question it answers — start, complete, fail, drain, cancel, fence,
+/// refuse — is answered by one silo. Multi-silo behavior, killing a silo and waiting for liveness to
+/// stabilize, is a later phase's, and a test cluster that spawned processes to prove none of it would only
+/// spend time.
+/// </para>
+/// <para>
+/// One silo, and stated as a choice rather than left as a default: a second silo would place coordinators
+/// and runs on either of two hosts and make every test's timing a distribution, without testing anything
+/// this phase claims. What it would test — that ownership survives a silo dying — is exactly what phase 4
+/// builds.
+/// </para>
+/// <para>
+/// Built once per collection because deploying a cluster costs seconds and every test here is independent
+/// of every other: pipelines are addressed by graph identity, and each test uses its own.
+/// </para>
+/// </remarks>
+public sealed class DataflowCluster : IAsyncLifetime
+{
+    /// <summary>Gets the deployed cluster.</summary>
+    /// <value>The cluster, available from the moment the fixture has initialized.</value>
+    internal InProcessTestCluster Cluster { get; private set; } = null!;
+
+    /// <summary>Gets the client host every test materializes pipelines through.</summary>
+    internal OrleansDataflowHost Host { get; private set; } = null!;
+
+    /// <inheritdoc/>
+    public async ValueTask InitializeAsync()
+    {
+        InProcessTestClusterBuilder builder = new(initialSilosCount: 1);
+
+        builder.ConfigureSilo((siloOptions, silo) =>
+        {
+            _ = silo.AddMemoryGrainStorage(OrleansDataflowStorage.CoordinatorProviderName);
+            _ = silo.AddOrleansDataflow(dataflow => dataflow
+                .AddCatalog(TestVocabulary.Catalog())
+                .AddFactory(TestVocabulary.Provider, new TestStageFactory()));
+        });
+
+        // The client-side registration, exercised the way a deployment writes it rather than by newing the
+        // host up: what a client configures is one call on its services, and a test that skipped it would
+        // leave the only supported spelling unproven.
+        builder.ConfigureClientHost(client =>
+            client.Services.AddOrleansDataflowClient(options =>
+                options.PollInterval = TimeSpan.FromMilliseconds(10)));
+
+        Cluster = builder.Build();
+
+        await Cluster.DeployAsync();
+
+        Host = Cluster.Client.ServiceProvider.GetRequiredService<OrleansDataflowHost>();
+    }
+
+    /// <inheritdoc/>
+    public async ValueTask DisposeAsync()
+    {
+        if (Cluster is not null)
+        {
+            await Cluster.DisposeAsync();
+        }
+    }
+}
+
+/// <summary>
+/// The collection every cluster test belongs to.
+/// </summary>
+/// <remarks>
+/// One collection and therefore one cluster: the tests run one after another against one deployment rather
+/// than each paying for its own. They are independent of each other by construction — every test addresses
+/// its own pipeline identity — so sharing costs them nothing.
+/// </remarks>
+[CollectionDefinition(Name)]
+public sealed class DataflowClusterCollectionDefinition : ICollectionFixture<DataflowCluster>
+{
+    /// <summary>The collection's name.</summary>
+    public const string Name = "orleans-dataflow-cluster";
+}

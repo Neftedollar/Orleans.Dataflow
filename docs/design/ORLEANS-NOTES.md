@@ -71,6 +71,16 @@ time.
 
 ## Named unknowns (probe, do not guess)
 
-1. Memory stream provider rewindability (`IsRewindable` value).
-2. `ReminderOptions.MinimumReminderPeriod` default and throw-vs-clamp.
-3. `TestingHost` package dependency closure.
+1. Memory stream provider rewindability (`IsRewindable` value) — probe in
+   M3 phase 2.
+2. `ReminderOptions.MinimumReminderPeriod` default and throw-vs-clamp —
+   probe in M3 phase 3.
+3. ~~`TestingHost` package dependency closure~~ **Resolved by probe
+   (phase 1)**: TestingHost 10.2.2 transitively carries the whole silo host
+   (`Runtime`, plus `Persistence.Memory`, `Reminders`, `Streaming`), so a
+   test project references only TestingHost and the test framework. Two
+   side facts: TestingHost drags `DurableJobs` and `Journaling` at
+   `10.2.2-alpha.1` (prerelease in a test-only path; restores clean), and
+   `Server` = Runtime + Persistence.Memory + Sdk + Core with no
+   Reminders/Streaming — which is why the src package references `Server`
+   and `Sdk` explicitly.

@@ -81,6 +81,33 @@ ingress: a grain call in flight is credit spent; a stream delivery into a
 full bounded ingress follows its declared overflow policy; nothing anywhere
 uses a mailbox as an unbounded buffer.
 
+## Phase 1 — as implemented (rules the later phases inherit)
+
+- **Wire discipline**: no definition-plane identity type crosses a grain
+  boundary — RunId/GraphId/fingerprints travel as strings, slots as name
+  plus fingerprint text; a reflection test fails any wire member typed from
+  the Abstractions assembly, so drift is caught at build, not at first
+  send. Grain-thrown refusals carry no inner exception (Orleans serializes
+  the whole chain, and an unserializable inner replaces the diagnosis with
+  a codec error); the cause folds into the message.
+- **Two exception worlds**: `PipelineFencingException` strictly for a stale
+  epoch against a live run; `PipelineRunLostException` for an attempt that
+  no longer exists — absence is not staleness.
+- **Registered sources receive both tokens** (run and stop), so drain and
+  abandon stay distinguishable across the seam; the factory mirror in the
+  Orleans package is public while the engine seam stays internal.
+- **Grain turns never park**: status and result calls answer "not yet"
+  rather than await; shutdown and cancel request rather than drain; the
+  engine's dedicated threads do the waiting.
+- **Phase-1 limits, stated**: results live only as long as the run grain's
+  activation (proven absent, not promised); a deactivation mid-run faults
+  that attempt; a remote failure arrives as type name plus message — the
+  author's exception type does not survive the hop; the coordinator's
+  `Runs` register is written for phase-4 reconciliation but only
+  `LastEpoch` is load-bearing today; ETag fencing of competing coordinator
+  activations is designed but demonstrated only across deliberate
+  deactivation until phase 4's kill tests.
+
 ## Phasing
 
 1. **Hosting + coordinator + run grain** — DI registration, the

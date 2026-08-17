@@ -1,0 +1,18 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <IsTestProject>true</IsTestProject>
+    <OutputType>Exe</OutputType>
+  </PropertyGroup>
+  <ItemGroup>
+    <PackageReference Include="xunit.v3.mtp-v2" />
+    <!--
+      TestingHost carries the whole silo host transitively: Runtime (which is what Server is a meta-package
+      over), Sdk with its code generator, Persistence.Memory, Reminders, and Streaming. Referencing Server
+      here as well would pin the same assemblies twice and say nothing extra, so it is deliberately absent;
+      the dependency closure was probed rather than assumed.
+    -->
+    <PackageReference Include="Microsoft.Orleans.TestingHost" />
+    <ProjectReference Include="../../src/Orleans.Dataflow/Orleans.Dataflow.csproj" />
+    <ProjectReference Include="../../src/Orleans.Dataflow.Orleans/Orleans.Dataflow.Orleans.csproj" />
+  </ItemGroup>
+</Project>

@@ -1,0 +1,186 @@
+using Orleans.Dataflow.Definition;
+using Orleans.Dataflow.Identity;
+using Orleans.Dataflow.OrleansTests.Cluster;
+using Xunit;
+
+namespace Orleans.Dataflow.OrleansTests.Provider;
+
+/// <summary>
+/// The pipelines the cluster tests run, authored through the ordinary registered surface.
+/// </summary>
+/// <remarks>
+/// Every one of these is written the way a user writes one: typed handles resolved against a catalog,
+/// named occurrences, raw canonical payloads, and <c>AsPipeline</c> under a real identity. Nothing here
+/// hand-builds a document, which is the point — what the cluster runs is what the authoring API produces.
+/// </remarks>
+internal static class TestPipelines
+{
+    /// <summary>The name every pipeline here exposes its total under.</summary>
+    internal const string TotalSlot = "total";
+
+    /// <summary>Builds a pipeline that sums the doubles of the first numbers.</summary>
+    /// <param name="id">The pipeline's identity, which is also its coordinator's key.</param>
+    /// <param name="count">How many numbers the source emits.</param>
+    /// <param name="halt">
+    /// The signal the source raises after its last element instead of ending, or <see langword="null"/>
+    /// when it should end on its own.
+    /// </param>
+    /// <returns>
+    /// The pipeline and the slot its total resolves under. The slot is the pipeline's own, recovered from
+    /// the deployable document, and deliberately not the one the closing <c>To</c> handed back: closing
+    /// produces a slot bound to that built graph instance, and <c>AsPipeline</c> re-identifies the content
+    /// under a real identity, so the graph's slot names neither the pipeline's document nor its world.
+    /// </returns>
+    internal static (PipelineDefinition Pipeline, ResultSlot<long> Slot) Doubling(
+        string id,
+        int count,
+        string? halt = null)
+    {
+        (RunnableGraph _, ResultSlot<long> _, PipelineDefinition pipeline, ResultSlot<long> slot) =
+            DoublingParts(id, count, halt);
+
+        return (pipeline, slot);
+    }
+
+    /// <summary>Builds the same pipeline and hands back the built graph and its slot as well.</summary>
+    /// <param name="id">The pipeline's identity.</param>
+    /// <param name="count">How many numbers the source emits.</param>
+    /// <param name="halt">The signal the source raises instead of ending, or <see langword="null"/>.</param>
+    /// <returns>The graph, the slot closing it produced, the pipeline, and the pipeline's own slot.</returns>
+    /// <remarks>
+    /// The four together are what a test needs to say that the two slots are different values bound to
+    /// different documents, which is the whole distinction between the authoring plane and the deployable
+    /// one seen from the one place it is observable.
+    /// </remarks>
+    internal static (RunnableGraph Graph, ResultSlot<long> GraphSlot, PipelineDefinition Pipeline, ResultSlot<long> Slot) DoublingParts(
+        string id,
+        int count,
+        string? halt = null)
+    {
+        (RunnableGraph graph, ResultSlot<long> graphSlot) = Source
+            .FromRegistered(
+                RegisteredStage.Source(TestVocabulary.Catalog(), TestVocabulary.Range, TestVocabulary.Number),
+                "numbers",
+                halt is null ? TestRangeParameters.Write(count) : TestRangeParameters.Write(count, halt))
+            .Via(
+                RegisteredStage.Flow(
+                    TestVocabulary.Catalog(),
+                    TestVocabulary.Double,
+                    TestVocabulary.Number,
+                    TestVocabulary.Number),
+                "doubled",
+                TestVocabulary.Empty)
+            .To(
+                RegisteredStage.SinkWithResult(
+                    TestVocabulary.Catalog(),
+                    TestVocabulary.Sum,
+                    TestVocabulary.Number,
+                    TestVocabulary.Total),
+                "total",
+                TestVocabulary.Empty,
+                TotalSlot);
+
+        PipelineDefinition pipeline = graph.AsPipeline(GraphId.Create(id), GraphRevision.Create(1));
+
+        return (graph, graphSlot, pipeline, pipeline.ResultSlot(TotalSlot, TestVocabulary.Total));
+    }
+
+    /// <summary>Builds a pipeline whose middle stage throws at one element.</summary>
+    /// <param name="id">The pipeline's identity.</param>
+    /// <param name="count">How many numbers the source emits.</param>
+    /// <param name="failAt">The element the middle stage throws at.</param>
+    /// <returns>The pipeline and the slot its total would have resolved under.</returns>
+    internal static (PipelineDefinition Pipeline, ResultSlot<long> Slot) Failing(string id, int count, long failAt)
+    {
+        (RunnableGraph graph, ResultSlot<long> graphSlot) = Source
+            .FromRegistered(
+                RegisteredStage.Source(TestVocabulary.Catalog(), TestVocabulary.Range, TestVocabulary.Number),
+                "numbers",
+                TestRangeParameters.Write(count))
+            .Via(
+                RegisteredStage.Flow(
+                    TestVocabulary.Catalog(),
+                    TestVocabulary.Fail,
+                    TestVocabulary.Number,
+                    TestVocabulary.Number),
+                "boom",
+                TestFailParameters.Write(failAt))
+            .To(
+                RegisteredStage.SinkWithResult(
+                    TestVocabulary.Catalog(),
+                    TestVocabulary.Sum,
+                    TestVocabulary.Number,
+                    TestVocabulary.Total),
+                "total",
+                TestVocabulary.Empty,
+                TotalSlot);
+
+        _ = graphSlot;
+
+        PipelineDefinition pipeline = graph.AsPipeline(GraphId.Create(id), GraphRevision.Create(1));
+
+        return (pipeline, pipeline.ResultSlot(TotalSlot, TestVocabulary.Total));
+    }
+
+    /// <summary>Builds a pipeline naming a stage no silo in these tests registers.</summary>
+    /// <param name="id">The pipeline's identity.</param>
+    /// <returns>The pipeline.</returns>
+    /// <remarks>
+    /// Authored against a catalog that has the stage so the document can be closed at all, and run against
+    /// a silo whose catalog does not, which is exactly the shape of a rolling upgrade that removed a stage:
+    /// a valid document a deployment cannot resolve.
+    /// </remarks>
+    internal static PipelineDefinition Unknown(string id)
+    {
+        StageRef missing = StageRef.Create(TestVocabulary.Provider, StageId.Create("nowhere"), 1);
+        StageCatalog authoring = StageCatalog.Create(
+        [
+            .. TestVocabulary.Catalog().Specifications,
+            StageSpecification.Create(
+                missing,
+                [InputPortSpecification.Create(PortId.Create("in"), TestVocabulary.Number.Reference)],
+                [OutputPortSpecification.Create(PortId.Create("out"), TestVocabulary.Number.Reference)],
+                [],
+                TestVocabulary.NoParameters,
+                []),
+        ]);
+
+        (RunnableGraph graph, ResultSlot<long> _) = Source
+            .FromRegistered(
+                RegisteredStage.Source(authoring, TestVocabulary.Range, TestVocabulary.Number),
+                "numbers",
+                TestRangeParameters.Write(3))
+            .Via(
+                RegisteredStage.Flow(authoring, missing, TestVocabulary.Number, TestVocabulary.Number),
+                "elsewhere",
+                TestVocabulary.Empty)
+            .To(
+                RegisteredStage.SinkWithResult(
+                    authoring,
+                    TestVocabulary.Sum,
+                    TestVocabulary.Number,
+                    TestVocabulary.Total),
+                "total",
+                TestVocabulary.Empty,
+                TotalSlot);
+
+        return graph.AsPipeline(GraphId.Create(id), GraphRevision.Create(1));
+    }
+
+    /// <summary>Materializes a pipeline and waits for it to end.</summary>
+    /// <param name="cluster">The deployed cluster.</param>
+    /// <param name="pipeline">The pipeline to run.</param>
+    /// <returns>The handle of the ended run.</returns>
+    internal static async Task<Hosting.OrleansRunHandle> RunAsync(
+        DataflowCluster cluster,
+        PipelineDefinition pipeline)
+    {
+        Hosting.OrleansRunHandle handle = await cluster.Host.MaterializeAsync(
+            pipeline,
+            TestContext.Current.CancellationToken);
+
+        await handle.Completion;
+
+        return handle;
+    }
+}
