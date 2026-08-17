@@ -111,9 +111,15 @@ internal sealed class LocalStageDescriptor : StageOccurrence
 
     /// <inheritdoc/>
     /// <value>
-    /// The one local input port name for every shape that consumes elements; <see langword="null"/> for a
-    /// source, which consumes none.
+    /// The one local input port name for every shape that consumes one stream; <see langword="null"/> for a
+    /// source, which consumes none, and for a fan-in junction, which consumes several.
     /// </value>
+    /// <remarks>
+    /// A fan-in answers <see langword="null"/> here for the reason a fan-out answers it for its outputs:
+    /// this member is what the chain-composing builder connects to, and a junction is not something a chain
+    /// can hold. Deriving the answer from the declared port list rather than from a place is what makes that
+    /// true by construction instead of by a rule written twice.
+    /// </remarks>
     internal override PortId? InputPort =>
         LocalVocabulary.InputPortsOf(Kind) is [{ } only] ? only.Id : null;
 
@@ -427,6 +433,37 @@ internal sealed class LocalStageDescriptor : StageOccurrence
     /// </remarks>
     internal static LocalStageDescriptor Unzip(object left, object right) =>
         new(LocalStageKind.Unzip, new[] { left, right }, seed: null, LocalVocabulary.EmptyParameters);
+
+    /// <summary>Creates a junction that emits whichever of its inputs has an element.</summary>
+    /// <returns>The descriptor.</returns>
+    /// <remarks>
+    /// No behavior and no payload at all, for the reason a broadcast has neither: a merge is decided
+    /// entirely by the edges its inputs carry, and elements pass through it untouched, so there is nothing
+    /// left for a binding to say and nothing a document could state twice.
+    /// </remarks>
+    internal static LocalStageDescriptor Merge() =>
+        new(LocalStageKind.Merge, behavior: null, seed: null, LocalVocabulary.EmptyParameters);
+
+    /// <summary>Creates a junction that emits each of its inputs to its end before reading the next.</summary>
+    /// <returns>The descriptor.</returns>
+    internal static LocalStageDescriptor Concat() =>
+        new(LocalStageKind.Concat, behavior: null, seed: null, LocalVocabulary.EmptyParameters);
+
+    /// <summary>Creates a junction that emits a declared number of elements from each input in turn.</summary>
+    /// <param name="segmentSize">The validated number of elements taken from one input before the next.</param>
+    /// <returns>The descriptor.</returns>
+    /// <remarks>
+    /// The one junction with a payload of its own. How many inputs the rotation runs over is stated by the
+    /// edges, as it is for every junction; how many elements it takes from each of them before moving on is
+    /// a number that changes the sequence the graph produces, so it is written into the document and into
+    /// the fingerprint taken over it.
+    /// </remarks>
+    internal static LocalStageDescriptor Interleave(int segmentSize) =>
+        new(
+            LocalStageKind.Interleave,
+            behavior: null,
+            seed: null,
+            LocalInterleaveParameters.Write(segmentSize));
 
     /// <summary>Creates a folding sink.</summary>
     /// <param name="seed">The initial state, which may be <see langword="null"/>.</param>

@@ -49,10 +49,13 @@ namespace Orleans.Dataflow.Runtime;
 /// <para>
 /// <b>Branching.</b> A graph is segments and channels whichever shape it has, and everything above is
 /// stated per segment and per channel rather than per position, which is what lets a junction be one more
-/// segment instead of one more model. Three things follow. A junction pump reads one channel and writes
-/// several under the rule its strategy states, and holds one element while it does. A completion walks
-/// upstream edge by edge and stops at a junction that still has a live leg, so a finished branch stops
-/// feeding without stopping the world. And a run has as many endings as the graph has sinks: each folds
+/// segment instead of one more model. Four things follow. A fan-out pump reads one channel and writes
+/// several under the rule its strategy states, and a fan-in pump reads several and writes one under the
+/// rule of its own; both hold one element while they place it and neither holds one between elements. A
+/// completion walks upstream edge by edge and stops at a junction that still has a live leg, so a finished
+/// branch stops feeding without stopping the world. A graph may begin in several places, because inputs
+/// that converge through a fan-in are one stream and not several runs — every head is a segment of the
+/// same kind the single head always was. And a run has as many endings as the graph has sinks: each folds
 /// its own state and settles its own slot, the run settles when every segment has stopped, and the single
 /// outcome — a failure anywhere, a cancellation, a clean end — is what every slot reports.
 /// </para>
@@ -391,9 +394,9 @@ internal sealed class LocalRun
     /// <summary>Runs one segment to its end and reports how it ended to the run.</summary>
     /// <param name="index">The segment's position in the plan.</param>
     /// <remarks>
-    /// The four loop shapes are chosen here and the outcome of all of them is folded here, so that what a
-    /// failure, a cancellation and a clean end mean is stated once for every segment rather than four
-    /// times. An enumerator obtained by the head segment is released on every path, including the ones
+    /// The five loop shapes are chosen here and the outcome of all of them is folded here, so that what a
+    /// failure, a cancellation and a clean end mean is stated once for every segment rather than five
+    /// times. An enumerator obtained by a head segment is released on every path, including the ones
     /// where obtaining or reading it is what went wrong, which is why it is held in this frame.
     /// </remarks>
     private void Execute(int index)
@@ -409,9 +412,11 @@ internal sealed class LocalRun
                 ? Pull(segment, index, source, ref elements)
                 : segment.Async is { } asynchronous
                     ? Map(segment, index, asynchronous)
-                    : segment.FanOut is { } junction
-                        ? Fan(segment, index, junction)
-                        : Push(segment, index);
+                    : segment.FanOut is { } splitting
+                        ? Fan(segment, index, splitting)
+                        : segment.FanIn is { } joining
+                            ? Join(segment, index, joining)
+                            : Push(segment, index);
         }
         catch (OperationCanceledException) when (_token.IsCancellationRequested)
         {
@@ -1061,9 +1066,9 @@ internal sealed class LocalRun
         }
     }
 
-    /// <summary>Waits until one leg can take an element.</summary>
-    /// <param name="channel">The leg's channel.</param>
-    /// <returns><see langword="false"/> when the leg's channel is closed and it has left the set.</returns>
+    /// <summary>Waits until one channel below a junction can take an element.</summary>
+    /// <param name="channel">The channel: a leg of a fan-out, or the one output of a fan-in.</param>
+    /// <returns><see langword="false"/> when the channel is closed and there is nothing to deliver to.</returns>
     /// <exception cref="OperationCanceledException">The run was cancelled.</exception>
     /// <remarks>
     /// A boundary whose policy is anything but backpressure answers an offer whether or not it has room —
@@ -1191,6 +1196,288 @@ internal sealed class LocalRun
         return false;
     }
 
+    /// <summary>Drives a joining junction: secures room below, reads the input its rule names, delivers.</summary>
+    /// <param name="segment">The segment being executed.</param>
+    /// <param name="index">Its position in the plan.</param>
+    /// <param name="junction">The strategy that decides which input the next element comes from.</param>
+    /// <returns><see langword="true"/> when the loop stopped because the run was canceled.</returns>
+    /// <remarks>
+    /// <para>
+    /// <b>Room first, read second.</b> The same order the splitting junction keeps, and the same two things
+    /// at once: it is ADR 0005's demand rule — an input is pulled only when there is demand this junction
+    /// can satisfy from it — and it is the whole of the held-element bound, because the one element such a
+    /// junction ever holds is the one it is placing. A junction that read first would have taken an element
+    /// out of an input to hold it for the length of a wait, which is a read-ahead the table does not allow.
+    /// </para>
+    /// <para>
+    /// <b>What "which input" means is the strategy's.</b> A merge scans from its cursor for an input that
+    /// has something and moves the cursor past the one it took, which is round-robin among the ready: a
+    /// producer that is merely faster cannot keep an element that has already arrived at another input
+    /// waiting. When nothing is ready it waits on every live input at once, and the wait that answers
+    /// <see langword="false"/> is an input completing. A concat reads one input to its end and does not
+    /// touch the next one until then — the sources behind it are running, because a run starts every
+    /// segment, but their elements stay in their own channels and a full one parks its source, which is
+    /// backpressure rather than a queue. An interleave reads a declared number of elements from the input
+    /// whose turn it is, waiting for that input even when another has something, which is the determinism
+    /// its declared segment size buys; a completed input leaves the rotation and the remainder continues in
+    /// order. All three end when the last of their inputs has ended.
+    /// </para>
+    /// <para>
+    /// <b>Failure needs nothing here.</b> An input's failure is a failure of the segment that was feeding
+    /// it, which records it and cancels the run; every wait in this loop is taken on the run's token, so a
+    /// junction asleep on the inputs that are still healthy is woken by the failure of one that is not.
+    /// That is ADR 0005's first shared rule and it is the engine's ordinary one.
+    /// </para>
+    /// <para>
+    /// <b>The park points are the ordinary ones.</b> Between elements, once before the read and once after
+    /// it, exactly as every other pump parks: an element read from a wait that began before the pause is
+    /// held rather than delivered, and the room secured for it is still there when the run resumes, because
+    /// a junction is the only writer to its own output.
+    /// </para>
+    /// </remarks>
+    private bool Join(LocalSegment segment, int index, LocalFanIn junction)
+    {
+        IReadOnlyList<int> inputs = segment.Inputs;
+        int output = segment.Outputs[0];
+
+        // One pending element-wait per input at most, kept across passes for the same reason a fan-out
+        // keeps its room-waits: a wait-any that abandoned the waits it did not choose would leave one more
+        // waiter on every input of every pass, and a bounded channel remembers every one of them.
+        Task<bool>?[] pending = new Task<bool>?[inputs.Count];
+        bool[] ended = new bool[inputs.Count];
+        int cursor = 0;
+        int taken = 0;
+
+        while (true)
+        {
+            if (_token.IsCancellationRequested)
+            {
+                return true;
+            }
+
+            if (Stopping(index))
+            {
+                return false;
+            }
+
+            if (_pause.Park())
+            {
+                continue;
+            }
+
+            if (Closed(output) || !Vacancy(output))
+            {
+                Complete(index);
+
+                return false;
+            }
+
+            // A pause that arrived while this junction was waiting for room is observed before the read,
+            // not after it: securing room takes no step the run can see, and reading would take one.
+            if (_pause.IsPaused)
+            {
+                continue;
+            }
+
+            object? element = null;
+
+            if (junction.Kind is LocalFanInKind.Merge)
+            {
+                int chosen = -1;
+
+                for (int step = 0; step < inputs.Count && chosen < 0; step++)
+                {
+                    int input = cursor + step >= inputs.Count ? cursor + step - inputs.Count : cursor + step;
+
+                    if (!ended[input] && _channels[inputs[input]].Reader.TryRead(out element))
+                    {
+                        chosen = input;
+                    }
+                }
+
+                if (chosen < 0)
+                {
+                    if (!Waiting(inputs, ended, pending))
+                    {
+                        return false;
+                    }
+
+                    continue;
+                }
+
+                cursor = chosen + 1 == inputs.Count ? 0 : chosen + 1;
+            }
+            else if (!_channels[inputs[cursor]].Reader.TryRead(out element))
+            {
+                if (Arrival(_channels[inputs[cursor]].Reader))
+                {
+                    continue;
+                }
+
+                // The input whose turn it was has ended. A concat moves to the one behind it and an
+                // interleave to the next one still live; both stop when there is none, which is the table's
+                // "completes when all inputs complete" for one and its "completes when the last input
+                // completes" for the other, reached by the same step.
+                ended[cursor] = true;
+                taken = 0;
+                cursor = Next(ended, cursor, junction.Kind is LocalFanInKind.Interleave);
+
+                if (cursor < 0)
+                {
+                    return false;
+                }
+
+                continue;
+            }
+
+            while (_pause.Park())
+            {
+                if (_token.IsCancellationRequested)
+                {
+                    return true;
+                }
+            }
+
+            if (!Deliver(segment, index, element))
+            {
+                return false;
+            }
+
+            if (junction.Kind is not LocalFanInKind.Interleave || ++taken != junction.Segment)
+            {
+                continue;
+            }
+
+            taken = 0;
+            cursor = Next(ended, cursor, wrapping: true);
+
+            if (cursor < 0)
+            {
+                return false;
+            }
+        }
+    }
+
+    /// <summary>Waits until one of a joining junction's live inputs has an element or ends.</summary>
+    /// <param name="inputs">The channels this junction reads.</param>
+    /// <param name="ended">The inputs that have completed and been drained, updated here.</param>
+    /// <param name="pending">The per-input element-waits kept across passes.</param>
+    /// <returns>
+    /// <see langword="true"/> when an input may have something to read; <see langword="false"/> when every
+    /// input has ended and there is nothing left to join.
+    /// </returns>
+    /// <exception cref="OperationCanceledException">The run was cancelled.</exception>
+    /// <remarks>
+    /// The merge's wait and nobody else's: a concat and an interleave wait on the one input whose turn it
+    /// is, which is an ordinary <see cref="Arrival"/>. The shape is the fan-out balance arm's, and the
+    /// cached waits matter for the same reason — a wait-any consumes one of the tasks it was given and
+    /// abandons the rest, so the rest have to be the very tasks the next pass waits on again.
+    /// </remarks>
+    private bool Waiting(IReadOnlyList<int> inputs, bool[] ended, Task<bool>?[] pending)
+    {
+        while (true)
+        {
+            List<Task>? waits = null;
+            bool live = false;
+
+            for (int input = 0; input < inputs.Count; input++)
+            {
+                if (ended[input])
+                {
+                    pending[input] = null;
+
+                    continue;
+                }
+
+                live = true;
+
+                Task<bool> wait = pending[input] ??=
+                    _channels[inputs[input]].Reader.WaitToReadAsync(_token).AsTask();
+
+                if (!wait.IsCompleted)
+                {
+                    (waits ??= []).Add(wait);
+
+                    continue;
+                }
+
+                pending[input] = null;
+
+                // A completed wait is consumed here and not remembered, because this junction is the only
+                // reader of this input: what it answered is still true until this junction itself takes the
+                // element, and remembering the answer would make the next pass believe an element that had
+                // already been taken was still there.
+                if (wait.GetAwaiter().GetResult())
+                {
+                    return true;
+                }
+
+                ended[input] = true;
+            }
+
+            if (!live)
+            {
+                return false;
+            }
+
+            if (waits is null)
+            {
+                // Every live input answered that its channel is done, which the next pass sees as those
+                // inputs having ended. Nothing is waited for, and the loop is bounded by inputs that only
+                // ever end.
+                continue;
+            }
+
+            _pause.Idle();
+
+            try
+            {
+                _ = Task.WaitAny([.. waits], _token);
+            }
+            finally
+            {
+                _pause.Busy();
+            }
+        }
+    }
+
+    /// <summary>Finds the input a rotation moves to after the one it has finished with.</summary>
+    /// <param name="ended">The inputs that have completed and been drained.</param>
+    /// <param name="from">The input the rotation is leaving.</param>
+    /// <param name="wrapping">Whether the rotation returns to the first input after the last.</param>
+    /// <returns>The next input, or minus one when none is left.</returns>
+    /// <remarks>
+    /// The one place a concat and an interleave differ, and it is one boolean: an interleave rotates, so
+    /// the input after the last is the first again and a lone survivor keeps its turn forever; a concat
+    /// walks forward once and is over when it runs off the end, which is exactly "completes when the last
+    /// input completes". Everything the two have in common — skipping the inputs that have ended, and
+    /// answering "none" the same way — is therefore written once.
+    /// </remarks>
+    private static int Next(bool[] ended, int from, bool wrapping)
+    {
+        for (int step = 1; step <= ended.Length; step++)
+        {
+            int input = from + step;
+
+            if (input >= ended.Length)
+            {
+                if (!wrapping)
+                {
+                    return -1;
+                }
+
+                input -= ended.Length;
+            }
+
+            if (!ended[input])
+            {
+                return input;
+            }
+        }
+
+        return -1;
+    }
+
     /// <summary>Pushes one element through a segment's fused stages and into whatever follows it.</summary>
     /// <param name="segment">The segment doing the work.</param>
     /// <param name="index">Its position in the plan.</param>
@@ -1205,8 +1492,9 @@ internal sealed class LocalRun
     /// asked about an element that is not there. What follows the stages is this segment's one output
     /// channel when it has one and its terminal when it has none, which is the only place what a segment
     /// is connected to changes what it does. A segment that reaches this method has at most one output —
-    /// the several a junction has are the junction pump's, and a junction fuses with no stage and holds no
-    /// terminal.
+    /// the several a fan-out has are that pump's own, and a fan-in has exactly one, which is why the
+    /// joining pump delivers through here like anything else; both fuse with no stage and hold no terminal,
+    /// so for them this method is the offer and nothing more.
     /// </para>
     /// <para>
     /// A stage that ends the stream ends it for this segment and for everything above it, whether or not

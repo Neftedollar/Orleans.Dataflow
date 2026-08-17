@@ -154,6 +154,7 @@ public sealed class CatalogValidationTests
                 LocalStage("broadcast"),
                 LocalStage("buffer"),
                 LocalStage("collect"),
+                LocalStage("concat"),
                 LocalStage("count"),
                 LocalStage("cycle"),
                 LocalStage("distinct"),
@@ -171,8 +172,10 @@ public sealed class CatalogValidationTests
                 LocalStage("from-factory"),
                 LocalStage("from-task"),
                 LocalStage("ignore"),
+                LocalStage("interleave"),
                 LocalStage("last"),
                 LocalStage("last-or-default"),
+                LocalStage("merge"),
                 LocalStage("never"),
                 LocalStage("queue"),
                 LocalStage("range"),
@@ -203,14 +206,21 @@ public sealed class CatalogValidationTests
     public void EveryStageDeclaresThePortsItsPlaceInAGraphImplies()
     {
         // The ports are derived from where a shape stands, so this is where that derivation is checked
-        // against a list written by hand: a source consumes nothing, a sink produces nothing, a junction
-        // consumes one stream and produces several, and everything else does both. A shape that moved
-        // between the four would keep validating and start executing somewhere it cannot stand.
+        // against a list written by hand: a source consumes nothing, a sink produces nothing, a splitting
+        // junction consumes one stream and produces several, a joining one does the opposite, and
+        // everything else consumes and produces one. A shape that moved between the five would keep
+        // validating and start executing somewhere it cannot stand.
         Dictionary<string, int> junctions = new(StringComparer.Ordinal)
         {
             ["balance"] = 8,
             ["broadcast"] = 8,
             ["unzip"] = 2,
+        };
+        Dictionary<string, int> joins = new(StringComparer.Ordinal)
+        {
+            ["concat"] = 8,
+            ["interleave"] = 8,
+            ["merge"] = 8,
         };
         string[] sources =
         [
@@ -251,7 +261,11 @@ public sealed class CatalogValidationTests
         {
             string stage = specification.Stage.Stage.Value;
 
-            Assert.Equal(sources.Contains(stage) ? 0 : 1, specification.InputPorts.Count);
+            int inputs = joins.TryGetValue(stage, out int streams)
+                ? streams
+                : sources.Contains(stage) ? 0 : 1;
+
+            Assert.Equal(inputs, specification.InputPorts.Count);
 
             int outputs = junctions.TryGetValue(stage, out int legs)
                 ? legs
@@ -276,6 +290,20 @@ public sealed class CatalogValidationTests
                 port => Assert.False(port.IsIgnorable));
         }
 
+        // The same rule read on the other side of a joining junction. "Optional" is what an input port
+        // calls what an output port calls "ignorable", and the two spellings mean one thing here: the
+        // edges of a document state how many streams this occurrence joins, and the first two are required
+        // so that a junction cannot be wired as a chain.
+        foreach ((string stage, int _) in joins)
+        {
+            Assert.True(
+                LocalStageCatalog.Instance.TryGetSpecification(
+                    LocalStage(stage),
+                    out StageSpecification? specification));
+            Assert.Equal(2, specification!.InputPorts.Count(port => !port.IsOptional));
+            Assert.All(specification.InputPorts.Take(2), port => Assert.False(port.IsOptional));
+        }
+
         Assert.True(LocalStageCatalog.Instance.TryGetSpecification(LocalStage("unzip"), out StageSpecification? unzip));
         Assert.Equal(["left", "right"], unzip!.OutputPorts.Select(port => port.Id.Value));
 
@@ -284,6 +312,11 @@ public sealed class CatalogValidationTests
         Assert.Equal(
             ["out-0", "out-1", "out-2", "out-3", "out-4", "out-5", "out-6", "out-7"],
             broadcast!.OutputPorts.Select(port => port.Id.Value));
+
+        Assert.True(LocalStageCatalog.Instance.TryGetSpecification(LocalStage("merge"), out StageSpecification? merge));
+        Assert.Equal(
+            ["in-0", "in-1", "in-2", "in-3", "in-4", "in-5", "in-6", "in-7"],
+            merge!.InputPorts.Select(port => port.Id.Value));
     }
 
     [Fact]
@@ -334,6 +367,7 @@ public sealed class CatalogValidationTests
                 ["broadcast"] = "local-parameters",
                 ["buffer"] = "local-buffer-parameters",
                 ["collect"] = "local-collect-parameters",
+                ["concat"] = "local-parameters",
                 ["count"] = "local-parameters",
                 ["cycle"] = "local-parameters",
                 ["distinct"] = "local-distinct-parameters",
@@ -351,8 +385,10 @@ public sealed class CatalogValidationTests
                 ["from-factory"] = "local-parameters",
                 ["from-task"] = "local-parameters",
                 ["ignore"] = "local-parameters",
+                ["interleave"] = "local-interleave-parameters",
                 ["last"] = "local-parameters",
                 ["last-or-default"] = "local-parameters",
+                ["merge"] = "local-parameters",
                 ["never"] = "local-parameters",
                 ["queue"] = "local-buffer-parameters",
                 ["range"] = "local-range-parameters",
@@ -395,13 +431,21 @@ public sealed class CatalogValidationTests
         // graph's element typing; the compiler proves that instead.
         foreach (StageSpecification specification in LocalStageCatalog.Instance.Specifications)
         {
+            // A joining junction's inputs are the one place a local input port is named anything but "in"
+            // and the one place an input is optional, for the reason its mirror gives below.
+            bool join = specification.Stage.Stage.Value is "merge" or "concat" or "interleave";
+
             Assert.All(
                 specification.InputPorts,
                 port =>
                 {
-                    Assert.Equal("in", port.Id.Value);
+                    if (!join)
+                    {
+                        Assert.Equal("in", port.Id.Value);
+                        Assert.False(port.IsOptional);
+                    }
+
                     Assert.Equal(Contract("local-opaque"), port.ElementContract);
-                    Assert.False(port.IsOptional);
                 });
 
             // A junction's legs are the one place a local output port is named anything but "out" and the
@@ -459,6 +503,7 @@ public sealed class CatalogValidationTests
                 ["broadcast"] = 0,
                 ["buffer"] = 0,
                 ["collect"] = 1,
+                ["concat"] = 0,
                 ["count"] = 1,
                 ["cycle"] = 0,
                 ["distinct"] = 0,
@@ -476,8 +521,10 @@ public sealed class CatalogValidationTests
                 ["from-factory"] = 0,
                 ["from-task"] = 0,
                 ["ignore"] = 0,
+                ["interleave"] = 0,
                 ["last"] = 1,
                 ["last-or-default"] = 1,
+                ["merge"] = 0,
                 ["never"] = 0,
                 ["queue"] = 1,
                 ["range"] = 0,

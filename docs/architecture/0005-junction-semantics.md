@@ -75,12 +75,14 @@ Five rules hold for every junction, stated once:
   the default, because a merge that ends while an input still has elements
   discards them silently.
 - **Concat** gives demand only to the active input; inputs behind it are
-  not pulled at all, so a source that is expensive to start is not started
-  early. A failure on any input — active or not — fails the run at once
-  (rule 1 requires watching every leg, and the engine watches channels,
-  not sources; an unpulled registered source that fails at open fails when
-  it is opened, which for concat is when its turn comes — the difference
-  is stated rather than hidden).
+  not read at all until their turn. Corrected by checkpoint 2's
+  measurement rather than left standing: this engine launches every
+  segment, so a later input's source *runs* — up to its boundary's
+  capacity plus the one element in its hand — and a source that fails at
+  open fails the run at once, not at its turn. What concat withholds is
+  reads, and what that buys is backpressure on the waiting inputs, not
+  deferred startup; a deployment that needs a source untouched until its
+  turn expresses that in the source itself, not in the junction.
 - **Zip** completes eagerly on the first completed input: a zip missing a
   leg can never emit another row, and holding the other legs open would
   buffer forever for nobody. The N−1 held elements are the partial row

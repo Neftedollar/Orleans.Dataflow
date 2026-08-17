@@ -27,11 +27,12 @@ namespace Orleans.Dataflow.Authoring;
 /// which is what makes fusion the default and a queue something an author asked for.
 /// </para>
 /// <para>
-/// Three of the shapes are junctions: <see cref="Broadcast"/>, <see cref="Balance"/>, and
-/// <see cref="Unzip"/> each declare several output ports and each is a boundary on every one of them. A
-/// junction never fuses with anything, because its pump shape — one reader, several writers, and a rule
-/// about which of them must have room before it pulls — is the whole of what it is. Their contracts are
-/// ADR 0005's fan-out table, and the runtime holds them per junction rather than per graph.
+/// Six of the shapes are junctions. <see cref="Broadcast"/>, <see cref="Balance"/>, and <see cref="Unzip"/>
+/// each declare several output ports; <see cref="Merge"/>, <see cref="Concat"/>, and
+/// <see cref="Interleave"/> each declare several input ports. Every one of them is a boundary on every port
+/// it declares, and none of them fuses with anything, because a junction's pump shape — several channels on
+/// one side, one on the other, and a rule about which of them moves next — is the whole of what it is. Their
+/// contracts are ADR 0005's two tables, and the runtime holds them per junction rather than per graph.
 /// </para>
 /// <para>
 /// <see cref="SinkProbe"/> is the one shape no author-facing operator of this package builds: it is the
@@ -189,6 +190,25 @@ internal enum LocalStageKind
     /// output ports <c>left</c> and <c>right</c>.
     /// </summary>
     Unzip,
+
+    /// <summary>
+    /// Emits whichever input has an element, in rotation among the ready ones, and completes when every
+    /// input has; between two and <see cref="LocalVocabulary.MaxFanIn"/> input ports and one output port.
+    /// </summary>
+    Merge,
+
+    /// <summary>
+    /// Emits each input to its end in port order without reading the ones behind it, and completes when the
+    /// last one has; between two and <see cref="LocalVocabulary.MaxFanIn"/> input ports and one output port.
+    /// </summary>
+    Concat,
+
+    /// <summary>
+    /// Emits a declared number of elements from each input in fixed rotation, continuing over the remainder
+    /// when one completes; between two and <see cref="LocalVocabulary.MaxFanIn"/> input ports and one
+    /// output port.
+    /// </summary>
+    Interleave,
 
     /// <summary>Folds every element into a state value; one input port and one result port.</summary>
     Fold,

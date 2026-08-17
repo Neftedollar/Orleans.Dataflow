@@ -75,8 +75,28 @@ internal static class LocalVocabulary
     /// </remarks>
     internal const int MinFanOut = 2;
 
+    /// <summary>The greatest number of inputs a fan-in junction declares.</summary>
+    /// <remarks>
+    /// The mirror of <see cref="MaxFanOut"/> and the same number for the same reason: a stage specification
+    /// declares a port list rather than an arity, so a junction's inputs have to be ports that exist whether
+    /// or not a given document wires them, and the list has to stop somewhere. A graph that needs a ninth
+    /// input says so and gets a diagnostic instead of silently losing one.
+    /// </remarks>
+    internal const int MaxFanIn = 8;
+
+    /// <summary>The smallest number of inputs a fan-in junction declares.</summary>
+    /// <remarks>
+    /// Both of the first two ports are required, which is what makes "this is a junction" a fact the graph
+    /// compiler checks rather than a promise the author makes. A fan-in wired at one input is a chain
+    /// written the long way, and one wired at none is a source that produces nothing.
+    /// </remarks>
+    internal const int MinFanIn = 2;
+
     /// <summary>The prefix of every numbered fan-out port name.</summary>
     private const string FanOutPortPrefix = "out-";
+
+    /// <summary>The prefix of every numbered fan-in port name.</summary>
+    private const string FanInPortPrefix = "in-";
 
     /// <summary>The provider every local stage belongs to.</summary>
     internal static readonly ProviderId Provider = ProviderId.Create("local");
@@ -216,6 +236,18 @@ internal static class LocalVocabulary
     internal static readonly StageRef Unzip =
         StageRef.Create(Provider, StageId.Create("unzip"), StageRef.FirstMajorVersion);
 
+    /// <summary>The stage reference of a junction that emits whichever input has an element.</summary>
+    internal static readonly StageRef Merge =
+        StageRef.Create(Provider, StageId.Create("merge"), StageRef.FirstMajorVersion);
+
+    /// <summary>The stage reference of a junction that emits one input to its end before the next.</summary>
+    internal static readonly StageRef Concat =
+        StageRef.Create(Provider, StageId.Create("concat"), StageRef.FirstMajorVersion);
+
+    /// <summary>The stage reference of a junction that emits a declared number of elements per input.</summary>
+    internal static readonly StageRef Interleave =
+        StageRef.Create(Provider, StageId.Create("interleave"), StageRef.FirstMajorVersion);
+
     /// <summary>The stage reference of a folding sink.</summary>
     internal static readonly StageRef Fold =
         StageRef.Create(Provider, StageId.Create("fold"), StageRef.FirstMajorVersion);
@@ -334,6 +366,17 @@ internal static class LocalVocabulary
             ContractId.Create("local-distinct-parameters"),
             ContractReference.FirstMajorVersion);
 
+    /// <summary>The parameter contract an interleave declares.</summary>
+    /// <remarks>
+    /// The rotation's segment size is configuration and is written down; how many inputs the rotation runs
+    /// over is not, because the edges already say it. <see cref="LocalInterleaveParameters"/> owns the
+    /// shape.
+    /// </remarks>
+    internal static readonly ContractReference InterleaveParameterContract =
+        ContractReference.Create(
+            ContractId.Create("local-interleave-parameters"),
+            ContractReference.FirstMajorVersion);
+
     /// <summary>The parameter contract a collecting sink declares.</summary>
     /// <remarks>
     /// The bound on collected elements is configuration and is written down; the element type is not, for
@@ -377,6 +420,17 @@ internal static class LocalVocabulary
 
     /// <summary>The input ports of a source, which are none.</summary>
     private static readonly InputPortSpecification[] NoInputs = [];
+
+    /// <summary>The input ports a fan-in junction declares, in rotation order.</summary>
+    /// <remarks>
+    /// The mirror of <see cref="FanOutOutputs"/> and the same reasoning read backwards. The first two are
+    /// wired or the document does not validate; the rest are optional, which is the definition plane's own
+    /// spelling of "an input a graph may leave unwired", so the edges of the document are what say how many
+    /// inputs this junction joins. Ordinal order over the names is the order a concat consumes its inputs
+    /// in and the order an interleave rotates through them, which is why the port list and the rotation are
+    /// one statement rather than two.
+    /// </remarks>
+    private static readonly InputPortSpecification[] FanInInputs = FanInPorts();
 
     /// <summary>The output ports of every shape that produces one stream, which is the one element port.</summary>
     private static readonly OutputPortSpecification[] ElementOutput =
@@ -510,6 +564,9 @@ internal static class LocalVocabulary
         LocalStageKind.Broadcast => Broadcast,
         LocalStageKind.Balance => Balance,
         LocalStageKind.Unzip => Unzip,
+        LocalStageKind.Merge => Merge,
+        LocalStageKind.Concat => Concat,
+        LocalStageKind.Interleave => Interleave,
         LocalStageKind.Fold => Fold,
         LocalStageKind.Ignore => Ignore,
         LocalStageKind.ForEach => ForEach,
@@ -546,6 +603,7 @@ internal static class LocalVocabulary
         LocalStageKind.Range => RangeParameterContract,
         LocalStageKind.Distinct => DistinctParameterContract,
         LocalStageKind.Collect => CollectParameterContract,
+        LocalStageKind.Interleave => InterleaveParameterContract,
         LocalStageKind.FromEnumerable or
             LocalStageKind.Empty or
             LocalStageKind.Single or
@@ -563,6 +621,8 @@ internal static class LocalVocabulary
             LocalStageKind.Broadcast or
             LocalStageKind.Balance or
             LocalStageKind.Unzip or
+            LocalStageKind.Merge or
+            LocalStageKind.Concat or
             LocalStageKind.Where or
             LocalStageKind.Scan or
             LocalStageKind.TakeWhile or
@@ -603,6 +663,7 @@ internal static class LocalVocabulary
             _ when contract == RangeParameterContract => LocalRangeParameters.Validator,
             _ when contract == DistinctParameterContract => LocalDistinctParameters.Validator,
             _ when contract == CollectParameterContract => LocalCollectParameters.Validator,
+            _ when contract == InterleaveParameterContract => LocalInterleaveParameters.Validator,
             _ => null,
         };
     }
@@ -652,6 +713,9 @@ internal static class LocalVocabulary
         LocalStageKind.Broadcast or
             LocalStageKind.Balance or
             LocalStageKind.Unzip => LocalStagePlace.FanOut,
+        LocalStageKind.Merge or
+            LocalStageKind.Concat or
+            LocalStageKind.Interleave => LocalStagePlace.FanIn,
         LocalStageKind.Fold or
             LocalStageKind.Ignore or
             LocalStageKind.ForEach or
@@ -683,14 +747,24 @@ internal static class LocalVocabulary
 
     /// <summary>Returns the input ports an occurrence of <paramref name="kind"/> declares.</summary>
     /// <param name="kind">The stage shape.</param>
-    /// <returns>The one element input port, or an empty list for a source.</returns>
+    /// <returns>
+    /// The numbered inputs for a fan-in junction, the one element input port for every other consuming
+    /// shape, and an empty list for a source.
+    /// </returns>
     /// <exception cref="ArgumentOutOfRangeException"><paramref name="kind"/> is not a declared member.</exception>
     /// <remarks>
-    /// Every shape that consumes anything consumes one stream in this checkpoint, junctions included: a
-    /// fan-out has one input by definition, and the shapes that have several arrive with the fan-in pumps.
+    /// A fan-out has one input by definition and every operator and terminal has one because a branch is a
+    /// chain; the fan-in junctions are the only shapes whose answer is a list, and it is the same list for
+    /// all three because what differs between them is which input they read next rather than how many they
+    /// have.
     /// </remarks>
     internal static IReadOnlyList<InputPortSpecification> InputPortsOf(LocalStageKind kind) =>
-        ConsumesElements(kind) ? ElementInput : NoInputs;
+        PlaceOf(kind) switch
+        {
+            LocalStagePlace.Source => NoInputs,
+            LocalStagePlace.FanIn => FanInInputs,
+            _ => ElementInput,
+        };
 
     /// <summary>Returns the output ports an occurrence of <paramref name="kind"/> declares.</summary>
     /// <param name="kind">The stage shape.</param>
@@ -734,6 +808,35 @@ internal static class LocalVocabulary
     /// <returns>The port name, such as <c>out-0</c>.</returns>
     internal static PortId FanOutPort(int leg) =>
         PortId.Create(FanOutPortPrefix + leg.ToString(CultureInfo.InvariantCulture));
+
+    /// <summary>Builds the numbered input ports of a fan-in junction.</summary>
+    /// <returns>The ports, <see cref="MinFanIn"/> of them required and the rest optional.</returns>
+    /// <remarks>
+    /// Ordinal order over the names is the order a concat consumes and an interleave rotates in, and it is
+    /// where a merge's rotation starts. The number is formatted with the invariant culture for the reason
+    /// every identifier in this vocabulary is: a culture with non-ASCII digits would otherwise produce a
+    /// name the identifier grammar rejects.
+    /// </remarks>
+    private static InputPortSpecification[] FanInPorts()
+    {
+        InputPortSpecification[] ports = new InputPortSpecification[MaxFanIn];
+
+        for (int index = 0; index < ports.Length; index++)
+        {
+            ports[index] = InputPortSpecification.Create(
+                FanInPort(index),
+                ElementContract,
+                isOptional: index >= MinFanIn);
+        }
+
+        return ports;
+    }
+
+    /// <summary>Builds the name of one numbered fan-in port.</summary>
+    /// <param name="input">The zero-based position of the input.</param>
+    /// <returns>The port name, such as <c>in-0</c>.</returns>
+    internal static PortId FanInPort(int input) =>
+        PortId.Create(FanInPortPrefix + input.ToString(CultureInfo.InvariantCulture));
 
     /// <summary>Returns the result port an occurrence of <paramref name="kind"/> declares.</summary>
     /// <param name="kind">The stage shape.</param>

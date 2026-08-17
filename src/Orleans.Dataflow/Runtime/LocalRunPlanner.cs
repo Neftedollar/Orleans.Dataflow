@@ -32,21 +32,32 @@ namespace Orleans.Dataflow.Runtime;
 /// zero-padded numbering happens to make the two agree for the graphs it closes, but a document this type
 /// is handed by anything else has no such property, and a runtime that read the node list would execute
 /// such a document in the wrong order rather than reject it. Following edges is also what makes the shape
-/// check real: every shape this checkpoint cannot execute — two sources, a node fed by two others, a node
-/// that is not a junction feeding two, a cycle, a component nothing reaches — is rejected here, which is
-/// the defense that keeps the run loops free of cases they cannot execute.
+/// check real: every shape this checkpoint cannot execute — a node fed by two others that is not a fan-in,
+/// a node that is not a fan-out feeding two, two sources whose streams never meet, a cycle, a component
+/// nothing reaches — is rejected here, which is the defense that keeps the run loops free of cases they
+/// cannot execute.
 /// </para>
 /// <para>
-/// <b>Branches and fusion.</b> The graph is walked as branches: one from the source, and one more from
-/// every leg of every junction. A branch is cut into segments at boundaries and nowhere else, so adjacent
-/// synchronous stages end up in one segment and one loop, exactly as a whole linear graph does. A
-/// <c>buffer</c> declares the channel of the next cut; an asynchronous stage cuts and heads the segment
-/// that follows, whether it maps its elements or is the callback sink that ends the branch; a junction cuts
-/// and is its own segment, because its pump shape is what defines it. A buffer standing immediately before
-/// an asynchronous stage or a junction is that stage's own input channel, and a buffer standing
-/// immediately on a leg is that leg's own channel, rather than a second one with an empty relay segment
-/// between them — which is what an author who writes <c>Buffer(8)</c> there means, and it keeps the count
-/// of channels equal to the count of boundaries the author wrote.
+/// <b>Several sources are one graph exactly when they converge.</b> A document may begin in as many places
+/// as it has junctions to join them again: a walk starts at every node nothing feeds, and what makes those
+/// walks one run rather than several is that the whole document is one connected component. Two chains
+/// side by side in one document are still refused, and the refusal now says what is actually wrong with
+/// them — not that there are two sources, but that nothing joins what they feed, so one outcome would have
+/// to speak for two streams that never meet.
+/// </para>
+/// <para>
+/// <b>Branches and fusion.</b> The graph is walked as branches: one from every source, one from every leg
+/// of every fan-out, and one from below every fan-in. A branch is cut into segments at boundaries and
+/// nowhere else, so adjacent synchronous stages end up in one segment and one loop, exactly as a whole
+/// linear graph does. A <c>buffer</c> declares the channel of the next cut; an asynchronous stage cuts and
+/// heads the segment that follows, whether it maps its elements or is the callback sink that ends the
+/// branch; a junction cuts and is its own segment, because its pump shape is what defines it. A branch that
+/// runs into a fan-in ends there, and the junction itself is built by the last branch to arrive at it,
+/// because a pump that reads several channels cannot exist until every one of them does. A buffer standing
+/// immediately before an asynchronous stage or a junction is that stage's own input channel, and a buffer
+/// standing immediately below a junction is that junction's own output channel, rather than a second one
+/// with an empty relay segment between them — which is what an author who writes <c>Buffer(8)</c> there
+/// means, and it keeps the count of channels equal to the count of boundaries the author wrote.
 /// </para>
 /// <para>
 /// A linear document therefore plans to exactly the segments, channels and fusion it always did: one
@@ -101,55 +112,70 @@ internal static class LocalRunPlanner
         string runIdentity)
     {
         Dictionary<NodeId, StageNode> declarations = Declarations(document);
-        Dictionary<PortAddress, NodeId> downstream = new(document.Edges.Count);
+        Dictionary<PortAddress, GraphEdge> downstream = new(document.Edges.Count);
         Dictionary<NodeId, List<GraphEdge>> leaving = new(document.Nodes.Count);
-        HashSet<NodeId> fed = new(document.Edges.Count);
+        Dictionary<NodeId, List<GraphEdge>> arriving = new(document.Nodes.Count);
 
         foreach (GraphEdge edge in document.Edges)
         {
-            if (!downstream.TryAdd(edge.From, edge.To.Node))
+            if (!downstream.TryAdd(edge.From, edge))
             {
                 throw Foreign($"the port '{edge.From}' feeds more than one node");
             }
 
-            if (!fed.Add(edge.To.Node))
-            {
-                throw Foreign($"the node '{edge.To.Node}' is fed by more than one node");
-            }
+            Attach(leaving, edge.From.Node, edge);
+            Attach(arriving, edge.To.Node, edge);
+        }
 
-            if (leaving.TryGetValue(edge.From.Node, out List<GraphEdge>? edges))
+        // Read over the document's own node order rather than over a dictionary, so that a document with
+        // two of these says the same thing every time it is refused.
+        foreach (StageNode fed in document.Nodes)
+        {
+            if (arriving.TryGetValue(fed.Id, out List<GraphEdge>? into) && into.Count > 1 && !Joins(fed.Id))
             {
-                edges.Add(edge);
-            }
-            else
-            {
-                leaving.Add(edge.From.Node, [edge]);
+                throw Foreign(
+                    $"the node '{fed.Id}' is fed by more than one node, and joining several streams is what a fan-in junction is for");
             }
         }
 
-        NodeId head = Head(document, fed);
+        List<NodeId> heads = Heads(document, arriving);
         List<LocalSegment> segments = [];
         List<LocalBoundary> boundaries = [];
         List<int> producers = [];
         List<Sink> sinks = [];
         List<int> completesAtStart = [];
         Dictionary<NodeId, (LocalIngressQueue? Queue, object Handle)> controls = [];
+        Dictionary<NodeId, int[]> joined = [];
         HashSet<NodeId> walked = new(document.Nodes.Count);
-        Queue<(NodeId Start, int Input)> branches = new();
+        Queue<(NodeId Start, int Input, PortId Entry)> branches = new();
 
-        branches.Enqueue((head, -1));
+        for (int index = 0; index < heads.Count; index++)
+        {
+            branches.Enqueue((heads[index], -1, LocalVocabulary.InputPort));
+        }
 
         while (branches.Count > 0)
         {
-            (NodeId start, int input) = branches.Dequeue();
+            (NodeId start, int input, PortId entry) = branches.Dequeue();
 
-            Branch(start, input);
+            Branch(start, input, entry);
         }
 
         if (walked.Count != document.Nodes.Count)
         {
+            // A cycle is what this usually is, and it is refused here rather than by a rule of its own:
+            // every node of a cycle is fed, so no walk from a source reaches one, and a fan-in whose inputs
+            // a cycle feeds is never built at all because the last of its arrivals never comes.
             throw Foreign(
-                $"its {document.Nodes.Count} nodes do not form one graph, and following the edges from '{head}' reached {walked.Count} of them");
+                $"its {document.Nodes.Count} nodes do not form one graph, and following the edges from its sources reached {walked.Count} of them");
+        }
+
+        if (Separated(document, leaving, arriving, heads) is { } split)
+        {
+            throw Foreign(
+                split.Begins
+                    ? $"both '{split.First}' and '{split.Other}' begin a chain and no junction joins what they feed, so it is two runs written in one document"
+                    : $"no path of edges joins '{split.First}' to '{split.Other}', so it is two runs written in one document");
         }
 
         for (int index = 0; index < segments.Count; index++)
@@ -175,9 +201,9 @@ internal static class LocalRunPlanner
         return new LocalRunPlan(segments, boundaries, producers, endings, declared, completesAtStart);
 
         // Compiles one maximal junction-free chain, from the node that begins it to the terminal or the
-        // junction that ends it. The head branch begins at the source and reads no channel; every other
-        // branch begins on a leg and reads the channel that leg is.
-        void Branch(NodeId start, int input)
+        // junction that ends it. A head branch begins at a source and reads no channel; every other branch
+        // begins on a leg or below a junction and reads the channel that boundary is.
+        void Branch(NodeId start, int input, PortId entry)
         {
             LocalSource? elements = null;
             LocalAsyncStage? asynchronous = null;
@@ -189,13 +215,25 @@ internal static class LocalRunPlanner
             bool produces = false;
             List<int> inputs = input < 0 ? [] : [input];
             NodeId current = start;
+            PortId port = entry;
 
             while (true)
             {
+                // A joining junction ends this branch wherever it stands, including at the very first node
+                // of one: what a branch hands it is a channel, and which of its inputs that channel is is
+                // said by the port this branch arrived at.
+                if (Joins(current))
+                {
+                    Meet(declarations[current], port);
+
+                    return;
+                }
+
                 // Refused rather than skipped, because skipping would leave the channel this branch was
                 // entered on with nobody reading it, and a channel nobody reads is a run that waits
                 // forever. It is unreachable for a document whose nodes each have at most one edge into
-                // them, which is checked above; this is what keeps that reasoning from being load-bearing.
+                // them unless they join several, which is checked above; this is what keeps that reasoning
+                // from being load-bearing.
                 if (!walked.Add(current))
                 {
                     throw Foreign($"the node '{current}' is reached from more than one place");
@@ -206,7 +244,7 @@ internal static class LocalRunPlanner
                 // What a shape may be is decided by what the document connects it to and not by a position
                 // in a list, because a graph has no single list to count along. For a chain the two agree
                 // exactly: the node nothing feeds is the first and the node that feeds nothing is the last.
-                bool first = !fed.Contains(current);
+                bool first = !arriving.ContainsKey(current);
                 bool last = !leaving.ContainsKey(current);
                 int position = walked.Count;
 
@@ -518,6 +556,7 @@ internal static class LocalRunPlanner
                         elements,
                         asynchronous,
                         fanOut: null,
+                        fanIn: null,
                         [.. stages],
                         terminal,
                         inputs,
@@ -536,6 +575,7 @@ internal static class LocalRunPlanner
                 }
 
                 current = onwards[0].To.Node;
+                port = onwards[0].To.Port;
             }
 
             // Adds one synchronous stage to the segment under construction, opening the segment a pending
@@ -563,6 +603,7 @@ internal static class LocalRunPlanner
                     elements,
                     asynchronous,
                     fanOut: null,
+                    fanIn: null,
                     [.. stages],
                     terminal: null,
                     inputs,
@@ -601,10 +642,10 @@ internal static class LocalRunPlanner
                 }
             }
 
-            // Ends this branch at a junction. The junction is a segment of its own, because its pump shape
-            // is what it is and nothing fuses with it: whatever was under construction is closed at a
-            // boundary first, the legs are allocated in the specification's port order — which is rotation
-            // order — and one branch is queued behind each of them.
+            // Ends this branch at a splitting junction. The junction is a segment of its own, because its
+            // pump shape is what it is and nothing fuses with it: whatever was under construction is closed
+            // at a boundary first, the legs are allocated in the specification's port order — which is
+            // rotation order — and one branch is queued behind each of them.
             void Split(StageNode node, LocalStageKind kind, LocalFanOut junction)
             {
                 Open(pending ?? LocalBoundary.Handoff);
@@ -612,22 +653,22 @@ internal static class LocalRunPlanner
                 int segment = segments.Count;
                 IReadOnlyList<OutputPortSpecification> ports = LocalVocabulary.OutputPortsOf(kind);
                 List<int> legs = [];
-                List<(NodeId Start, int Input)> queued = [];
+                List<(NodeId Start, int Input, PortId Entry)> queued = [];
 
-                for (int port = 0; port < ports.Count; port++)
+                for (int leg = 0; leg < ports.Count; leg++)
                 {
-                    if (!downstream.TryGetValue(PortAddress.Create(node.Id, ports[port].Id), out NodeId target))
+                    if (!downstream.TryGetValue(PortAddress.Create(node.Id, ports[leg].Id), out GraphEdge onwards))
                     {
                         continue;
                     }
 
-                    (LocalBoundary boundary, NodeId begins) = Leg(target);
+                    (LocalBoundary boundary, NodeId begins, PortId entered) = Below(onwards);
                     int channel = boundaries.Count;
 
                     boundaries.Add(boundary);
                     producers.Add(segment);
                     legs.Add(channel);
-                    queued.Add((begins, channel));
+                    queued.Add((begins, channel, entered));
                 }
 
                 if (legs.Count != leaving[node.Id].Count)
@@ -652,6 +693,7 @@ internal static class LocalRunPlanner
                     elements: null,
                     async: null,
                     junction,
+                    fanIn: null,
                     [],
                     terminal: null,
                     inputs,
@@ -663,59 +705,274 @@ internal static class LocalRunPlanner
                     branches.Enqueue(queued[leg]);
                 }
             }
+
+            // Ends this branch at a joining junction, and builds that junction when this is the last branch
+            // to arrive at it. Everything under construction is closed at a boundary first, exactly as it
+            // is at a splitting junction; the channel that closing produced is the input this branch feeds,
+            // and which input that is is the port the branch arrived at. The junction cannot be built any
+            // earlier than the last arrival, because a pump that reads several channels needs all of them.
+            void Meet(StageNode node, PortId entry)
+            {
+                Open(pending ?? LocalBoundary.Handoff);
+
+                if (inputs.Count == 0)
+                {
+                    throw Foreign(
+                        $"the junction '{node.Id}' is fed by nothing at the port '{entry}', and a junction joins at least {LocalVocabulary.MinFanIn} inputs");
+                }
+
+                LocalStageKind kind = bindings[node.Id].Kind;
+                IReadOnlyList<InputPortSpecification> ports = LocalVocabulary.InputPortsOf(kind);
+                int arrival = -1;
+
+                for (int input = 0; input < ports.Count && arrival < 0; input++)
+                {
+                    if (ports[input].Id == entry)
+                    {
+                        arrival = input;
+                    }
+                }
+
+                if (arrival < 0)
+                {
+                    throw Foreign(
+                        $"the junction '{node.Id}' is wired at a port the stage '{node.Stage}' does not declare as an input");
+                }
+
+                if (!joined.TryGetValue(node.Id, out int[]? arrived))
+                {
+                    arrived = new int[ports.Count];
+
+                    Array.Fill(arrived, -1);
+                    joined.Add(node.Id, arrived);
+                }
+
+                if (arrived[arrival] >= 0)
+                {
+                    throw Foreign($"the junction '{node.Id}' is reached at the port '{entry}' from more than one place");
+                }
+
+                arrived[arrival] = inputs[0];
+
+                List<int> streams = [];
+
+                for (int input = 0; input < arrived.Length; input++)
+                {
+                    if (arrived[input] >= 0)
+                    {
+                        streams.Add(arrived[input]);
+                    }
+                }
+
+                if (streams.Count != arriving[node.Id].Count)
+                {
+                    return;
+                }
+
+                if (streams.Count < LocalVocabulary.MinFanIn)
+                {
+                    throw Foreign(
+                        $"the junction '{node.Id}' joins {streams.Count} of its inputs, and a junction joins at least {LocalVocabulary.MinFanIn}");
+                }
+
+                if (!leaving.TryGetValue(node.Id, out List<GraphEdge>? onwards) || onwards.Count != 1)
+                {
+                    throw Foreign(
+                        $"the junction '{node.Id}' feeds {onwards?.Count ?? 0} nodes, and a joining junction feeds exactly one");
+                }
+
+                _ = walked.Add(node.Id);
+
+                int segment = segments.Count;
+                (LocalBoundary boundary, NodeId begins, PortId entered) = Below(onwards[0]);
+                int channel = boundaries.Count;
+
+                boundaries.Add(boundary);
+                producers.Add(segment);
+                segments.Add(new LocalSegment(
+                    elements: null,
+                    async: null,
+                    fanOut: null,
+                    Joining(node, kind),
+                    [],
+                    terminal: null,
+                    streams,
+                    [channel],
+                    -1));
+                branches.Enqueue((begins, channel, entered));
+            }
         }
 
-        // Reads the boundary one leg of a junction gets and where the branch behind it begins. A buffer
-        // standing immediately on a leg is that leg's own channel rather than a second one behind an
-        // implicit handoff, which is the rule a buffer in front of an asynchronous stage already follows
-        // and what keeps "total memory is the sum of the declared capacities" true across a junction.
-        (LocalBoundary Boundary, NodeId Start) Leg(NodeId target)
+        // Reads the boundary the channel below one port of a junction gets, and where the branch behind it
+        // begins. A buffer standing immediately below a junction — on a leg of a fan-out, or under the one
+        // output of a fan-in — is that channel rather than a second one behind an implicit handoff, which
+        // is the rule a buffer in front of an asynchronous stage already follows and what keeps "total
+        // memory is the sum of the declared capacities" true across a junction.
+        (LocalBoundary Boundary, NodeId Start, PortId Entry) Below(GraphEdge onwards)
         {
+            NodeId target = onwards.To.Node;
+
             if (!bindings.TryGetValue(target, out LocalStageDescriptor? buffer) ||
                 buffer.Kind is not LocalStageKind.Buffer ||
                 !leaving.TryGetValue(target, out List<GraphEdge>? edges) ||
                 edges.Count != 1)
             {
-                return (LocalBoundary.Handoff, target);
+                return (LocalBoundary.Handoff, target, onwards.To.Port);
             }
 
             _ = walked.Add(target);
 
-            return (Boundary(declarations[target]), edges[0].To.Node);
+            return (Boundary(declarations[target]), edges[0].To.Node, edges[0].To.Port);
+        }
+
+        // Reports whether a node is a joining junction, which is the one shape a branch ends at without
+        // being walked: it is walked by whichever branch arrives at it last.
+        bool Joins(NodeId node) =>
+            bindings.TryGetValue(node, out LocalStageDescriptor? descriptor) &&
+            LocalVocabulary.PlaceOf(descriptor.Kind) is LocalStagePlace.FanIn;
+
+        // Builds the strategy of one joining junction. The rotation's segment size is read from the
+        // document rather than from the binding, for the reason every number is: what the catalog validates
+        // has to be exactly what the runtime executes.
+        LocalFanIn Joining(StageNode node, LocalStageKind kind) => kind switch
+        {
+            LocalStageKind.Merge => LocalFanIn.Merge(),
+            LocalStageKind.Concat => LocalFanIn.Concat(),
+            _ => LocalFanIn.Interleave(Interleaved(node)),
+        };
+    }
+
+    /// <summary>Adds one edge to the list a node keeps of the edges on one of its sides.</summary>
+    /// <param name="edges">The table being built, of edges leaving nodes or of edges arriving at them.</param>
+    /// <param name="node">The node the edge belongs to on that side.</param>
+    /// <param name="edge">The edge.</param>
+    /// <remarks>
+    /// Both directions of the document are indexed, and both are needed: the downstream one is the walk,
+    /// and the upstream one is what says whether a node is fed by more than one stream and how many
+    /// arrivals a junction is waiting for.
+    /// </remarks>
+    private static void Attach(Dictionary<NodeId, List<GraphEdge>> edges, NodeId node, GraphEdge edge)
+    {
+        if (edges.TryGetValue(node, out List<GraphEdge>? attached))
+        {
+            attached.Add(edge);
+        }
+        else
+        {
+            edges.Add(node, [edge]);
         }
     }
 
-    /// <summary>Finds the one node a document's edges begin at.</summary>
+    /// <summary>Finds the nodes a document's edges begin at.</summary>
     /// <param name="document">The document being compiled.</param>
-    /// <param name="fed">The nodes some edge terminates at.</param>
-    /// <returns>The identifier of the node nothing feeds.</returns>
-    /// <exception cref="InvalidOperationException">There is not exactly one such node.</exception>
+    /// <param name="arriving">The edges terminating at each node that some edge terminates at.</param>
+    /// <returns>The identifiers of the nodes nothing feeds, in the document's own node order.</returns>
+    /// <exception cref="InvalidOperationException">There is no such node.</exception>
     /// <remarks>
-    /// One source and no more, in this checkpoint. Two sources are not a fan-in — they are two runs written
-    /// in one document, whose elements never meet — and executing them as one would give a single outcome
-    /// to two independent streams. The junctions that really do join several inputs arrive with the fan-in
-    /// pump, and the refusal is what keeps this checkpoint's promise honest until they do.
+    /// Several sources are legal now that junctions can join them, and the check that used to live here —
+    /// exactly one head — has moved to where the real question is: not how many places a document begins
+    /// in, but whether what they feed ever meets. A document with no head at all is still refused here,
+    /// because every one of its nodes is fed by another and a run of it could never start; that is what a
+    /// document which is nothing but a cycle looks like from this end.
     /// </remarks>
-    private static NodeId Head(GraphDocument document, HashSet<NodeId> fed)
+    private static List<NodeId> Heads(GraphDocument document, Dictionary<NodeId, List<GraphEdge>> arriving)
     {
-        NodeId? head = null;
+        List<NodeId> heads = [];
 
         foreach (StageNode node in document.Nodes)
         {
-            if (fed.Contains(node.Id))
+            if (!arriving.ContainsKey(node.Id))
             {
-                continue;
+                heads.Add(node.Id);
             }
-
-            if (head is not null)
-            {
-                throw Foreign($"both '{head}' and '{node.Id}' begin a chain");
-            }
-
-            head = node.Id;
         }
 
-        return head ?? throw Foreign("no node begins a chain");
+        return heads.Count > 0 ? heads : throw Foreign("no node begins a chain");
+    }
+
+    /// <summary>Finds two nodes of a document that no path of edges joins.</summary>
+    /// <param name="document">The document being compiled.</param>
+    /// <param name="leaving">The edges leaving each node that has any.</param>
+    /// <param name="arriving">The edges arriving at each node that has any.</param>
+    /// <param name="heads">The nodes nothing feeds, of which there is at least one.</param>
+    /// <returns>
+    /// The two nodes and whether the second of them begins a chain, or <see langword="null"/> when the
+    /// document is one connected component.
+    /// </returns>
+    /// <remarks>
+    /// <para>
+    /// The check that replaced "exactly one source". Following the edges downstream from every head reaches
+    /// every node of a graph whose sources converge and of one whose sources do not, so reachability alone
+    /// cannot tell the two apart; what tells them apart is whether the document is connected when the edges
+    /// are read in both directions, which is exactly "do these streams ever meet".
+    /// </para>
+    /// <para>
+    /// The second node is a head whenever one is available, because that is the honest way to describe two
+    /// chains side by side: each of them begins something the other never reaches. The fallback names
+    /// whatever node was not reached instead of asserting that a head must exist, so that the reasoning
+    /// about why one always does is not load-bearing.
+    /// </para>
+    /// </remarks>
+    private static (NodeId First, NodeId Other, bool Begins)? Separated(
+        GraphDocument document,
+        Dictionary<NodeId, List<GraphEdge>> leaving,
+        Dictionary<NodeId, List<GraphEdge>> arriving,
+        List<NodeId> heads)
+    {
+        HashSet<NodeId> reached = [heads[0]];
+        Queue<NodeId> pending = new();
+
+        pending.Enqueue(heads[0]);
+
+        while (pending.Count > 0)
+        {
+            NodeId node = pending.Dequeue();
+
+            if (leaving.TryGetValue(node, out List<GraphEdge>? onwards))
+            {
+                for (int index = 0; index < onwards.Count; index++)
+                {
+                    if (reached.Add(onwards[index].To.Node))
+                    {
+                        pending.Enqueue(onwards[index].To.Node);
+                    }
+                }
+            }
+
+            if (arriving.TryGetValue(node, out List<GraphEdge>? into))
+            {
+                for (int index = 0; index < into.Count; index++)
+                {
+                    if (reached.Add(into[index].From.Node))
+                    {
+                        pending.Enqueue(into[index].From.Node);
+                    }
+                }
+            }
+        }
+
+        if (reached.Count == document.Nodes.Count)
+        {
+            return null;
+        }
+
+        for (int index = 0; index < heads.Count; index++)
+        {
+            if (!reached.Contains(heads[index]))
+            {
+                return (heads[0], heads[index], true);
+            }
+        }
+
+        foreach (StageNode node in document.Nodes)
+        {
+            if (!reached.Contains(node.Id))
+            {
+                return (heads[0], node.Id, false);
+            }
+        }
+
+        return null;
     }
 
     /// <summary>Resolves a node no local behavior is bound to through the runtime-factory seam.</summary>
@@ -824,6 +1081,21 @@ internal static class LocalRunPlanner
             ? new LocalIngressQueue(options!.Capacity, options.OverflowPolicy)
             : throw Foreign(
                 $"the queue '{node.Id}' carries parameters this runtime cannot read: {string.Join("; ", violations)}");
+
+    /// <summary>Reads an interleave node's payload as the segment size it declares.</summary>
+    /// <param name="node">The node as the document declares it.</param>
+    /// <returns>The number of elements the rotation takes from one input before moving on.</returns>
+    /// <exception cref="InvalidOperationException">The payload is not an interleave payload.</exception>
+    /// <remarks>
+    /// The one number a junction carries, read from the document for the reason every number is read from
+    /// it: a segment size that lived only in the binding table would make two graphs that produce different
+    /// sequences look identical, and a hand-built document's segment size would be decoration.
+    /// </remarks>
+    private static int Interleaved(StageNode node) =>
+        LocalInterleaveParameters.TryRead(node.Parameters, out int segmentSize, out IReadOnlyList<string> violations)
+            ? segmentSize
+            : throw Foreign(
+                $"the interleave '{node.Id}' carries parameters this runtime cannot read: {string.Join("; ", violations)}");
 
     /// <summary>Reads a distinct node's payload as the key bound it declares.</summary>
     /// <param name="node">The node as the document declares it.</param>

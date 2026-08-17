@@ -11,10 +11,11 @@ namespace Orleans.Dataflow.Authoring;
 /// catalog and the authoring occurrence read their port lists from it rather than each declaring its own.
 /// </para>
 /// <para>
-/// <see cref="FanOut"/> is the fourth, and it is what makes a graph more than a chain: one input and several
-/// outputs, each of which begins a branch of its own. It is a place rather than a flag because a shape's
-/// place is exactly the question "what ports does it have", and a junction's answer is a list rather than a
-/// single port.
+/// <see cref="FanOut"/> and <see cref="FanIn"/> are the fourth and the fifth, and they are what make a graph
+/// more than a chain: one splits a chain into branches and the other joins branches into one. They are
+/// places rather than flags because a shape's place is exactly the question "what ports does it have", and a
+/// junction's answer is a list rather than a single port — on the output side for one of them and on the
+/// input side for the other.
 /// </para>
 /// </remarks>
 internal enum LocalStagePlace
@@ -30,4 +31,7 @@ internal enum LocalStagePlace
 
     /// <summary>Splits a chain: one input port and several output ports, each one the head of a branch.</summary>
     FanOut,
+
+    /// <summary>Joins chains: several input ports, each one the end of a branch, and one output port.</summary>
+    FanIn,
 }

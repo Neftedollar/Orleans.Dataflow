@@ -12,19 +12,20 @@ namespace Orleans.Dataflow.Runtime;
 /// runs precisely as it did before buffers existed, whether it is the whole graph or one branch of one.
 /// </para>
 /// <para>
-/// At most one of <see cref="Elements"/>, <see cref="Async"/>, and <see cref="FanOut"/> is set, and only
-/// for the segments that have a head of their own: the segment at the head of the graph pulls from a
-/// sequence, a segment that begins at an asynchronous stage drives that stage, a junction segment is the
-/// junction and nothing else, and every other segment simply reads its input channel.
-/// <see cref="Terminal"/> is set on a segment that ends a branch and only when the sink there has something
-/// to do with an element.
+/// At most one of <see cref="Elements"/>, <see cref="Async"/>, <see cref="FanOut"/>, and
+/// <see cref="FanIn"/> is set, and only for the segments that have a head of their own: a segment at a head
+/// of the graph pulls from a sequence, a segment that begins at an asynchronous stage drives that stage, a
+/// junction segment is the junction and nothing else, and every other segment simply reads its input
+/// channel. <see cref="Terminal"/> is set on a segment that ends a branch and only when the sink there has
+/// something to do with an element.
 /// </para>
 /// <para>
 /// <see cref="Inputs"/> and <see cref="Outputs"/> are what make the plan a graph rather than a line. A
 /// segment's position in the plan named both of them when a plan was one chain; now a segment says which
-/// channels it reads and which it writes, the head reads none, an ending writes none, and a junction writes
-/// several. Nothing else about a channel changed — the policies, the offer discipline, and the closing on
-/// completion are the boundary machinery they always were, and only the way one is found is new.
+/// channels it reads and which it writes, a head reads none, an ending writes none, a fan-out writes
+/// several, and a fan-in reads several. Nothing else about a channel changed — the policies, the offer
+/// discipline, and the closing on completion are the boundary machinery they always were, and only the way
+/// one is found is new.
 /// </para>
 /// </remarks>
 internal sealed class LocalSegment
@@ -32,16 +33,18 @@ internal sealed class LocalSegment
     /// <summary>Initializes a new instance of the <see cref="LocalSegment"/> class.</summary>
     /// <param name="elements">The factory of the sequence to pull from, or <see langword="null"/>.</param>
     /// <param name="async">The asynchronous stage that heads this segment, or <see langword="null"/>.</param>
-    /// <param name="fanOut">The junction this segment is, or <see langword="null"/>.</param>
+    /// <param name="fanOut">The splitting junction this segment is, or <see langword="null"/>.</param>
+    /// <param name="fanIn">The joining junction this segment is, or <see langword="null"/>.</param>
     /// <param name="stages">The fused synchronous stages, in flow order.</param>
     /// <param name="terminal">What the branch's terminal does with an element, or <see langword="null"/>.</param>
-    /// <param name="inputs">The channels this segment reads, which is one of them or none.</param>
+    /// <param name="inputs">The channels this segment reads, which is one, none, or a junction's inputs.</param>
     /// <param name="outputs">The channels this segment writes, which is none, one, or a junction's legs.</param>
     /// <param name="ending">The ending this segment settles, or minus one when it is not the end of a branch.</param>
     internal LocalSegment(
         LocalSource? elements,
         LocalAsyncStage? async,
         LocalFanOut? fanOut,
+        LocalFanIn? fanIn,
         IReadOnlyList<LocalElementStage> stages,
         LocalTerminal? terminal,
         IReadOnlyList<int> inputs,
@@ -51,6 +54,7 @@ internal sealed class LocalSegment
         Elements = elements;
         Async = async;
         FanOut = fanOut;
+        FanIn = fanIn;
         Stages = stages;
         Terminal = terminal;
         Inputs = inputs;
@@ -75,8 +79,8 @@ internal sealed class LocalSegment
     /// <value>The stage, or <see langword="null"/> when this segment has no asynchronous head.</value>
     internal LocalAsyncStage? Async { get; }
 
-    /// <summary>Gets the junction this segment is.</summary>
-    /// <value>The strategy, or <see langword="null"/> for every segment that is not a junction.</value>
+    /// <summary>Gets the splitting junction this segment is.</summary>
+    /// <value>The strategy, or <see langword="null"/> for every segment that is not a fan-out.</value>
     /// <remarks>
     /// A junction never fuses with anything, so a segment that has one has no stages and no terminal: its
     /// whole work is to read one channel and place what it read into several, under the rule its strategy
@@ -84,6 +88,17 @@ internal sealed class LocalSegment
     /// function from an element to an element, and a junction is a shape of loop.
     /// </remarks>
     internal LocalFanOut? FanOut { get; }
+
+    /// <summary>Gets the joining junction this segment is.</summary>
+    /// <value>The strategy, or <see langword="null"/> for every segment that is not a fan-in.</value>
+    /// <remarks>
+    /// The mirror of <see cref="FanOut"/> and a separate member rather than a shared one, because the two
+    /// are two shapes of loop rather than two settings of one: a fan-out reads one channel and writes
+    /// several, a fan-in reads several and writes one, and there is no pass of either loop that could be
+    /// written once for both. Everything a junction has in common with a junction — never fusing, holding
+    /// one element, parking between elements — is stated in <see cref="LocalRun"/> once all the same.
+    /// </remarks>
+    internal LocalFanIn? FanIn { get; }
 
     /// <summary>Gets the fused synchronous stages this segment applies, in flow order.</summary>
     /// <value>
@@ -103,13 +118,14 @@ internal sealed class LocalSegment
 
     /// <summary>Gets the channels this segment reads from.</summary>
     /// <value>
-    /// The one channel a downstream segment reads, or an empty list for the segment at the head of the
-    /// graph, which reads a sequence instead.
+    /// The one channel a downstream segment reads, one per input for a fan-in junction, or an empty list
+    /// for a segment at a head of the graph, which reads a sequence instead.
     /// </value>
     /// <remarks>
     /// A list rather than a single value because the fan-in pumps read several, and because the propagation
     /// of a completed stream walks exactly this list: a segment that stops closes every channel it was
-    /// reading, which is what releases a producer parked in a full one.
+    /// reading, which is what releases a producer parked in a full one. For a fan-in that is also what
+    /// releases the sources of the inputs whose turn had not come.
     /// </remarks>
     internal IReadOnlyList<int> Inputs { get; }
 

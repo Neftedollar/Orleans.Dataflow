@@ -73,10 +73,10 @@ public sealed class MaterializationTests
     public async Task MaterializeAsyncRejectsADocumentThatIsTwoChains()
     {
         // Two independent source-to-sink chains validate against the catalog perfectly well: every port is
-        // connected and every capability is declared. Only the runtime refuses, and it refuses for a
-        // reason branching does not weaken: two sources are not a fan-in but two runs written in one
-        // document, whose elements never meet and whose single outcome would say nothing true about
-        // either.
+        // connected and every capability is declared. Only the runtime refuses, and it refuses for a reason
+        // the fan-in junctions did not weaken: several sources are legal exactly when they converge, and
+        // these two never do, so a single outcome would have to say something true about two streams whose
+        // elements never meet.
         GraphDocument document = Document(
             [
                 Node("stage-1", "from-enumerable"),

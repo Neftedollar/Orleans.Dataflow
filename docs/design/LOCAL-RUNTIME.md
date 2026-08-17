@@ -352,8 +352,8 @@ depended on the plan being linear — and a probe attaches to an edge.
 1. **DAG plan and fan-out** — *as implemented, see below*: edge-keyed channels,
    multiple terminals, broadcast/balance/unzip, multiple named result slots
    resolving per-terminal. Proves the plan model and the FanOut pump.
-2. **Simple fan-in**: merge, concat, interleave — the FanIn pump with
-   strategies that never hold a partial row.
+2. **Simple fan-in** — *as implemented, see below*: merge, concat, interleave —
+   the FanIn pump with strategies that never hold a partial row.
 3. **Row-building fan-in**: zip and combine-latest — held rows, eager
    completion for zip, frozen-leg semantics for combine-latest.
 4. **Partition and cycles**: the routed-element hold, out-of-range
@@ -445,3 +445,142 @@ component nothing reaches. Pause, shutdown, and cancellation are proven to work
 across a fan-out rather than proven in general — the control-plane
 generalization is checkpoint 5, and the pause of a branching run is claimed here
 only as "it comes to rest and moves again".
+
+## M4.1 checkpoint 2 (simple fan-in) — as implemented
+
+The plan above is what was built; what follows is where it needed a decision it
+did not already contain, where it turned out to be describing something the
+engine cannot quite mean, and what this checkpoint does not do.
+
+**Several sources are one graph exactly when they converge.** The planner's
+old rule was "exactly one node begins a chain", and the rule that replaced it
+is not "any number of them" but connectivity: a walk starts at every node
+nothing feeds, and the document has to be one component when its edges are read
+in both directions. Two chains side by side still fail, and the diagnostic now
+says what is actually wrong with them — not that there are two sources, but
+that no junction joins what they feed, so one outcome would have to speak for
+two streams that never meet. Reachability alone could not have told the two
+apart, because following the edges from every head reaches every node of both.
+
+Three refusals are the whole of what stays forbidden. A node fed by more than
+one stream that is not a fan-in — the shape a chain cannot execute, now stated
+against the binding rather than against the edge count alone. A component
+nothing joins. And a cycle, which is refused exactly as it was before and for a
+sharper reason than before: every node of a cycle is fed, so no walk from a
+source reaches one, and a fan-in whose input a cycle feeds is never built at
+all, because the last of its arrivals never comes. Cycles stay checkpoint 4.
+
+**A junction is built by the last branch that arrives at it.** A pump that
+reads several channels cannot exist until every one of them does, so a branch
+that runs into a fan-in ends there, closes whatever it was building at a
+boundary, and records that channel against the port it arrived at; the arrival
+that fills the last declared input is the one that allocates the segment. Which
+input a channel is is therefore stated by the port an edge terminates at and by
+nothing else — the mirror of a leg being stated by the port an edge leaves.
+Both buffers behave the way a buffer in front of an asynchronous stage does: one
+written immediately before a junction is that input's own channel, and one
+written immediately below it is the junction's output channel, rather than a
+second channel with an empty relay segment between them.
+
+**The FanIn pump asks for room and then reads,** which is the mirror of the
+fan-out rule and is again both the demand rule and the held-element bound: the
+one element such a junction holds outside a declared buffer is the one it is
+placing, because it never takes an element out of an input it has nowhere to put.
+That is one number rather than an argument, and it is counted the way the buffer
+suite counts — the greatest number of elements a run held at once, read after
+the run is over rather than sampled at a moment that might have been one step
+early. A junction that read first and waited afterwards holds one more, and
+every bounded-memory test in the fan-in suite reports that difference.
+
+**The three strategies are three answers to one question.** A merge scans from
+a cursor for an input that has something and moves the cursor past the one it
+took, which is round-robin among the ready ones: a producer that is merely
+faster cannot keep an element that has already arrived at another input
+waiting, and a junction that scanned in port order every time would starve
+every input behind an input that never runs dry. When nothing is ready it waits
+on every live input at once, with the waits cached per input for the reason the
+fan-out caches its room-waits — a wait-any abandons the tasks it did not pick,
+and abandoning a channel waiter per pass is a leak the channel remembers. A
+concat reads one input to its end and moves to the next. An interleave reads a
+declared number of elements from the input whose turn it is, waiting for that
+input even when another has something ready; that head-of-line wait is what its
+segment size buys, and it makes the output a function of the inputs rather than
+of the scheduler. A completed input leaves the rotation and the remainder
+continues in order. All three end when the last of their inputs has ended.
+
+**Failure needed no code at all.** ADR 0005's first shared rule — an input's
+failure fails the run whether or not that input was the one being read — is the
+engine's ordinary one seen from a new position: the failure is recorded by the
+segment that was feeding the input, recording it cancels the run's token, and
+every wait this pump takes is taken on that token. A junction asleep on the
+inputs that are healthy is woken by the failure of one that is not.
+
+**Where the design was describing something this engine cannot mean.** ADR 0005
+says a concat gives demand only to the active input, "so a source that is
+expensive to start is not started early". This engine starts every segment when
+the run starts, so the sources of the inputs behind the active one are running
+from the first moment; what the junction does is not read their channels. The
+honest form of the promise is therefore backpressure rather than laziness: such
+an input fills its own bounded channel, its source parks holding one more
+element, and no third element is ever pulled for as long as the junction is
+busy elsewhere — one channel plus one hand, exactly the bound a declared buffer
+on that input widens. The consequence the ADR names is real but arrives earlier
+than its sentence suggests: a source that fails at open fails the run as soon as
+its channel has room for the attempt, which is at once, and not when its turn
+comes. Deferring the start of an input's source is a real feature and it is not
+this checkpoint's; naming the difference is.
+
+**A split feeding a join that waits head-of-line needs a buffer, and nothing
+checks that it has one.** This is the first shape in which two junction
+contracts can be individually satisfiable and jointly impossible, and it was
+found by running it rather than by reading it. A broadcast pulls only when every
+live leg has room; a concat reads one input to its end before touching the next;
+an interleave waits for the input whose turn it is even when another has
+something ready. Wire a broadcast's two legs straight into a concat, or into an
+interleave whose segment size is more than one, and the run stops before its
+second element: the junction is waiting for a leg the split cannot fill until
+the other leg is drained, and nothing drains it. A declared buffer on the legs —
+one deep enough for the head-of-line depth the junction's contract implies, which
+is the segment size for an interleave and the whole input for a concat —
+resolves it, and the interleave case with two-element buffers is a test here,
+alive and exactly determined. This is the same class of statement ADR 0005 makes
+about cycles: a wait that only the waiter could release is a deadlock by
+construction. The difference is that the cycle rule is enforced at validation and
+this one is not; a liveness check over junction contracts is not something this
+checkpoint has, and the honest position is that the shape is documented rather
+than refused.
+
+**An interleave is the one junction with a payload.** How many streams a
+junction joins is stated by its edges, so no junction writes an arity down; how
+many elements a rotation takes from one of them before moving on is not an edge
+at all, so it is written into the document under `local-interleave-parameters`
+and validated as a positive integer by the very reader the runtime uses. Zero is
+a real count for a take and a skip and is not one here — a rotation that takes
+nothing from an input is a junction that never emits.
+
+**Eight inputs, the first two required.** The ceiling mirrors the fan-out's and
+is stated for the same reason. "Optional" on an input port is what "ignorable"
+is on an output port: the edges of a document say how many streams a given
+occurrence joins, and the ports past the second are inputs a graph may leave
+unwired. Nothing about junction validation needed a new rule here either — an
+input port address carries at most one edge, and the graph compiler already
+requires an edge at every port that is not optional.
+
+**What this checkpoint does not do.** There is still no authoring spelling for
+any junction: the C# graph builder is M4.2, and the tests here build documents
+and binding tables directly. There is no zip and no combine-latest — the two
+junctions that hold a partial row are checkpoint 3, and a pump that never holds
+one cannot pretend to be them. There is no partition and there are no cycles.
+The control plane is proven to work across a fan-in rather than proven in
+general: a paused joining run comes to rest and moves again — including a pause
+that lands on a junction asleep on its inputs, which is the case the wait
+discipline exists for and the one a run arranged so that there is no other way
+to be quiet actually tests — a shutdown drains it in the junction's own order, a
+cancellation ends it, and the general statement is still checkpoint 5.
+And one property of the local planner is worth stating rather than discovering:
+where a document's stage reference and the binding table's kind declare the same
+ports, the binding is what executes — a `merge` node bound to an interleave is
+refused only because it has no segment size to read, and a `broadcast` node
+bound to a balance has been executing as a balance since checkpoint 1. The
+binding table is the statement of behavior by design; that it can disagree with
+the document about *which* junction a node is has not been made a diagnostic.
