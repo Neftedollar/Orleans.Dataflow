@@ -212,10 +212,19 @@ public sealed class ReminderTriggerTests(DataflowCluster cluster)
             // recycled activation is in, produced deliberately rather than waited for.
             await Poll.UntilAsync(() => accepting.Ticks > 0, "the trigger delivered a tick before it was recycled");
 
-            await cluster.Cluster.Client.GetGrain<IManagementGrain>(0).ForceActivationCollection(TimeSpan.Zero);
+            // Collected inside the poll rather than once before it: collection only takes an idle
+            // activation, and a trigger that is ticking every second is busy in small windows. One attempt
+            // that lands in such a window would leave the receiver attached and this test waiting for a
+            // removal that cannot come; retrying per turn makes the recycle a certainty rather than a race.
+            IManagementGrain management = cluster.Cluster.Client.GetGrain<IManagementGrain>(0);
 
             await Poll.UntilAsync(
-                async () => !await trigger.IsScheduledAsync(),
+                async () =>
+                {
+                    await management.ForceActivationCollection(TimeSpan.Zero);
+
+                    return !await trigger.IsScheduledAsync();
+                },
                 "a tick that found no receiver removed the reminder");
         }
         finally
