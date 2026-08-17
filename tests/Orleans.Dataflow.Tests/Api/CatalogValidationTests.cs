@@ -178,6 +178,7 @@ public sealed class CatalogValidationTests
                 LocalStage("last-or-default"),
                 LocalStage("merge"),
                 LocalStage("never"),
+                LocalStage("partition"),
                 LocalStage("queue"),
                 LocalStage("range"),
                 LocalStage("repeat"),
@@ -216,6 +217,7 @@ public sealed class CatalogValidationTests
         {
             ["balance"] = 8,
             ["broadcast"] = 8,
+            ["partition"] = 8,
             ["unzip"] = 2,
         };
         Dictionary<string, int> joins = new(StringComparer.Ordinal)
@@ -395,6 +397,7 @@ public sealed class CatalogValidationTests
                 ["last-or-default"] = "local-parameters",
                 ["merge"] = "local-parameters",
                 ["never"] = "local-parameters",
+                ["partition"] = "local-parameters",
                 ["queue"] = "local-buffer-parameters",
                 ["range"] = "local-range-parameters",
                 ["repeat"] = "local-count-parameters",
@@ -458,7 +461,8 @@ public sealed class CatalogValidationTests
             // A junction's legs are the one place a local output port is named anything but "out" and the
             // one place an output is ignorable: which legs an occurrence has is stated by the edges of the
             // document, so the ports past the second are outputs a graph may leave unwired.
-            bool junction = specification.Stage.Stage.Value is "broadcast" or "balance" or "unzip";
+            bool junction = specification.Stage.Stage.Value is
+                "broadcast" or "balance" or "partition" or "unzip";
 
             Assert.All(
                 specification.OutputPorts,
@@ -534,6 +538,7 @@ public sealed class CatalogValidationTests
                 ["last-or-default"] = 1,
                 ["merge"] = 0,
                 ["never"] = 0,
+                ["partition"] = 0,
                 ["queue"] = 1,
                 ["range"] = 0,
                 ["repeat"] = 0,

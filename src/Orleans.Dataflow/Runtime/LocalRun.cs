@@ -271,6 +271,7 @@ internal sealed class LocalRun
     /// <summary>Stops pulling new elements and completes the run as if the source had ended.</summary>
     /// <returns>A task that completes when the run has stopped and its resources are released.</returns>
     /// <remarks>
+    /// <para>
     /// Graceful, and graceful now means drain: only the segment that pulls from the source observes the
     /// request, and everything already admitted keeps flowing. A boundary's contents are delivered, the
     /// callbacks in flight in an asynchronous segment are awaited, the result is resolved with the state
@@ -280,14 +281,40 @@ internal sealed class LocalRun
     /// full buffer, delays the stop until it can proceed. The runtime's own waits are the exception and are
     /// released at once: a source that waits for an offer, for a channel, or for nothing at all is this
     /// runtime's code rather than the author's, and a request to stop producing reaches it directly.
+    /// </para>
+    /// <para>
+    /// A cycle is where "stop pulling" needs a second place to be said. The elements circulating in a
+    /// feedback loop are not fed by a source and never run out, so a graceful stop that only told the
+    /// sources to stop would wait forever for a stream that has no end. A feedback edge is the loop's own
+    /// source — it is where work enters the graph a second time — so a shutdown closes it, exactly as it
+    /// stops a pull. What that channel was holding is drained through it, what is already inside the loop
+    /// leaves through the exit the graph has, and the junction that was reading it sees its last input end
+    /// and completes. Nothing is discarded that a shutdown of an acyclic graph would have kept.
+    /// </para>
     /// </remarks>
     internal async ValueTask ShutdownAsync()
     {
         _shutdownRequested = true;
 
         RequestStop();
+        Sever();
 
         await DrainAsync().ConfigureAwait(false);
+    }
+
+    /// <summary>Closes every feedback edge, so that a cycle stops re-admitting its own elements.</summary>
+    /// <remarks>
+    /// The same walk a downstream completion takes, started from outside instead of from below, and
+    /// therefore idempotent and safe from any thread for the same reasons: closing an edge is guarded, and
+    /// the producer it reaches stops only when that was its last live output. A run with no cycle in it has
+    /// no feedback edge and this does nothing at all.
+    /// </remarks>
+    private void Sever()
+    {
+        for (int index = 0; index < _plan.Feedback.Count; index++)
+        {
+            Leave(_plan.Feedback[index]);
+        }
     }
 
     /// <summary>Cancels the run and waits for it to stop.</summary>
@@ -396,12 +423,15 @@ internal sealed class LocalRun
     /// <summary>Runs one segment to its end and reports how it ended to the run.</summary>
     /// <param name="index">The segment's position in the plan.</param>
     /// <remarks>
-    /// The six loop shapes are chosen here and the outcome of all of them is folded here, so that what a
-    /// failure, a cancellation and a clean end mean is stated once for every segment rather than six
+    /// The seven loop shapes are chosen here and the outcome of all of them is folded here, so that what a
+    /// failure, a cancellation and a clean end mean is stated once for every segment rather than seven
     /// times. An enumerator obtained by a head segment is released on every path, including the ones
     /// where obtaining or reading it is what went wrong, which is why it is held in this frame. A joining
-    /// junction is two of the six: one that emits the element it read, and one that builds a row out of
-    /// several, told apart by whether the junction carries something to build a row with.
+    /// junction is two of the seven: one that emits the element it read, and one that builds a row out of
+    /// several, told apart by whether the junction carries something to build a row with. A splitting one
+    /// is two more, told apart the same way: a junction carrying a routing function reads before it waits,
+    /// because what it is waiting for is what that function answers, and every other splitting junction
+    /// waits before it reads.
     /// </remarks>
     private void Execute(int index)
     {
@@ -417,7 +447,9 @@ internal sealed class LocalRun
                 : segment.Async is { } asynchronous
                     ? Map(segment, index, asynchronous)
                     : segment.FanOut is { } splitting
-                        ? Fan(segment, index, splitting)
+                        ? splitting.Router is { } routing
+                            ? Route(segment, index, routing)
+                            : Fan(segment, index, splitting)
                         : segment.FanIn is { } joining
                             ? joining.Combiner is { } combining
                                 ? Row(segment, index, joining, combining)
@@ -1201,6 +1233,168 @@ internal sealed class LocalRun
 
         return false;
     }
+
+    /// <summary>Drives a routed junction: reads one element, asks where it goes, holds it until it can go there.</summary>
+    /// <param name="segment">The segment being executed.</param>
+    /// <param name="index">Its position in the plan.</param>
+    /// <param name="route">The author's routing function, which names the leg one element belongs on.</param>
+    /// <returns><see langword="true"/> when the loop stopped because the run was canceled.</returns>
+    /// <exception cref="InvalidOperationException">
+    /// The routing function named an output this junction does not have.
+    /// </exception>
+    /// <remarks>
+    /// <para>
+    /// <b>Read first, wait second, and only here.</b> Every other pump in this engine secures room before
+    /// it takes an element, because taking one it cannot place is a read-ahead no contract allows. A
+    /// partition cannot: the room it needs is room on the leg its element belongs on, and which leg that is
+    /// is what the author's function answers from the element itself. So the order inverts, and the bound
+    /// stays the same number for a different reason — one element is read, routed once, and held until its
+    /// target can take it. ADR 0005 says so in words and the table's "pulls upstream when its target has
+    /// room" is that sentence read backwards; the words are what this implements.
+    /// </para>
+    /// <para>
+    /// <b>Head-of-line, one element deep.</b> While the held element waits for its own leg, no other leg is
+    /// offered anything and the input is not read again, so a leg whose elements are queued upstream
+    /// starves behind a leg that is full. That is not a defect to be worked around inside the junction: it
+    /// is the difference between a partition and a balance, and an author who wants the other behavior
+    /// wants the other junction. A declared buffer on the slow leg is what buys slack, exactly as it does
+    /// under a concat.
+    /// </para>
+    /// <para>
+    /// <b>Once per element.</b> The routing function is called exactly once for each element, on the
+    /// segment's own thread, between the park points — never while the run is paused, never twice for one
+    /// element, and never at all for an element the junction did not take. It is the keyed adapter's
+    /// read-once rule in a second place and for the same reason: a function an engine may call again is a
+    /// function that has to be pure, and nothing here can require that of an author.
+    /// </para>
+    /// <para>
+    /// <b>An answer outside the range fails the run; an answer naming a leg that has left does not.</b> The
+    /// two look alike and are not. Out of range is the case ADR 0005 decides, and it decides it because the
+    /// answer names nothing at all: there is no such stream, so discarding the element silently would be
+    /// hiding a defect. A leg that has *left* is a stream that ended — the ADR does not decide this one, and
+    /// the engine already has: an element that arrives at a channel a downstream completion closed is
+    /// abandoned rather than dropped, counted, or failed on, everywhere in this runtime. Making this
+    /// junction the exception was tried and is wrong twice over. It contradicts the third shared rule, which
+    /// says a completed leg stops feeding rather than stopping the world. And it makes the outcome of a run
+    /// depend on a race: a completion walking upstream closes legs while elements are still travelling
+    /// towards them, so an ordinary early completion — a take on a leg, a first-element sink, a completion
+    /// coming round a cycle — would end the run successfully or in failure according to which of the two
+    /// arrived first. A contract that cannot say which is not one. The junction still completes upstream the
+    /// ordinary way when the *last* leg leaves, and a mode in which any leg leaving ends the run is the
+    /// declared-variant escape hatch ADR 0005 describes rather than a silent change to this one.
+    /// </para>
+    /// </remarks>
+    private bool Route(LocalSegment segment, int index, Func<object?, int> route)
+    {
+        ChannelReader<object?> reader = _channels[segment.Inputs[0]].Reader;
+        IReadOnlyList<int> legs = segment.Outputs;
+
+        while (true)
+        {
+            if (_token.IsCancellationRequested)
+            {
+                return true;
+            }
+
+            if (Stopping(index))
+            {
+                return false;
+            }
+
+            if (_pause.Park())
+            {
+                continue;
+            }
+
+            if (Left(legs))
+            {
+                // Every leg has left, so there is nothing to route for and nothing has been routed. This
+                // is rule three's other half and it is checked before the read rather than after it: an
+                // element taken here would have no destination and would have to fail a run that is
+                // ending cleanly.
+                Complete(index);
+
+                return false;
+            }
+
+            if (!reader.TryRead(out object? element))
+            {
+                if (!Arrival(reader))
+                {
+                    return false;
+                }
+
+                continue;
+            }
+
+            while (_pause.Park())
+            {
+                if (_token.IsCancellationRequested)
+                {
+                    return true;
+                }
+            }
+
+            int leg = route(element);
+
+            if (leg < 0 || leg >= legs.Count)
+            {
+                throw Misrouted(leg, legs.Count);
+            }
+
+            int channel = legs[leg];
+
+            // Abandoned, at each of the three moments the leg can turn out to have gone: before the wait
+            // for its room, during that wait, and at the offer itself. All three mean one thing — the
+            // stream this element was routed to has ended — and all three are answered the way this engine
+            // answers it everywhere, by letting the element go and reading the next one.
+            if (Closed(channel) || !Vacancy(channel))
+            {
+                continue;
+            }
+
+            // The element has been held for the length of the wait and placing it is a step, so the pause
+            // is examined once more. The room is still there afterwards because this junction is the only
+            // writer to this leg.
+            while (_pause.Park())
+            {
+                if (_token.IsCancellationRequested)
+                {
+                    return true;
+                }
+            }
+
+            _ = Offer(channel, element);
+        }
+    }
+
+    /// <summary>Reports whether every leg of a splitting junction has left.</summary>
+    /// <param name="legs">The channels the junction writes into.</param>
+    /// <returns><see langword="true"/> when none of them will ever be read again.</returns>
+    private bool Left(IReadOnlyList<int> legs)
+    {
+        for (int leg = 0; leg < legs.Count; leg++)
+        {
+            if (!Closed(legs[leg]))
+            {
+                return false;
+            }
+        }
+
+        return true;
+    }
+
+    /// <summary>Builds the failure of a routing function that named an output this junction does not have.</summary>
+    /// <param name="leg">The position the routing function answered.</param>
+    /// <param name="legs">The number of outputs this occurrence wires.</param>
+    /// <returns>The exception to throw.</returns>
+    /// <remarks>
+    /// The arity is in the sentence because it is not in the document: how many legs a junction has is
+    /// stated by its edges, so a function written against a graph with three legs and wired into one with
+    /// two has no way to be told apart from a function with an off-by-one except by saying both numbers.
+    /// </remarks>
+    private static InvalidOperationException Misrouted(int leg, int legs) =>
+        new($"A partition's routing function answered {leg}, and this junction is wired to {legs} outputs, so only 0 to {legs - 1} name one. The answer is the position of a wired output in port order; an element routed outside that range has no destination, and discarding it silently would be worse.");
 
     /// <summary>Drives a joining junction: secures room below, reads the input its rule names, delivers.</summary>
     /// <param name="segment">The segment being executed.</param>

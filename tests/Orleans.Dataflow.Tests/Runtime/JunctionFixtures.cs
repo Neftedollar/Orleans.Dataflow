@@ -161,6 +161,12 @@ internal static class JunctionFixtures
     internal static LocalStageDescriptor Buffering(int capacity) =>
         LocalStageDescriptor.Buffer(new BufferOptions { Capacity = capacity });
 
+    /// <summary>Builds the binding of a routed junction over integers.</summary>
+    /// <param name="router">The routing function, answering the zero-based position of a leg.</param>
+    /// <returns>The descriptor.</returns>
+    internal static LocalStageDescriptor Routing(Func<int, int> router) =>
+        LocalStageDescriptor.Partition(router);
+
     /// <summary>Builds the binding of a synchronous per-element sink over integers.</summary>
     /// <param name="callback">What to do with each element.</param>
     /// <returns>The descriptor.</returns>

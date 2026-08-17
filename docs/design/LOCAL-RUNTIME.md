@@ -333,12 +333,22 @@ contracts this model must keep, and nothing below weakens one.
 Validation refuses a cycle unless it passes a boundary whose policy can
 answer without downstream room (ADR 0005). Execution needs nothing new
 beyond that rule: a legal cycle is edges and channels like any others, and
-the boundary that made it legal is what breaks the wait. The subtle part
-is completion — a cycle's segments feed each other, so "inputs done" can
-only arrive from outside the cycle; the plan detects strongly connected
-components at validation time and completion enters a cycle only when
-every edge into the component has completed, at which point the component
-drains and its channels close in dependency order.
+the boundary that made it legal is what breaks the wait.
+
+**Corrected by checkpoint 4 rather than left standing.** This paragraph used
+to continue: "completion enters a cycle only when every edge into the
+component has completed, at which point the component drains and its
+channels close in dependency order". That is wrong, and wrong in the
+direction that destroys work. The elements circulating inside a loop are a
+live stream whether or not anything outside it is still producing, and for
+an iterative computation that is the normal state rather than an edge case:
+the external input is a seed, and everything after the seed is the loop
+talking to itself. Ending the loop because its external inputs ended would
+kill a computation that is still running. Closing every edge into a cycle
+therefore says nothing at all about when that cycle ends. What is true is
+stated in checkpoint 4's section below — a cycle ends from inside, by a
+stage **on the loop** that ends its own stream, or from outside by a stop,
+and otherwise it does not end.
 
 ### Controls, pause, and probes
 
@@ -357,9 +367,9 @@ depended on the plan being linear — and a probe attaches to an edge.
 3. **Row-building fan-in** — *as implemented, see below*: zip and
    combine-latest — held rows, eager completion for zip, frozen-leg
    semantics for combine-latest.
-4. **Partition and cycles**: the routed-element hold, out-of-range
-   failure, SCC detection at validation, a legal cycle executing and
-   completing from outside in.
+4. **Partition and cycles** — *as implemented, see below*: the routed-element
+   hold, out-of-range failure, cycle detection at validation, a legal cycle
+   executing, and the corrected statement of when one ends.
 5. **Control-plane generalization**: pause quiescence, shutdown drain,
    cancellation, and probes proven across branching topologies; the
    bounded-memory suite extended to junctions (held elements counted
@@ -724,3 +734,248 @@ run absorbed, not as a measurement of the junction's own memory: N−1 and N
 are what the counting on the source side implies given where every other
 element in the run must be, which is the same argument every bounded-memory
 test in this suite makes.
+
+## M4.1 checkpoint 4 (partition and cycles) — as implemented
+
+The plan above is what was built; what follows is where it needed a decision it
+did not already contain, where a sentence of the design turned out to be wrong
+rather than merely loose, and what this checkpoint does not do.
+
+**A cycle does not complete from outside, and the design said it did.** This is
+the correction, stated first because everything else about a cycle follows from
+it. The design's claim was that "completion enters a cycle only when every edge
+into the component has completed, at which point the component drains and its
+channels close in dependency order". Nothing in this engine does that, and
+nothing should. Closing every external input of a loop is not a statement about
+the loop: the elements circulating inside it are a live stream, and for the
+graph a cycle is usually written for — an iterative computation whose external
+input is a seed — that is the whole run rather than its tail. A rule that ended
+the loop when its seed ran out would end the computation at the moment it
+started working. What is true is smaller and has three cases.
+
+1. **From inside, by a stage on the loop that ends its own stream.** A `Take`,
+   a `TakeWhile`, a `First` — anything that completes — standing **on the
+   cycle** ends the loop and the run: the completion walks upstream around the
+   loop the way it walks up a chain, the junction's inputs close, the segments
+   below drain, and the run reports what it accumulated. This is the author's
+   exit and the only end a cycle has of its own accord.
+2. **From outside, by a stop.** Cancellation abandons a loop as it abandons
+   anything else, because every wait a junction takes is taken on the run's
+   token. Shutdown needed one new thing and it is the smallest one available:
+   **a shutdown cuts every feedback edge.** A feedback edge is where work
+   enters a graph a second time, so it is the loop's own source, and "stop
+   pulling" said to a source is "stop re-admitting" said to a loop. What was
+   queued in that channel is drained through it, what is already circulating
+   leaves by the exit the graph has, and the junction that was reading it sees
+   its last input end and completes. Nothing a shutdown of an acyclic graph
+   would have kept is discarded.
+3. **Otherwise, not at all.** A cycle whose elements all die inside it — a
+   filter that eventually drops everything, a routing function that eventually
+   sends everything out — goes **quiet** rather than completing. Every pump in
+   it is then asleep on a channel that will never produce and will never close,
+   because the only thing that could close it is the loop itself. The run stays
+   alive until it is shut down or cancelled. This engine does not detect a
+   quiet loop and deliberately does not guess: the detection is sound only as
+   "every segment of the component is idle, every channel inside it is empty,
+   and every channel into it is closed and empty", which is a distributed
+   termination problem with a racy answer, and an early guess would truncate a
+   run silently. A hang that an author can see and stop is a better answer than
+   a completion that was not true. The honest promise is therefore: **write the
+   loop's exit as a stage on the loop, or stop the run.** This case is pinned
+   as an assertion rather than left as a sentence: a loop with a filter that
+   eventually drops everything is run to the point where nothing can wake it
+   again, and at that point everything it produced has been delivered and the
+   run has not ended.
+
+**And the trap that follows from case 1, stated loudly.** A `Take` on the
+*exit leg* of the loop's fan-out does **not** stop the loop. When that leg's
+downstream completes, the leg leaves the junction's delivery set and the
+junction goes on feeding the legs that remain — which for a feedback fan-out is
+the loop itself, so the elements circulate forever with nowhere to go. That is
+ADR 0005's third shared rule working exactly as written; it is a trap only
+because a loop is self-sustaining where a chain is not. The exit has to be on
+the cycle.
+
+**Legality is a walk over the graph with the relieving boundaries removed.**
+ADR 0005 says a cycle is legal exactly when every cycle passes at least one
+boundary that can answer without waiting for its own downstream. "Every cycle"
+is what makes the naive reading wrong: a component may contain a dropping
+buffer and still contain a cycle that avoids it, and enumerating cycles to tell
+them apart is exponential. Deleting the relieving nodes and asking whether any
+cycle survives is the same claim answered in one depth-first walk, and the walk
+reports the surviving loop's node path because "there is a cycle" is not
+something an author can act on. A relieving boundary is a declared `Buffer`
+whose overflow policy is not `Backpressure` — dropping, discarding, or failing
+are all answers, and a failing run is not a hanging one — and nothing else is,
+the implicit handoff between two segments least of all. A backpressuring buffer
+of any capacity only postpones the deadlock and is refused like a handoff.
+
+**Two more refusals that a cycle makes reachable for the first time.** A cycle
+nothing outside feeds can never hold an element, so a run of it would idle
+forever in half its segments; it is refused by name rather than left to the
+connectivity message, which would say only that some nodes went unvisited. And
+a graph every one of whose branches runs back into a junction has no terminal
+at all: without cycles that shape does not exist, because following the edges
+of a finite acyclic graph always reaches a node that feeds nothing.
+
+**The rule lives in the planner, not in the graph compiler.** ADR 0005 says
+"the graph compiler enforces this as a validation rule". The graph compiler is
+catalog-generic and a relieving boundary is local-vocabulary knowledge — which
+stage is a buffer, and what its payload's overflow policy says — so the rule
+sits where every other shape rule of this runtime sits, beside "two sources
+that never meet" and "a node fed by more than one stream that is not a fan-in".
+The ADR's substance is kept exactly: the graph is refused before anything
+executes, and the diagnostic names the cycle's node path.
+
+**M0's no-self-loop rule is gone, as ADR 0005 ratified.** `GraphEdge.Create`
+and `GraphDocument`'s structural invariants refused a self-loop and said in
+their own messages that they were doing so only until cycles arrived with a
+boundary contract. They have. A self-loop is a cycle of one node and is now
+tested by the cycle rule like any other loop — refused with the same sentence,
+naming the same path — and the definition plane no longer has an opinion about
+loops at all, which is right for a plane that does not know what a boundary
+policy is. This is the one change outside `Orleans.Dataflow` in this
+checkpoint.
+
+**A back edge always terminates at a fan-in, and the plan rests on it.** The
+walk that compiles a document is acyclic by construction: it starts at the
+heads, and a junction is built by the last branch that arrives at it. A cycle
+breaks that, because the branch carrying a feedback edge begins *below* the
+junction it feeds — so the junction would wait for a branch that waits for the
+junction. What breaks the deadlock is that the feedback inputs are known before
+the walk begins, as the back edges of a depth-first walk rooted at the heads.
+A junction is then built when every input **from outside the cycle** has
+arrived, with a place kept for each feedback input, and the arrival that
+eventually comes round fills the place in the list the segment is already
+reading. That works because a back edge's target always has a tree edge into it
+as well, so it always has more than one incoming edge, so the rule that a node
+fed by more than one stream must be a fan-in has already required it to be one —
+and because at least one of its inputs is a tree edge, so it always has an
+arrival from outside to be built by. Both facts are checked rather than
+reasoned about.
+
+**Partition reads first and waits second, and it is the only pump that does.**
+Every other junction in this engine secures room before it takes an element,
+because taking one it cannot place is a read-ahead no contract allows. A
+partition cannot: the room it needs is room on the leg its element belongs on,
+and which leg that is is what the author's function answers from the element
+itself. So the order inverts and the bound stays one element for a different
+reason — one element is read, routed once, and held until its target can take
+it. ADR 0005's table says "pulls upstream when its target has room" and its
+text says "runs the author's routing function once per element and then waits
+for that element's target specifically"; the text is what an implementation can
+mean, and it is what this implements.
+
+**Head-of-line, one element deep, and that is the operator.** While the held
+element waits for its own leg, no other leg is offered anything and the input
+is not read again, so a leg whose elements are queued upstream starves for
+exactly as long. It is proved the way every bound in this suite is proved — how
+far a held source gets, read after the run is over — and it is not a defect to
+be worked around inside the junction: it is the difference between a partition
+and a balance, and an author who wants the other behavior wants the other
+junction. A declared buffer on the slow leg buys slack, exactly as one does
+under a concat. The routing function runs exactly once per element, on the
+segment's own thread, never while the run is paused and never for an element
+the junction did not take — the keyed adapter's read-once rule in a second
+place and for the same reason, since a function an engine may call again is one
+that has to be pure and nothing here can require that of an author.
+
+**Out of range fails the run; a leg that has left does not.** The two look
+alike and are not, and getting this wrong is the mistake this checkpoint made
+first and then measured. Out of range is ADR 0005's own decision and it is
+right for the reason the ADR gives: the answer names nothing at all, there is
+no such stream, and discarding the element would hide a defect. The sentence
+carries both the answer and the wired arity, because how many legs a junction
+has is stated by its edges and by nothing the function can see, so an answer of
+three against two legs is otherwise indistinguishable from an off-by-one. A leg
+that has **left** is something else: it is a stream that *ended*, and this
+engine already answers that everywhere — an element arriving at a channel a
+downstream completion closed is abandoned rather than dropped, counted, or
+failed on. Making this junction the exception was implemented, and it was wrong
+twice over. It contradicts the third shared rule, which says a completed leg
+stops feeding rather than stopping the world. And it makes the outcome of an
+ordinary run a race: a completion walking upstream closes legs while elements
+are still travelling towards them, so the same graph ended successfully or in
+failure depending on which arrived first — which a full-suite run duly
+demonstrated by failing once and passing eight times. A contract that cannot
+say which is not one. So a routed element whose leg has gone is abandoned, the
+junction goes on feeding the legs that remain, and it completes upstream when
+the last of them leaves. An abandoned element is not counted as a drop, for the
+reason the drop counter already gives: nothing discarded it, the stream it was
+travelling to had ended. A mode in which any leg leaving ends the run is the
+declared-variant escape hatch ADR 0005 describes — the same shape as an
+eager-cancel broadcast — rather than a silent change to this one.
+
+**The completion walk terminates on a cyclic producer graph, and the flags are
+what make it so.** `Complete` and `Leave` are mutually recursive: a segment
+that stops closes every channel it reads, and a closed channel lowers its
+producer's count of live outputs until the producer stops in its turn. In a
+strongly connected component "its turn" eventually means the segment the walk
+started at. The two interlocked flags — this segment has stopped, this edge is
+closed — are what bound it, and that was verified by instrumenting the walk and
+watching it come back rather than by reading the code: on a loop whose exit leg
+has already left, one completion produces the sequence *enter, enter, enter,
+re-entry* and stops, with the re-entry landing on the very segment the walk
+began at. The depth is bounded by the number of segments, and a test whose only
+claim is that such a run ends at all is the honest one, because a missing guard
+would not fail an assertion — it would exhaust the stack.
+
+**What this checkpoint does not do.** There is still no authoring spelling for
+any junction, splitting or joining: the C# graph builder is M4.2, and the tests
+here build documents and binding tables directly. There is no liveness rule for
+the acyclic split-join hazard checkpoint 2 documented, and the assessment is
+recorded below rather than half-implemented. A `Zip` or a `Concat` standing in
+a cycle is legal by the boundary rule and can still starve, because that rule
+is about the write side — a pump waiting for room — and a row-building junction
+in a loop waits for an *element* that only its own output could produce; the
+first row can never be built and the loop never starts. That is the same class
+of statement as the split-join hazard and is documented rather than refused.
+Quiescence detection for a loop that has gone quiet is not here and is named
+above as the thing that would replace the hang. And the control plane is proven
+to work across a partition and across a cycle rather than proven in general —
+a paused loop comes to rest and moves again, a shutdown ends it, a cancellation
+ends it, a failure inside it wins — with one case explicitly deferred: a pause
+that lands on a partition **holding a routed element** is not tested, because
+filling a leg means its consumer is stuck, and the only ways to keep a consumer
+stuck are an author's callback, which blocks quiescence by design, and a
+probe's rendezvous, which is checkpoint 5's.
+
+### Assessment: a liveness rule for the acyclic split-join hazard
+
+Checkpoint 2 documented a shape whose junction contracts are individually
+satisfiable and jointly impossible: a broadcast feeding an order-dependent
+join — a concat, or an interleave whose segment size is above one — with no
+buffer on any path between them. The cycle rule refuses its own version of the
+same thing at validation, so the question this checkpoint owed was whether the
+acyclic version can be refused too. It can be *stated*, and it is not being
+shipped, for reasons worth recording rather than repeating later.
+
+The rule would be: for a fan-in `J` and two of its inputs `i` and `j`, if both
+are fed transitively by one fan-out whose contract is *every live leg must have
+room* (broadcast, unzip), then the path to `j` must provide at least the
+head-of-line depth `J`'s contract implies while it waits on `i`. For an
+interleave that depth is its declared segment size, which is a number. For a
+concat it is **the whole of input `i`**, which is not a number at all and cannot
+be one — so for a concat the only satisfiable form of the requirement is the
+cycle rule's own predicate, a boundary on `j`'s path that answers without room.
+That much is crisp.
+
+What is not crisp is everything between. "The path" is not one path: branches
+pass through further junctions, each with its own contract, and the slack a
+path provides is the sum of the declared capacities along it only when nothing
+on it changes the element count — which a `Take`, a `Where`, and a fan-in all
+do. A rule that summed capacities anyway would refuse graphs that run today,
+including the very one checkpoint 2 shipped as a live test: an interleave of
+segment size two under a broadcast with two-element buffers on the legs, which
+is exactly determined and alive. A rule that refused every broadcast-to-concat
+pair would refuse the ones a dropping buffer makes legal. And a rule that got
+either direction wrong would be worse than the hazard, because a refusal is a
+graph an author cannot run at all while a deadlock is a graph an author can
+observe, read the documentation for, and fix with a buffer.
+
+The assessment is therefore: **documented, not enforced**, and the distinction
+from the cycle rule is real rather than an inconsistency. A cycle's illegality
+is a property of the graph's shape alone — a loop of waiting boundaries waits
+for itself whatever the elements do — while this hazard's depends on the
+element counts a graph actually produces. The first is decidable by looking;
+the second is not.

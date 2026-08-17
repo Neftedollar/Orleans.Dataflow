@@ -55,15 +55,18 @@ public sealed class GraphEdgeTests
     [InlineData("stage", "out", "in")]
     [InlineData("orders/stage", "left", "right")]
     [InlineData("stage", "loop", "loop")]
-    public void CreateRejectsSelfLoopAndPointsAtTheBoundaryContract(string node, string fromPort, string toPort)
+    public void CreateAcceptsASelfLoopBecauseTheCycleRuleSubsumesIt(string node, string fromPort, string toPort)
     {
-        ArgumentException exception = Assert.Throws<ArgumentException>(
-            "to",
-            () => { _ = GraphEdge.Create(Address(node, fromPort), Address(node, toPort)); });
+        // M0 refused a self-loop here and said in the message that it was doing so only until cycles
+        // arrived with a boundary contract. They have (ADR 0005), and the contract is a statement about
+        // the boundaries a loop passes rather than about the shape of one edge: a self-loop is a cycle of
+        // one node and is tested by the cycle rule like every other loop. An edge is a connection between
+        // two port addresses, and both of them naming one node is a connection.
+        GraphEdge loop = GraphEdge.Create(Address(node, fromPort), Address(node, toPort));
 
-        Assert.Contains("self-loop", exception.Message, StringComparison.Ordinal);
-        Assert.Contains("boundary contract", exception.Message, StringComparison.Ordinal);
-        Assert.Contains(node, exception.Message, StringComparison.Ordinal);
+        Assert.Equal(Address(node, fromPort), loop.From);
+        Assert.Equal(Address(node, toPort), loop.To);
+        Assert.False(loop.IsDefault);
     }
 
     [Fact]

@@ -73,14 +73,15 @@ public readonly record struct GraphEdge : IComparable<GraphEdge>, IComparable
     /// <param name="to">The input port the edge terminates at; must not be the default value.</param>
     /// <returns>The validated edge.</returns>
     /// <exception cref="ArgumentException">
-    /// <paramref name="from"/> or <paramref name="to"/> is the default value, or both endpoints name the
-    /// same node.
+    /// <paramref name="from"/> or <paramref name="to"/> is the default value.
     /// </exception>
     /// <remarks>
-    /// Both endpoints naming one node is a self-loop, which this milestone rejects outright rather than
-    /// accepting into a document no validator can yet reason about. Cycles arrive in a later milestone
-    /// together with the explicit boundary contract that gives them defined completion and failure
-    /// semantics.
+    /// Both endpoints naming one node is a self-loop, and a self-loop is a cycle of one node rather than a
+    /// shape of its own. M0 refused it here because no validator could yet reason about a cycle at all;
+    /// ADR 0005 subsumes that refusal into the cycle rule, so an edge is now built and the runtime that has
+    /// to execute the loop is what decides whether it can — a cycle is legal exactly when it passes a
+    /// boundary that can answer without room below it, and one node's output feeding its own input is
+    /// tested by that rule like any other loop rather than by a special case here.
     /// </remarks>
     public static GraphEdge Create(PortAddress from, PortAddress to)
     {
@@ -96,11 +97,6 @@ public readonly record struct GraphEdge : IComparable<GraphEdge>, IComparable
             throw new ArgumentException(
                 $"A {nameof(GraphEdge)} requires a created target {nameof(PortAddress)}; the default {nameof(PortAddress)} names no port.",
                 nameof(to));
-        }
-
-        if (from.Node == to.Node)
-        {
-            throw new ArgumentException(DescribeSelfLoop(from, to), nameof(to));
         }
 
         return new GraphEdge(from, to);
@@ -206,15 +202,6 @@ public readonly record struct GraphEdge : IComparable<GraphEdge>, IComparable
     /// </returns>
     /// <remarks>This method never throws.</remarks>
     public override string ToString() => IsDefault ? "(default GraphEdge)" : $"{_from} -> {_to}";
-
-    /// <summary>
-    /// Builds the message for a rejected self-loop edge.
-    /// </summary>
-    /// <param name="from">The origin endpoint.</param>
-    /// <param name="to">The target endpoint.</param>
-    /// <returns>A message naming the offending node and the rule it breaks.</returns>
-    private static string DescribeSelfLoop(PortAddress from, PortAddress to) =>
-        $"An edge from '{from}' to '{to}' is a self-loop on node '{from.Node}', which is not allowed in this milestone; cycles arrive with an explicit boundary contract in a later milestone.";
 
     private static InvalidOperationException DefaultAccess() =>
         new(IdentifierGrammar.DescribeDefaultAccess(nameof(GraphEdge)));

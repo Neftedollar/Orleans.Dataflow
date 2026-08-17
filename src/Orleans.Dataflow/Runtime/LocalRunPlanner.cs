@@ -32,10 +32,19 @@ namespace Orleans.Dataflow.Runtime;
 /// zero-padded numbering happens to make the two agree for the graphs it closes, but a document this type
 /// is handed by anything else has no such property, and a runtime that read the node list would execute
 /// such a document in the wrong order rather than reject it. Following edges is also what makes the shape
-/// check real: every shape this checkpoint cannot execute — a node fed by two others that is not a fan-in,
-/// a node that is not a fan-out feeding two, two sources whose streams never meet, a cycle, a component
-/// nothing reaches — is rejected here, which is the defense that keeps the run loops free of cases they
-/// cannot execute.
+/// check real: every shape this runtime cannot execute — a node fed by two others that is not a fan-in,
+/// a node that is not a fan-out feeding two, two sources whose streams never meet, a cycle that waits for
+/// itself, a cycle nothing feeds, a graph with no terminal, a component nothing reaches — is rejected here,
+/// which is the defense that keeps the run loops free of cases they cannot execute.
+/// </para>
+/// <para>
+/// <b>A cycle is a shape the walk is told about before it starts.</b> ADR 0005 makes a loop legal exactly
+/// when it passes a boundary that can answer without room below it, and that is decided first, over the
+/// graph with those boundaries deleted, so a loop that waits for itself is named as one rather than
+/// discovered as nodes nobody reached. What survives is compiled by cutting the same edges any depth-first
+/// walk would call back edges: those inputs of a joining junction are places kept rather than channels
+/// waited for, because the branch that carries one begins below the junction it feeds and could not exist
+/// until the junction did. Everything else about a cyclic plan is the acyclic one.
 /// </para>
 /// <para>
 /// <b>Several sources are one graph exactly when they converge.</b> A document may begin in as many places
@@ -138,14 +147,54 @@ internal static class LocalRunPlanner
             }
         }
 
+        // The cycle rule of ADR 0005, before anything is walked and before a head is even looked for: a
+        // cycle every one of whose boundaries waits for room below it is a deadlock by construction, and
+        // naming it as one is more useful than whatever a graph with no source is told afterwards. The
+        // reduced graph is the whole of the rule — drop the nodes that can answer without room and any
+        // cycle that survives is a cycle that passes none of them.
+        HashSet<NodeId> relieving = Relieving(document, bindings, declarations);
+
+        if (Cycle(document, leaving, node => !relieving.Contains(node)) is { } deadlocked)
+        {
+            throw Foreign(
+                $"the cycle {Path(deadlocked)} passes no boundary that can answer without room below it, and in a pull engine such a loop waits for room only its own waiter could make; give one of its edges a buffer whose overflow policy is not backpressure");
+        }
+
         List<NodeId> heads = Heads(document, arriving);
+        HashSet<NodeId> reachable = Reachable(leaving, heads);
+
+        // A legal cycle nothing outside feeds can never hold an element, so a run of it would idle
+        // forever. It is refused here rather than left to the connectivity message below, which would say
+        // only that some nodes were not reached and not why they never could be.
+        if (Cycle(document, leaving, node => !reachable.Contains(node)) is { } sealedOff)
+        {
+            throw Foreign(
+                $"the cycle {Path(sealedOff)} is fed by nothing outside it, so no element could ever enter it");
+        }
+
+        HashSet<PortAddress> feedback = Feedback(leaving, heads);
+
+        foreach (PortAddress port in feedback)
+        {
+            // The invariant the plan below rests on, checked rather than reasoned about. A back edge of a
+            // walk rooted at the heads always terminates at a node that also has a tree edge into it, so
+            // that node is fed by more than one stream and the rule above has already required it to be a
+            // fan-in; this is what keeps that argument from being load-bearing.
+            if (!Joins(port.Node))
+            {
+                throw Foreign(
+                    $"the node '{port.Node}' closes a cycle at the port '{port.Port}' and is not a fan-in junction, so nothing in it could join what comes round with what comes in");
+            }
+        }
+
         List<LocalSegment> segments = [];
         List<LocalBoundary> boundaries = [];
         List<int> producers = [];
         List<Sink> sinks = [];
         List<int> completesAtStart = [];
+        List<int> feedbackChannels = [];
         Dictionary<NodeId, (LocalIngressQueue? Queue, object Handle)> controls = [];
-        Dictionary<NodeId, int[]> joined = [];
+        Dictionary<NodeId, Arrivals> joined = [];
         HashSet<NodeId> walked = new(document.Nodes.Count);
         Queue<(NodeId Start, int Input, PortId Entry)> branches = new();
 
@@ -163,9 +212,12 @@ internal static class LocalRunPlanner
 
         if (walked.Count != document.Nodes.Count)
         {
-            // A cycle is what this usually is, and it is refused here rather than by a rule of its own:
-            // every node of a cycle is fed, so no walk from a source reaches one, and a fan-in whose inputs
-            // a cycle feeds is never built at all because the last of its arrivals never comes.
+            // A cycle used to be what this was, and no longer is: a legal cycle is walked through its
+            // reserved feedback inputs, and an unreachable one is refused above by name. What is left is a
+            // node no walk arrives at for some reason nothing else has caught, and every argument that
+            // there is no such reason ends in "because a node that is fed by nothing is a head, and one
+            // that is fed only from inside a loop no source reaches has already been refused". That
+            // argument is not load-bearing, which is what this guard is for.
             throw Foreign(
                 $"its {document.Nodes.Count} nodes do not form one graph, and following the edges from its sources reached {walked.Count} of them");
         }
@@ -186,6 +238,24 @@ internal static class LocalRunPlanner
             }
         }
 
+        // Newly reachable now that a cycle can be planned: a graph every one of whose branches runs back
+        // into a junction has no terminal at all, and a run of it would move elements forever with nobody
+        // to report an outcome. Without cycles this is impossible, because following the edges of a finite
+        // acyclic graph always reaches a node that feeds nothing.
+        if (sinks.Count == 0)
+        {
+            throw Foreign("no branch of it ends in a terminal, so nothing consumes what its stages produce");
+        }
+
+        foreach ((NodeId node, Arrivals arrivals) in joined)
+        {
+            if (arrivals.Streams is { } streams && streams.Contains(-1))
+            {
+                throw Foreign(
+                    $"the junction '{node}' closes a cycle at an input no branch of the graph ever reached");
+            }
+        }
+
         (ResultSlotId?[] slots, LocalControl[] declared) = Slots(document, sinks, controls);
         LocalEnding[] endings = new LocalEnding[sinks.Count];
 
@@ -198,7 +268,14 @@ internal static class LocalRunPlanner
                 slots[index]);
         }
 
-        return new LocalRunPlan(segments, boundaries, producers, endings, declared, completesAtStart);
+        return new LocalRunPlan(
+            segments,
+            boundaries,
+            producers,
+            endings,
+            declared,
+            completesAtStart,
+            feedbackChannels);
 
         // Compiles one maximal junction-free chain, from the node that begins it to the terminal or the
         // junction that ends it. A head branch begins at a source and reads no channel; every other branch
@@ -478,6 +555,12 @@ internal static class LocalRunPlanner
                         case LocalStageKind.Balance when !first && !last:
                             Split(declaration, descriptor.Kind, LocalFanOut.Balance());
                             return;
+                        case LocalStageKind.Partition when !first && !last:
+                            Split(
+                                declaration,
+                                descriptor.Kind,
+                                LocalFanOut.Partition(LocalDelegateAdapter.Router(descriptor.Behavior)));
+                            return;
                         case LocalStageKind.Unzip when !first && !last:
                             Split(
                                 declaration,
@@ -706,11 +789,19 @@ internal static class LocalRunPlanner
                 }
             }
 
-            // Ends this branch at a joining junction, and builds that junction when this is the last branch
-            // to arrive at it. Everything under construction is closed at a boundary first, exactly as it
-            // is at a splitting junction; the channel that closing produced is the input this branch feeds,
-            // and which input that is is the port the branch arrived at. The junction cannot be built any
-            // earlier than the last arrival, because a pump that reads several channels needs all of them.
+            // Ends this branch at a joining junction, and builds that junction when the last branch that
+            // can arrive at it before it exists has arrived. Everything under construction is closed at a
+            // boundary first, exactly as it is at a splitting junction; the channel that closing produced
+            // is the input this branch feeds, and which input that is is the port the branch arrived at.
+            //
+            // A cycle is the whole reason "the last arrival" is not simply "every arrival". The branch
+            // that carries a feedback edge begins below this very junction, so it cannot be walked until
+            // the junction exists, and the junction cannot wait for it: the two would wait for each other
+            // and the plan would never be built. So a feedback input is a place kept rather than a channel
+            // waited for — the junction is built when every input that comes from outside the cycle has
+            // arrived, with its feedback inputs holding a reserved slot, and the arrival that eventually
+            // comes round fills that slot in the list the segment is already reading. Which inputs those
+            // are is decided before the walk begins, by the back edges of a walk rooted at the heads.
             void Meet(StageNode node, PortId entry)
             {
                 Open(pending ?? LocalBoundary.Handoff);
@@ -739,35 +830,75 @@ internal static class LocalRunPlanner
                         $"the junction '{node.Id}' is wired at a port the stage '{node.Stage}' does not declare as an input");
                 }
 
-                if (!joined.TryGetValue(node.Id, out int[]? arrived))
+                if (!joined.TryGetValue(node.Id, out Arrivals? arrived))
                 {
-                    arrived = new int[ports.Count];
+                    arrived = new Arrivals(ports.Count);
 
-                    Array.Fill(arrived, -1);
+                    for (int input = 0; input < ports.Count; input++)
+                    {
+                        arrived.Feedback[input] =
+                            feedback.Contains(PortAddress.Create(node.Id, ports[input].Id));
+                    }
+
                     joined.Add(node.Id, arrived);
                 }
 
-                if (arrived[arrival] >= 0)
+                if (arrived.Channels[arrival] >= 0)
                 {
                     throw Foreign($"the junction '{node.Id}' is reached at the port '{entry}' from more than one place");
                 }
 
-                arrived[arrival] = inputs[0];
+                arrived.Channels[arrival] = inputs[0];
 
-                List<int> streams = [];
-
-                for (int input = 0; input < arrived.Length; input++)
+                if (arrived.Streams is { } opened)
                 {
-                    if (arrived[input] >= 0)
+                    // The arrival that closed a cycle. The junction has been reading this list since it
+                    // was built, and this is the channel the slot was kept for; the run needs the channel
+                    // again by itself, because cutting a feedback edge is how a graceful stop ends a loop.
+                    // A slot is always there — the junction is built only once every wired input has
+                    // either arrived or been marked as feedback — and the guard is here so that the
+                    // argument stays an argument rather than an index nobody checked.
+                    if (arrived.Slots[arrival] < 0)
                     {
-                        streams.Add(arrived[input]);
+                        throw Foreign(
+                            $"the junction '{node.Id}' was built before the port '{entry}' was known to be one of its inputs");
+                    }
+
+                    opened[arrived.Slots[arrival]] = inputs[0];
+                    feedbackChannels.Add(inputs[0]);
+
+                    return;
+                }
+
+                int joins = 0;
+
+                for (int input = 0; input < ports.Count; input++)
+                {
+                    if (arrived.Channels[input] >= 0 || arrived.Feedback[input])
+                    {
+                        joins++;
                     }
                 }
 
-                if (streams.Count != arriving[node.Id].Count)
+                if (joins != arriving[node.Id].Count)
                 {
                     return;
                 }
+
+                List<int> streams = [];
+
+                for (int input = 0; input < ports.Count; input++)
+                {
+                    if (arrived.Channels[input] < 0 && !arrived.Feedback[input])
+                    {
+                        continue;
+                    }
+
+                    arrived.Slots[input] = streams.Count;
+                    streams.Add(arrived.Channels[input]);
+                }
+
+                arrived.Streams = streams;
 
                 if (streams.Count < LocalVocabulary.MinFanIn)
                 {
@@ -895,6 +1026,239 @@ internal static class LocalRunPlanner
 
         return heads.Count > 0 ? heads : throw Foreign("no node begins a chain");
     }
+
+    /// <summary>Finds one cycle among the nodes a filter admits, and reports the nodes it runs through.</summary>
+    /// <param name="document">The document being compiled.</param>
+    /// <param name="leaving">The edges leaving each node that has any.</param>
+    /// <param name="included">The nodes to walk over; every other node is treated as absent.</param>
+    /// <returns>The cycle's nodes in flow order, or <see langword="null"/> when there is no cycle.</returns>
+    /// <remarks>
+    /// <para>
+    /// One depth-first walk from every admitted node, reporting the first back edge it meets. Both of this
+    /// runtime's cycle rules are this one search over two different filters, which is the point of writing
+    /// it once: ADR 0005's legality rule is "is there a cycle once the boundaries that can answer without
+    /// room are removed", and the entry rule is "is there a cycle among the nodes no source reaches". A
+    /// filter is exactly how a node is removed from a graph without building a second one.
+    /// </para>
+    /// <para>
+    /// Removing a node rather than an edge is what makes the legality rule correct rather than
+    /// approximately correct. "Every cycle passes at least one relieving boundary" is not the same claim as
+    /// "some cycle through this component passes one", and enumerating cycles to tell them apart is
+    /// exponential; deleting the relieving nodes and asking whether any cycle survives is the same claim,
+    /// answered in one walk. A self-loop is a cycle of one node and needs no separate rule, which is
+    /// exactly what ADR 0005 says when it subsumes M0's refusal.
+    /// </para>
+    /// <para>
+    /// The walk is iterative because a graph's depth is not this process's stack to spend, and the path is
+    /// kept as a list beside the stack so that the answer is the cycle itself rather than the fact that
+    /// there is one: a diagnostic that names <c>a -&gt; b -&gt; a</c> is actionable and one that says "a
+    /// cycle exists" is not.
+    /// </para>
+    /// </remarks>
+    private static List<NodeId>? Cycle(
+        GraphDocument document,
+        Dictionary<NodeId, List<GraphEdge>> leaving,
+        Func<NodeId, bool> included)
+    {
+        HashSet<NodeId> finished = [];
+        Dictionary<NodeId, int> depth = [];
+        List<NodeId> path = [];
+        Stack<(NodeId Node, int Next)> pending = new();
+
+        foreach (StageNode start in document.Nodes)
+        {
+            if (!included(start.Id) || finished.Contains(start.Id))
+            {
+                continue;
+            }
+
+            pending.Push((start.Id, 0));
+            depth.Add(start.Id, path.Count);
+            path.Add(start.Id);
+
+            while (pending.Count > 0)
+            {
+                (NodeId node, int next) = pending.Pop();
+
+                if (!leaving.TryGetValue(node, out List<GraphEdge>? onwards) || next == onwards.Count)
+                {
+                    _ = depth.Remove(node);
+                    path.RemoveAt(path.Count - 1);
+                    _ = finished.Add(node);
+
+                    continue;
+                }
+
+                pending.Push((node, next + 1));
+
+                NodeId target = onwards[next].To.Node;
+
+                if (!included(target) || finished.Contains(target))
+                {
+                    continue;
+                }
+
+                if (depth.TryGetValue(target, out int entered))
+                {
+                    return path.GetRange(entered, path.Count - entered);
+                }
+
+                depth.Add(target, path.Count);
+                path.Add(target);
+                pending.Push((target, 0));
+            }
+        }
+
+        return null;
+    }
+
+    /// <summary>Finds the nodes a walk from the heads reaches by following the edges forward.</summary>
+    /// <param name="leaving">The edges leaving each node that has any.</param>
+    /// <param name="heads">The nodes nothing feeds.</param>
+    /// <returns>The reachable nodes.</returns>
+    /// <remarks>
+    /// Deliberately one-directional, unlike <see cref="Separated"/>: what this answers is whether an
+    /// element could ever arrive at a node, and elements travel one way. A cycle among the nodes this does
+    /// not reach is a cycle no source feeds.
+    /// </remarks>
+    private static HashSet<NodeId> Reachable(Dictionary<NodeId, List<GraphEdge>> leaving, List<NodeId> heads)
+    {
+        HashSet<NodeId> reached = [.. heads];
+        Queue<NodeId> pending = new(heads);
+
+        while (pending.Count > 0)
+        {
+            if (!leaving.TryGetValue(pending.Dequeue(), out List<GraphEdge>? onwards))
+            {
+                continue;
+            }
+
+            for (int index = 0; index < onwards.Count; index++)
+            {
+                if (reached.Add(onwards[index].To.Node))
+                {
+                    pending.Enqueue(onwards[index].To.Node);
+                }
+            }
+        }
+
+        return reached;
+    }
+
+    /// <summary>Finds the input ports a cycle closes at, as the back edges of a walk from the heads.</summary>
+    /// <param name="leaving">The edges leaving each node that has any.</param>
+    /// <param name="heads">The nodes nothing feeds.</param>
+    /// <returns>The addresses of the input ports those edges terminate at.</returns>
+    /// <remarks>
+    /// <para>
+    /// Cutting these edges is what turns a cyclic document back into the acyclic one the planner's walk
+    /// knows how to compile, and every cycle contains at least one of them by construction: a depth-first
+    /// walk meets a node of the current path again exactly when the edge it followed closes a cycle. Which
+    /// edge of a given cycle is chosen depends on the order the edges are read in and does not matter — any
+    /// one of them cut leaves a graph the walk can finish.
+    /// </para>
+    /// <para>
+    /// The answer is ports rather than edges because a port is what the plan needs: an input of a junction
+    /// is named by the port an edge terminates at and by nothing else, so a reserved slot is a port's, and
+    /// a buffer folded into the leg above it changes which edge arrives without changing which port it
+    /// arrives at.
+    /// </para>
+    /// </remarks>
+    private static HashSet<PortAddress> Feedback(Dictionary<NodeId, List<GraphEdge>> leaving, List<NodeId> heads)
+    {
+        HashSet<PortAddress> feedback = [];
+        HashSet<NodeId> open = [];
+        HashSet<NodeId> finished = [];
+        Stack<(NodeId Node, int Next)> pending = new();
+
+        for (int index = 0; index < heads.Count; index++)
+        {
+            if (finished.Contains(heads[index]))
+            {
+                continue;
+            }
+
+            pending.Push((heads[index], 0));
+            _ = open.Add(heads[index]);
+
+            while (pending.Count > 0)
+            {
+                (NodeId node, int next) = pending.Pop();
+
+                if (!leaving.TryGetValue(node, out List<GraphEdge>? onwards) || next == onwards.Count)
+                {
+                    _ = open.Remove(node);
+                    _ = finished.Add(node);
+
+                    continue;
+                }
+
+                pending.Push((node, next + 1));
+
+                NodeId target = onwards[next].To.Node;
+
+                if (open.Contains(target))
+                {
+                    _ = feedback.Add(onwards[next].To);
+
+                    continue;
+                }
+
+                if (finished.Contains(target))
+                {
+                    continue;
+                }
+
+                _ = open.Add(target);
+                pending.Push((target, 0));
+            }
+        }
+
+        return feedback;
+    }
+
+    /// <summary>Finds the nodes that are boundaries able to answer an offer without room below them.</summary>
+    /// <param name="document">The document being compiled.</param>
+    /// <param name="bindings">The authoring-side behavior of every locally bound node.</param>
+    /// <param name="declarations">The document's nodes, keyed by identifier.</param>
+    /// <returns>The nodes a cycle may pass through without being a deadlock by construction.</returns>
+    /// <remarks>
+    /// ADR 0005's predicate, and the whole of what makes a cycle legal: a declared buffer whose overflow
+    /// policy is not backpressure answers every offer — by dropping, by discarding what it held, or by
+    /// failing the run — so a pump above it never waits for room that only a pump below it could make.
+    /// Every other boundary this engine has waits, the implicit handoff between two segments included, so
+    /// nothing else relieves a cycle. A payload this runtime cannot read is not a relieving boundary
+    /// either: the walk reports that node as unreadable in its own words, and treating an unreadable
+    /// capacity as a licence would be the one place a broken document bought a weaker rule. Computed once
+    /// rather than asked per edge, because the answer involves reading a parameter payload and the walk
+    /// that consumes it visits a node once per edge into it.
+    /// </remarks>
+    private static HashSet<NodeId> Relieving(
+        GraphDocument document,
+        IReadOnlyDictionary<NodeId, LocalStageDescriptor> bindings,
+        Dictionary<NodeId, StageNode> declarations)
+    {
+        HashSet<NodeId> relieving = [];
+
+        foreach (StageNode node in document.Nodes)
+        {
+            if (bindings.TryGetValue(node.Id, out LocalStageDescriptor? descriptor) &&
+                descriptor.Kind is LocalStageKind.Buffer &&
+                LocalBufferParameters.TryRead(declarations[node.Id].Parameters, out BufferOptions? options, out _) &&
+                options!.OverflowPolicy is not OverflowPolicy.Backpressure)
+            {
+                _ = relieving.Add(node.Id);
+            }
+        }
+
+        return relieving;
+    }
+
+    /// <summary>Renders a cycle's nodes as the loop they are, for a diagnostic.</summary>
+    /// <param name="cycle">The nodes in flow order, beginning at the one the cycle returns to.</param>
+    /// <returns>The path, closed back onto its first node.</returns>
+    private static string Path(List<NodeId> cycle) =>
+        string.Join(" -> ", cycle.Select(node => $"'{node}'").Append($"'{cycle[0]}'"));
 
     /// <summary>Finds two nodes of a document that no path of edges joins.</summary>
     /// <param name="document">The document being compiled.</param>
@@ -1279,4 +1643,58 @@ internal static class LocalRunPlanner
         Func<object?>? SeedFactory,
         NodeId Node,
         bool Produces);
+
+    /// <summary>What one joining junction under construction has been told about its inputs so far.</summary>
+    /// <remarks>
+    /// Four parallel arrays over the junction's declared input ports, and they exist as one type because a
+    /// cycle makes "which branches have arrived" and "which segment is already reading them" two questions
+    /// about the same junction at the same time. Without a cycle only the first two would be needed and a
+    /// bare array of channels was enough, which is what this replaced.
+    /// </remarks>
+    /// <param name="ports">How many input ports the junction's stage declares.</param>
+    private sealed class Arrivals(int ports)
+    {
+        /// <summary>Gets the channel each input port was reached on, or minus one when none has.</summary>
+        internal int[] Channels { get; } = Filled(ports);
+
+        /// <summary>Gets which input ports a feedback edge terminates at.</summary>
+        /// <value>
+        /// <see langword="true"/> for a port whose branch begins below this junction, so that waiting for
+        /// it before building the junction would be waiting for the junction itself.
+        /// </value>
+        internal bool[] Feedback { get; } = new bool[ports];
+
+        /// <summary>Gets each input port's position in the junction's list of channels, or minus one.</summary>
+        /// <remarks>
+        /// The list holds one entry per wired input and a port list holds every port the stage declares,
+        /// so the two are not the same index; this is the map between them, and it is what a feedback
+        /// arrival writes through when it fills the slot that was kept for it.
+        /// </remarks>
+        internal int[] Slots { get; } = Filled(ports);
+
+        /// <summary>Gets or sets the very list of channels the built segment reads.</summary>
+        /// <value>
+        /// The junction's inputs once it has been built, still holding minus one at any slot a feedback
+        /// edge has not filled yet; <see langword="null"/> before it is built.
+        /// </value>
+        /// <remarks>
+        /// Held rather than copied, deliberately: the segment is constructed with this list and a feedback
+        /// arrival writes into it afterwards, which is how a channel that cannot exist when the junction
+        /// is built still becomes one of its inputs. Nothing reads a plan until it is finished, so the
+        /// mutation is invisible to everything but this compilation.
+        /// </remarks>
+        internal List<int>? Streams { get; set; }
+
+        /// <summary>Builds an array of the given length filled with minus one.</summary>
+        /// <param name="length">The number of ports.</param>
+        /// <returns>The array.</returns>
+        private static int[] Filled(int length)
+        {
+            int[] values = new int[length];
+
+            Array.Fill(values, -1);
+
+            return values;
+        }
+    }
 }

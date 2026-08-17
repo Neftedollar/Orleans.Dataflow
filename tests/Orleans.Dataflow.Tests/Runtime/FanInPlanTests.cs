@@ -179,11 +179,13 @@ public sealed class FanInPlanTests
     }
 
     [Fact]
-    public async Task ACycleThroughAJoiningJunctionIsRefused()
+    public async Task ACycleThroughAJoiningJunctionWithNoRelievingBoundaryIsRefused()
     {
-        // The shape a fan-in makes reachable for the first time, and the reason cycles are still a later
-        // checkpoint: a junction fed by its own downstream is never built, because the last of its arrivals
-        // never comes, and everything behind it is therefore a part of the document no walk reaches.
+        // The shape a fan-in makes reachable for the first time. Checkpoint 2 refused it as nodes no walk
+        // from a source reached; checkpoint 4 refuses it for what it actually is, because it can now tell:
+        // every edge of this loop waits for room below it, so the junction would wait for the broadcast
+        // and the broadcast for the junction. The path is in the diagnostic because that is what an author
+        // needs in order to put a buffer somewhere in it.
         RunnableGraph graph = Graph(
             Declaring(
                 [
@@ -208,8 +210,8 @@ public sealed class FanInPlanTests
         InvalidOperationException refused =
             await Assert.ThrowsAsync<InvalidOperationException>(async () => await Host.MaterializeAsync(graph, TestToken));
 
-        Assert.Contains("do not form one graph", refused.Message, StringComparison.Ordinal);
-        Assert.Contains("reached 1 of them", refused.Message, StringComparison.Ordinal);
+        Assert.Contains("passes no boundary that can answer without room below it", refused.Message, StringComparison.Ordinal);
+        Assert.Contains("'stage-2' -> 'stage-3' -> 'stage-2'", refused.Message, StringComparison.Ordinal);
     }
 
     [Fact]

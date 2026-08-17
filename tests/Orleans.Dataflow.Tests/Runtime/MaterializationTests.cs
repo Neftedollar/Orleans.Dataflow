@@ -196,14 +196,24 @@ public sealed class MaterializationTests
     [Fact]
     public async Task MaterializeAsyncRejectsADocumentWhoseNodesAllFeedOneAnother()
     {
-        // Every node is fed, so there is no head to walk from at all.
+        // Every node is fed, so there is no head to walk from at all. The loop passes a dropping buffer,
+        // so it is a legal cycle rather than a refused one and the answer is about the missing source
+        // rather than about the loop: a graph made of nothing but a cycle has nowhere for an element to
+        // come from.
         RunnableGraph graph = Graph(
             Document(
-                [Node("stage-1", "select"), Node("stage-2", "select")],
+                [
+                    Node("stage-1", "select"),
+                    Node(
+                        "stage-2",
+                        "buffer",
+                        "local-buffer-parameters",
+                        """{"capacity":4,"overflowPolicy":"drop-oldest"}"""),
+                ],
                 [Edge("stage-1", "stage-2"), Edge("stage-2", "stage-1")]),
             Bindings(
                 ("stage-1", LocalStageDescriptor.Select((Func<int, int>)(value => value))),
-                ("stage-2", LocalStageDescriptor.Select((Func<int, int>)(value => value)))));
+                ("stage-2", LocalStageDescriptor.Buffer(new BufferOptions { Capacity = 4 }))));
 
         InvalidOperationException rejected =
             await Assert.ThrowsAsync<InvalidOperationException>(async () => await Host.MaterializeAsync(graph, TestToken));
@@ -212,31 +222,37 @@ public sealed class MaterializationTests
     }
 
     [Fact]
-    public async Task MaterializeAsyncRejectsAChainThatLeavesSomeNodesUnreached()
+    public async Task MaterializeAsyncRejectsACycleNothingOutsideItFeeds()
     {
-        // One real chain beside a cycle nothing feeds into. Walking from the only head reaches half the
-        // document, and a run that executed it would silently ignore the other half. This is also how a
-        // cycle is refused in this checkpoint: every node of one is fed, so no walk from a source ever
-        // reaches it.
+        // One real chain beside a legal cycle nothing feeds into. The loop passes a dropping buffer, so
+        // ADR 0005's legality rule is satisfied and it would not deadlock; what it can never do is hold an
+        // element, because no edge enters it from outside. A run of this would idle forever in half its
+        // segments, so it is refused and the diagnostic names the loop rather than reporting that some
+        // nodes went unvisited.
         RunnableGraph graph = Graph(
             Document(
                 [
                     Node("stage-1", "from-enumerable"),
                     Node("stage-2", "ignore"),
                     Node("stage-3", "select"),
-                    Node("stage-4", "select"),
+                    Node(
+                        "stage-4",
+                        "buffer",
+                        "local-buffer-parameters",
+                        """{"capacity":4,"overflowPolicy":"drop-oldest"}"""),
                 ],
                 [Edge("stage-1", "stage-2"), Edge("stage-3", "stage-4"), Edge("stage-4", "stage-3")]),
             Bindings(
                 ("stage-1", LocalStageDescriptor.FromEnumerable(new RecordingEnumerable<int>(1))),
                 ("stage-2", LocalStageDescriptor.Ignore()),
                 ("stage-3", LocalStageDescriptor.Select((Func<int, int>)(value => value))),
-                ("stage-4", LocalStageDescriptor.Select((Func<int, int>)(value => value)))));
+                ("stage-4", LocalStageDescriptor.Buffer(new BufferOptions { Capacity = 4 }))));
 
         InvalidOperationException rejected =
             await Assert.ThrowsAsync<InvalidOperationException>(async () => await Host.MaterializeAsync(graph, TestToken));
 
-        Assert.Contains("do not form one graph", rejected.Message, StringComparison.Ordinal);
-        Assert.Contains("reached 2 of them", rejected.Message, StringComparison.Ordinal);
+        Assert.Contains("is fed by nothing outside it", rejected.Message, StringComparison.Ordinal);
+        Assert.Contains("'stage-3'", rejected.Message, StringComparison.Ordinal);
+        Assert.Contains("'stage-4'", rejected.Message, StringComparison.Ordinal);
     }
 }

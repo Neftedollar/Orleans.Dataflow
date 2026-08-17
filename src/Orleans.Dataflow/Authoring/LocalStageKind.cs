@@ -27,8 +27,9 @@ namespace Orleans.Dataflow.Authoring;
 /// which is what makes fusion the default and a queue something an author asked for.
 /// </para>
 /// <para>
-/// Eight of the shapes are junctions. <see cref="Broadcast"/>, <see cref="Balance"/>, and
-/// <see cref="Unzip"/> each declare several output ports; <see cref="Merge"/>, <see cref="Concat"/>,
+/// Nine of the shapes are junctions. <see cref="Broadcast"/>, <see cref="Balance"/>,
+/// <see cref="Partition"/>, and <see cref="Unzip"/> each declare several output ports;
+/// <see cref="Merge"/>, <see cref="Concat"/>,
 /// <see cref="Interleave"/>, <see cref="Zip"/>, and <see cref="CombineLatest"/> each declare several input
 /// ports. Every one of them is a boundary on every port it declares, and none of them fuses with anything,
 /// because a junction's pump shape — several channels on one side, one on the other, and a rule about which
@@ -185,6 +186,12 @@ internal enum LocalStageKind
     /// <see cref="LocalVocabulary.MaxFanOut"/> output ports.
     /// </summary>
     Balance,
+
+    /// <summary>
+    /// Delivers each element to the one output its routing function names, waiting for that output alone;
+    /// one input port and between two and <see cref="LocalVocabulary.MaxFanOut"/> output ports.
+    /// </summary>
+    Partition,
 
     /// <summary>
     /// Delivers the two halves of a row to two outputs that both have room; one input port and the two

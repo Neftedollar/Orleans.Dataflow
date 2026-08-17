@@ -421,6 +421,18 @@ internal sealed class LocalStageDescriptor : StageOccurrence
     internal static LocalStageDescriptor Balance() =>
         new(LocalStageKind.Balance, behavior: null, seed: null, LocalVocabulary.EmptyParameters);
 
+    /// <summary>Creates a junction that delivers each element to the one output its function names.</summary>
+    /// <param name="router">The routing function, as the authoring value received it.</param>
+    /// <returns>The descriptor.</returns>
+    /// <remarks>
+    /// The router is behavior for the reason an unzip's projections are: which leg an element belongs on is
+    /// a statement about an element type, and an element type never appears in a local document. What the
+    /// document states is that this node routes one stream into several, which is the part that is
+    /// topology; how many legs it has is stated by its edges, so there is no payload here either.
+    /// </remarks>
+    internal static LocalStageDescriptor Partition(object router) =>
+        new(LocalStageKind.Partition, router, seed: null, LocalVocabulary.EmptyParameters);
+
     /// <summary>Creates a junction that delivers the two halves of a row to two outputs.</summary>
     /// <param name="left">The projection of a row onto its left half, as the authoring value received it.</param>
     /// <param name="right">The projection of a row onto its right half, as the authoring value received it.</param>

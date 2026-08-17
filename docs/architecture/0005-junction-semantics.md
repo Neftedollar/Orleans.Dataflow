@@ -105,7 +105,7 @@ Five rules hold for every junction, stated once:
 |---|---|---|---|
 | `Broadcast` | every element to every live output | **every** live output has room | 1 element |
 | `Balance` | each element to **one** output with room | **any** output has room | 1 element |
-| `Partition` | each element to the output its function names | its **target** has room | 1 element |
+| `Partition` | each element to the output its function names | it holds no routed element (reads first — the target *is* the element's) | 1 element |
 | `Unzip` | a row's halves to their outputs | **both** outputs have room | 1 element |
 
 - **Broadcast** is slowest-consumer backpressure by construction: the pull
@@ -125,7 +125,13 @@ Five rules hold for every junction, stated once:
   other leg starves while it waits, which is head-of-line blocking one
   element deep and is exactly Akka's contract. A routing result outside
   the declared range fails the run — a misrouted element has no honest
-  destination, and dropping it silently would be worse.
+  destination, and dropping it silently would be worse. An element routed
+  to a leg that has *left* is abandoned rather than failed on, ratified by
+  checkpoint 4's measurement: failing there races an ordinary early
+  completion, whose walk closes legs while elements still travel toward
+  them, and it is what the engine's offer contract already does at every
+  closed channel. Rule 3 stands: the junction keeps feeding the legs that
+  remain.
 - **Unzip** takes a two-part row and is `Broadcast` for halves: both
   outputs must have room before the pull, each receives its half of the
   same row, so the two legs advance in lockstep and can be re-zipped
@@ -137,12 +143,20 @@ A cycle is legal exactly when every cycle in the graph passes through at
 least one boundary that can hold an element and answer without waiting for
 its own downstream — a buffer whose overflow policy is anything but
 `Backpressure`, or (once M4's timing operators exist) an explicit delay.
-The graph compiler enforces this as a validation rule: a cycle of nothing
-but backpressuring edges is refused before execution with the cycle's node
-path in the diagnostic, because in a pull engine such a loop is a deadlock
-by construction — every pump in it waits for room that only itself can
-make. M0's no-self-loop rule is subsumed: a self-loop is a cycle and gets
-the same test rather than a special refusal.
+Validation enforces this before execution: a cycle of nothing but
+backpressuring edges is refused with the cycle's node path in the
+diagnostic, because in a pull engine such a loop is a deadlock by
+construction — every pump in it waits for room that only itself can make.
+The rule lives with the host's planner rather than the catalog-generic
+graph compiler (amended by checkpoint 4): which stage is a relieving
+boundary is vocabulary knowledge the compiler deliberately does not have,
+and every shape rule since the junctions arrived has lived there for the
+same reason. M0's no-self-loop rule is subsumed: a self-loop is a cycle
+and gets the same test rather than a special refusal. What ends a legal
+cycle is the design doc's corrected contract: a stream-ending stage on
+the loop, or a shutdown severing its feedback edges — never the closing
+of its external inputs alone, which for a seeded loop is the moment the
+computation starts, not the moment it ends.
 
 ## Decision: the ratified M2 deferrals
 

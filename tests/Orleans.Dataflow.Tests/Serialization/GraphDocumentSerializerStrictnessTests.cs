@@ -1,4 +1,5 @@
 using System.Text;
+using Orleans.Dataflow.Definition;
 using Orleans.Dataflow.Serialization;
 using Xunit;
 
@@ -289,15 +290,23 @@ public sealed class GraphDocumentSerializerStrictnessTests
     }
 
     [Fact]
-    public void ASelfLoopEdgeIsRejectedByTheEdgeFactoryAndCarriesItsReport()
+    public void ASelfLoopEdgeIsReadRatherThanRejected()
     {
-        GraphDocumentFormatException exception = Representative(
+        // M0 refused this here, because no layer could yet reason about a loop at all. ADR 0005 subsumes
+        // that refusal into the cycle rule: a self-loop is a cycle of one node, and whether a cycle can
+        // run is a question about the boundaries it passes, which a document does not answer and a reader
+        // of bytes cannot. The strictness this file is about is unaffected — the reader still accepts
+        // exactly one byte form of the document it now accepts.
+        byte[] mutated = Mutate(
+            FixtureGraphs.RepresentativeFileName,
             "\"to\":{\"nodeId\":\"stage/mapper\",\"portId\":\"in\"}",
             "\"to\":{\"nodeId\":\"reader\",\"portId\":\"in\"}");
 
-        Assert.Contains("$.edges[0]", exception.Message, StringComparison.Ordinal);
-        Assert.Contains("self-loop", exception.Message, StringComparison.Ordinal);
-        Assert.IsType<ArgumentException>(exception.InnerException);
+        GraphDocument document = GraphDocumentSerializer.Deserialize(mutated);
+        GraphEdge loop = document.Edges[0];
+
+        Assert.Equal(loop.From.Node, loop.To.Node);
+        Assert.Equal(mutated, GraphDocumentSerializer.Serialize(document));
     }
 
     [Fact]

@@ -59,7 +59,7 @@ internal static class LocalVocabulary
     /// <summary>The numeric format that pads a position to the four digits <see cref="MaxAutoNamedPosition"/> allows.</summary>
     private const string AutoNameNumberFormat = "D4";
 
-    /// <summary>The greatest number of outputs a broadcast or a balance declares.</summary>
+    /// <summary>The greatest number of outputs a broadcast, a balance, or a partition declares.</summary>
     /// <remarks>
     /// A stage specification declares a port list rather than an arity, so a junction's legs have to be
     /// ports that exist whether or not a given document wires them; the bound is where that list stops. It
@@ -231,6 +231,10 @@ internal static class LocalVocabulary
     /// <summary>The stage reference of a junction that delivers each element to one output with room.</summary>
     internal static readonly StageRef Balance =
         StageRef.Create(Provider, StageId.Create("balance"), StageRef.FirstMajorVersion);
+
+    /// <summary>The stage reference of a junction that delivers each element to the output its function names.</summary>
+    internal static readonly StageRef Partition =
+        StageRef.Create(Provider, StageId.Create("partition"), StageRef.FirstMajorVersion);
 
     /// <summary>The stage reference of a junction that delivers a row's halves to two outputs.</summary>
     internal static readonly StageRef Unzip =
@@ -454,7 +458,7 @@ internal static class LocalVocabulary
         OutputPortSpecification.Create(RightPort, ElementContract),
     ];
 
-    /// <summary>The output ports a broadcast or a balance declares, in rotation order.</summary>
+    /// <summary>The output ports a broadcast, a balance, or a partition declares, in rotation order.</summary>
     /// <remarks>
     /// The first two are wired or the document does not validate — a junction with one leg is a chain
     /// written the long way, and one with none is a discarding sink. The rest are ignorable, which is the
@@ -571,6 +575,7 @@ internal static class LocalVocabulary
         LocalStageKind.SelectValueTaskAsyncUnordered => SelectValueTaskAsyncUnordered,
         LocalStageKind.Broadcast => Broadcast,
         LocalStageKind.Balance => Balance,
+        LocalStageKind.Partition => Partition,
         LocalStageKind.Unzip => Unzip,
         LocalStageKind.Merge => Merge,
         LocalStageKind.Concat => Concat,
@@ -630,6 +635,7 @@ internal static class LocalVocabulary
             LocalStageKind.Select or
             LocalStageKind.Broadcast or
             LocalStageKind.Balance or
+            LocalStageKind.Partition or
             LocalStageKind.Unzip or
             LocalStageKind.Merge or
             LocalStageKind.Concat or
@@ -724,6 +730,7 @@ internal static class LocalVocabulary
             LocalStageKind.SelectValueTaskAsyncUnordered => LocalStagePlace.Operator,
         LocalStageKind.Broadcast or
             LocalStageKind.Balance or
+            LocalStageKind.Partition or
             LocalStageKind.Unzip => LocalStagePlace.FanOut,
         LocalStageKind.Merge or
             LocalStageKind.Concat or
@@ -790,15 +797,16 @@ internal static class LocalVocabulary
     internal static IReadOnlyList<OutputPortSpecification> OutputPortsOf(LocalStageKind kind) => kind switch
     {
         LocalStageKind.Unzip => RowOutputs,
-        LocalStageKind.Broadcast or LocalStageKind.Balance => FanOutOutputs,
+        LocalStageKind.Broadcast or LocalStageKind.Balance or LocalStageKind.Partition => FanOutOutputs,
         _ => ProducesElements(kind) ? ElementOutput : NoOutputs,
     };
 
-    /// <summary>Builds the numbered output ports of a broadcast or a balance.</summary>
+    /// <summary>Builds the numbered output ports of a broadcast, a balance, or a partition.</summary>
     /// <returns>The ports, <see cref="MinFanOut"/> of them required and the rest ignorable.</returns>
     /// <remarks>
-    /// Ordinal order over the names is rotation order, which is what a balance distributes in and what a
-    /// broadcast asks for room in. The number is formatted with the invariant culture for the reason every
+    /// Ordinal order over the names is rotation order, which is what a balance distributes in, what a
+    /// broadcast asks for room in, and what a partition's routing function answers with. The number is
+    /// formatted with the invariant culture for the reason every
     /// identifier in this vocabulary is: a culture with non-ASCII digits would otherwise produce a name the
     /// identifier grammar rejects.
     /// </remarks>

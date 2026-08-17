@@ -41,6 +41,9 @@ internal static class LocalDelegateAdapter
     /// <summary>The template closed to wrap a predicate delegate.</summary>
     private static readonly MethodInfo PredicateTemplate = Template(nameof(BoxPredicate));
 
+    /// <summary>The template closed to wrap a partition's routing function.</summary>
+    private static readonly MethodInfo RouterTemplate = Template(nameof(BoxRouter));
+
     /// <summary>The template closed to wrap a folding delegate.</summary>
     private static readonly MethodInfo FolderTemplate = Template(nameof(BoxFolder));
 
@@ -136,6 +139,33 @@ internal static class LocalDelegateAdapter
         }
 
         return halves;
+    }
+
+    /// <summary>Wraps a partition's routing function into one over boxed elements.</summary>
+    /// <param name="behavior">The bound <c>Func&lt;T, int&gt;</c>.</param>
+    /// <returns>The wrapped routing function.</returns>
+    /// <exception cref="InvalidOperationException">
+    /// <paramref name="behavior"/> is not a one-argument function returning <see cref="int"/>.
+    /// </exception>
+    /// <remarks>
+    /// Recovered by reflection the way an unzip's projections are, and for the same reason it is possible
+    /// at all: the delegate's own constructed type names the element type, so there is one template to
+    /// close rather than one per arity. What the function answers is the zero-based position of a leg in
+    /// the junction's port order, which is why nothing here can check the answer — how many legs this
+    /// occurrence has is stated by its edges, and the pump is where the range is known.
+    /// </remarks>
+    internal static Func<object?, int> Router(object? behavior)
+    {
+        const string Expected = "Func<T, int>";
+
+        Type[] arguments = Arguments(behavior, typeof(Func<,>), LocalStageKind.Partition, Expected);
+
+        if (arguments[1] != typeof(int))
+        {
+            throw Mismatch(behavior, LocalStageKind.Partition, Expected);
+        }
+
+        return (Func<object?, int>)Close(RouterTemplate, [arguments[0]], behavior);
     }
 
     /// <summary>Reads a junction's binding as the combiner that builds one row from its inputs' elements.</summary>
@@ -610,6 +640,14 @@ internal static class LocalDelegateAdapter
     /// <remarks>Invoked only by reflection, over the type arguments recovered from the delegate itself.</remarks>
     private static Func<object?, bool> BoxPredicate<TIn>(Func<TIn, bool> predicate) =>
         element => predicate((TIn)element!);
+
+    /// <summary>Wraps a typed routing function into one over boxed elements.</summary>
+    /// <typeparam name="TIn">The element type the routing function reads.</typeparam>
+    /// <param name="router">The author's delegate.</param>
+    /// <returns>The wrapper.</returns>
+    /// <remarks>Invoked only by reflection, over the type argument recovered from the delegate itself.</remarks>
+    private static Func<object?, int> BoxRouter<TIn>(Func<TIn, int> router) =>
+        element => router((TIn)element!);
 
     /// <summary>Wraps a typed asynchronous mapping into one over boxed elements.</summary>
     /// <typeparam name="TIn">The element type the mapping consumes.</typeparam>

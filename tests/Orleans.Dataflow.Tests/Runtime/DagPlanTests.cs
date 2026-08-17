@@ -338,6 +338,66 @@ public sealed class DagPlanTests
     }
 
     [Fact]
+    public void APartitionDeclaresTheSameLegsEveryOtherSplittingJunctionDoes()
+    {
+        // The routed junction needed no new port rule and no payload: how many legs it has is stated by
+        // its edges, exactly as a broadcast's are, and what it does with them is a binding. This is that
+        // sameness written down, on both halves of the cardinality rule at once.
+        GraphDocument wired = Declaring(
+            [
+                Node("stage-1", "from-enumerable"),
+                Node("stage-2", "partition"),
+                Node("stage-3", "ignore"),
+                Node("stage-4", "ignore"),
+            ],
+            [Edge("stage-1", "stage-2"), Leg("stage-2", 0, "stage-3"), Leg("stage-2", 1, "stage-4")],
+            []);
+
+        Assert.True(GraphCompiler.Validate(wired, LocalStageCatalog.Instance).IsValid);
+
+        GraphDocument lonely = Declaring(
+            [Node("stage-1", "from-enumerable"), Node("stage-2", "partition"), Node("stage-3", "ignore")],
+            [Edge("stage-1", "stage-2"), Leg("stage-2", 0, "stage-3")],
+            []);
+
+        GraphValidationReport report = GraphCompiler.Validate(lonely, LocalStageCatalog.Instance);
+
+        Assert.False(report.IsValid);
+        Assert.Contains(
+            report.Diagnostics,
+            diagnostic => diagnostic.Rule == "unconnected-output-port" && diagnostic.Subject == "stage-2#out-1");
+    }
+
+    [Fact]
+    public async Task APartitionBoundToSomethingThatIsNotARoutingFunctionIsRefused()
+    {
+        // The routing function is recovered from the delegate's own constructed type, so a binding of the
+        // wrong shape is a sentence at materialization rather than a cast failure inside a running loop.
+        // Returning something other than an index is the interesting half: the argument type would let a
+        // mapping stage's delegate through if the return type were not checked too.
+        RunnableGraph graph = Graph(
+            Declaring(
+                [
+                    Node("stage-1", "from-enumerable"),
+                    Node("stage-2", "partition"),
+                    Node("stage-3", "ignore"),
+                    Node("stage-4", "ignore"),
+                ],
+                [Edge("stage-1", "stage-2"), Leg("stage-2", 0, "stage-3"), Leg("stage-2", 1, "stage-4")],
+                []),
+            Bindings(
+                ("stage-1", LocalStageDescriptor.FromEnumerable(new RecordingEnumerable<int>(1))),
+                ("stage-2", LocalStageDescriptor.Partition((Func<int, string>)(value => $"leg {value}"))),
+                ("stage-3", LocalStageDescriptor.Ignore()),
+                ("stage-4", LocalStageDescriptor.Ignore())));
+
+        InvalidOperationException refused = await Assert.ThrowsAsync<InvalidOperationException>(
+            async () => await Host.MaterializeAsync(graph, TestToken));
+
+        Assert.Contains("must be bound to a Func<T, int>", refused.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public async Task ABindingWhoseShapeIsNotAJunctionCannotStandWhereOneDoes()
     {
         RunnableGraph graph = Graph(

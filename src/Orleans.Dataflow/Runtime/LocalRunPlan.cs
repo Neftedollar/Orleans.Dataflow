@@ -49,13 +49,15 @@ internal sealed class LocalRunPlan
     /// <param name="completesAtStart">
     /// The segments whose stream is over before the run begins, which is usually none.
     /// </param>
+    /// <param name="feedback">The channels that carry a cycle's elements back round, which is usually none.</param>
     internal LocalRunPlan(
         IReadOnlyList<LocalSegment> segments,
         IReadOnlyList<LocalBoundary> boundaries,
         IReadOnlyList<int> producers,
         IReadOnlyList<LocalEnding> endings,
         IReadOnlyList<LocalControl> controls,
-        IReadOnlyList<int> completesAtStart)
+        IReadOnlyList<int> completesAtStart,
+        IReadOnlyList<int> feedback)
     {
         Segments = segments;
         Boundaries = boundaries;
@@ -63,6 +65,7 @@ internal sealed class LocalRunPlan
         Endings = endings;
         Controls = controls;
         CompletesAtStart = completesAtStart;
+        Feedback = feedback;
     }
 
     /// <summary>Gets the segments this plan executes.</summary>
@@ -129,4 +132,18 @@ internal sealed class LocalRunPlan
     /// junction ends that leg alone, and the other legs run exactly as they would have.
     /// </remarks>
     internal IReadOnlyList<int> CompletesAtStart { get; }
+
+    /// <summary>Gets the channels that carry a cycle's elements back round to a junction.</summary>
+    /// <value>
+    /// One channel per feedback edge of the graph, which is an empty list for every acyclic plan.
+    /// </value>
+    /// <remarks>
+    /// A feedback edge is where new work enters a graph a second time, which is what makes it the loop's
+    /// source and not merely one of its edges. A graceful shutdown therefore closes exactly these channels
+    /// and nothing else: it is the same request the source pump answers by stopping its pull, asked of the
+    /// only other place elements come from. What was queued in one is drained, what is circulating leaves
+    /// through the exit the graph already has, and a run that would otherwise never stop ends with what it
+    /// had. Cancellation needs no such list, because it cancels every wait in the run at once.
+    /// </remarks>
+    internal IReadOnlyList<int> Feedback { get; }
 }
