@@ -44,8 +44,8 @@ Every row starts at **Research** and advances only together with its evidence; I
 | Overflow policies | P1 | M2 | Implemented | Backpressure, drop-oldest, drop-newest, drop-buffer, and fail report distinct outcomes. |
 | Operator fusion | P1 | M2 | Implemented | Compatible adjacent stages share an executor without changing element semantics. |
 | Explicit async boundary | P1 | M2 | Research | Placement/concurrency changes are visible; ordering contract remains explicit. |
-| Credit protocol across Orleans boundaries | P0 | M3 | Research | Grain calls or stream publication are not mistaken for downstream demand. |
-| Partition-aware placement | P1 | M3 | Research | Partition ownership, rebalance, ordering, and failover are specified. |
+| Credit protocol across Orleans boundaries | P0 | M3 | Implemented | A call in flight is credit spent and its reply is the grant; nothing on the wire carries credit. Neither an awaited grain call nor a stream publication is counted as downstream demand: each adapter's bound is what admits the next element. |
+| Partition-aware placement | P1 | M3 | Research | Partition ownership, rebalance, ordering, and failover are specified. Half of it exists on `main` and the row does not advance on half: placement of run grains and per-key executor grains is a hosting option (cluster default, random, prefer-local, hash-based) and per-key ordering is proven, while ownership, rebalance, and failover are M3 phase 4b and a single-silo suite cannot show where activations landed. |
 | Pause, resume, drain, shutdown, and abort | P1 | M2 | Implemented | Each control has distinct state transitions and in-flight behavior. |
 | Kill switch and external shutdown control | P1 | M2 | Implemented | Single-run control is a RunHandle intrinsic (ADR 0004): shutdown drains, disposal cancels; a switch shared across runs is a separate documented contract. |
 
@@ -134,7 +134,7 @@ C# names should follow .NET expectations where possible. If the Akka.NET behavio
 | Orleans Stream source | P0 | M3 | Implemented | Provider-specific delivery, ordering, rewind token, subscription ownership, and resubscription. |
 | Orleans Stream sink | P0 | M3 | Implemented | Publication acknowledgement is not universal end-to-end processing. |
 | Awaited grain-call flow/sink | P0 | M3 | Implemented | Awaited reply is the acknowledgement boundary; timeout/retry/idempotency are explicit. |
-| Keyed grain-call flow | P1 | M3 | Research | Per-key ordering and parallelism bounds. |
+| Keyed grain-call flow | P1 | M3 | Implemented | One call in flight per key gives per-key ordering without relying on transport ordering (probed: Orleans reorders pipelined calls); the declared bound governs concurrency across keys; per-key executor grains are opt-in per occurrence. |
 | Controlled grain group source | P1 | M3 | Research | A coordinator enumerates bounded keys/partitions; never an implicit cluster-wide grain scan. |
 | One-way grain-call sink | P2 | M3 | Research | Explicit best-effort adapter; never the default durable sink. |
 | Grain `IAsyncEnumerable<T>` source | P1 | M3 | Implemented | Call-scoped backpressure and cancellation; no implicit resume. |

@@ -366,6 +366,170 @@ internal sealed record GrainCallDeclaration(
     TimeSpan? Timeout);
 
 /// <summary>
+/// How a keyed grain call states which registration it addresses, how it is bounded, and whether it runs
+/// inside the run or on per-key executor grains.
+/// </summary>
+/// <remarks>
+/// <para>
+/// The four members a plain grain call has, plus one: <c>distributed</c>. That flag is the opt-in that keeps
+/// M3's doctrine intact — runs distribute before stages do, so a stage that distributes below a run says so
+/// in the document rather than doing it because it could. A document that does not ask for it gets the
+/// run-local keyed path, which is the default and stays the default.
+/// </para>
+/// <para>
+/// <b>There is no per-key bound member, and its absence is the contract.</b> A keyed stage holds exactly one
+/// call in flight per key, always, because that is where its per-key ordering comes from: the next element
+/// of a key is not sent until the previous one has replied, so nothing between the run and the grain has to
+/// order anything. Orleans undertakes no pairwise ordering between activations, and this repository's own
+/// probe watched it reorder pipelined calls inside a single silo, so a member that let a document ask for
+/// two in flight per key would be a knob for silently losing the ordering the stage promises.
+/// <c>maxInFlight</c> therefore bounds distinct keys and only distinct keys.
+/// </para>
+/// </remarks>
+internal static class KeyedGrainCallPayload
+{
+    /// <summary>The payload member holding whether the stage runs on per-key executor grains.</summary>
+    internal const string DistributedMember = "distributed";
+
+    /// <summary>Writes the payload of one keyed grain call.</summary>
+    /// <param name="call">The registered call's name.</param>
+    /// <param name="input">The contract text of the elements the call consumes.</param>
+    /// <param name="output">The contract text of the elements the call produces.</param>
+    /// <param name="maxInFlight">The greatest number of calls in flight at once, across keys.</param>
+    /// <param name="distributed">Whether the stage runs on per-key executor grains.</param>
+    /// <param name="timeout">The per-call timeout, or <see langword="null"/> for no timeout of our own.</param>
+    /// <returns>The canonical payload.</returns>
+    internal static CanonicalJsonValue Write(
+        string call,
+        string input,
+        string output,
+        int maxInFlight,
+        bool distributed,
+        TimeSpan? timeout)
+    {
+        string timeoutMember = timeout is null
+            ? string.Empty
+            : string.Create(
+                CultureInfo.InvariantCulture,
+                $",\"{GrainCallPayload.TimeoutMember}\":{(long)timeout.Value.TotalMilliseconds}");
+
+        return CanonicalJsonValue.Parse(string.Create(
+            CultureInfo.InvariantCulture,
+            $"{{\"{GrainCallPayload.CallMember}\":{JsonSerializer.Serialize(call)}," +
+            $"\"{DistributedMember}\":{(distributed ? "true" : "false")}," +
+            $"\"{GrainCallPayload.InputMember}\":{JsonSerializer.Serialize(input)}," +
+            $"\"{GrainCallPayload.MaxInFlightMember}\":{maxInFlight}," +
+            $"\"{GrainCallPayload.OutputMember}\":{JsonSerializer.Serialize(output)}{timeoutMember}}}"));
+    }
+
+    /// <summary>Reads a payload back into what it declares.</summary>
+    /// <param name="parameters">The node's payload, in canonical form.</param>
+    /// <param name="declaration">
+    /// When this method returns <see langword="true"/>, what the payload declares; otherwise
+    /// <see langword="null"/>.
+    /// </param>
+    /// <param name="violations">
+    /// When this method returns <see langword="false"/>, one lower-case sentence fragment per violation.
+    /// </param>
+    /// <returns><see langword="true"/> when the payload is a valid keyed-grain-call payload.</returns>
+    internal static bool TryRead(
+        CanonicalJsonValue parameters,
+        out KeyedGrainCallDeclaration? declaration,
+        out IReadOnlyList<string> violations)
+    {
+        declaration = null;
+
+        if (!OrleansPayload.TryOpen(parameters, out JsonElement payload, out violations))
+        {
+            return false;
+        }
+
+        List<string> found = [];
+        string? call = OrleansPayload.ReadText(payload, GrainCallPayload.CallMember, found);
+        string? input = OrleansPayload.ReadText(payload, GrainCallPayload.InputMember, found);
+        string? output = OrleansPayload.ReadText(payload, GrainCallPayload.OutputMember, found);
+        int maxInFlight = 0;
+
+        if (LocalParameterPayload.TryReadPositiveInteger(
+            payload,
+            GrainCallPayload.MaxInFlightMember,
+            found,
+            out int declared))
+        {
+            maxInFlight = declared;
+        }
+
+        bool distributed = false;
+
+        if (!payload.TryGetProperty(DistributedMember, out JsonElement mode))
+        {
+            found.Add(LocalParameterPayload.DescribeMissing(DistributedMember));
+        }
+        else if (mode.ValueKind is not JsonValueKind.True and not JsonValueKind.False)
+        {
+            found.Add(LocalParameterPayload.DescribeWrongKind(DistributedMember, mode, "true or false"));
+        }
+        else
+        {
+            distributed = mode.ValueKind is JsonValueKind.True;
+        }
+
+        TimeSpan? timeout = null;
+
+        // Optional, exactly as the plain grain call's is: a stage without a timeout of its own leaves the
+        // wait to Orleans' own call timeout, which is a different contract rather than a missing member.
+        if (payload.TryGetProperty(GrainCallPayload.TimeoutMember, out JsonElement _) &&
+            LocalParameterPayload.TryReadPositiveInteger(
+                payload,
+                GrainCallPayload.TimeoutMember,
+                found,
+                out int milliseconds))
+        {
+            timeout = TimeSpan.FromMilliseconds(milliseconds);
+        }
+
+        LocalParameterPayload.ReportUnknownMembers(
+            payload,
+            [
+                GrainCallPayload.CallMember,
+                DistributedMember,
+                GrainCallPayload.InputMember,
+                GrainCallPayload.MaxInFlightMember,
+                GrainCallPayload.OutputMember,
+                GrainCallPayload.TimeoutMember,
+            ],
+            found);
+
+        if (found.Count > 0)
+        {
+            violations = found;
+
+            return false;
+        }
+
+        violations = [];
+        declaration = new KeyedGrainCallDeclaration(call!, input!, output!, maxInFlight, distributed, timeout);
+
+        return true;
+    }
+}
+
+/// <summary>What a keyed grain call's payload declares.</summary>
+/// <param name="Call">The registered call's name.</param>
+/// <param name="Input">The contract text of the elements the call consumes.</param>
+/// <param name="Output">The contract text of the replies.</param>
+/// <param name="MaxInFlight">The greatest number of calls in flight at once, across keys.</param>
+/// <param name="Distributed">Whether the stage runs on per-key executor grains.</param>
+/// <param name="Timeout">The per-call timeout, or <see langword="null"/>.</param>
+internal sealed record KeyedGrainCallDeclaration(
+    string Call,
+    string Input,
+    string Output,
+    int MaxInFlight,
+    bool Distributed,
+    TimeSpan? Timeout);
+
+/// <summary>
 /// How a grain enumeration states which registration it opens.
 /// </summary>
 internal static class GrainEnumerablePayload

@@ -22,6 +22,7 @@ internal sealed class OrleansAdapterRegistry
 {
     private readonly Dictionary<string, IStreamElementEntry> _elements;
     private readonly Dictionary<string, IGrainCallEntry> _calls;
+    private readonly Dictionary<string, IKeyedGrainCallEntry> _keyedCalls;
     private readonly Dictionary<string, IGrainCallSinkEntry> _callSinks;
     private readonly Dictionary<string, IGrainEnumerableEntry> _enumerables;
     private readonly Dictionary<string, IObserverBridgeEntry> _bridges;
@@ -30,6 +31,7 @@ internal sealed class OrleansAdapterRegistry
     /// <summary>Initializes a new instance of the <see cref="OrleansAdapterRegistry"/> class.</summary>
     /// <param name="elements">The stream element bindings, keyed by contract text.</param>
     /// <param name="calls">The transforming call bindings, keyed by name.</param>
+    /// <param name="keyedCalls">The keyed call bindings, keyed by name.</param>
     /// <param name="callSinks">The terminating call bindings, keyed by name.</param>
     /// <param name="enumerables">The enumeration bindings, keyed by name.</param>
     /// <param name="bridges">The observer bridge bindings, keyed by name.</param>
@@ -37,6 +39,7 @@ internal sealed class OrleansAdapterRegistry
     private OrleansAdapterRegistry(
         Dictionary<string, IStreamElementEntry> elements,
         Dictionary<string, IGrainCallEntry> calls,
+        Dictionary<string, IKeyedGrainCallEntry> keyedCalls,
         Dictionary<string, IGrainCallSinkEntry> callSinks,
         Dictionary<string, IGrainEnumerableEntry> enumerables,
         Dictionary<string, IObserverBridgeEntry> bridges,
@@ -44,6 +47,7 @@ internal sealed class OrleansAdapterRegistry
     {
         _elements = elements;
         _calls = calls;
+        _keyedCalls = keyedCalls;
         _callSinks = callSinks;
         _enumerables = enumerables;
         _bridges = bridges;
@@ -55,13 +59,14 @@ internal sealed class OrleansAdapterRegistry
     /// The registry an authoring process validates against: it can check the shape of a payload and
     /// nothing about which names a silo publishes, which is exactly the split between a catalog and a host.
     /// </value>
-    internal static OrleansAdapterRegistry Empty { get; } = new([], [], [], [], [], []);
+    internal static OrleansAdapterRegistry Empty { get; } = new([], [], [], [], [], [], []);
 
     /// <summary>Gets a value indicating whether this registry checks names at all.</summary>
     /// <value><see langword="true"/> for <see cref="Empty"/> and for a silo that registered nothing.</value>
     internal bool IsEmpty =>
         _elements.Count == 0 &&
         _calls.Count == 0 &&
+        _keyedCalls.Count == 0 &&
         _callSinks.Count == 0 &&
         _enumerables.Count == 0 &&
         _bridges.Count == 0 &&
@@ -79,6 +84,20 @@ internal sealed class OrleansAdapterRegistry
     /// <param name="call">When this method returns <see langword="true"/>, the binding.</param>
     /// <returns><see langword="true"/> when this silo registers that call.</returns>
     internal bool TryGetCall(string name, out IGrainCallEntry? call) => _calls.TryGetValue(name, out call);
+
+    /// <summary>Resolves a keyed call by name.</summary>
+    /// <param name="name">The name a payload carries.</param>
+    /// <param name="call">When this method returns <see langword="true"/>, the binding.</param>
+    /// <returns><see langword="true"/> when this silo registers that keyed call.</returns>
+    /// <remarks>
+    /// Asked on two silos rather than one for a distributed keyed stage: by the silo materializing the run,
+    /// which refuses a document naming something it does not publish, and again by whichever silo an
+    /// executor is placed on, which is the only place a cluster with unevenly registered silos can be
+    /// caught. That is the deployment-scoped limit the whole registry carries, seen where distribution
+    /// makes it reachable.
+    /// </remarks>
+    internal bool TryGetKeyedCall(string name, out IKeyedGrainCallEntry? call) =>
+        _keyedCalls.TryGetValue(name, out call);
 
     /// <summary>Resolves a terminating call by name.</summary>
     /// <param name="name">The name a payload carries.</param>
@@ -101,6 +120,10 @@ internal sealed class OrleansAdapterRegistry
     /// <summary>Lists the transforming call names this silo publishes, in ordinal order.</summary>
     /// <returns>The names.</returns>
     internal IReadOnlyList<string> Calls => Sorted(_calls.Keys);
+
+    /// <summary>Lists the keyed call names this silo publishes, in ordinal order.</summary>
+    /// <returns>The names.</returns>
+    internal IReadOnlyList<string> KeyedCalls => Sorted(_keyedCalls.Keys);
 
     /// <summary>Lists the terminating call names this silo publishes, in ordinal order.</summary>
     /// <returns>The names.</returns>
@@ -154,6 +177,7 @@ internal sealed class OrleansAdapterRegistry
     {
         private readonly Dictionary<string, IStreamElementEntry> _elements = new(StringComparer.Ordinal);
         private readonly Dictionary<string, IGrainCallEntry> _calls = new(StringComparer.Ordinal);
+        private readonly Dictionary<string, IKeyedGrainCallEntry> _keyedCalls = new(StringComparer.Ordinal);
         private readonly Dictionary<string, IGrainCallSinkEntry> _callSinks = new(StringComparer.Ordinal);
         private readonly Dictionary<string, IGrainEnumerableEntry> _enumerables = new(StringComparer.Ordinal);
         private readonly Dictionary<string, IObserverBridgeEntry> _bridges = new(StringComparer.Ordinal);
@@ -194,6 +218,19 @@ internal sealed class OrleansAdapterRegistry
             {
                 _violations.Add(
                     $"the grain call '{call.Name}' is registered more than once, and a document addressing that name would have two answers");
+            }
+        }
+
+        /// <summary>Registers one keyed call binding.</summary>
+        /// <param name="call">The binding.</param>
+        internal void Add(IKeyedGrainCallEntry call)
+        {
+            Any = true;
+
+            if (!_keyedCalls.TryAdd(call.Name, call))
+            {
+                _violations.Add(
+                    $"the keyed grain call '{call.Name}' is registered more than once, and a document addressing that name would have two answers");
             }
         }
 
@@ -258,7 +295,14 @@ internal sealed class OrleansAdapterRegistry
             _violations.Count > 0
                 ? throw new ArgumentException(
                     $"The Orleans adapter registration breaks {_violations.Count} invariant{(_violations.Count == 1 ? string.Empty : "s")}: {string.Join("; ", _violations)}.")
-                : new OrleansAdapterRegistry(_elements, _calls, _callSinks, _enumerables, _bridges, _broadcasts);
+                : new OrleansAdapterRegistry(
+                    _elements,
+                    _calls,
+                    _keyedCalls,
+                    _callSinks,
+                    _enumerables,
+                    _bridges,
+                    _broadcasts);
     }
 }
 
@@ -297,6 +341,7 @@ internal sealed class OrleansStageValidator(OrleansAdapterRegistry registry, Orl
         OrleansStageKind.StreamSource => StreamSource(parameters),
         OrleansStageKind.StreamSink => StreamSink(parameters),
         OrleansStageKind.GrainCall => GrainCall(parameters),
+        OrleansStageKind.KeyedGrainCall => KeyedGrainCall(parameters),
         OrleansStageKind.GrainCallSink => GrainCallSink(parameters),
         OrleansStageKind.GrainEnumerable => GrainEnumerable(parameters),
         OrleansStageKind.ReminderTrigger => ReminderTrigger(parameters),
@@ -406,6 +451,53 @@ internal sealed class OrleansStageValidator(OrleansAdapterRegistry registry, Orl
         if (!string.Equals(output, declaration.Output, StringComparison.Ordinal))
         {
             found.Add(Mismatch(GrainCallPayload.OutputMember, declaration.Call, declaration.Output!, output));
+        }
+
+        return found;
+    }
+
+    /// <summary>Checks a keyed grain call's payload.</summary>
+    /// <param name="parameters">The payload.</param>
+    /// <returns>The violations.</returns>
+    /// <remarks>
+    /// The same contract-to-contract check the transforming form gets, and nothing about the key: a routing
+    /// function is code the silo registered, so there is no declaration of it for a payload to disagree
+    /// with. Whether the stage distributes is likewise not checked here, because both answers are legal on
+    /// every silo — a document that asks for distribution is asking this cluster to place executors, and
+    /// every silo running the adapters can host one.
+    /// </remarks>
+    private IReadOnlyList<string> KeyedGrainCall(CanonicalJsonValue parameters)
+    {
+        if (!KeyedGrainCallPayload.TryRead(
+            parameters,
+            out KeyedGrainCallDeclaration? declaration,
+            out IReadOnlyList<string> violations))
+        {
+            return violations;
+        }
+
+        if (registry.IsEmpty)
+        {
+            return [];
+        }
+
+        if (!registry.TryGetKeyedCall(declaration!.Call, out IKeyedGrainCallEntry? call))
+        {
+            return [Unregistered("keyed grain call", declaration.Call, registry.KeyedCalls)];
+        }
+
+        List<string> found = [];
+        string input = call!.Input.ToString();
+        string output = call.Output.ToString();
+
+        if (!string.Equals(input, declaration.Input, StringComparison.Ordinal))
+        {
+            found.Add(Mismatch(GrainCallPayload.InputMember, declaration.Call, declaration.Input, input));
+        }
+
+        if (!string.Equals(output, declaration.Output, StringComparison.Ordinal))
+        {
+            found.Add(Mismatch(GrainCallPayload.OutputMember, declaration.Call, declaration.Output, output));
         }
 
         return found;
@@ -540,7 +632,7 @@ internal sealed class OrleansStageValidator(OrleansAdapterRegistry registry, Orl
     }
 }
 
-/// <summary>Which of the eight Orleans adapters a validator or a factory is dealing with.</summary>
+/// <summary>Which of the nine Orleans adapters a validator or a factory is dealing with.</summary>
 internal enum OrleansStageKind
 {
     /// <summary>A subscription that feeds a run's bounded ingress.</summary>
@@ -551,6 +643,9 @@ internal enum OrleansStageKind
 
     /// <summary>An awaited grain call that transforms elements.</summary>
     GrainCall,
+
+    /// <summary>A keyed grain call, ordered per key and optionally distributed over executor grains.</summary>
+    KeyedGrainCall,
 
     /// <summary>An awaited grain call that terminates a graph.</summary>
     GrainCallSink,

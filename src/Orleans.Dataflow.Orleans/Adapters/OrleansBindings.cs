@@ -92,6 +92,41 @@ internal interface IGrainCallEntry
 }
 
 /// <summary>
+/// What one silo knows about a named keyed grain call: the routing function beside the call itself.
+/// </summary>
+/// <remarks>
+/// The key extractor is the difference between this and <see cref="IGrainCallEntry"/>, and it is code, so it
+/// is a registration rather than anything a document could carry — ADR 0001's rule applied to routing. A
+/// document names the call and the silo owns the function that says which partition an element belongs to.
+/// </remarks>
+internal interface IKeyedGrainCallEntry
+{
+    /// <summary>Gets the name a document addresses this call by.</summary>
+    string Name { get; }
+
+    /// <summary>Gets the contract of the elements this call consumes.</summary>
+    ContractReference Input { get; }
+
+    /// <summary>Gets the contract of the elements this call produces.</summary>
+    ContractReference Output { get; }
+
+    /// <summary>Reads the key one element belongs to.</summary>
+    /// <param name="element">The element.</param>
+    /// <returns>The key, which is never empty.</returns>
+    /// <exception cref="ArgumentException">
+    /// The element is not the type this silo binds to the call, or the extractor produced no key.
+    /// </exception>
+    string KeyOf(object? element);
+
+    /// <summary>Invokes the call.</summary>
+    /// <param name="grains">The silo's grain factory.</param>
+    /// <param name="element">The element to send.</param>
+    /// <param name="cancellationToken">The token that cancels this call.</param>
+    /// <returns>The reply.</returns>
+    Task<object?> InvokeAsync(IGrainFactory grains, object? element, CancellationToken cancellationToken);
+}
+
+/// <summary>
 /// What one silo knows about a named awaited grain call whose reply is discarded.
 /// </summary>
 internal interface IGrainCallSinkEntry
@@ -390,6 +425,155 @@ public static class GrainCallBinding
         OrleansBindingNames.RequireContract(output.IsDefault, nameof(output));
 
         return new GrainCallBinding<TIn, TOut>(name, input, output, call);
+    }
+}
+
+/// <summary>
+/// One named keyed grain call, declared once and used twice: the call, and the function that says which key
+/// an element belongs to.
+/// </summary>
+/// <typeparam name="TIn">The element type the call consumes.</typeparam>
+/// <typeparam name="TOut">The element type the call produces.</typeparam>
+/// <remarks>
+/// <para>
+/// The key extractor is what makes this a different registration from
+/// <see cref="GrainCallBinding{TIn, TOut}"/> rather than the same one with an option. Routing is behavior:
+/// it decides which activation an element reaches and, when the stage is distributed, which grain the
+/// cluster has to place. A document may name the call and may not carry the function, exactly as it may
+/// name a call and not a method.
+/// </para>
+/// <para>
+/// The key is text and it becomes part of a grain key when the stage is distributed, so the whole of what
+/// this declaration requires of it is that it exists: any non-empty string is a partition. An extractor that
+/// returns nothing is a programming error rather than an element that belongs nowhere, and it is refused at
+/// the element that produced it with both the call's name and the element's type in the message.
+/// </para>
+/// </remarks>
+public sealed class KeyedGrainCallBinding<TIn, TOut> : IKeyedGrainCallEntry
+{
+    private readonly Func<TIn, string> _key;
+    private readonly Func<IGrainFactory, TIn, CancellationToken, Task<TOut>> _call;
+
+    /// <summary>Initializes a new instance of the <see cref="KeyedGrainCallBinding{TIn, TOut}"/> class.</summary>
+    /// <param name="name">The validated call name.</param>
+    /// <param name="input">The validated input contract.</param>
+    /// <param name="output">The validated output contract.</param>
+    /// <param name="key">The routing function.</param>
+    /// <param name="call">The call itself.</param>
+    internal KeyedGrainCallBinding(
+        string name,
+        ElementContract<TIn> input,
+        ElementContract<TOut> output,
+        Func<TIn, string> key,
+        Func<IGrainFactory, TIn, CancellationToken, Task<TOut>> call)
+    {
+        Name = name;
+        Input = input;
+        Output = output;
+        _key = key;
+        _call = call;
+    }
+
+    /// <summary>Gets the name a document addresses this call by.</summary>
+    public string Name { get; }
+
+    /// <summary>Gets the contract of the elements this call consumes.</summary>
+    public ElementContract<TIn> Input { get; }
+
+    /// <summary>Gets the contract of the elements this call produces.</summary>
+    public ElementContract<TOut> Output { get; }
+
+    /// <inheritdoc/>
+    ContractReference IKeyedGrainCallEntry.Input => Input.Reference;
+
+    /// <inheritdoc/>
+    ContractReference IKeyedGrainCallEntry.Output => Output.Reference;
+
+    /// <summary>Returns a one-line diagnostic summary of this declaration.</summary>
+    /// <returns>Text of the form <c>keyed grain call 'price-order' order@v1 as Order -&gt; price@v1 as Price</c>.</returns>
+    /// <remarks>The method never throws.</remarks>
+    public override string ToString() => $"keyed grain call '{Name}' {Input} -> {Output}";
+
+    /// <inheritdoc/>
+    string IKeyedGrainCallEntry.KeyOf(object? element)
+    {
+        // The element may have arrived over a hop, so its type is checked here rather than assumed. A cast
+        // that failed inside the extractor would report the author's routing function as the problem.
+        if (element is not TIn typed)
+        {
+            throw new ArgumentException(
+                $"The keyed grain call '{Name}' carries '{typeof(TIn).FullName}' in this silo, and the element handed to it is '{element?.GetType().FullName ?? "null"}'.",
+                nameof(element));
+        }
+
+        string key = _key(typed);
+
+        return string.IsNullOrEmpty(key)
+            ? throw new ArgumentException(
+                $"The key extractor registered for the keyed grain call '{Name}' produced no key for an element of '{typeof(TIn).FullName}'. Every element belongs to exactly one partition, and an empty key names none.",
+                nameof(element))
+            : key;
+    }
+
+    /// <inheritdoc/>
+    async Task<object?> IKeyedGrainCallEntry.InvokeAsync(
+        IGrainFactory grains,
+        object? element,
+        CancellationToken cancellationToken)
+    {
+        if (element is not TIn typed)
+        {
+            throw new ArgumentException(
+                $"The keyed grain call '{Name}' carries '{typeof(TIn).FullName}' in this silo, and the element handed to it is '{element?.GetType().FullName ?? "null"}'.",
+                nameof(element));
+        }
+
+        return await _call(grains, typed, cancellationToken).ConfigureAwait(false);
+    }
+}
+
+/// <summary>
+/// The factory that declares a named keyed grain call.
+/// </summary>
+public static class KeyedGrainCallBinding
+{
+    /// <summary>Declares a named keyed grain call and the function that partitions its elements.</summary>
+    /// <typeparam name="TIn">The element type the call consumes.</typeparam>
+    /// <typeparam name="TOut">The element type the call produces.</typeparam>
+    /// <param name="name">The name a document addresses the call by.</param>
+    /// <param name="input">The contract of the elements the call consumes.</param>
+    /// <param name="output">The contract of the elements the call produces.</param>
+    /// <param name="key">
+    /// The routing function, which reads the key an element belongs to. It runs once per element on the
+    /// run's own thread, so it must be quick and must not block; and it must be a function of the element
+    /// alone, because two elements of one key are ordered by their key and nothing else.
+    /// </param>
+    /// <param name="call">
+    /// The call, which receives the silo's grain factory, one element, and a token that is cancelled when
+    /// the run stops and when the stage's declared timeout elapses.
+    /// </param>
+    /// <returns>The binding.</returns>
+    /// <exception cref="ArgumentNullException">
+    /// <paramref name="name"/>, <paramref name="key"/>, or <paramref name="call"/> is
+    /// <see langword="null"/>.
+    /// </exception>
+    /// <exception cref="ArgumentException">
+    /// <paramref name="name"/> is empty or white space, or either contract is the default value.
+    /// </exception>
+    public static KeyedGrainCallBinding<TIn, TOut> Create<TIn, TOut>(
+        string name,
+        ElementContract<TIn> input,
+        ElementContract<TOut> output,
+        Func<TIn, string> key,
+        Func<IGrainFactory, TIn, CancellationToken, Task<TOut>> call)
+    {
+        OrleansBindingNames.Require(name);
+        ArgumentNullException.ThrowIfNull(key);
+        ArgumentNullException.ThrowIfNull(call);
+        OrleansBindingNames.RequireContract(input.IsDefault, nameof(input));
+        OrleansBindingNames.RequireContract(output.IsDefault, nameof(output));
+
+        return new KeyedGrainCallBinding<TIn, TOut>(name, input, output, key, call);
     }
 }
 

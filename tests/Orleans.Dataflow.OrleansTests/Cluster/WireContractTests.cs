@@ -131,6 +131,14 @@ public sealed class WireContractTests(DataflowCluster cluster)
         Assert.Equal("m", failed.FailureMessage);
         Assert.Equal("r", failed.RunId);
 
+        KeyedExecutionFailedException keyed = RoundTrip(
+            new KeyedExecutionFailedException("orders/run/priced/key-1", "price", "T", "m"));
+
+        Assert.Equal("orders/run/priced/key-1", keyed.Executor);
+        Assert.Equal("price", keyed.Call);
+        Assert.Equal("T", keyed.FailureType);
+        Assert.Equal("m", keyed.FailureMessage);
+
         Assert.Contains("refused", RoundTrip(new PipelineRejectedException("refused")).Message, StringComparison.Ordinal);
         Assert.Contains("lost", RoundTrip(new PipelineRunLostException("lost")).Message, StringComparison.Ordinal);
     }
@@ -196,6 +204,7 @@ public sealed class WireContractTests(DataflowCluster cluster)
             .Concat(typeof(IPipelineRunGrain).GetMethods())
             .Concat(typeof(IReminderTriggerGrain).GetMethods())
             .Concat(typeof(IObserverBridgeGrain).GetMethods())
+            .Concat(typeof(IKeyedExecutorGrain).GetMethods())
             .Concat(typeof(IDataflowPushReceiver).GetMethods()))
         {
             foreach (System.Reflection.ParameterInfo argument in member.GetParameters())

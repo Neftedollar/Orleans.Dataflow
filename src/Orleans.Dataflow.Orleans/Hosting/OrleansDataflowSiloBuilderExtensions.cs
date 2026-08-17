@@ -4,6 +4,7 @@ using Orleans.Dataflow.Definition;
 using Orleans.Dataflow.Identity;
 using Orleans.Dataflow.Runtime;
 using Orleans.Hosting;
+using Orleans.Runtime.Placement;
 
 namespace Orleans.Dataflow.Hosting;
 
@@ -39,7 +40,7 @@ public static class OrleansDataflowSiloBuilderExtensions
     /// The Orleans adapter vocabulary is published exactly when this silo registers at least one Orleans
     /// binding. A deployment that uses no adapter therefore keeps precisely the catalog it wrote — and
     /// precisely the catalog fingerprint it had — while a deployment that registers one stream element or
-    /// one named call gets all five adapter stages, because they ship as one vocabulary and a half-published
+    /// one named call gets all nine adapter stages, because they ship as one vocabulary and a half-published
     /// one would fail at the first element instead of at the start.
     /// </para>
     /// <para>
@@ -76,6 +77,18 @@ public static class OrleansDataflowSiloBuilderExtensions
         // throws at the first activation.
         _ = builder.Services.AddSingleton(registrations.Resolve);
 
+        // The adapter registry is registered on its own as well as being captured by the factory, because
+        // the keyed stage's executor grains resolve it: an executor runs on whichever silo the cluster
+        // placed it on and has to look up the call the document named there, rather than in whichever
+        // process happened to materialize the run.
+        _ = builder.Services.AddSingleton(registrations.Registry);
+
+        // Registered whatever the deployment asked for, including the default of asking for nothing: the
+        // resolver defers for a grain type whose placement was left to the cluster, so a silo that never
+        // called UsePlacement behaves exactly as it did before this existed.
+        _ = builder.Services.AddSingleton(registrations.Placement);
+        _ = builder.Services.AddSingleton<IPlacementStrategyResolver, DataflowPlacementStrategyResolver>();
+
         return builder;
     }
 
@@ -91,6 +104,7 @@ public static class OrleansDataflowSiloBuilderExtensions
         private readonly List<KeyValuePair<ProviderId, IStageRuntimeFactory>> _factories = [];
         private readonly OrleansAdapterRegistry.Builder _adapters = new();
         private readonly DotnetRegistrations _dotnet = new();
+        private readonly OrleansDataflowPlacementOptions _placement = new();
         private OrleansAdapterRegistry? _registry;
         private StageCatalog? _catalog;
         private bool _anyCatalog;
@@ -139,6 +153,27 @@ public static class OrleansDataflowSiloBuilderExtensions
             ArgumentNullException.ThrowIfNull(binding);
 
             _adapters.Add((IGrainCallEntry)binding);
+
+            return this;
+        }
+
+        /// <inheritdoc/>
+        public IOrleansDataflowBuilder AddKeyedGrainCall<TIn, TOut>(KeyedGrainCallBinding<TIn, TOut> binding)
+        {
+            ArgumentNullException.ThrowIfNull(binding);
+
+            _adapters.Add((IKeyedGrainCallEntry)binding);
+
+            return this;
+        }
+
+        /// <inheritdoc/>
+        public IOrleansDataflowBuilder UsePlacement(
+            DataflowPlacement runGrains,
+            DataflowPlacement keyedExecutors)
+        {
+            _placement.RunGrains = runGrains;
+            _placement.KeyedExecutors = keyedExecutors;
 
             return this;
         }
@@ -240,6 +275,16 @@ public static class OrleansDataflowSiloBuilderExtensions
             _catalog = StageCatalog.Create(specifications);
             _ = new StageRuntimeRegistry(keys);
         }
+
+        /// <summary>Gets the adapter registry this silo publishes, once it has been checked.</summary>
+        /// <value>
+        /// The registry the executor grains resolve names through, which is the same value the adapter
+        /// factory was constructed with rather than a second one built from the same registrations.
+        /// </value>
+        internal OrleansAdapterRegistry Registry => _registry!;
+
+        /// <summary>Gets where this silo places the two grain types whose placement is a decision.</summary>
+        internal OrleansDataflowPlacementOptions Placement => _placement;
 
         /// <summary>Resolves everything registered into the value the grains read.</summary>
         /// <param name="services">The silo's container.</param>

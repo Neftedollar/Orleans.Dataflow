@@ -80,6 +80,42 @@ public interface IOrleansDataflowBuilder
     /// </remarks>
     IOrleansDataflowBuilder AddGrainCall<TIn, TOut>(GrainCallBinding<TIn, TOut> binding);
 
+    /// <summary>Registers a named keyed grain call and the function that partitions its elements.</summary>
+    /// <typeparam name="TIn">The element type the call consumes.</typeparam>
+    /// <typeparam name="TOut">The element type the call produces.</typeparam>
+    /// <param name="binding">The binding, declared once and handed to the authoring side as well.</param>
+    /// <returns>This builder, so registrations chain.</returns>
+    /// <exception cref="ArgumentNullException"><paramref name="binding"/> is <see langword="null"/>.</exception>
+    /// <remarks>
+    /// The routing function is registered here for the same reason the call is: a document names things and
+    /// a deployment names code, and deciding which partition an element belongs to is code. Every silo that
+    /// may host one of this stage's executors registers the same binding, because a distributed keyed stage
+    /// places its executors anywhere in the cluster and each one resolves the name on the silo it landed
+    /// on.
+    /// </remarks>
+    IOrleansDataflowBuilder AddKeyedGrainCall<TIn, TOut>(KeyedGrainCallBinding<TIn, TOut> binding);
+
+    /// <summary>States where this silo places the run grain and the keyed stage's executor grains.</summary>
+    /// <param name="runGrains">Where a run's grain is placed.</param>
+    /// <param name="keyedExecutors">Where a keyed stage's per-key executor grains are placed.</param>
+    /// <returns>This builder, so registrations chain.</returns>
+    /// <remarks>
+    /// <para>
+    /// Both default to <see cref="DataflowPlacement.ClusterDefault"/>, which leaves the decision exactly
+    /// where it was: this package pins nothing unless a deployment asks it to. Calling this replaces
+    /// whatever a previous call said rather than adding to it, because a grain type has one placement.
+    /// </para>
+    /// <para>
+    /// It is worth stating why the knob exists rather than an attribute on the grain classes. Orleans 9.2
+    /// changed the cluster default to resource-optimized placement, so the answer a deployment gets now
+    /// depends on its silos' load — which is the right default and the wrong one for a deployment that has
+    /// arranged its data by the same key its executors are named after, or for a test that means to assert
+    /// that keyed work reached more than one silo. An attribute would have fixed the answer in this
+    /// assembly; this leaves it with the deployment.
+    /// </para>
+    /// </remarks>
+    IOrleansDataflowBuilder UsePlacement(DataflowPlacement runGrains, DataflowPlacement keyedExecutors);
+
     /// <summary>Registers a named awaited grain call that terminates a graph.</summary>
     /// <typeparam name="TIn">The element type the call consumes.</typeparam>
     /// <param name="binding">The binding, declared once and handed to the authoring side as well.</param>

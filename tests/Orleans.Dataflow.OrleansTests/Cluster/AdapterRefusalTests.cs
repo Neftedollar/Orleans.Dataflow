@@ -188,12 +188,13 @@ public sealed class AdapterRefusalTests(DataflowCluster cluster)
     }
 
     [Fact]
-    public void TheAdapterCatalogPublishesTheEightAdapterStagesAndNothingElse()
+    public void TheAdapterCatalogPublishesTheNineAdapterStagesAndNothingElse()
     {
-        Assert.Equal(8, OrleansStages.Catalog.Specifications.Count);
+        Assert.Equal(9, OrleansStages.Catalog.Specifications.Count);
         Assert.True(OrleansStages.Catalog.TryGetSpecification(OrleansStages.StreamSourceStage, out _));
         Assert.True(OrleansStages.Catalog.TryGetSpecification(OrleansStages.StreamSinkStage, out _));
         Assert.True(OrleansStages.Catalog.TryGetSpecification(OrleansStages.GrainCallStage, out _));
+        Assert.True(OrleansStages.Catalog.TryGetSpecification(OrleansStages.KeyedGrainCallStage, out _));
         Assert.True(OrleansStages.Catalog.TryGetSpecification(OrleansStages.GrainCallSinkStage, out _));
         Assert.True(OrleansStages.Catalog.TryGetSpecification(OrleansStages.GrainEnumerableStage, out _));
         Assert.True(OrleansStages.Catalog.TryGetSpecification(OrleansStages.ReminderTriggerStage, out _));

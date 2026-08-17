@@ -103,7 +103,7 @@ Names are provisional until repository and NuGet namespace checks are performed.
 | Adapter | Priority | Notes |
 |---|---:|---|
 | Awaited grain call | P0 | A reply acknowledges that method invocation, not an arbitrary downstream side effect. |
-| Keyed grain call | P1 | Bounded parallelism and per-key ordering are first-class options. |
+| Keyed grain call | P1 | **Implemented (M3 phase 4a).** Acknowledgement: the awaited reply, whether the call is made from inside the run or from the key's executor grain. Backpressure and credit: one call in flight per key plus the declared bound across keys, both held by the run — the reply is the grant and no credit message exists. Ordering: per key, in the run's order, because in-flight per key is one; probed, because Orleans documents no pairwise ordering between activations and was measured reordering pipelined calls within a single silo. Emission across keys is in input order. Delivery: at-most-once from this adapter — the first failure faults the run and nothing retries. Distribution: opt-in per occurrence; executors are keyed `{graph}/{run}/{node}/{key}`, per-run, stateless, and left to activation collection. Placement of those executors is a hosting option. Resource bounds: one credit entry per key with work in flight, so the accounting is bounded by the declared bound and never by the key space. |
 | Orleans Stream publication | P0 | Publication acknowledgement and end-to-end delivery are provider-specific. |
 | One-way grain call | P2 | Explicit best-effort adapter; never the default durable sink. |
 | Grain observer callback | P2 | Best effort; disconnect and resubscription behavior are surfaced. |

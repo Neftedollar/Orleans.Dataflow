@@ -6,25 +6,28 @@ using Orleans.Dataflow.Serialization;
 namespace Orleans.Dataflow.Adapters;
 
 /// <summary>
-/// The Orleans-native adapter vocabulary: five registered stages, the catalog that publishes them, and the
+/// The Orleans-native adapter vocabulary: nine registered stages, the catalog that publishes them, and the
 /// typed handles and payloads an author writes them with.
 /// </summary>
 /// <remarks>
 /// <para>
-/// <b>Eight stages and no more.</b> A stream subscription that feeds a run and a stream publication a run
-/// feeds; an awaited grain call in its transforming and its terminating form; a grain enumeration that
-/// heads a run; a cluster reminder whose ticks head one; a named bridge external grain code pushes at; and
-/// a Broadcast Channel publication. Each is a real registered stage — named in a document, resolved from a
-/// silo's catalog by identity, built by a runtime factory — so a pipeline written with them carries no
-/// delegate, no CLR name, and nothing a document could not honestly say.
+/// <b>Nine stages and no more.</b> A stream subscription that feeds a run and a stream publication a run
+/// feeds; an awaited grain call in its transforming and its terminating form; a keyed grain call, which is
+/// the one stage that may distribute below its run; a grain enumeration that heads a run; a cluster reminder
+/// whose ticks head one; a named bridge external grain code pushes at; and a Broadcast Channel publication.
+/// Each is a real registered stage — named in a document, resolved from a silo's catalog by identity, built
+/// by a runtime factory — so a pipeline written with them carries no delegate, no CLR name, and nothing a
+/// document could not honestly say.
 /// </para>
 /// <para>
 /// <b>The Broadcast Channel <em>source</em> is deliberately absent.</b> A channel's subscription is
 /// implicit — a grain type declares the namespaces it receives, and the runtime activates one grain per
 /// channel key — so a run cannot subscribe to one at all. Reaching it needs a delivery registry that maps
-/// live runs to the grains the runtime activates, which is the same machinery phase 4's keyed distribution
-/// needs, and building half of it here would fix its shape before that work exists. The sink is complete;
-/// the source is scheduled rather than approximated.
+/// live runs to the grains the runtime activates, and the keyed stage below did <em>not</em> turn out to
+/// need one: an executor's address is composed from the run's own identity, so the run knows where to send
+/// and never has to look anything up. A broadcast subscriber's address is the runtime's to choose, which is
+/// the opposite direction and the registry is what would bridge it. The sink is complete; the source is
+/// still scheduled rather than approximated.
 /// </para>
 /// <para>
 /// <b>Declare once, use twice.</b> The bindings in this namespace are written once by deployment code and
@@ -36,7 +39,7 @@ namespace Orleans.Dataflow.Adapters;
 /// </para>
 /// <para>
 /// <b>The element contract these ports declare is opaque, and that is a stated limit.</b> Every one of the
-/// five is one specification, and a specification declares one element contract per port; the contract a
+/// nine is one specification, and a specification declares one element contract per port; the contract a
 /// given occurrence actually carries is a property of that occurrence and has nowhere in a specification to
 /// live. So the ports declare <see cref="ElementContract"/> — one opaque reference, exactly as every local
 /// port declares one — and what an occurrence really carries is stated in its payload and checked against
@@ -76,6 +79,11 @@ public static class OrleansStages
     /// <value><c>orleans/grain-call@v1</c>.</value>
     public static StageRef GrainCallStage { get; } =
         StageRef.Create(Provider, StageId.Create("grain-call"), StageRef.FirstMajorVersion);
+
+    /// <summary>Gets the reference of the keyed grain call.</summary>
+    /// <value><c>orleans/grain-call-keyed@v1</c>.</value>
+    public static StageRef KeyedGrainCallStage { get; } =
+        StageRef.Create(Provider, StageId.Create("grain-call-keyed"), StageRef.FirstMajorVersion);
 
     /// <summary>Gets the reference of the awaited grain call that terminates a graph.</summary>
     /// <value><c>orleans/grain-call-sink@v1</c>.</value>
@@ -132,6 +140,13 @@ public static class OrleansStages
     public static ContractReference GrainCallParameterContract { get; } =
         ContractReference.Create(
             ContractId.Create("orleans-grain-call-parameters"),
+            ContractReference.FirstMajorVersion);
+
+    /// <summary>Gets the parameter contract a keyed grain call declares.</summary>
+    /// <value><c>orleans-grain-call-keyed-parameters@v1</c>.</value>
+    public static ContractReference KeyedGrainCallParameterContract { get; } =
+        ContractReference.Create(
+            ContractId.Create("orleans-grain-call-keyed-parameters"),
             ContractReference.FirstMajorVersion);
 
     /// <summary>Gets the parameter contract a terminating grain call declares.</summary>
@@ -339,6 +354,74 @@ public static class OrleansStages
         ArgumentNullException.ThrowIfNull(call);
 
         return RegisteredStage.Flow(Catalog, GrainCallStage, Element<TIn>(), Element<TOut>());
+    }
+
+    /// <summary>Declares a named keyed grain call as a typed transformation.</summary>
+    /// <typeparam name="TIn">The element type the call consumes.</typeparam>
+    /// <typeparam name="TOut">The element type the call produces.</typeparam>
+    /// <param name="call">The keyed call binding this silo registered.</param>
+    /// <returns>The typed handle.</returns>
+    /// <exception cref="ArgumentNullException"><paramref name="call"/> is <see langword="null"/>.</exception>
+    /// <remarks>
+    /// <para>
+    /// <b>What makes it keyed.</b> Every element belongs to a key, read by the routing function the binding
+    /// registered, and the stage promises that one key's elements are processed one at a time in the order
+    /// the run produced them. Elements of different keys overlap up to the declared bound. That is the whole
+    /// difference from <see cref="GrainCall{TIn, TOut}"/>, which orders nothing and overlaps everything.
+    /// </para>
+    /// <para>
+    /// <b>Acknowledgement</b>: the awaited reply, exactly as the plain form's is. When the stage is
+    /// distributed the reply is the executor's, which is the reply of the call it made — an executor adds a
+    /// hop and no semantics.
+    /// </para>
+    /// <para>
+    /// <b>Ordering, and where it comes from.</b> One call in flight per key, always, and that is not a
+    /// setting. The next element of a key is not sent until the previous element's reply has arrived, so
+    /// nothing between the run and the grain is ever asked to keep two messages in order. This is deliberate
+    /// and was measured rather than assumed: Orleans documents no pairwise ordering between activations, and
+    /// the probe in this repository's suite watched pipelined calls arrive badly out of order inside a
+    /// single silo. A stage that pipelined per key would therefore promise an ordering the transport
+    /// visibly does not provide. Emission is in input order across all keys, as every ordered asynchronous
+    /// stage's is.
+    /// </para>
+    /// <para>
+    /// <b>Backpressure and credit</b>: the declared bound, spent per call and returned by the reply. Two
+    /// bounds hold at once — one call per key, and <c>maxInFlight</c> calls across all keys — and both are
+    /// held by the run rather than by anything on the wire. There is no credit message: a reply is the grant
+    /// for that key, and a freed slot is the grant for the next key. The cost is stated plainly: elements
+    /// that all share one key run one at a time no matter how large the bound is, and a bound's worth of
+    /// elements on one key occupies the whole stage while they wait for it.
+    /// </para>
+    /// <para>
+    /// <b>Distribution is opt-in</b>, declared in the payload. Left off — the default — the calls are made
+    /// from inside the run exactly as a plain grain call's are, and the key only orders them. Turned on,
+    /// each key gets an executor grain of its own, keyed by the run's identity, this occurrence, and the
+    /// key, and the cluster places those executors: work for different keys then runs on different silos
+    /// rather than all on the one hosting the run. That is opt-in because M3's rule is that runs distribute
+    /// before stages do, and this is the first stage allowed to distribute below its run.
+    /// </para>
+    /// <para>
+    /// <b>Failure</b>: the first failure wins and faults the run, and no retry is ever made — an M3 keyed
+    /// call is at-most-once per element from this adapter's side. A distributed call that fails arrives as
+    /// the executor's refusal naming the author's exception type, its message, and the executor's own
+    /// address; a run-local one arrives as the author's exception itself. That difference is the cost of the
+    /// hop and is stated rather than hidden. A silo that dies while holding an executor surfaces as the
+    /// failed grain call it is: the run faults, and nothing here quietly runs the element again. Supervision
+    /// and retry are M5's.
+    /// </para>
+    /// <para>
+    /// <b>Executor lifetime</b>: an executor belongs to one run and holds no state between calls, so
+    /// nothing about it is durable and nothing of it is shared with another run. It is left to Orleans'
+    /// activation collection when the run ends rather than deactivated by the run, because the engine's
+    /// asynchronous-stage seam has no per-run teardown hook; the executors carry a short collection age so
+    /// that "dies with the run" is a bounded delay rather than a promise this adapter cannot keep.
+    /// </para>
+    /// </remarks>
+    public static RegisteredFlow<TIn, TOut> KeyedGrainCall<TIn, TOut>(KeyedGrainCallBinding<TIn, TOut> call)
+    {
+        ArgumentNullException.ThrowIfNull(call);
+
+        return RegisteredStage.Flow(Catalog, KeyedGrainCallStage, Element<TIn>(), Element<TOut>());
     }
 
     /// <summary>Declares a named awaited grain call as a typed termination.</summary>
@@ -762,6 +845,45 @@ public static class OrleansStages
             timeout);
     }
 
+    /// <summary>Writes the payload of one keyed grain call occurrence.</summary>
+    /// <typeparam name="TIn">The element type the call consumes.</typeparam>
+    /// <typeparam name="TOut">The element type the call produces.</typeparam>
+    /// <param name="call">The keyed call binding this silo registered.</param>
+    /// <param name="maxInFlight">
+    /// The greatest number of calls in flight at once across all keys; at least one. One call per key is
+    /// held regardless, and is not configurable: it is where this stage's per-key ordering comes from.
+    /// </param>
+    /// <param name="distributed">
+    /// Whether each key's calls run on an executor grain of their own, which is what lets the cluster place
+    /// a run's keyed work across silos. Left off, the calls are made from inside the run.
+    /// </param>
+    /// <param name="timeout">
+    /// The per-call timeout, or <see langword="null"/> to leave the wait to Orleans' own call timeout. It
+    /// bounds the whole hop — the executor's call included — rather than only the part nearest the run.
+    /// </param>
+    /// <returns>The canonical payload.</returns>
+    /// <exception cref="ArgumentNullException"><paramref name="call"/> is <see langword="null"/>.</exception>
+    /// <exception cref="ArgumentOutOfRangeException">
+    /// <paramref name="maxInFlight"/> is below one, or <paramref name="timeout"/> is not positive.
+    /// </exception>
+    public static CanonicalJsonValue KeyedGrainCallParameters<TIn, TOut>(
+        KeyedGrainCallBinding<TIn, TOut> call,
+        int maxInFlight,
+        bool distributed = false,
+        TimeSpan? timeout = null)
+    {
+        ArgumentNullException.ThrowIfNull(call);
+        RequireBounds(maxInFlight, timeout);
+
+        return KeyedGrainCallPayload.Write(
+            call.Name,
+            call.Input.Reference.ToString(),
+            call.Output.Reference.ToString(),
+            maxInFlight,
+            distributed,
+            timeout);
+    }
+
     /// <summary>Writes the payload of one terminating grain call occurrence.</summary>
     /// <typeparam name="TIn">The element type the call consumes.</typeparam>
     /// <param name="call">The call binding this silo registered.</param>
@@ -838,6 +960,14 @@ public static class OrleansStages
                 GrainCallParameterContract,
                 [],
                 new OrleansStageValidator(registry, OrleansStageKind.GrainCall)),
+            StageSpecification.Create(
+                KeyedGrainCallStage,
+                [InputPortSpecification.Create(InputPort, ElementContract)],
+                [OutputPortSpecification.Create(OutputPort, ElementContract)],
+                [],
+                KeyedGrainCallParameterContract,
+                [],
+                new OrleansStageValidator(registry, OrleansStageKind.KeyedGrainCall)),
             StageSpecification.Create(
                 GrainCallSinkStage,
                 [InputPortSpecification.Create(InputPort, ElementContract)],

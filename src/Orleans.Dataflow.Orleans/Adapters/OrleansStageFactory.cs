@@ -66,6 +66,11 @@ internal sealed class OrleansStageFactory(
             return GrainCall(node);
         }
 
+        if (node.Stage == OrleansStages.KeyedGrainCallStage)
+        {
+            return KeyedGrainCall(node);
+        }
+
         if (node.Stage == OrleansStages.GrainCallSinkStage)
         {
             return GrainCallSink(node);
@@ -233,6 +238,111 @@ internal sealed class OrleansStageFactory(
                 cancellationToken)),
             declaration.MaxInFlight,
             ordered: true);
+    }
+
+    /// <summary>Builds the keyed grain call, in whichever of its two forms the document asked for.</summary>
+    /// <param name="node">The node.</param>
+    /// <returns>The runtime.</returns>
+    /// <remarks>
+    /// <para>
+    /// One stage and two ways of running it, chosen by the payload rather than by the deployment: run-local,
+    /// where the calls are made from inside the run and the key only orders them, and distributed, where
+    /// each key gets an executor grain and the cluster decides which silo it lives on. Run-local is the
+    /// default because M3's rule is that runs distribute before stages do — this is the first stage allowed
+    /// to distribute below its run, and a stage that did so by default would have made the rule a
+    /// preference.
+    /// </para>
+    /// <para>
+    /// <b>The credit is the same in both forms.</b> The window below is created here, so it is per node per
+    /// run — two runs of one pipeline share no accounting — and it keeps one call in flight per key. The
+    /// bound across keys is the engine's own, declared as the stage's concurrency; a call in flight is
+    /// credit spent, and the reply is the grant. Nothing but the reply crosses the wire.
+    /// </para>
+    /// <para>
+    /// <b>Where the run's identity comes from.</b> The seam hands a factory no run identity by design, and a
+    /// flow stage — unlike a source — is never handed the run's tokens either, so there is no seam through
+    /// which to receive one. What there is instead is where this runs: materialization happens on the run
+    /// grain's own turn, so the ambient grain context at this moment <em>is</em> the run, and its key is the
+    /// <c>{graph}/{run}</c> the source openers are given. It is read here once per occurrence and captured,
+    /// never at call time — the engine's threads are not inside a grain and would see nothing. A context
+    /// that is somehow absent falls back to a fresh identifier, which keeps every executor private to this
+    /// materialization at the cost of an address that no longer names its run.
+    /// </para>
+    /// </remarks>
+    private DataflowStageRuntime KeyedGrainCall(StageNode node)
+    {
+        KeyedGrainCallDeclaration declaration = Read<KeyedGrainCallDeclaration>(
+            node,
+            KeyedGrainCallPayload.TryRead);
+
+        if (!registry.TryGetKeyedCall(declaration.Call, out IKeyedGrainCallEntry? call))
+        {
+            throw Unregistered(node, "keyed grain call", declaration.Call);
+        }
+
+        KeyedCallWindow window = new();
+        Func<string, object?, CancellationToken, Task<object?>> invoke = declaration.Distributed
+            ? Distributed(KeyedExecutorPrefix(node), declaration)
+            : (_, element, token) => GrainCallInvocation.InvokeAsync(
+                inner => call!.InvokeAsync(grains, element, inner),
+                declaration.Call,
+                declaration.Timeout,
+                token);
+
+        return DataflowStageRuntime.ElementAsync(
+            (element, cancellationToken) =>
+            {
+                // Read once. The routing function is the author's, and an adapter that asked it twice per
+                // element would double whatever it costs and would part company with itself the moment it
+                // was not pure.
+                string key = call!.KeyOf(element);
+
+                return new ValueTask<object?>(
+                    window.SubmitAsync(key, () => invoke(key, element, cancellationToken)));
+            },
+            declaration.MaxInFlight,
+            ordered: true);
+    }
+
+    /// <summary>Builds the invocation that sends one element to its key's executor grain.</summary>
+    /// <param name="prefix">The executor address without its key: <c>{graph}/{run}/{node}</c>.</param>
+    /// <param name="declaration">What the occurrence declares.</param>
+    /// <returns>The invocation.</returns>
+    /// <remarks>
+    /// The timeout is applied here rather than inside the executor, and that is the honest boundary: what a
+    /// document declares is how long it will wait for an answer, and the answer has to come back across the
+    /// hop. A timeout enforced on the executor's side would bound the inner call and leave the run waiting
+    /// on a silo that had already given up.
+    /// </remarks>
+    private Func<string, object?, CancellationToken, Task<object?>> Distributed(
+        string prefix,
+        KeyedGrainCallDeclaration declaration) =>
+        (key, element, token) => GrainCallInvocation.InvokeAsync(
+            inner => grains
+                .GetGrain<IKeyedExecutorGrain>($"{prefix}/{key}")
+                .ExecuteAsync(declaration.Call, element, inner),
+            declaration.Call,
+            declaration.Timeout,
+            token);
+
+    /// <summary>Composes the address every executor of one occurrence shares, without its key.</summary>
+    /// <param name="node">The node.</param>
+    /// <returns>The prefix <c>{graph}/{run}/{node}</c>.</returns>
+    /// <remarks>
+    /// Three parts and each is load-bearing. The run makes an executor private to one attempt, so two runs
+    /// of one pipeline never share a worker; the occurrence separates two keyed stages standing in one
+    /// document; and the key that is appended per element is the partition. The result is a grain key that
+    /// reads as what it is in a directory listing or a failure message, which is the whole reason it is
+    /// composed from identities rather than hashed into one.
+    /// </remarks>
+    private string KeyedExecutorPrefix(StageNode node)
+    {
+        string run = services.GetService<IGrainContextAccessor>()?.GrainContext?.GrainId.Key.ToString() is
+            { Length: > 0 } identity
+            ? identity
+            : Guid.NewGuid().ToString("N");
+
+        return $"{run}/{node.Id}";
     }
 
     /// <summary>Builds the terminating grain call.</summary>

@@ -49,6 +49,16 @@ time.
   `ReminderOptions.MinimumReminderPeriod` exists but its default and
   enforcement mode are undocumented — **probe before writing fast-ticking
   reminder tests**.
+- **Pipelined calls arrive reordered** (probed 2026-08-17, Orleans 10.2.2):
+  two hundred sequenced calls from one caller to one non-reentrant callee
+  arrived badly out of order *within a single in-process silo* — the first
+  arrival was the fourteenth sent. No pairwise message ordering between
+  activations is documented, and `[Unordered]` is a no-op, so ordering can
+  be neither requested nor refused. A design that needs per-key order must
+  hold one call in flight per key and let the reply be the grant; the keyed
+  grain-call stage does exactly that, and the probe lives in the suite as
+  `KeyedOrderingProbeTests` so a future Orleans that changes this answers
+  the question again.
 - **Observers are weakly referenced** (learned from a flake, 2026-08-17): the
   client-side table behind `CreateObjectReference` does not root the observer
   object. An implementation nothing else references is garbage-collected, the

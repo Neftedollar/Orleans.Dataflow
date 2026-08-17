@@ -1,7 +1,7 @@
 # Orleans runtime design
 
-- Status: M3 architecture; phase 1 is the implementation target, later phases
-  firm up as their predecessors land
+- Status: M3 architecture; phases 1-3 and 4a are implemented, 4b (failover)
+  is the remaining target
 - Depends on: [ORLEANS-NOTES.md](ORLEANS-NOTES.md) (verified Orleans 10
   facts), [REGISTERED-STAGES.md](REGISTERED-STAGES.md),
   [LOCAL-RUNTIME.md](LOCAL-RUNTIME.md), ADRs 0001-0004
@@ -69,7 +69,7 @@ as canonical bytes, never as Orleans-serialized object graphs.
 | Orleans Stream source | `orleans/stream-source` | delivery into the run's ingress (bounded; overflow per options) | implicit-subscription grain feeds the run's queue; provider guarantees reported per provider (`IsRewindable` probed, not assumed) |
 | Orleans Stream sink | `orleans/stream-sink` | `OnNextAsync` awaited per element (publication, not end-to-end) | |
 | Awaited grain call (flow/sink) | `orleans/grain-call` | the awaited reply | timeout/retry/idempotency are explicit options; one-way is a separate best-effort stage, never the default |
-| Keyed grain call | `orleans/grain-call-keyed` | per-key ordered awaited replies | phase 4 distributes per-key executors; phase 2 executes keyed calls from within the run with bounded per-key in-flight |
+| Keyed grain call | `orleans/grain-call-keyed` | per-key ordered awaited replies | one call in flight per key (that is where the ordering comes from — measured, see phase 4a), the declared bound across keys; per-key executor grains are opt-in per occurrence |
 | Grain `IAsyncEnumerable<T>` source | `orleans/grain-enumerable` | call-scoped pull (Orleans batching) | cooperative cancellation; `CancelRequestOnTimeout=false` gotcha handled explicitly |
 | Timer trigger source | `orleans/timer` | none (tick generation) | activation-scoped, non-durable — documented |
 | Reminder trigger source | `orleans/reminder` | none | definition survives restart, missed ticks not replayed — matrix contract verbatim |
@@ -184,6 +184,84 @@ uses a mailbox as an unbounded buffer.
   failure still surfaces) — both bridges self-heal through refusal-driven
   cleanup.
 
+## Phase 4a — as implemented (keyed distribution, credit, placement)
+
+- **The probe answered open question 3, and it answered "no".** Orleans
+  documents no pairwise message ordering between activations, and the matrix
+  promises per-key ordered awaited replies, so the credit shape could not be
+  chosen by taste. A caller pumping 200 sequenced calls at one non-reentrant
+  callee without awaiting between them was measured, in three shapes (cold
+  callee, warm callee, and a caller that is not a grain — the adapter's own
+  shape). **Arrivals were reordered in every round of every shape, inside a
+  single in-process silo where every hop is local delivery**: on the deciding
+  run the first of 200 arrivals from a grain caller was the 14th call sent, and
+  from a client caller the 2nd. In-flight greater than one per key was
+  therefore never legal.
+- **The credit wire shape, decided by that result: the reply *is* the grant,
+  and nothing else is on the wire.** Two bounds hold at once and both are held
+  by the run rather than by any message. Within a key: exactly one call in
+  flight, so the next element of a key is not sent until the previous one has
+  replied — which is where the per-key ordering promise comes from, as a
+  property of our accounting rather than of the transport, true on one silo and
+  on fifty alike. Across keys: the stage's declared `maxInFlight`, which is the
+  engine's own ordered-async-stage bound — a call in flight is credit spent and
+  an element cannot enter the stage until a slot frees. No grant message, no
+  credit member, no per-key window parameter: a payload member for two in
+  flight per key would be a knob for silently losing the ordering the stage
+  promises, so the payload has none. `KeyedCallWindow` is the whole protocol,
+  and it holds one entry per key *with work in flight* — bounded by the
+  declared number, never by the cardinality of the key space.
+- **Distribution is opt-in per keyed stage**, declared as `distributed` in the
+  occurrence's payload and required rather than defaulted. Off — the default —
+  the calls are made from inside the run and the key only orders them; on, each
+  key gets an `IKeyedExecutorGrain` and the cluster places it. That preserves
+  "runs distribute before stages do": this is the first stage allowed to
+  distribute below its run and it does so because a document asked, not because
+  it could.
+- **Executor identity is `{graph}/{run}/{node}/{key}`** — per run, per
+  occurrence, per partition; ephemeral; no cross-run sharing. Where the run
+  identity comes from is worth recording, because the seam does not supply one:
+  a flow stage is never handed the run's tokens (only source openers are), so
+  the factory reads the ambient grain context at materialization, which *is*
+  the run grain because materialization happens on its turn. It is captured
+  once per occurrence and never read at call time — the engine's threads are
+  not inside a grain. A context that is somehow absent falls back to a fresh
+  identifier, which keeps executors private to the materialization at the cost
+  of an address that no longer names its run.
+- **Executors are collected, not torn down, and that is a stated limit.** The
+  engine's asynchronous-stage seam has no per-run teardown hook, so a run
+  cannot deactivate the executors it used. They hold no state between calls and
+  carry a shortened `[CollectionAgeLimit]`, so "dies with the run" is honestly
+  "outlives the run by at most that idle period, holding nothing".
+- **Failure wins and nothing retries.** A keyed call that throws faults the run
+  at the first failure; a lost executor surfaces as the failed grain call it is.
+  The two paths report differently and that is the documented cost of the hop:
+  run-local, the author's exception reaches the run itself; distributed, the
+  executor folds the author's type and message into a
+  `KeyedExecutionFailedException` naming the executor's own address, because an
+  exception chain is only as serializable as its least prepared link. Retry is
+  M5's supervision work.
+- **Placement is a hosting decision, through Orleans' own
+  `IPlacementStrategyResolver`.** `UsePlacement(runGrains, keyedExecutors)`
+  chooses per grain type between the cluster default (defer), random, prefer-local,
+  and hash-based; the resolver answers for exactly those two grain types and
+  defers for every other, so a deployment that never calls it behaves exactly as
+  before. An attribute on the grain classes would have fixed the answer in the
+  package; this leaves it with the deployment — which matters because Orleans
+  9.2 made `ResourceOptimizedPlacement` the default, so a test meaning to assert
+  spread must pin `Random` rather than hope. The grain types are resolved through
+  `GrainTypeResolver` rather than spelled as text, so the mapping cannot drift.
+- **Phase-4a limits, stated**: single-silo tests, so nothing here proves that
+  keyed work actually landed on more than one host, that ordering survives a
+  connection re-established mid-run, or anything at all about a silo dying —
+  those need the multi-silo fixture that the failover half of phase 4 brings,
+  and the placement tests assert which strategy a silo will use rather than
+  where activations went. The timeout is the caller's and bounds the whole hop,
+  so an executor is never bounded independently of the run waiting on it. Two
+  silos with different keyed registrations accept the same document and fail at
+  the executor rather than at the start — the same deployment-scoped limit the
+  registry has carried since phase 2, now reachable one hop further away.
+
 ## Phasing
 
 1. **Hosting + coordinator + run grain** — DI registration, the
@@ -201,7 +279,10 @@ uses a mailbox as an unbounded buffer.
    key), placement options, multi-silo tests: `KillSiloAsync` +
    `WaitForLivenessToStabilizeAsync`, no split-brain ownership (epoch
    fencing proven under kill), deactivation/reactivation, rolling-upgrade
-   catalog refusal.
+   catalog refusal. Split in two: **4a** is the keyed stage, its credit
+   protocol, and the placement options — landed, see the as-implemented
+   section above; **4b** is failover, which needs the multi-silo fixture
+   nothing before it required.
 
 ## Open questions (answered by their phase, not guessed now)
 
@@ -210,9 +291,17 @@ uses a mailbox as an unbounded buffer.
 2. Whether the run grain streams large results or caps result-slot payload
    sizes (Collect over a cluster is a foot-gun; a cap with a named error is
    the likely answer).
-3. The exact credit protocol wire shape for phase 4 (grant-on-reply versus
-   explicit credit messages) — decided against measured multi-silo behavior,
-   not upfront.
+3. ~~The exact credit protocol wire shape for phase 4 (grant-on-reply versus
+   explicit credit messages)~~ **Resolved by probe (phase 4a)**: grant-on-reply,
+   in its strongest form — the reply *is* the grant and there is no credit
+   member on the wire at all. Forced rather than preferred: the probe showed
+   Orleans reordering pipelined calls between one caller and one non-reentrant
+   callee in every round, inside a single silo, so per-key in-flight is one and
+   the ordering the matrix promises is a property of the adapter's accounting
+   instead of the transport's. The credit window across distinct keys is the
+   stage's declared bound, held by the engine. Explicit credit messages would
+   have bought nothing: with one call outstanding per key there is exactly one
+   message whose arrival could carry a grant, and it already does.
 4. The reminder minimum period — the remaining research unknown, probed in
    phase 3 before any contract claims it (memory-stream rewindability
    resolved: true; rewind stays unexposed until a checkpoint/cursor story

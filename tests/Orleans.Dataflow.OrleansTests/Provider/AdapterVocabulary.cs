@@ -87,6 +87,49 @@ internal static class AdapterVocabulary
             static (grains, order, cancellationToken) =>
                 grains.GetGrain<IAdapterPricingGrain>("hanging").PriceHeldAsync(order, cancellationToken));
 
+    /// <summary>Reads the partition one order belongs to.</summary>
+    /// <param name="order">The order.</param>
+    /// <returns>One of three keys.</returns>
+    /// <remarks>
+    /// Written once and handed to both halves of the keyed binding — the routing function and the call —
+    /// because they have to agree: the key decides which executor the element goes to and which grain the
+    /// call reaches, and two spellings of "the key" would be a stage that ordered one partition while
+    /// talking to another. Three keys over twelve elements gives every key four elements, which is enough
+    /// for an ordering claim to have something to be wrong about.
+    /// </remarks>
+    internal static string KeyOf(AdapterOrder order) =>
+        string.Create(System.Globalization.CultureInfo.InvariantCulture, $"key-{order.Amount % 3}");
+
+    /// <summary>The keyed call that prices an order on the grain its key names.</summary>
+    internal static KeyedGrainCallBinding<AdapterOrder, AdapterPrice> KeyedPricing { get; } =
+        KeyedGrainCallBinding.Create(
+            "keyed-price-order",
+            OrderContract,
+            PriceContract,
+            KeyOf,
+            static (grains, order, cancellationToken) =>
+                grains.GetGrain<IAdapterKeyedGrain>(KeyOf(order)).PriceAsync(order, cancellationToken));
+
+    /// <summary>The keyed call that holds every order until the test releases it.</summary>
+    internal static KeyedGrainCallBinding<AdapterOrder, AdapterPrice> GatedKeyedPricing { get; } =
+        KeyedGrainCallBinding.Create(
+            "gated-keyed-price-order",
+            OrderContract,
+            PriceContract,
+            KeyOf,
+            static (grains, order, cancellationToken) =>
+                grains.GetGrain<IAdapterKeyedGrain>(KeyOf(order)).PriceGatedAsync(order, cancellationToken));
+
+    /// <summary>The keyed call that throws.</summary>
+    internal static KeyedGrainCallBinding<AdapterOrder, AdapterPrice> FailingKeyedPricing { get; } =
+        KeyedGrainCallBinding.Create(
+            "failing-keyed-price-order",
+            OrderContract,
+            PriceContract,
+            KeyOf,
+            static (grains, order, cancellationToken) =>
+                grains.GetGrain<IAdapterKeyedGrain>(KeyOf(order)).PriceRefusedAsync(order, cancellationToken));
+
     /// <summary>The terminating call that records a price.</summary>
     internal static GrainCallSinkBinding<AdapterPrice> Recording { get; } =
         GrainCallSinkBinding.Create(
@@ -110,6 +153,14 @@ internal static class AdapterVocabulary
             OrderContract,
             static (grains, cancellationToken) =>
                 grains.GetGrain<IAdapterFeedGrain>("feed").EnumerateAsync(4, cancellationToken));
+
+    /// <summary>The enumeration that yields twelve orders and ends, four to each of three keys.</summary>
+    internal static GrainEnumerableBinding<AdapterOrder> KeyedFeed { get; } =
+        GrainEnumerableBinding.Create(
+            "orders-keyed-feed",
+            OrderContract,
+            static (grains, cancellationToken) =>
+                grains.GetGrain<IAdapterFeedGrain>("keyed-feed").EnumerateAsync(12, cancellationToken));
 
     /// <summary>The enumeration that never ends and stops only when its token is cancelled.</summary>
     internal static GrainEnumerableBinding<AdapterOrder> EndlessFeed { get; } =

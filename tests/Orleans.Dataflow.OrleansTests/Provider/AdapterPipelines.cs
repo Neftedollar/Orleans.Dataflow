@@ -177,6 +177,66 @@ internal static class AdapterPipelines
         return graph.AsPipeline(GraphId.Create(id), GraphRevision.Create(1));
     }
 
+    /// <summary>Builds a pipeline that reads a grain enumeration, prices it by key, and records the prices.</summary>
+    /// <param name="id">The pipeline's identity.</param>
+    /// <param name="call">The keyed pricing call to make.</param>
+    /// <param name="maxInFlight">The greatest number of calls in flight at once across keys.</param>
+    /// <param name="distributed">Whether the keyed stage runs on per-key executor grains.</param>
+    /// <param name="timeout">The per-call timeout, or <see langword="null"/>.</param>
+    /// <returns>The pipeline.</returns>
+    /// <remarks>
+    /// The same three-node shape the unkeyed pricing pipeline has, so the two are comparable: what differs
+    /// is the middle stage and its payload, which is the whole of what a document says about being keyed.
+    /// </remarks>
+    internal static PipelineDefinition KeyedPricedFeed(
+        string id,
+        KeyedGrainCallBinding<AdapterOrder, AdapterPrice> call,
+        int maxInFlight = 1,
+        bool distributed = false,
+        TimeSpan? timeout = null)
+    {
+        RunnableGraph graph = Source
+            .FromRegistered(
+                OrleansStages.GrainEnumerable(AdapterVocabulary.KeyedFeed),
+                "feed",
+                OrleansStages.GrainEnumerableParameters(AdapterVocabulary.KeyedFeed))
+            .Via(
+                OrleansStages.KeyedGrainCall(call),
+                "priced",
+                OrleansStages.KeyedGrainCallParameters(call, maxInFlight, distributed, timeout))
+            .To(
+                OrleansStages.GrainCallSink(AdapterVocabulary.Recording),
+                "recorded",
+                OrleansStages.GrainCallSinkParameters(AdapterVocabulary.Recording, 1));
+
+        return graph.AsPipeline(GraphId.Create(id), GraphRevision.Create(1));
+    }
+
+    /// <summary>Builds a pipeline whose keyed grain call carries a payload the test wrote by hand.</summary>
+    /// <param name="id">The pipeline's identity.</param>
+    /// <param name="payload">The payload.</param>
+    /// <returns>The pipeline.</returns>
+    internal static PipelineDefinition HandWrittenKeyedCall(string id, CanonicalJsonValue payload)
+    {
+        (RunnableGraph graph, ResultSlot<long> _) = Source
+            .FromRegistered(
+                OrleansStages.GrainEnumerable(AdapterVocabulary.KeyedFeed),
+                "feed",
+                OrleansStages.GrainEnumerableParameters(AdapterVocabulary.KeyedFeed))
+            .Via(OrleansStages.KeyedGrainCall(AdapterVocabulary.KeyedPricing), "priced", payload)
+            .To(
+                RegisteredStage.SinkWithResult(
+                    AdapterVocabulary.Catalog(),
+                    AdapterVocabulary.Count,
+                    OrleansStages.Element<AdapterPrice>(),
+                    AdapterVocabulary.Total),
+                "counted",
+                AdapterVocabulary.CountPayload("unused", int.MaxValue),
+                TotalSlot);
+
+        return graph.AsPipeline(GraphId.Create(id), GraphRevision.Create(1));
+    }
+
     /// <summary>Builds a pipeline that counts what a grain enumeration yields.</summary>
     /// <param name="id">The pipeline's identity.</param>
     /// <param name="source">The enumeration binding to open.</param>
