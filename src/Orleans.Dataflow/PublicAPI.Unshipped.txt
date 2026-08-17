@@ -51,6 +51,8 @@ Orleans.Dataflow.Flow<TIn, TOut>.Scan<TState>(TState seed, System.Func<TState, T
 Orleans.Dataflow.Flow<TIn, TOut>.Select<TNext>(System.Func<TOut, TNext>! selector) -> Orleans.Dataflow.Flow<TIn, TNext>!
 Orleans.Dataflow.Flow<TIn, TOut>.SelectAsync<TNext>(Orleans.Dataflow.ParallelismOptions! options, System.Func<TOut, System.Threading.CancellationToken, System.Threading.Tasks.Task<TNext>!>! selector) -> Orleans.Dataflow.Flow<TIn, TNext>!
 Orleans.Dataflow.Flow<TIn, TOut>.SelectAsyncUnordered<TNext>(Orleans.Dataflow.ParallelismOptions! options, System.Func<TOut, System.Threading.CancellationToken, System.Threading.Tasks.Task<TNext>!>! selector) -> Orleans.Dataflow.Flow<TIn, TNext>!
+Orleans.Dataflow.Flow<TIn, TOut>.SelectValueTaskAsync<TNext>(Orleans.Dataflow.ParallelismOptions! options, System.Func<TOut, System.Threading.CancellationToken, System.Threading.Tasks.ValueTask<TNext>>! selector) -> Orleans.Dataflow.Flow<TIn, TNext>!
+Orleans.Dataflow.Flow<TIn, TOut>.SelectValueTaskAsyncUnordered<TNext>(Orleans.Dataflow.ParallelismOptions! options, System.Func<TOut, System.Threading.CancellationToken, System.Threading.Tasks.ValueTask<TNext>>! selector) -> Orleans.Dataflow.Flow<TIn, TNext>!
 Orleans.Dataflow.Flow<TIn, TOut>.Skip(int count) -> Orleans.Dataflow.Flow<TIn, TOut>!
 Orleans.Dataflow.Flow<TIn, TOut>.SkipWhile(System.Func<TOut, bool>! predicate) -> Orleans.Dataflow.Flow<TIn, TOut>!
 Orleans.Dataflow.Flow<TIn, TOut>.Take(int count) -> Orleans.Dataflow.Flow<TIn, TOut>!
@@ -125,6 +127,9 @@ Orleans.Dataflow.RunHandle
 Orleans.Dataflow.RunHandle.Completion.get -> System.Threading.Tasks.Task!
 Orleans.Dataflow.RunHandle.DisposeAsync() -> System.Threading.Tasks.ValueTask
 Orleans.Dataflow.RunHandle.GetValueAsync<TResult>(Orleans.Dataflow.ResultSlot<TResult> slot, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task<TResult>!
+Orleans.Dataflow.RunHandle.IsPaused.get -> bool
+Orleans.Dataflow.RunHandle.PauseAsync(System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task!
+Orleans.Dataflow.RunHandle.ResumeAsync() -> System.Threading.Tasks.Task!
 Orleans.Dataflow.RunHandle.ShutdownAsync() -> System.Threading.Tasks.ValueTask
 Orleans.Dataflow.RunnableGraph
 Orleans.Dataflow.RunnableGraph.AsPipeline(Orleans.Dataflow.Identity.GraphId id, Orleans.Dataflow.Identity.GraphRevision revision) -> Orleans.Dataflow.PipelineDefinition!
@@ -157,6 +162,8 @@ Orleans.Dataflow.Source<T>.Scan<TState>(TState seed, System.Func<TState, T, TSta
 Orleans.Dataflow.Source<T>.Select<TOut>(System.Func<T, TOut>! selector) -> Orleans.Dataflow.Source<TOut>!
 Orleans.Dataflow.Source<T>.SelectAsync<TOut>(Orleans.Dataflow.ParallelismOptions! options, System.Func<T, System.Threading.CancellationToken, System.Threading.Tasks.Task<TOut>!>! selector) -> Orleans.Dataflow.Source<TOut>!
 Orleans.Dataflow.Source<T>.SelectAsyncUnordered<TOut>(Orleans.Dataflow.ParallelismOptions! options, System.Func<T, System.Threading.CancellationToken, System.Threading.Tasks.Task<TOut>!>! selector) -> Orleans.Dataflow.Source<TOut>!
+Orleans.Dataflow.Source<T>.SelectValueTaskAsync<TOut>(Orleans.Dataflow.ParallelismOptions! options, System.Func<T, System.Threading.CancellationToken, System.Threading.Tasks.ValueTask<TOut>>! selector) -> Orleans.Dataflow.Source<TOut>!
+Orleans.Dataflow.Source<T>.SelectValueTaskAsyncUnordered<TOut>(Orleans.Dataflow.ParallelismOptions! options, System.Func<T, System.Threading.CancellationToken, System.Threading.Tasks.ValueTask<TOut>>! selector) -> Orleans.Dataflow.Source<TOut>!
 Orleans.Dataflow.Source<T>.Skip(int count) -> Orleans.Dataflow.Source<T>!
 Orleans.Dataflow.Source<T>.SkipWhile(System.Func<T, bool>! predicate) -> Orleans.Dataflow.Source<T>!
 Orleans.Dataflow.Source<T>.Take(int count) -> Orleans.Dataflow.Source<T>!

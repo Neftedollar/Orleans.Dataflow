@@ -268,6 +268,70 @@ public sealed class Flow<TIn, TOut>
                 selector)));
     }
 
+    /// <summary>
+    /// Extends this flow with an asynchronous mapping stage over value tasks that preserves input order.
+    /// </summary>
+    /// <typeparam name="TNext">The element type the mapping produces.</typeparam>
+    /// <param name="options">The greatest number of callbacks in flight at one time.</param>
+    /// <param name="selector">The callback applied to every element.</param>
+    /// <returns>A new flow; this one is unchanged.</returns>
+    /// <exception cref="ArgumentNullException">
+    /// <paramref name="options"/> or <paramref name="selector"/> is <see langword="null"/>.
+    /// </exception>
+    /// <exception cref="ArgumentOutOfRangeException">
+    /// <see cref="ParallelismOptions.MaxConcurrency"/> is below one.
+    /// </exception>
+    /// <remarks>
+    /// The value-task family of <see cref="Source{T}.SelectValueTaskAsync{TOut}"/>, whose contract this
+    /// shares exactly: the same bounds and ordering as <see cref="SelectAsync{TNext}"/>, and the rule that
+    /// the runtime awaits each returned value task exactly once and never after reading its result.
+    /// </remarks>
+    public Flow<TIn, TNext> SelectValueTaskAsync<TNext>(
+        ParallelismOptions options,
+        Func<TOut, CancellationToken, ValueTask<TNext>> selector)
+    {
+        ArgumentNullException.ThrowIfNull(options);
+        ArgumentNullException.ThrowIfNull(selector);
+
+        return new Flow<TIn, TNext>(LocalStageChain.Append(
+            Stages,
+            LocalStageDescriptor.SelectValueTaskAsync(
+                LocalOptionGuard.Parallelism(options, nameof(options)),
+                selector)));
+    }
+
+    /// <summary>
+    /// Extends this flow with an asynchronous mapping stage over value tasks that emits in completion
+    /// order.
+    /// </summary>
+    /// <typeparam name="TNext">The element type the mapping produces.</typeparam>
+    /// <param name="options">The greatest number of callbacks in flight at one time.</param>
+    /// <param name="selector">The callback applied to every element.</param>
+    /// <returns>A new flow; this one is unchanged.</returns>
+    /// <exception cref="ArgumentNullException">
+    /// <paramref name="options"/> or <paramref name="selector"/> is <see langword="null"/>.
+    /// </exception>
+    /// <exception cref="ArgumentOutOfRangeException">
+    /// <see cref="ParallelismOptions.MaxConcurrency"/> is below one.
+    /// </exception>
+    /// <remarks>
+    /// The unordered spelling of <see cref="SelectValueTaskAsync{TNext}"/>: a result is emitted as soon as
+    /// its callback finishes, and the single-consumption rule applies unchanged.
+    /// </remarks>
+    public Flow<TIn, TNext> SelectValueTaskAsyncUnordered<TNext>(
+        ParallelismOptions options,
+        Func<TOut, CancellationToken, ValueTask<TNext>> selector)
+    {
+        ArgumentNullException.ThrowIfNull(options);
+        ArgumentNullException.ThrowIfNull(selector);
+
+        return new Flow<TIn, TNext>(LocalStageChain.Append(
+            Stages,
+            LocalStageDescriptor.SelectValueTaskAsyncUnordered(
+                LocalOptionGuard.Parallelism(options, nameof(options)),
+                selector)));
+    }
+
     /// <summary>Extends this flow with another flow.</summary>
     /// <typeparam name="TNext">The element type the downstream flow produces.</typeparam>
     /// <param name="flow">The downstream flow, which is not modified.</param>

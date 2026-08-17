@@ -7,7 +7,10 @@ namespace Orleans.Dataflow.Runtime;
 /// </summary>
 /// <param name="Slot">The name the document declares the control under.</param>
 /// <param name="Handle">The typed handle the author receives, already built for this run.</param>
-/// <param name="Queue">The queue behind the handle, which the run ends when it stops reading.</param>
+/// <param name="Queue">
+/// The queue behind the handle, which the run ends when it stops reading; <see langword="null"/> for a
+/// control that stands at the other end of a chain, whose release is its terminal's.
+/// </param>
 /// <remarks>
 /// <para>
 /// A control is a result slot whose value exists at the start of a run rather than at its end, which is
@@ -20,5 +23,11 @@ namespace Orleans.Dataflow.Runtime;
 /// graph never share a control. That is the same rule that gives them separate enumerators and separate
 /// fold state.
 /// </para>
+/// <para>
+/// A control is not only an ingress. A probe sink declares one at the end of a chain, where the thing an
+/// author reaches by name is the demand side of the terminal rather than a queue in front of the source;
+/// what the two have in common is the whole of what a control is — a per-run object, named in the
+/// document, resolved when the run starts.
+/// </para>
 /// </remarks>
-internal sealed record LocalControl(ResultSlotId Slot, object Handle, LocalIngressQueue Queue);
+internal sealed record LocalControl(ResultSlotId Slot, object Handle, LocalIngressQueue? Queue);

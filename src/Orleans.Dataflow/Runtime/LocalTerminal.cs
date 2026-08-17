@@ -13,10 +13,13 @@ namespace Orleans.Dataflow.Runtime;
 /// whose whole work is the callback its segment already drives.
 /// </para>
 /// <para>
-/// The fold receives the run's token because a terminal may wait: a sink that writes into a bounded channel
-/// holds the segment's thread until there is room, which is the same backpressure a slow synchronous
-/// callback applies. Every other terminal ignores it, and passing it to all of them keeps the element path
-/// one shape rather than one shape plus a special case.
+/// The fold receives the run's own context because a terminal may wait: a sink that writes into a bounded
+/// channel holds the segment's thread until there is room, and a probe sink holds it until a receiver asks
+/// for the element, which is the same backpressure a slow synchronous callback applies. A terminal that
+/// waits needs what a source that waits needs — the run's token to abandon by, the stop token to tell a
+/// graceful stop from an abandonment, and the pause gate to report a wait to. Every other terminal ignores
+/// all three, and passing them to all of them keeps the element path one shape rather than one shape plus a
+/// special case.
 /// </para>
 /// <para>
 /// The state itself is not here. It belongs to the run, because a run is what a state is fresh per, and a
@@ -27,14 +30,14 @@ namespace Orleans.Dataflow.Runtime;
 internal sealed class LocalTerminal
 {
     /// <summary>Initializes a new instance of the <see cref="LocalTerminal"/> class.</summary>
-    /// <param name="folder">The fold over boxed state, boxed elements, and the run's token.</param>
+    /// <param name="folder">The fold over boxed state, boxed elements, and the run's own context.</param>
     /// <param name="completesOnFirstElement">Whether one element is the whole of what this terminal wants.</param>
     /// <param name="requiresElement">Whether a stream that ended with no element is a failure.</param>
     /// <param name="element">Which element this terminal is about, when it requires one.</param>
     /// <param name="finisher">The projection of the final state into the result, when there is one.</param>
     /// <param name="closing">What to release when the run ends, when there is anything.</param>
     private LocalTerminal(
-        Func<object?, object?, CancellationToken, object?> folder,
+        Func<object?, object?, LocalRunContext, object?> folder,
         bool completesOnFirstElement,
         bool requiresElement,
         string element = "first",
@@ -55,7 +58,7 @@ internal sealed class LocalTerminal
     /// per-element sink written as a fold that keeps its state, the replacement of the state by the element
     /// for a first-or-last-element sink, the append of a collecting one, and the write of a channel sink.
     /// </value>
-    internal Func<object?, object?, CancellationToken, object?> Folder { get; }
+    internal Func<object?, object?, LocalRunContext, object?> Folder { get; }
 
     /// <summary>Gets a value indicating whether the first element completes the run.</summary>
     /// <value>
@@ -191,13 +194,35 @@ internal sealed class LocalTerminal
     /// </remarks>
     internal static LocalTerminal Channel(LocalChannelSink channel) =>
         new(
-            (state, element, token) =>
+            (state, element, context) =>
             {
-                channel.Write(element, token);
+                channel.Write(element, context.RunToken);
 
                 return state;
             },
             completesOnFirstElement: false,
             requiresElement: false,
             closing: channel.Close);
+
+    /// <summary>Creates the terminal of a probe sink.</summary>
+    /// <param name="probe">The rendezvous this run's probe hands its elements through.</param>
+    /// <returns>The terminal.</returns>
+    /// <remarks>
+    /// The one terminal that consumes on demand rather than on arrival: an element waits here until a
+    /// receiver asks for it, which holds the segment's thread exactly as a slow synchronous callback would,
+    /// and is why a run in front of a probe sink advances only as far as its declared bounds allow. The
+    /// release is the probe's own, because how the run ended is what a receiver still waiting has to be
+    /// told.
+    /// </remarks>
+    internal static LocalTerminal Probing(LocalSinkProbe probe) =>
+        new(
+            (state, element, context) =>
+            {
+                probe.Deliver(element, context);
+
+                return state;
+            },
+            completesOnFirstElement: false,
+            requiresElement: false,
+            closing: probe.Close);
 }

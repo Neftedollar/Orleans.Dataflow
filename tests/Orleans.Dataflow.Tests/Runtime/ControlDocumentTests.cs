@@ -38,8 +38,8 @@ public sealed class ControlDocumentTests
         InvalidOperationException refused = await Assert.ThrowsAsync<InvalidOperationException>(
             async () => await Host.MaterializeAsync(graph, TestToken));
 
-        Assert.Contains("the queue 'stage-1' declares no control slot", refused.Message, StringComparison.Ordinal);
-        Assert.Contains("nothing could ever offer it an element", refused.Message, StringComparison.Ordinal);
+        Assert.Contains("the stage 'stage-1' declares no control slot", refused.Message, StringComparison.Ordinal);
+        Assert.Contains("nothing could ever reach the control it produces", refused.Message, StringComparison.Ordinal);
     }
 
     [Fact]

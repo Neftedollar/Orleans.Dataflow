@@ -174,6 +174,17 @@ internal static class LocalVocabulary
     internal static readonly StageRef SelectAsyncUnordered =
         StageRef.Create(Provider, StageId.Create("select-async-unordered"), StageRef.FirstMajorVersion);
 
+    /// <summary>The stage reference of an order-preserving asynchronous mapping stage over value tasks.</summary>
+    internal static readonly StageRef SelectValueTaskAsync =
+        StageRef.Create(Provider, StageId.Create("select-value-task-async"), StageRef.FirstMajorVersion);
+
+    /// <summary>The stage reference of a value-task mapping stage that emits in completion order.</summary>
+    internal static readonly StageRef SelectValueTaskAsyncUnordered =
+        StageRef.Create(
+            Provider,
+            StageId.Create("select-value-task-async-unordered"),
+            StageRef.FirstMajorVersion);
+
     /// <summary>The stage reference of a folding sink.</summary>
     internal static readonly StageRef Fold =
         StageRef.Create(Provider, StageId.Create("fold"), StageRef.FirstMajorVersion);
@@ -217,6 +228,10 @@ internal static class LocalVocabulary
     /// <summary>The stage reference of a sink that writes into a channel the author owns.</summary>
     internal static readonly StageRef ToChannel =
         StageRef.Create(Provider, StageId.Create("to-channel"), StageRef.FirstMajorVersion);
+
+    /// <summary>The stage reference of a sink that hands every element to a receiver that asks for it.</summary>
+    internal static readonly StageRef SinkProbe =
+        StageRef.Create(Provider, StageId.Create("sink-probe"), StageRef.FirstMajorVersion);
 
     /// <summary>The one element contract every local port declares.</summary>
     /// <remarks>
@@ -421,6 +436,8 @@ internal static class LocalVocabulary
         LocalStageKind.Buffer => Buffer,
         LocalStageKind.SelectAsync => SelectAsync,
         LocalStageKind.SelectAsyncUnordered => SelectAsyncUnordered,
+        LocalStageKind.SelectValueTaskAsync => SelectValueTaskAsync,
+        LocalStageKind.SelectValueTaskAsyncUnordered => SelectValueTaskAsyncUnordered,
         LocalStageKind.Fold => Fold,
         LocalStageKind.Ignore => Ignore,
         LocalStageKind.ForEach => ForEach,
@@ -432,6 +449,7 @@ internal static class LocalVocabulary
         LocalStageKind.LastOrDefault => LastOrDefault,
         LocalStageKind.Collect => Collect,
         LocalStageKind.ToChannel => ToChannel,
+        LocalStageKind.SinkProbe => SinkProbe,
         _ => throw new ArgumentOutOfRangeException(nameof(kind)),
     };
 
@@ -449,6 +467,8 @@ internal static class LocalVocabulary
         LocalStageKind.Buffer or LocalStageKind.Queue => BufferParameterContract,
         LocalStageKind.SelectAsync or
             LocalStageKind.SelectAsyncUnordered or
+            LocalStageKind.SelectValueTaskAsync or
+            LocalStageKind.SelectValueTaskAsyncUnordered or
             LocalStageKind.ForEachAsync => ParallelismParameterContract,
         LocalStageKind.Take or LocalStageKind.Skip or LocalStageKind.Repeat => CountParameterContract,
         LocalStageKind.Range => RangeParameterContract,
@@ -481,7 +501,8 @@ internal static class LocalVocabulary
             LocalStageKind.Count or
             LocalStageKind.Last or
             LocalStageKind.LastOrDefault or
-            LocalStageKind.ToChannel => ParameterContract,
+            LocalStageKind.ToChannel or
+            LocalStageKind.SinkProbe => ParameterContract,
         _ => throw new ArgumentOutOfRangeException(nameof(kind)),
     };
 
@@ -550,7 +571,9 @@ internal static class LocalVocabulary
             LocalStageKind.Distinct or
             LocalStageKind.Buffer or
             LocalStageKind.SelectAsync or
-            LocalStageKind.SelectAsyncUnordered => LocalStagePlace.Operator,
+            LocalStageKind.SelectAsyncUnordered or
+            LocalStageKind.SelectValueTaskAsync or
+            LocalStageKind.SelectValueTaskAsyncUnordered => LocalStagePlace.Operator,
         LocalStageKind.Fold or
             LocalStageKind.Ignore or
             LocalStageKind.ForEach or
@@ -561,7 +584,8 @@ internal static class LocalVocabulary
             LocalStageKind.Last or
             LocalStageKind.LastOrDefault or
             LocalStageKind.Collect or
-            LocalStageKind.ToChannel => LocalStagePlace.Terminal,
+            LocalStageKind.ToChannel or
+            LocalStageKind.SinkProbe => LocalStagePlace.Terminal,
         _ => throw new ArgumentOutOfRangeException(nameof(kind)),
     };
 
@@ -585,10 +609,11 @@ internal static class LocalVocabulary
     /// <exception cref="ArgumentOutOfRangeException"><paramref name="kind"/> is not a declared member.</exception>
     /// <remarks>
     /// Two kinds of value are declared here and the port name is what tells them apart. A sink's
-    /// <c>result</c> is what the run accumulated and resolves when the run ends; a queue's <c>control</c>
-    /// is the handle producers push through and resolves when the run starts. Both are result slots, which
-    /// is what ADR 0002 said when it listed a queue control beside a fold result, and both travel through
-    /// the same declaration in a document.
+    /// <c>result</c> is what the run accumulated and resolves when the run ends; a <c>control</c> is a
+    /// per-run object an author reaches by name and resolves when the run starts — the queue producers push
+    /// through at the head of a chain, the receiver a probe sink hands its elements to at the end of one.
+    /// Both are result slots, which is what ADR 0002 said when it listed a queue control beside a fold
+    /// result, and both travel through the same declaration in a document.
     /// </remarks>
     internal static ResultPortSpecification? ResultPortOf(LocalStageKind kind)
     {
@@ -606,7 +631,8 @@ internal static class LocalVocabulary
                 LocalStageKind.Last or
                 LocalStageKind.LastOrDefault or
                 LocalStageKind.Collect => ResultPortSpecification.Create(ResultPort, ResultContract),
-            LocalStageKind.Queue => ResultPortSpecification.Create(ControlPort, ControlContract),
+            LocalStageKind.Queue or
+                LocalStageKind.SinkProbe => ResultPortSpecification.Create(ControlPort, ControlContract),
             _ => null,
         };
     }

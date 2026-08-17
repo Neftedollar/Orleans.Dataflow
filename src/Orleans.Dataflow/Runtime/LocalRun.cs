@@ -46,6 +46,19 @@ namespace Orleans.Dataflow.Runtime;
 /// deadlock: a flag it examines between elements, and the closing of the channels it writes into, which is
 /// what releases a source parked in a full buffer's offer.
 /// </para>
+/// <para>
+/// <b>Pausing.</b> A pause holds every segment at a safe point without ending the run, and the safe points
+/// are the ones that already exist: the same places between elements at which a segment observes
+/// cancellation, a shutdown, and a stream completed downstream. Three of them are worth naming. A source
+/// looks again after its pull as well as before it, because an element that arrived from a wait began
+/// arriving before the pause did, and delivering it would be a paused run moving an element. An
+/// asynchronous segment looks between the elements of one pass and not only at the start of it, so a pause
+/// that lands mid-pass stops the pass rather than letting a whole window of results out and a whole window
+/// of callbacks in. And every wait this runtime owns — for room at a boundary, for an element, for a
+/// callback, for a receiver — reports itself to <see cref="LocalPause"/> for its duration, so a pause takes
+/// effect on a run that is waiting for something that is not coming instead of waiting for it too.
+/// Cancellation and shutdown open the gate for good, so neither can ever be delayed by a pause.
+/// </para>
 /// </remarks>
 internal sealed class LocalRun
 {
@@ -53,6 +66,7 @@ internal sealed class LocalRun
     private readonly CancellationTokenSource _cancellation;
     private readonly CancellationTokenSource _stopping;
     private readonly CancellationToken _token;
+    private readonly LocalPause _pause;
     private readonly LocalRunContext _context;
     private readonly TaskCompletionSource _completion = new(TaskCreationOptions.RunContinuationsAsynchronously);
     private readonly TaskCompletionSource<object?>? _result;
@@ -85,7 +99,16 @@ internal sealed class LocalRun
         _cancellation = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
         _token = _cancellation.Token;
         _stopping = CancellationTokenSource.CreateLinkedTokenSource(_token);
-        _context = new LocalRunContext(_token, _stopping.Token);
+        _pause = new LocalPause(plan.Segments.Count);
+        _context = new LocalRunContext(_pause, _token, _stopping.Token);
+
+        // Stopping wins over pausing, and this is the whole of that rule: every way a run stops — the
+        // caller's token, this run's own cancellation, a failure, a graceful shutdown — cancels the stop
+        // token, and cancelling it opens the pause gate for good. A parked segment therefore observes the
+        // stop at its park point, and no pause can ever delay a cancellation or a shutdown. Registered
+        // rather than called from the two request methods, because a caller's token cancels this run
+        // without either of them being called at all.
+        _ = _stopping.Token.Register(static held => ((LocalPause)held!).Open(), _pause);
         _result = plan.Slot is null
             ? null
             : new TaskCompletionSource<object?>(TaskCreationOptions.RunContinuationsAsynchronously);
@@ -148,7 +171,10 @@ internal sealed class LocalRun
 
             for (int index = 0; index < _plan.Controls.Count; index++)
             {
-                dropped += _plan.Controls[index].Queue.Dropped;
+                if (_plan.Controls[index].Queue is { } queue)
+                {
+                    dropped += queue.Dropped;
+                }
             }
 
             return dropped;
@@ -235,6 +261,37 @@ internal sealed class LocalRun
 
         await DrainAsync().ConfigureAwait(false);
     }
+
+    /// <summary>Gets a value indicating whether this run is being held at its park points.</summary>
+    /// <value><see langword="true"/> between a pause and the resume that releases it.</value>
+    /// <remarks>Observational and best-effort: it answers for a moment that may already have passed.</remarks>
+    internal bool IsPaused => _pause.IsPaused;
+
+    /// <summary>Asks every segment to stop at its next safe point and waits for all of them to be there.</summary>
+    /// <param name="cancellationToken">A token that stops this wait; it does not withdraw the pause.</param>
+    /// <returns>A task that completes when the pause has taken effect.</returns>
+    /// <remarks>
+    /// The request and the wait are two things, and the token belongs to the second: a caller who stops
+    /// waiting has still asked for a pause, and the run is still being held when they stop looking. Asking
+    /// twice awaits one quiescence; asking after the run has been asked to stop completes at once and holds
+    /// nothing, because a run on its way out has no safe point left to park at.
+    /// </remarks>
+    internal Task PauseAsync(CancellationToken cancellationToken)
+    {
+        Task quiet = _pause.Request();
+
+        return cancellationToken.CanBeCanceled ? quiet.WaitAsync(cancellationToken) : quiet;
+    }
+
+    /// <summary>Releases the segments a pause is holding.</summary>
+    /// <returns>A task that completes when no segment is being held any more.</returns>
+    /// <remarks>
+    /// Idempotent, and a no-op for a run that was never paused or has already stopped. Every segment
+    /// continues from exactly where it parked, which is what makes a pause a hold rather than a stop: an
+    /// element that was in a buffer is still in that buffer, an element a source had pulled is delivered
+    /// next, and a callback whose result was waiting for its turn is emitted in that turn.
+    /// </remarks>
+    internal Task ResumeAsync() => _pause.Release();
 
     /// <summary>Opens the bounded channel of one boundary.</summary>
     /// <param name="boundary">The declared capacity and policy.</param>
@@ -346,12 +403,21 @@ internal sealed class LocalRun
     /// </param>
     /// <returns><see langword="true"/> when the loop stopped because the run was canceled.</returns>
     /// <remarks>
+    /// <para>
     /// Cancellation is examined once per element, before the pull, so an element already in flight is
     /// finished rather than abandoned halfway through a chain; the same point observes a shutdown request
     /// and the end of a stream something downstream completed, and cancellation is examined first, so a run
     /// that is asked to do both ends canceled. The source is opened and its enumerator obtained at the
     /// first pull rather than before the loop, so a run stopped before its first element never touches the
     /// source at all.
+    /// </para>
+    /// <para>
+    /// A pause is examined at that same point and once more after the pull, and the second look is the one
+    /// that matters for a source that waits: an element obtained from a queue that had gone quiet arrives
+    /// long after the pause began, and delivering it because the pull happened to be in progress would let
+    /// a paused run keep moving elements. The element in hand is not lost by parking there; it is the very
+    /// element the run delivers when it resumes.
+    /// </para>
     /// </remarks>
     private bool Pull(LocalSegment segment, int index, LocalSource source, ref IEnumerator? elements)
     {
@@ -367,6 +433,11 @@ internal sealed class LocalRun
                 return false;
             }
 
+            if (_pause.Park())
+            {
+                continue;
+            }
+
             elements ??= source(_context).GetEnumerator() ??
                 throw new InvalidOperationException(
                     "The source sequence produced no enumerator. A sequence a graph is bound to has to be enumerable more than in name.");
@@ -374,6 +445,17 @@ internal sealed class LocalRun
             if (!elements.MoveNext())
             {
                 return false;
+            }
+
+            // A loop and not a single look, because a resume and a second pause can arrive between the two:
+            // a segment released from one pause examines the gate again before it does anything, exactly as
+            // it would at the top of the loop. The element stays in hand across all of it.
+            while (_pause.Park())
+            {
+                if (_token.IsCancellationRequested)
+                {
+                    return true;
+                }
             }
 
             if (!Deliver(segment, index, elements.Current))
@@ -410,6 +492,11 @@ internal sealed class LocalRun
                 return false;
             }
 
+            if (_pause.Park())
+            {
+                continue;
+            }
+
             if (reader.TryRead(out object? element))
             {
                 if (!Deliver(segment, index, element))
@@ -420,10 +507,34 @@ internal sealed class LocalRun
                 continue;
             }
 
-            if (!reader.WaitToReadAsync(_token).AsTask().GetAwaiter().GetResult())
+            if (!Arrival(reader))
             {
                 return false;
             }
+        }
+    }
+
+    /// <summary>Waits for an element to arrive on a segment's input channel.</summary>
+    /// <param name="reader">The channel to wait on.</param>
+    /// <returns><see langword="false"/> when the channel is completed and empty.</returns>
+    /// <exception cref="OperationCanceledException">The run was cancelled.</exception>
+    /// <remarks>
+    /// One of this runtime's own waits, so it reports itself to the pause gate: a segment whose upstream
+    /// has been parked would otherwise never reach its own park point, and a pause would wait forever on
+    /// the very quiet it caused. The caller returns to the top of its loop afterwards, where the pause is
+    /// examined before the element that has just arrived is touched.
+    /// </remarks>
+    private bool Arrival(ChannelReader<object?> reader)
+    {
+        _pause.Idle();
+
+        try
+        {
+            return reader.WaitToReadAsync(_token).AsTask().GetAwaiter().GetResult();
+        }
+        finally
+        {
+            _pause.Busy();
         }
     }
 
@@ -488,9 +599,18 @@ internal sealed class LocalRun
                 exhausted = true;
             }
 
+            // Before emitting and before admitting, so a paused asynchronous stage neither starts a new
+            // callback nor delivers a finished one. The callbacks already running are awaited rather than
+            // cancelled — they are an author's code, which a pause has no business interrupting — and their
+            // results wait in the window until the run is resumed.
+            if (_pause.Park())
+            {
+                continue;
+            }
+
             if (stage.Ordered)
             {
-                while (window.Count > 0 && window.Peek().IsCompleted)
+                while (window.Count > 0 && window.Peek().IsCompleted && !_pause.IsPaused)
                 {
                     Task<object?> completed = window.Dequeue();
 
@@ -500,14 +620,27 @@ internal sealed class LocalRun
             }
             else
             {
-                while (finished.TryDequeue(out Task<object?>? completed))
+                while (!_pause.IsPaused && finished.TryDequeue(out Task<object?>? completed))
                 {
                     outstanding--;
                     Emit(completed);
                 }
             }
 
-            while (!exhausted && outstanding < stage.MaxConcurrency && reader.TryRead(out object? element))
+            // A pause that arrived in the middle of a pass is observed here rather than after it. One pass
+            // emits everything that is ready and then admits everything that fits, so a segment that
+            // finished its pass before looking would deliver a whole window of results and start a whole
+            // window of callbacks after being asked to stop — which is not what "park at the next safe
+            // point" means. The safe point is between elements, and this is where the loop goes back to it.
+            if (_pause.IsPaused)
+            {
+                continue;
+            }
+
+            while (!exhausted &&
+                outstanding < stage.MaxConcurrency &&
+                !_pause.IsPaused &&
+                reader.TryRead(out object? element))
             {
                 if (_token.IsCancellationRequested)
                 {
@@ -524,6 +657,11 @@ internal sealed class LocalRun
                 outstanding++;
             }
 
+            if (_pause.IsPaused)
+            {
+                continue;
+            }
+
             bool admitting = !exhausted && outstanding < stage.MaxConcurrency;
 
             if (!admitting && outstanding == 0)
@@ -538,17 +676,26 @@ internal sealed class LocalRun
 
             Task woken = outstanding > 0 ? wakeup.Next() : Task.CompletedTask;
 
-            if (admitting && outstanding > 0)
+            _pause.Idle();
+
+            try
             {
-                _ = Task.WaitAny([arrival!, woken], _token);
+                if (admitting && outstanding > 0)
+                {
+                    _ = Task.WaitAny([arrival!, woken], _token);
+                }
+                else if (admitting)
+                {
+                    arrival!.Wait(_token);
+                }
+                else
+                {
+                    woken.Wait(_token);
+                }
             }
-            else if (admitting)
+            finally
             {
-                arrival!.Wait(_token);
-            }
-            else
-            {
-                woken.Wait(_token);
+                _pause.Busy();
             }
 
             if (arrival is { IsCompleted: true })
@@ -607,6 +754,12 @@ internal sealed class LocalRun
         ConcurrentQueue<Task<object?>> finished,
         LocalWakeup wakeup)
     {
+        // Counted before the callback starts and released by the continuation below, so that a callback
+        // whose task completes synchronously is still one the run knows it ran. A pause has not taken
+        // effect while any of them is executing: parked segments say nothing about an author's code that is
+        // still running beside them.
+        _pause.Admitted();
+
         Task<object?> callback = stage.Callback(element, _token);
 
         _ = callback.ContinueWith(
@@ -619,6 +772,7 @@ internal sealed class LocalRun
                     finished.Enqueue(completed);
                 }
 
+                _pause.Completed();
                 wakeup.Signal();
             },
             CancellationToken.None,
@@ -721,7 +875,7 @@ internal sealed class LocalRun
         else if (segment.Terminal is { } terminal)
         {
             _observed = true;
-            _state = terminal.Folder(_state, element, _token);
+            _state = terminal.Folder(_state, element, _context);
             completing |= terminal.CompletesOnFirstElement;
         }
 
@@ -795,7 +949,21 @@ internal sealed class LocalRun
             default:
                 try
                 {
-                    channel.Writer.WriteAsync(element, _token).AsTask().GetAwaiter().GetResult();
+                    // The wait for room is this runtime's own, so it reports itself to the pause gate. A
+                    // segment holding an element that a full boundary has no room for takes no step until
+                    // room appears, and room appears only when the segment below it moves; requiring it to
+                    // hand the element over before a pause could take effect would deadlock a pause against
+                    // the backpressure that put it there.
+                    _pause.Idle();
+
+                    try
+                    {
+                        channel.Writer.WriteAsync(element, _token).AsTask().GetAwaiter().GetResult();
+                    }
+                    finally
+                    {
+                        _pause.Busy();
+                    }
                 }
                 catch (ChannelClosedException) when (Stopping(index))
                 {
@@ -913,6 +1081,11 @@ internal sealed class LocalRun
             _ = _channels[index].Writer.TryComplete();
         }
 
+        // A segment that has ended will never park again, so a pause waiting for it to come to rest is
+        // waiting for something that has already happened. A run whose segments have all ended is
+        // quiescent, which is what makes pausing a finished run answer at once.
+        _pause.Ended();
+
         if (Interlocked.Decrement(ref _running) == 0)
         {
             Settle();
@@ -962,9 +1135,14 @@ internal sealed class LocalRun
     /// </remarks>
     private void Settle()
     {
+        // A run that has ended holds nothing, so the pause gate opens here too and not only when something
+        // asked the run to stop: a source that simply ran out cancels no token, and a pause requested
+        // against the run afterwards would otherwise be a hold on segments that no longer exist.
+        _pause.Open();
+
         for (int index = 0; index < _plan.Controls.Count; index++)
         {
-            _plan.Controls[index].Queue.EndRun();
+            _plan.Controls[index].Queue?.EndRun();
         }
 
         Exception? failure = _failure;

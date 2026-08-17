@@ -42,7 +42,14 @@ Exit criteria:
 - authoring produces deterministic graph documents identical to core-built equivalents;
 - the API review finds no blocking naming, inference, or overload defects.
 
-## M2 — Local bounded runtime
+## M2 — Local bounded runtime (closed 2026-08-17; two recorded deferrals)
+
+Deferred deliberately, with their rationale: the C# `Choose` spelling moves
+to the M4 operator ADR (`Where`+`Select` covers the semantics; the F#
+`choose` arrives with the F# frontend over the algebra), and the
+controllable time abstraction plus the tick source move to M4 with the
+first operator that reads a clock — a clock nothing reads would be dead
+code pinned before its consumer exists.
 
 Deliverables:
 

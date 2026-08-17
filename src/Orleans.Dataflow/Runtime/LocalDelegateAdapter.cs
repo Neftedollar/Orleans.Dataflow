@@ -47,6 +47,9 @@ internal static class LocalDelegateAdapter
     /// <summary>The template closed to wrap an asynchronous mapping delegate.</summary>
     private static readonly MethodInfo AsyncSelectorTemplate = Template(nameof(BoxAsyncSelector));
 
+    /// <summary>The template closed to wrap an asynchronous mapping over value tasks.</summary>
+    private static readonly MethodInfo ValueTaskSelectorTemplate = Template(nameof(BoxValueTaskSelector));
+
     /// <summary>The template closed to wrap an asynchronous callback with no result.</summary>
     private static readonly MethodInfo AsyncCallbackTemplate = Template(nameof(BoxAsyncCallback));
 
@@ -246,6 +249,51 @@ internal static class LocalDelegateAdapter
             behavior);
     }
 
+    /// <summary>Wraps an asynchronous mapping over value tasks into one over boxed elements.</summary>
+    /// <param name="behavior">The bound <c>Func&lt;TIn, CancellationToken, ValueTask&lt;TOut&gt;&gt;</c>.</param>
+    /// <param name="kind">The stage shape, for the diagnostic.</param>
+    /// <returns>The wrapped mapping, in the one callback shape the asynchronous segment driver knows.</returns>
+    /// <exception cref="InvalidOperationException">
+    /// <paramref name="behavior"/> is not a two-argument function taking a
+    /// <see cref="CancellationToken"/> and returning a <see cref="ValueTask{TResult}"/>.
+    /// </exception>
+    /// <remarks>
+    /// <para>
+    /// The conversion is the whole of the value-task family's implementation, and it happens here rather
+    /// than in the run loop on purpose: what an asynchronous stage does — how many callbacks it admits, in
+    /// what order it emits, what a failure does to the ones beside it, what a drain awaits — is one
+    /// implementation, and a second driver differing only in the shape of the thing it awaits would be two
+    /// statements of one contract that could disagree. The price is one task per element, on a path that
+    /// already allocates a continuation per element.
+    /// </para>
+    /// <para>
+    /// The wrapper awaits the value task exactly once, which is the whole of the single-consumption rule a
+    /// <see cref="ValueTask{TResult}"/> imposes: an implementation backed by a pooled source may be
+    /// consumed once, and a runtime that awaited one twice, or that awaited it after reading its result,
+    /// would corrupt whatever else that source is now serving.
+    /// </para>
+    /// </remarks>
+    internal static Func<object?, CancellationToken, Task<object?>> ValueTaskSelector(
+        object? behavior,
+        LocalStageKind kind)
+    {
+        const string Expected = "Func<TIn, CancellationToken, ValueTask<TOut>>";
+
+        Type[] arguments = Arguments(behavior, typeof(Func<,,>), kind, Expected);
+
+        if (arguments[1] != typeof(CancellationToken) ||
+            !arguments[2].IsGenericType ||
+            arguments[2].GetGenericTypeDefinition() != typeof(ValueTask<>))
+        {
+            throw Mismatch(behavior, kind, Expected);
+        }
+
+        return (Func<object?, CancellationToken, Task<object?>>)Close(
+            ValueTaskSelectorTemplate,
+            [arguments[0], arguments[2].GetGenericArguments()[0]],
+            behavior);
+    }
+
     /// <summary>Wraps an asynchronous callback with no result into one over boxed elements.</summary>
     /// <param name="behavior">The bound <c>Func&lt;T, CancellationToken, Task&gt;</c>.</param>
     /// <returns>The wrapped callback, whose task always produces <see langword="null"/>.</returns>
@@ -359,6 +407,20 @@ internal static class LocalDelegateAdapter
         behavior as Func<LocalIngressQueue, object> ??
         throw new InvalidOperationException(
             $"A '{LocalStageKind.Queue}' stage must be bound to a factory of its typed control, and this one is bound to {Describe(behavior)}.");
+
+    /// <summary>Reads a sink binding as the facade factory of a probe sink.</summary>
+    /// <param name="behavior">The bound factory, which the authoring surface closed over the element type.</param>
+    /// <returns>The factory.</returns>
+    /// <exception cref="InvalidOperationException"><paramref name="behavior"/> is not such a factory.</exception>
+    /// <remarks>
+    /// The mirror image of <see cref="QueueFacade"/> at the other end of a chain, and pinned at authoring
+    /// for the same reason: the rendezvous the runtime builds works in boxed elements, and only code
+    /// holding the type argument can hand an author a typed receiver over it.
+    /// </remarks>
+    internal static Func<LocalSinkProbe, object> ProbeFacade(object? behavior) =>
+        behavior as Func<LocalSinkProbe, object> ??
+        throw new InvalidOperationException(
+            $"A '{LocalStageKind.SinkProbe}' stage must be bound to a factory of its typed control, and this one is bound to {Describe(behavior)}.");
 
     /// <summary>Reads a sink binding as the projection of a collected list into its result type.</summary>
     /// <param name="behavior">The bound projection, which the authoring surface closed over the element type.</param>
@@ -514,6 +576,22 @@ internal static class LocalDelegateAdapter
 
             return await pending.ConfigureAwait(false);
         };
+
+    /// <summary>Wraps a typed asynchronous mapping over value tasks into one over boxed elements.</summary>
+    /// <typeparam name="TIn">The element type the mapping consumes.</typeparam>
+    /// <typeparam name="TOut">The element type the mapping produces.</typeparam>
+    /// <param name="selector">The author's delegate.</param>
+    /// <returns>The wrapper.</returns>
+    /// <remarks>
+    /// Invoked only by reflection, over the type arguments recovered from the delegate itself. An
+    /// <see langword="await"/> and nothing else: a value task is a struct and can never be the null a
+    /// task-returning callback can return, and awaiting it once is what turns it into the task the
+    /// asynchronous segment driver holds. A callback that throws before returning its value task produces a
+    /// faulted task here exactly as one that throws afterwards does.
+    /// </remarks>
+    private static Func<object?, CancellationToken, Task<object?>> BoxValueTaskSelector<TIn, TOut>(
+        Func<TIn, CancellationToken, ValueTask<TOut>> selector) =>
+        async (element, token) => await selector((TIn)element!, token).ConfigureAwait(false);
 
     /// <summary>Wraps a typed folder into one over boxed state and boxed elements.</summary>
     /// <typeparam name="TState">The state type, which is also the result type.</typeparam>

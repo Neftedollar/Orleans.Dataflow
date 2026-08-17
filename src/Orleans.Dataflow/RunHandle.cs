@@ -25,13 +25,19 @@ namespace Orleans.Dataflow;
 /// grow.
 /// </para>
 /// <para>
+/// <b>Pausing is neither of them.</b> <see cref="PauseAsync"/> stops the run without ending it and
+/// <see cref="ResumeAsync"/> continues it from exactly where it stopped, so a paused run has no outcome, no
+/// resolved result, and nothing to release. Both stops win over a pause: a run asked to shut down or
+/// cancelled while paused observes that at its park points and ends.
+/// </para>
+/// <para>
 /// <b>Threading.</b> Every member is safe to call from any thread, at any point in the run's life,
 /// concurrently with any other member. Two callers awaiting one result observe one outcome.
 /// </para>
 /// <para>
-/// <b>What this checkpoint does not do.</b> There is no pausing, no resuming, and no abort distinct from
-/// cancellation; the elements a buffer discarded are counted but not yet exposed, because what an author
-/// will read them through is a monitor; and nothing here consults a clock.
+/// <b>What this checkpoint does not do.</b> There is no abort distinct from cancellation and no lifecycle
+/// state vocabulary beyond <see cref="IsPaused"/>; the elements a buffer discarded are counted but not yet
+/// exposed, because what an author will read them through is a monitor; and nothing here consults a clock.
 /// </para>
 /// </remarks>
 public sealed class RunHandle : IAsyncDisposable
@@ -178,6 +184,94 @@ public sealed class RunHandle : IAsyncDisposable
     /// </para>
     /// </remarks>
     public ValueTask DisposeAsync() => _run.DisposeAsync();
+
+    /// <summary>Gets a value indicating whether this run is currently being held at its park points.</summary>
+    /// <value><see langword="true"/> between a pause and the resume that releases it.</value>
+    /// <remarks>
+    /// <para>
+    /// <b>Observational, and best-effort by construction.</b> It answers for a moment that may already have
+    /// passed by the time the caller reads it: another thread may resume the run, or the run may end, in
+    /// the instant between. Nothing may be built on it that a race could break — it is for a log line, a
+    /// diagnostic, or a test's own assertion, and never for deciding what to do next. The way to know a
+    /// pause has taken effect is to await <see cref="PauseAsync"/>, which is a fact rather than a reading.
+    /// </para>
+    /// <para>
+    /// It is exposed rather than omitted because the alternative is worse: without it, a paused run and a
+    /// run whose source has simply gone quiet are indistinguishable from the outside, and an author who
+    /// wanted to tell them apart would have to keep their own flag beside the handle and hope it agreed
+    /// with the runtime. One honest bool, documented as a reading, is a smaller lie than that. It is
+    /// deliberately not the first member of a state enumeration: the vocabulary of run lifecycle states
+    /// belongs to the supervision milestone, and inventing one here to hold a single fact would fix names
+    /// that have not been designed yet.
+    /// </para>
+    /// <para>
+    /// A run that has been asked to stop reports <see langword="false"/>, whether it was cancelled, shut
+    /// down, or has already ended. Stopping wins over pausing, and a run on its way out is being held by
+    /// nothing.
+    /// </para>
+    /// </remarks>
+    public bool IsPaused => _run.IsPaused;
+
+    /// <summary>Asks this run to stop between elements and waits until it has.</summary>
+    /// <param name="cancellationToken">A token that stops this wait; it does not withdraw the pause.</param>
+    /// <returns>A task that completes when the pause has taken effect.</returns>
+    /// <exception cref="OperationCanceledException"><paramref name="cancellationToken"/> was cancelled.</exception>
+    /// <remarks>
+    /// <para>
+    /// Every segment stops at its next safe point — the same point between elements at which it observes
+    /// cancellation and a shutdown — and stays there until <see cref="ResumeAsync"/>. The returned task
+    /// completes once all of them are there and no asynchronous callback is still running: what a paused
+    /// run guarantees is that no author code of its own is executing and that nothing will move an element
+    /// until it is resumed.
+    /// </para>
+    /// <para>
+    /// <b>What "nothing is in flight" does and does not mean.</b> An element that was already produced and
+    /// is waiting — in a buffer, in a segment's hand at a boundary that has no room for it, in an
+    /// asynchronous stage's window, or at a sink nobody has asked for it — is held rather than in flight,
+    /// because nothing will move it. Demanding that every such element be handed over first would be a
+    /// promise no run could keep: a source waiting for room in a full buffer is waiting for the very
+    /// segment a pause has parked.
+    /// </para>
+    /// <para>
+    /// <b>The token cancels the wait and not the request.</b> A caller who stops waiting has still asked
+    /// for a pause, and the run is still being held when they stop looking; resuming is what withdraws it.
+    /// Asking twice awaits the same quiescence rather than a second one.
+    /// </para>
+    /// <para>
+    /// <b>Interactions, all of them decided.</b> Pausing a run that has already ended completes at once and
+    /// is not an error. A shutdown, a cancellation, a disposal, or a failure during a pause wins and ends
+    /// the run: the parked segments observe it at their park points, and a pause can never delay any of
+    /// them. A paused run's controls keep working — an offer to the queue of a paused run is answered by
+    /// the queue's own declared policy, because the queue stands upstream of the segment that is parked —
+    /// and <see cref="GetValueAsync"/> simply keeps waiting, because a paused run has not ended and has no
+    /// result yet.
+    /// </para>
+    /// <para>
+    /// <b>What a pause waits for.</b> A pause is observed between elements, so a source that blocks inside
+    /// a pull, or a callback that is still running, delays it until it returns — the same rule a shutdown
+    /// follows, and for the same reason: this runtime does not interrupt an author's code. The runtime's
+    /// own waits are the exception and are accounted for directly, so a run waiting on an empty queue, an
+    /// idle channel, a source that never produces, or a receiver that has not asked yet is a run a pause
+    /// takes effect on at once.
+    /// </para>
+    /// </remarks>
+    public Task PauseAsync(CancellationToken cancellationToken = default) => _run.PauseAsync(cancellationToken);
+
+    /// <summary>Releases a paused run and waits until it is moving again.</summary>
+    /// <returns>A task that completes when no segment is being held any more.</returns>
+    /// <remarks>
+    /// <para>
+    /// Every segment continues from exactly where it parked. An element a source had already pulled is the
+    /// next one it delivers, a buffer still holds what it held, and a callback whose result was waiting for
+    /// its turn is emitted in that turn: a pause loses no element and repeats none.
+    /// </para>
+    /// <para>
+    /// Idempotent, and a no-op for a run that was never paused or has already ended. It takes no token
+    /// because there is nothing to wait for that could be worth abandoning: a released segment is released,
+    /// and the task only reports that the last of them has left its park point.
+    /// </para>
+    /// </remarks>
+    public Task ResumeAsync() => _run.ResumeAsync();
 
     /// <summary>Returns a one-line diagnostic summary of this run.</summary>
     /// <returns>Text of the form <c>run of sha256:9f86d081... (RanToCompletion)</c>.</returns>

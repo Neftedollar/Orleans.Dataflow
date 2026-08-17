@@ -6,5 +6,6 @@
   <ItemGroup>
     <PackageReference Include="xunit.v3.mtp-v2" />
     <ProjectReference Include="../../src/Orleans.Dataflow/Orleans.Dataflow.csproj" />
+    <ProjectReference Include="../../src/Orleans.Dataflow.Testing/Orleans.Dataflow.Testing.csproj" />
   </ItemGroup>
 </Project>

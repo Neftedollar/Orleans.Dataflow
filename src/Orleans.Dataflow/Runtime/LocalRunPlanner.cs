@@ -67,7 +67,7 @@ internal static class LocalRunPlanner
         List<LocalSegment> segments = [];
         List<LocalBoundary> boundaries = [];
         List<LocalElementStage> stages = [];
-        Dictionary<NodeId, (LocalIngressQueue Queue, object Handle)> queues = [];
+        Dictionary<NodeId, (LocalIngressQueue? Queue, object Handle)> controls = [];
         LocalSource? elements = null;
         LocalAsyncStage? head = null;
         LocalBoundary? pending = null;
@@ -209,7 +209,7 @@ internal static class LocalRunPlanner
                     LocalIngressQueue queue = Ingress(declaration);
                     object handle = LocalDelegateAdapter.QueueFacade(descriptor.Behavior)(queue);
 
-                    queues.Add(order[index], (queue, handle));
+                    controls.Add(order[index], (queue, handle));
                     elements = queue.Elements;
 
                     break;
@@ -259,7 +259,10 @@ internal static class LocalRunPlanner
                     Settle();
                     pending = Boundary(declaration);
                     break;
-                case LocalStageKind.SelectAsync or LocalStageKind.SelectAsyncUnordered when !first && !last:
+                case LocalStageKind.SelectAsync or
+                    LocalStageKind.SelectAsyncUnordered or
+                    LocalStageKind.SelectValueTaskAsync or
+                    LocalStageKind.SelectValueTaskAsyncUnordered when !first && !last:
                     Cut(pending ?? LocalBoundary.Handoff);
                     head = Asynchronous(declaration, descriptor);
                     break;
@@ -311,6 +314,18 @@ internal static class LocalRunPlanner
                     Settle();
                     terminal = LocalTerminal.Channel(LocalDelegateAdapter.ChannelSink(descriptor.Behavior));
                     break;
+                case LocalStageKind.SinkProbe when last && !first:
+                {
+                    Settle();
+
+                    LocalSinkProbe probe = new();
+
+                    controls.Add(order[index], (Queue: null, LocalDelegateAdapter.ProbeFacade(descriptor.Behavior)(probe)));
+                    terminal = LocalTerminal.Probing(probe);
+
+                    break;
+                }
+
                 default:
                     throw Foreign(
                         $"the node '{order[index]}' is a '{descriptor.Kind}' stage at position {index + 1} of {order.Count}, where that shape cannot stand");
@@ -324,7 +339,7 @@ internal static class LocalRunPlanner
             throw Foreign("the chain does not begin with a source");
         }
 
-        (ResultSlotId? slot, LocalControl[] controls) = Slots(graph.Document, order[^1], produces, queues);
+        (ResultSlotId? slot, LocalControl[] declared) = Slots(graph.Document, order[^1], produces, controls);
 
         return new LocalRunPlan(
             segments,
@@ -332,7 +347,7 @@ internal static class LocalRunPlanner
             seed,
             seedFactory,
             slot,
-            controls,
+            declared,
             completesAtStart);
 
         // Adds one synchronous stage to the segment under construction, opening the segment a pending
@@ -508,7 +523,9 @@ internal static class LocalRunPlanner
     /// <remarks>
     /// Ordering comes from the stage the document names and the concurrency bound from its payload, which
     /// is the split the two planes make everywhere: which operator was written is topology, and how many
-    /// of its callbacks run at once is configuration.
+    /// of its callbacks run at once is configuration. So does the shape of the callback, and it is resolved
+    /// here and nowhere else: the two value-task spellings are converted into the one callback shape the
+    /// asynchronous driver knows, so that everything that driver promises is promised once.
     /// </remarks>
     private static LocalAsyncStage Asynchronous(StageNode node, LocalStageDescriptor descriptor)
     {
@@ -522,11 +539,15 @@ internal static class LocalRunPlanner
         }
 
         return new LocalAsyncStage(
-            descriptor.Kind is LocalStageKind.ForEachAsync
-                ? LocalDelegateAdapter.AsyncCallback(descriptor.Behavior)
-                : LocalDelegateAdapter.AsyncSelector(descriptor.Behavior, descriptor.Kind),
+            descriptor.Kind switch
+            {
+                LocalStageKind.ForEachAsync => LocalDelegateAdapter.AsyncCallback(descriptor.Behavior),
+                LocalStageKind.SelectValueTaskAsync or LocalStageKind.SelectValueTaskAsyncUnordered =>
+                    LocalDelegateAdapter.ValueTaskSelector(descriptor.Behavior, descriptor.Kind),
+                _ => LocalDelegateAdapter.AsyncSelector(descriptor.Behavior, descriptor.Kind),
+            },
             options!.MaxConcurrency,
-            descriptor.Kind is LocalStageKind.SelectAsync);
+            descriptor.Kind is LocalStageKind.SelectAsync or LocalStageKind.SelectValueTaskAsync);
     }
 
     /// <summary>Orders a document's nodes by following its edges from the one node nothing feeds.</summary>
@@ -599,43 +620,44 @@ internal static class LocalRunPlanner
     /// <param name="document">The document being compiled.</param>
     /// <param name="terminal">The identifier of the last node of the chain.</param>
     /// <param name="produces">Whether the terminal declares a result port.</param>
-    /// <param name="queues">The ingress queues this plan built, keyed by node identifier.</param>
-    /// <returns>The terminal's slot name, if any, and one control per queue.</returns>
+    /// <param name="controls">The per-run controls this plan built, keyed by node identifier.</param>
+    /// <returns>The terminal's slot name, if any, and one <see cref="LocalControl"/> per control.</returns>
     /// <exception cref="InvalidOperationException">
     /// The document declares a slot no node of this chain produces, declares two on one producer, or leaves
-    /// a queue without one.
+    /// a control-bearing stage without one.
     /// </exception>
     /// <remarks>
     /// <para>
-    /// Two kinds of slot and one mechanism. A control slot is produced by a queue's <c>control</c> port and
-    /// its value exists from the start of the run; the terminal's slot is produced by the last node's
-    /// <c>result</c> port and its value exists at the end. Everything else about them is the same, which is
-    /// why they travel together in one document and resolve through one handle.
+    /// Two kinds of slot and one mechanism. A control slot is produced by a <c>control</c> port — a queue's
+    /// at the head of a chain, a probe sink's at the end of one — and its value exists from the start of
+    /// the run; the terminal's slot is produced by the last node's <c>result</c> port and its value exists
+    /// at the end. Everything else about them is the same, which is why they travel together in one
+    /// document and resolve through one handle.
     /// </para>
     /// <para>
-    /// A queue with no control slot is rejected rather than run. Nothing else can offer it an element, so
-    /// such a run would wait for a producer that cannot exist — a hang, which is a worse answer than a
-    /// sentence. It is unreachable through the authoring API, where declaring the queue is what names the
-    /// control.
+    /// A stage that produces a control and declares no slot for it is rejected rather than run. Nothing
+    /// else can reach that control, so such a run would wait for a producer or a receiver that cannot
+    /// exist — a hang, which is a worse answer than a sentence. It is unreachable through the authoring
+    /// API, where declaring the stage is what names the control.
     /// </para>
     /// </remarks>
     private static (ResultSlotId? Slot, LocalControl[] Controls) Slots(
         GraphDocument document,
         NodeId terminal,
         bool produces,
-        Dictionary<NodeId, (LocalIngressQueue Queue, object Handle)> queues)
+        Dictionary<NodeId, (LocalIngressQueue? Queue, object Handle)> controls)
     {
         ResultSlotId? result = null;
-        Dictionary<NodeId, LocalControl> controls = [];
+        Dictionary<NodeId, LocalControl> named = [];
 
         foreach (ResultSlotDefinition declared in document.ResultSlots)
         {
             if (declared.Producer.Port == LocalVocabulary.ControlPort &&
-                queues.TryGetValue(declared.Producer.Node, out (LocalIngressQueue Queue, object Handle) queue))
+                controls.TryGetValue(declared.Producer.Node, out (LocalIngressQueue? Queue, object Handle) control))
             {
-                if (!controls.TryAdd(declared.Producer.Node, new LocalControl(declared.Id, queue.Handle, queue.Queue)))
+                if (!named.TryAdd(declared.Producer.Node, new LocalControl(declared.Id, control.Handle, control.Queue)))
                 {
-                    throw Foreign($"the queue '{declared.Producer.Node}' declares more than one control slot");
+                    throw Foreign($"the stage '{declared.Producer.Node}' declares more than one control slot");
                 }
 
                 continue;
@@ -654,19 +676,19 @@ internal static class LocalRunPlanner
             }
 
             throw Foreign(
-                $"the result '{declared.Id}' is produced by '{declared.Producer}', which is neither the terminal of the chain nor the control port of one of its queues");
+                $"the result '{declared.Id}' is produced by '{declared.Producer}', which is neither the terminal of the chain nor the control port of one of its stages");
         }
 
-        foreach (NodeId node in queues.Keys)
+        foreach (NodeId node in controls.Keys)
         {
-            if (!controls.ContainsKey(node))
+            if (!named.ContainsKey(node))
             {
                 throw Foreign(
-                    $"the queue '{node}' declares no control slot, so nothing could ever offer it an element");
+                    $"the stage '{node}' declares no control slot, so nothing could ever reach the control it produces");
             }
         }
 
-        return (result, [.. controls.Values]);
+        return (result, [.. named.Values]);
     }
 
     /// <summary>Builds the exception for a document this runtime cannot execute.</summary>

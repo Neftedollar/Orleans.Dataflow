@@ -1,6 +1,7 @@
 using Orleans.Dataflow.Authoring;
 using Orleans.Dataflow.Compilation;
 using Orleans.Dataflow.Definition;
+using Orleans.Dataflow.Testing;
 using Xunit;
 using static Orleans.Dataflow.Tests.Api.ApiFixtures;
 
@@ -47,7 +48,7 @@ public sealed class CatalogValidationTests
 
             for (int index = 0; index < operators; index++)
             {
-                source = (index % 11) switch
+                source = (index % 13) switch
                 {
                     0 => source.Select(value => value + 1),
                     1 => source.Where(value => value > 0),
@@ -63,6 +64,12 @@ public sealed class CatalogValidationTests
                     7 => source.Skip(index),
                     8 => source.TakeWhile(value => value < long.MaxValue),
                     9 => source.TakeThrough(value => value < long.MaxValue),
+                    10 => source.SelectValueTaskAsync(
+                        new ParallelismOptions { MaxConcurrency = index + 1 },
+                        (value, _) => ValueTask.FromResult(value)),
+                    11 => source.SelectValueTaskAsyncUnordered(
+                        new ParallelismOptions { MaxConcurrency = index + 1 },
+                        (value, _) => ValueTask.FromResult(value)),
                     _ => source.Distinct(new DistinctOptions { MaxTrackedKeys = index + 1 }),
                 };
             }
@@ -111,14 +118,26 @@ public sealed class CatalogValidationTests
     }
 
     [Fact]
-    public void ALinearGraphNeverDeclaresMoreThanOneResultSlot()
+    public void ALinearGraphNeverDeclaresMoreThanOneResultSlotAndAnyNumberOfControls()
     {
         // The reason the definition plane's duplicate-slot violation is unreachable from this API: a graph
-        // is closed by exactly one To, and every To carries at most one slot name. Two slots in one graph
+        // is closed by exactly one To, and every To carries at most one slot name. Two results in one graph
         // arrive with graphs that have more than one sink.
+        //
+        // Controls are the other half of the same sentence and are not bounded by one, because they are not
+        // declared by the closing call at all: a queue and a probe name theirs on the stage that produces
+        // them, and a chain may hold more than one such stage. The port name is what tells the two apart,
+        // which is why the ports are separate identities rather than one.
         foreach ((string name, RunnableGraph graph) in RepresentativeGraphs())
         {
-            Assert.True(graph.Document.ResultSlots.Count <= 1, name);
+            Assert.True(
+                graph.Document.ResultSlots.Count(slot => slot.Producer.Port.Value == "result") <= 1,
+                name);
+            Assert.All(
+                graph.Document.ResultSlots,
+                slot => Assert.True(
+                    slot.Producer.Port.Value is "result" or "control",
+                    $"{name}: {slot.Producer.Port}"));
             Assert.Equal(graph.Document.ResultSlots.Count, graph.ResultSlots.Count);
         }
     }
@@ -160,7 +179,10 @@ public sealed class CatalogValidationTests
                 LocalStage("select"),
                 LocalStage("select-async"),
                 LocalStage("select-async-unordered"),
+                LocalStage("select-value-task-async"),
+                LocalStage("select-value-task-async-unordered"),
                 LocalStage("single"),
+                LocalStage("sink-probe"),
                 LocalStage("skip"),
                 LocalStage("skip-while"),
                 LocalStage("take"),
@@ -212,6 +234,7 @@ public sealed class CatalogValidationTests
             "ignore",
             "last",
             "last-or-default",
+            "sink-probe",
             "to-channel",
         ];
 
@@ -297,7 +320,10 @@ public sealed class CatalogValidationTests
                 ["select"] = "local-parameters",
                 ["select-async"] = "local-parallelism-parameters",
                 ["select-async-unordered"] = "local-parallelism-parameters",
+                ["select-value-task-async"] = "local-parallelism-parameters",
+                ["select-value-task-async-unordered"] = "local-parallelism-parameters",
                 ["single"] = "local-parameters",
+                ["sink-probe"] = "local-parameters",
                 ["skip"] = "local-count-parameters",
                 ["skip-while"] = "local-parameters",
                 ["take"] = "local-count-parameters",
@@ -357,7 +383,7 @@ public sealed class CatalogValidationTests
                     (string expectedPort, string expectedContract) = specification.Stage.Stage.Value switch
                     {
                         "fold" => ("result", "local-fold-result"),
-                        "queue" => ("control", "local-control"),
+                        "queue" or "sink-probe" => ("control", "local-control"),
                         _ => ("result", "local-result"),
                     };
 
@@ -407,7 +433,10 @@ public sealed class CatalogValidationTests
                 ["select"] = 0,
                 ["select-async"] = 0,
                 ["select-async-unordered"] = 0,
+                ["select-value-task-async"] = 0,
+                ["select-value-task-async-unordered"] = 0,
                 ["single"] = 0,
+                ["sink-probe"] = 1,
                 ["skip"] = 0,
                 ["skip-while"] = 0,
                 ["take"] = 0,
@@ -514,6 +543,23 @@ public sealed class CatalogValidationTests
                 .To(Sink.Ignore<string>()));
 
         yield return (
+            "source through both value-task mappings to fold",
+            Source.From(OrderEvents)
+                .SelectValueTaskAsync(
+                    new ParallelismOptions { MaxConcurrency = 2 },
+                    (order, _) => ValueTask.FromResult(order.Total))
+                .SelectValueTaskAsyncUnordered(
+                    new ParallelismOptions { MaxConcurrency = 1 },
+                    (total, _) => ValueTask.FromResult(total * 2m))
+                .To(s => s.Aggregate(0m, (sum, total) => sum + total), "total", out ResultSlot<decimal> _));
+
+        yield return (
+            "probe source through a buffer to a probe sink",
+            TestSource.Probe<OrderCreated>("emitted")
+                .Buffer(new BufferOptions { Capacity = 2 })
+                .To(TestSink.Probe<OrderCreated>("received")));
+
+        yield return (
             "source through a buffered flow with both asynchronous mappings to fold",
             Source.From(OrderEvents)
                 .Via(Flow.For<OrderCreated>()
@@ -573,6 +619,7 @@ public sealed class CatalogValidationTests
     /// <returns>The named graphs.</returns>
     private static IEnumerable<(string Name, RunnableGraph Graph)> Sources()
     {
+        yield return ("probe source", TestSource.Probe<int>("emitted").To(Sink.Ignore<int>()));
         yield return ("empty source", Source.Empty<int>().To(Sink.Ignore<int>()));
         yield return ("single-element source", Source.Single(1).To(Sink.Ignore<int>()));
         yield return ("repeating source", Source.Repeat(1, 3).To(Sink.Ignore<int>()));
@@ -611,6 +658,7 @@ public sealed class CatalogValidationTests
         yield return ("first", source.To(s => s.First(), "head", out ResultSlot<long> _));
         yield return ("first or default", source.To(s => s.FirstOrDefault(), "head", out ResultSlot<long> _));
         yield return ("counted", source.To(s => s.Count(), "counted", out ResultSlot<long> _));
+        yield return ("probed", source.To(TestSink.Probe<long>("received")));
     }
 
     /// <summary>Builds a chain long enough that ordinal identifier order differs from authoring order.</summary>

@@ -268,6 +268,87 @@ public sealed class Source<T>
                 selector)));
     }
 
+    /// <summary>
+    /// Extends this source with an asynchronous mapping stage over value tasks that preserves input order.
+    /// </summary>
+    /// <typeparam name="TOut">The element type the mapping produces.</typeparam>
+    /// <param name="options">The greatest number of callbacks in flight at one time.</param>
+    /// <param name="selector">The callback applied to every element.</param>
+    /// <returns>A new source; this one is unchanged.</returns>
+    /// <exception cref="ArgumentNullException">
+    /// <paramref name="options"/> or <paramref name="selector"/> is <see langword="null"/>.
+    /// </exception>
+    /// <exception cref="ArgumentOutOfRangeException">
+    /// <see cref="ParallelismOptions.MaxConcurrency"/> is below one.
+    /// </exception>
+    /// <remarks>
+    /// <para>
+    /// <see cref="SelectAsync"/> in every respect but the type of the thing awaited (ADR 0004 section 7
+    /// names the three families): the same bound on callbacks in flight, the same emission in input order,
+    /// the same run token, and the same rule that a failing callback faults the run, cancels the callbacks
+    /// beside it, and starts no later element.
+    /// </para>
+    /// <para>
+    /// The family exists because a <see cref="ValueTask{TResult}"/> is what a callback that usually
+    /// finishes synchronously should return — a cache hit, a value already in memory — and converting one
+    /// to a <see cref="Task{TResult}"/> at the call site to reach <see cref="SelectAsync"/> would allocate
+    /// exactly what the value task was chosen to avoid.
+    /// </para>
+    /// <para>
+    /// <b>The runtime awaits each returned value task exactly once, and never after reading its result.</b>
+    /// That is the rule a value task imposes on whoever consumes it, and it is stated here because the
+    /// consumer is this runtime rather than the author: a callback may return a value task backed by a
+    /// pooled source, and this operator is a correct consumer of one. What the author must not do is hand
+    /// back a value task that something else is also going to await.
+    /// </para>
+    /// </remarks>
+    public Source<TOut> SelectValueTaskAsync<TOut>(
+        ParallelismOptions options,
+        Func<T, CancellationToken, ValueTask<TOut>> selector)
+    {
+        ArgumentNullException.ThrowIfNull(options);
+        ArgumentNullException.ThrowIfNull(selector);
+
+        return new Source<TOut>(LocalStageChain.Append(
+            Stages,
+            LocalStageDescriptor.SelectValueTaskAsync(
+                LocalOptionGuard.Parallelism(options, nameof(options)),
+                selector)));
+    }
+
+    /// <summary>
+    /// Extends this source with an asynchronous mapping stage over value tasks that emits in completion
+    /// order.
+    /// </summary>
+    /// <typeparam name="TOut">The element type the mapping produces.</typeparam>
+    /// <param name="options">The greatest number of callbacks in flight at one time.</param>
+    /// <param name="selector">The callback applied to every element.</param>
+    /// <returns>A new source; this one is unchanged.</returns>
+    /// <exception cref="ArgumentNullException">
+    /// <paramref name="options"/> or <paramref name="selector"/> is <see langword="null"/>.
+    /// </exception>
+    /// <exception cref="ArgumentOutOfRangeException">
+    /// <see cref="ParallelismOptions.MaxConcurrency"/> is below one.
+    /// </exception>
+    /// <remarks>
+    /// The unordered spelling of <see cref="SelectValueTaskAsync{TOut}"/>, with the one difference its name
+    /// states: a result is emitted as soon as its callback finishes. The single-consumption rule of
+    /// <see cref="SelectValueTaskAsync{TOut}"/> applies here unchanged.
+    /// </remarks>
+    public Source<TOut> SelectValueTaskAsyncUnordered<TOut>(
+        ParallelismOptions options,
+        Func<T, CancellationToken, ValueTask<TOut>> selector)
+    {
+        ArgumentNullException.ThrowIfNull(options);
+        ArgumentNullException.ThrowIfNull(selector);
+
+        return new Source<TOut>(LocalStageChain.Append(
+            Stages,
+            LocalStageDescriptor.SelectValueTaskAsyncUnordered(
+                LocalOptionGuard.Parallelism(options, nameof(options)),
+                selector)));
+    }
+
     /// <summary>Extends this source with a reusable flow.</summary>
     /// <typeparam name="TOut">The element type the flow produces.</typeparam>
     /// <param name="flow">The flow to compose, which is not modified.</param>

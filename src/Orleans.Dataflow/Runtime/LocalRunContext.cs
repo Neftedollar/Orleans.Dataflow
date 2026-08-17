@@ -1,9 +1,13 @@
 namespace Orleans.Dataflow.Runtime;
 
 /// <summary>
-/// The two things a source of one run needs to know about that run: when it must abandon its work, and
-/// when it may stop producing.
+/// The three things a source or a terminal of one run needs to know about that run: when it must abandon
+/// its work, when it may stop producing, and where its own waits report that they are waiting.
 /// </summary>
+/// <param name="Pause">
+/// The run's pause gate. A wait that belongs to this runtime reports itself idle for its duration, so that
+/// a pause can take effect while the run is waiting for something that is not coming.
+/// </param>
 /// <param name="RunToken">
 /// The run's own token, cancelled when the run is cancelled and when anything in the run fails. This is
 /// the token an author's callback receives.
@@ -27,8 +31,17 @@ namespace Orleans.Dataflow.Runtime;
 /// nothing else, so shutdown still waits for it, which is the documented slow-source rule and not an
 /// oversight.
 /// </para>
+/// <para>
+/// <paramref name="Pause"/> divides the same two worlds the same way. A wait this runtime owns says so and
+/// is counted as a segment at rest; a wait inside an author's delegate says nothing, so a pause waits for
+/// it exactly as a shutdown does. The rule is one rule stated twice: what the runtime waits for, the
+/// runtime can account for.
+/// </para>
 /// </remarks>
-internal readonly record struct LocalRunContext(CancellationToken RunToken, CancellationToken StopToken)
+internal readonly record struct LocalRunContext(
+    LocalPause Pause,
+    CancellationToken RunToken,
+    CancellationToken StopToken)
 {
     /// <summary>Reports whether a wait released by <see cref="StopToken"/> was a graceful stop.</summary>
     /// <value>

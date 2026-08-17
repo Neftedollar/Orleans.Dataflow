@@ -129,7 +129,9 @@ internal static class LocalSequence
     /// <remarks>
     /// <para>
     /// The wait is a real wait on the run's stop token rather than a loop that keeps looking, so a run
-    /// parked here costs one blocked thread and no processor time at all.
+    /// parked here costs one blocked thread and no processor time at all. It is this runtime's own wait and
+    /// says so to the pause gate, which is what lets a run over a source that produces nothing be paused at
+    /// all rather than waiting for an element that is never coming.
     /// </para>
     /// <para>
     /// Both ways out are the run's, and they mean different things. A shutdown ends this sequence as
@@ -141,7 +143,17 @@ internal static class LocalSequence
     /// </remarks>
     internal static IEnumerable Never(LocalRunContext context)
     {
-        context.StopToken.WaitHandle.WaitOne();
+        context.Pause.Idle();
+
+        try
+        {
+            context.StopToken.WaitHandle.WaitOne();
+        }
+        finally
+        {
+            context.Pause.Busy();
+        }
+
         context.RunToken.ThrowIfCancellationRequested();
 
         yield break;
@@ -278,7 +290,9 @@ internal static class LocalSequence
     /// <remarks>
     /// <para>
     /// Not an iterator, because it catches: a shutdown ends the wait as the channel ending would, and a
-    /// cancellation is raised so the run reports the cancellation it was asked for.
+    /// cancellation is raised so the run reports the cancellation it was asked for. It is one of this
+    /// runtime's own waits and says so to the pause gate, so a pause of a run whose channel has gone quiet
+    /// takes effect here.
     /// </para>
     /// <para>
     /// A channel completed with a failure surfaces that failure here, and it is unwrapped before it travels
@@ -289,6 +303,8 @@ internal static class LocalSequence
     /// </remarks>
     private static bool Ready(LocalChannelSource reader, LocalRunContext context)
     {
+        context.Pause.Idle();
+
         try
         {
             return reader.WaitToRead(context.StopToken);
@@ -302,6 +318,10 @@ internal static class LocalSequence
             ExceptionDispatchInfo.Throw(closed.InnerException);
 
             throw;
+        }
+        finally
+        {
+            context.Pause.Busy();
         }
     }
 

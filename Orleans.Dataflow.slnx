@@ -2,6 +2,7 @@
   <Folder Name="/src/">
     <Project Path="src/Orleans.Dataflow.Abstractions/Orleans.Dataflow.Abstractions.csproj" />
     <Project Path="src/Orleans.Dataflow/Orleans.Dataflow.csproj" />
+    <Project Path="src/Orleans.Dataflow.Testing/Orleans.Dataflow.Testing.csproj" />
   </Folder>
   <Folder Name="/tests/">
     <Project Path="tests/Orleans.Dataflow.Tests/Orleans.Dataflow.Tests.csproj" />

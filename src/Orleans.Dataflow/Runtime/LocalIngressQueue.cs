@@ -51,8 +51,10 @@ internal sealed class LocalIngressQueue
     private readonly Lock _gate = new();
 
     private long _dropped;
+    private long _pulls;
     private int _state;
     private volatile bool _ended;
+    private volatile ILocalQueueObserver? _observer;
 
     /// <summary>The failure a producer ended this queue with, read by the segment that drains it.</summary>
     /// <remarks>
@@ -88,6 +90,27 @@ internal sealed class LocalIngressQueue
     /// <summary>Gets the number of elements this queue's overflow policy has discarded.</summary>
     /// <value>The running count, which stays zero for a queue that never overflows or never drops.</value>
     internal long Dropped => Interlocked.Read(ref _dropped);
+
+    /// <summary>Gets the number of elements the run has asked this queue for.</summary>
+    /// <value>The running count, incremented once for every element the run pulls, whether or not one was there.</value>
+    /// <remarks>
+    /// The demand meter. A pull is one turn of the run's own loop asking for the next element, so this
+    /// counts requests and not deliveries: a run parked on an empty queue has already spent the pull it is
+    /// waiting on. That is precisely what makes the number worth reading — a chain that never exceeds one
+    /// outstanding pull is a chain whose demand is bounded by a credit of one, and any other number is a
+    /// runtime prefetching behind the author's back.
+    /// </remarks>
+    internal long Pulls => Interlocked.Read(ref _pulls);
+
+    /// <summary>Watches what the run does with this queue.</summary>
+    /// <param name="observer">The observer, which the caller keeps.</param>
+    /// <remarks>
+    /// One observer, attached when the plan is compiled and before any segment starts, which is what makes
+    /// the field safe to publish without a lock. It exists because a test probe has to know the moment the
+    /// run takes an element — that moment is the whole of a rendezvous — and nothing about a queue's own
+    /// contract would tell it.
+    /// </remarks>
+    internal void Observe(ILocalQueueObserver observer) => _observer = observer;
 
     /// <summary>Offers one element to the queue.</summary>
     /// <param name="element">The element to enqueue.</param>
@@ -167,6 +190,7 @@ internal sealed class LocalIngressQueue
     {
         _ended = true;
         _ = _channel.Writer.TryComplete();
+        _observer?.Ended();
     }
 
     /// <summary>The sequence the run pulls the offered elements from.</summary>
@@ -182,24 +206,9 @@ internal sealed class LocalIngressQueue
     {
         try
         {
-            while (true)
+            while (Take(context, out object? element))
             {
-                if (_failure is { } pending)
-                {
-                    throw pending;
-                }
-
-                if (_channel.Reader.TryRead(out object? element))
-                {
-                    yield return element;
-
-                    continue;
-                }
-
-                if (!WaitToRead(context))
-                {
-                    break;
-                }
+                yield return element;
             }
 
             if (_failure is { } failure)
@@ -210,6 +219,42 @@ internal sealed class LocalIngressQueue
         finally
         {
             EndRun();
+        }
+    }
+
+    /// <summary>Takes the next element the run asked for, waiting for one if the queue is empty.</summary>
+    /// <param name="context">The tokens of the run.</param>
+    /// <param name="element">The element, when this method returns <see langword="true"/>.</param>
+    /// <returns><see langword="false"/> when the queue has ended and holds nothing more.</returns>
+    /// <remarks>
+    /// Split out of the iterator so that one pull is one call: the loop inside may go round several times
+    /// waiting for an element, and counting each turn would make the demand meter report how often the
+    /// queue was empty rather than how much the run asked for.
+    /// </remarks>
+    private bool Take(LocalRunContext context, out object? element)
+    {
+        Interlocked.Increment(ref _pulls);
+
+        while (true)
+        {
+            if (_failure is { } pending)
+            {
+                throw pending;
+            }
+
+            if (_channel.Reader.TryRead(out element))
+            {
+                _observer?.Taken();
+
+                return true;
+            }
+
+            if (!WaitToRead(context))
+            {
+                element = null;
+
+                return false;
+            }
         }
     }
 
@@ -380,10 +425,14 @@ internal sealed class LocalIngressQueue
     /// <returns><see langword="true"/> when an element may be available.</returns>
     /// <remarks>
     /// A shutdown ends the wait as the queue running out would, because that is what shutdown means: stop
-    /// producing and keep what you have. A cancellation is raised and abandons the run.
+    /// producing and keep what you have. A cancellation is raised and abandons the run. The wait is one of
+    /// this runtime's own, so it says so to the pause gate: a run waiting on an empty queue is a run at
+    /// rest, and a pause takes effect there rather than waiting for a producer that may never offer again.
     /// </remarks>
     private bool WaitToRead(LocalRunContext context)
     {
+        context.Pause.Idle();
+
         try
         {
             return _channel.Reader.WaitToReadAsync(context.StopToken).AsTask().GetAwaiter().GetResult();
@@ -391,6 +440,10 @@ internal sealed class LocalIngressQueue
         catch (OperationCanceledException) when (context.ShuttingDown)
         {
             return false;
+        }
+        finally
+        {
+            context.Pause.Busy();
         }
     }
 }

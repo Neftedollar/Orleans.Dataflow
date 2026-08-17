@@ -46,7 +46,7 @@ Every row starts at **Research** and advances only together with its evidence; I
 | Explicit async boundary | P1 | M2 | Research | Placement/concurrency changes are visible; ordering contract remains explicit. |
 | Credit protocol across Orleans boundaries | P0 | M3 | Research | Grain calls or stream publication are not mistaken for downstream demand. |
 | Partition-aware placement | P1 | M3 | Research | Partition ownership, rebalance, ordering, and failover are specified. |
-| Pause, resume, drain, shutdown, and abort | P1 | M2 | Research | Each control has distinct state transitions and in-flight behavior. |
+| Pause, resume, drain, shutdown, and abort | P1 | M2 | Implemented | Each control has distinct state transitions and in-flight behavior. |
 | Kill switch and external shutdown control | P1 | M2 | Implemented | Single-run control is a RunHandle intrinsic (ADR 0004): shutdown drains, disposal cancels; a switch shared across runs is a separate documented contract. |
 
 ## Lifecycle and failure
@@ -56,7 +56,7 @@ Every row starts at **Research** and advances only together with its evidence; I
 | Completion propagation | P0 | M2 | Implemented | Downstream completion and upstream resource release are deterministic. |
 | Failure propagation | P0 | M2 | Implemented | Downstream receives failure; upstream receives cancellation unless recovery intercepts it. |
 | Downstream cancellation | P0 | M2 | Implemented | Early sinks cancel upstream and release resources. |
-| Cancellation of async work | P0 | M2 | Research | Stage cancellation reaches `Task`, `ValueTask`, and later F# `Async` adapters. |
+| Cancellation of async work | P0 | M2 | Implemented | Stage cancellation reaches `Task`, `ValueTask`, and later F# `Async` adapters. |
 | Supervision: stop | P1 | M5 | Research | The failing stage fails the defined section or graph. |
 | Supervision: resume | P1 | M5 | Research | The failing element is dropped while compatible stage state is retained. |
 | Supervision: restart stage | P1 | M5 | Research | The failing element is dropped and declared local stage state resets. |
@@ -164,9 +164,9 @@ C# names should follow .NET expectations where possible. If the Akka.NET behavio
 | Capability | Tier | Target | Status |
 |---|---:|---:|---|
 | Deterministic graph inspection | P0 | M0 | Research |
-| Demand-aware test source and sink probes | P0 | M2 | Research |
+| Demand-aware test source and sink probes | P0 | M2 | Implemented |
 | Virtual/manual clock for time operators | P1 | M2 | Research |
-| Lifecycle and materialized-value assertions | P0 | M2 | Research |
+| Lifecycle and materialized-value assertions | P0 | M2 | Implemented |
 | Fault injection at source/stage/sink/boundary | P1 | M3-M5 | Research |
 | Multi-silo placement/failover harness | P0 | M3 | Research |
 | OpenTelemetry metrics, traces, and context propagation | P1 | M5 | Research |

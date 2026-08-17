@@ -79,6 +79,36 @@ The run loop is one async flow. All public `RunHandle` members are safe to
 call concurrently; concurrent observers of `Completion` and the same or
 different slots all see one terminal state.
 
+## Checkpoint 5 contract (pause, probes, ValueTask) — as implemented
+
+- **Quiescence** is: every segment has stopped at a point from which it
+  takes no further step until resumed, and no callback is executing. An
+  element already produced and waiting — in a buffer, in a writer's hand at
+  a full boundary, in an async window, at a sink nobody has asked — is
+  *held*, not in flight; the strict "nothing exists between stages" reading
+  would deadlock pause against backpressure (a source parked in a full
+  buffer waits for room only a running downstream segment can make).
+- `PauseAsync` returns at quiescence; `ResumeAsync` returns when no segment
+  is still held — "moving again" is a fact, not a permission. Stopping
+  always wins: a pause never delays cancellation, shutdown, failure, or a
+  natural end, and `IsPaused` (observational, best-effort, deliberately not
+  a state enum — M5 owns that vocabulary) is false for any stopped run. A
+  paused run's control slots keep working per their own policies.
+- **Demand-aware probes** live in the `Orleans.Dataflow.Testing` package
+  over control slots: `TestSource.Probe` (emit-by-emit lockstep;
+  `PullsObserved` is the demand meter) composes the ingress-queue machinery
+  rather than duplicating it; `TestSink.Probe` is a rendezvous — the run
+  delivers nothing without a `ReceiveAsync` — with terminal expectations
+  that return the run's own failure instance. No pending probe wait ever
+  hangs: it faults with `ProbeTerminatedException` naming the outcome. One
+  documented exception: a graceful shutdown with an element at a probe sink
+  and nobody receiving discards that element — the alternative turns
+  `ShutdownAsync` into a hang.
+- **`SelectValueTaskAsync`/`SelectValueTaskAsyncUnordered`** share the Task
+  family's driver through a boundary conversion awaiting each `ValueTask`
+  exactly once (pinned with an `IValueTaskSource` that throws on a second
+  consumption).
+
 ## Not in checkpoint 1
 
 - buffers, overflow policies, and credit above one;

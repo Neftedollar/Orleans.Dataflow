@@ -20,10 +20,18 @@ namespace Orleans.Dataflow.Authoring;
 /// terminals declare a result port on top of that.
 /// </para>
 /// <para>
-/// Four of the shapes are boundaries: <see cref="Buffer"/>, <see cref="SelectAsync"/>,
-/// <see cref="SelectAsyncUnordered"/>, and <see cref="ForEachAsync"/> each cut the chain into segments the
-/// runtime executes as separate loops joined by one bounded channel. Every other shape fuses, which is what
-/// makes fusion the default and a queue something an author asked for.
+/// Six of the shapes are boundaries: <see cref="Buffer"/>, <see cref="SelectAsync"/>,
+/// <see cref="SelectAsyncUnordered"/>, <see cref="SelectValueTaskAsync"/>,
+/// <see cref="SelectValueTaskAsyncUnordered"/>, and <see cref="ForEachAsync"/> each cut the chain into
+/// segments the runtime executes as separate loops joined by one bounded channel. Every other shape fuses,
+/// which is what makes fusion the default and a queue something an author asked for.
+/// </para>
+/// <para>
+/// <see cref="SinkProbe"/> is the one shape no author-facing operator of this package builds: it is the
+/// terminal of the demand-aware probes the testing package exposes. It lives here rather than there because
+/// what it does — hold an element until a receiver asks for it, on the segment's own thread, under this
+/// runtime's own stop and pause discipline — is runtime semantics, and a second implementation of those
+/// beside this one is exactly what a vocabulary exists to prevent.
 /// </para>
 /// <para>
 /// The kind is never serialized. It is recoverable from the node's <see cref="Definition.StageNode.Stage"/>
@@ -145,6 +153,18 @@ internal enum LocalStageKind
     /// </summary>
     SelectAsyncUnordered,
 
+    /// <summary>
+    /// Maps every element through a callback returning a value task and emits the results in input order;
+    /// one input port and one output port.
+    /// </summary>
+    SelectValueTaskAsync,
+
+    /// <summary>
+    /// Maps every element through a callback returning a value task and emits the results in completion
+    /// order; one input port and one output port.
+    /// </summary>
+    SelectValueTaskAsyncUnordered,
+
     /// <summary>Folds every element into a state value; one input port and one result port.</summary>
     Fold,
 
@@ -193,4 +213,10 @@ internal enum LocalStageKind
 
     /// <summary>Writes every element into a channel the author owns; one input port and nothing else.</summary>
     ToChannel,
+
+    /// <summary>
+    /// Hands every element to a receiver that asks for it, one at a time; one input port and one control
+    /// result port.
+    /// </summary>
+    SinkProbe,
 }

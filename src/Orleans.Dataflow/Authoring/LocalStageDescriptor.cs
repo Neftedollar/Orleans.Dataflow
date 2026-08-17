@@ -369,6 +369,31 @@ internal sealed class LocalStageDescriptor : StageOccurrence
     internal static LocalStageDescriptor SelectAsyncUnordered(ParallelismOptions options, object selector) =>
         new(LocalStageKind.SelectAsyncUnordered, selector, seed: null, LocalParallelismParameters.Write(options));
 
+    /// <summary>Creates an order-preserving asynchronous mapping stage over value tasks.</summary>
+    /// <param name="options">The validated concurrency bound.</param>
+    /// <param name="selector">The asynchronous callback, as the authoring value received it.</param>
+    /// <returns>The descriptor.</returns>
+    /// <remarks>
+    /// A stage of its own rather than a flavour of <see cref="SelectAsync"/>, because the shape of the
+    /// callback is not something a document could state: a binding is not durable topology, so two stages
+    /// whose only difference is the type of the thing they await would be one node with two possible
+    /// meanings. The runtime converts the two shapes into one at the callback boundary and drives them with
+    /// one implementation; what is written down is which of them the author wrote.
+    /// </remarks>
+    internal static LocalStageDescriptor SelectValueTaskAsync(ParallelismOptions options, object selector) =>
+        new(LocalStageKind.SelectValueTaskAsync, selector, seed: null, LocalParallelismParameters.Write(options));
+
+    /// <summary>Creates a value-task mapping stage that emits in completion order.</summary>
+    /// <param name="options">The validated concurrency bound.</param>
+    /// <param name="selector">The asynchronous callback, as the authoring value received it.</param>
+    /// <returns>The descriptor.</returns>
+    internal static LocalStageDescriptor SelectValueTaskAsyncUnordered(ParallelismOptions options, object selector) =>
+        new(
+            LocalStageKind.SelectValueTaskAsyncUnordered,
+            selector,
+            seed: null,
+            LocalParallelismParameters.Write(options));
+
     /// <summary>Creates a folding sink.</summary>
     /// <param name="seed">The initial state, which may be <see langword="null"/>.</param>
     /// <param name="folder">The folding delegate, as the authoring value received it.</param>
@@ -457,6 +482,21 @@ internal sealed class LocalStageDescriptor : StageOccurrence
     /// <returns>The descriptor.</returns>
     internal static LocalStageDescriptor ToChannel(object writer) =>
         new(LocalStageKind.ToChannel, writer, seed: null, LocalVocabulary.EmptyParameters);
+
+    /// <summary>Creates a sink that hands every element to a receiver that asks for it.</summary>
+    /// <param name="controlSlot">The validated name the control is declared under.</param>
+    /// <param name="controlType">The closed generic type of the control an author receives.</param>
+    /// <param name="facade">The factory that wraps a run's rendezvous into that typed control.</param>
+    /// <returns>The descriptor.</returns>
+    /// <remarks>
+    /// The control end of a chain rather than its head, and otherwise the very shape a queue source has: a
+    /// per-run object, named on the stage that produces it because a chain has one closing call and it is
+    /// not here, resolved when the run starts because a receiver has to exist while the run is still
+    /// running. It carries no payload at all, because a rendezvous has nothing to configure: its capacity
+    /// is neither one nor a number the author chose, it is the demand itself.
+    /// </remarks>
+    internal static LocalStageDescriptor SinkProbe(ResultSlotId controlSlot, Type controlType, object facade) =>
+        new(LocalStageKind.SinkProbe, facade, seed: null, LocalVocabulary.EmptyParameters, controlSlot, controlType);
 
     /// <summary>Returns a one-line diagnostic summary of this occurrence.</summary>
     /// <returns>The stage reference text, such as <c>local:select@1</c>.</returns>
