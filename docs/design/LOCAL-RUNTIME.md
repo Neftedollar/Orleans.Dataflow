@@ -152,17 +152,28 @@ checkpoint-2 rule; none introduces a boundary.
   semantics; relaxations arrive with the deduplication policies of M4).
 - **Early completion**: `Take` reaching its bound completes the run the way
   a source end does — upstream segments observe downstream completion and
-  stop pulling; the source's enumerator is released. This is the first
-  downstream-driven completion, and it flips the matrix row "Downstream
-  cancellation" only when the release is proven by test.
+  stop pulling; the source's enumerator is released, including a source
+  parked in a full buffer's offer (proven by the deadlock-pattern tests).
+  In-flight async callbacks upstream of the take are drained, not
+  cancelled — cancelling would surface `OperationCanceledException` inside
+  author code to end a successful run; a callback that fails while being
+  drained still faults the run, because failure wins. `Take(0)` resolves at
+  plan time: the source is never enumerated. `TakeThrough` is the inclusive
+  variant of `TakeWhile` over the same predicate polarity
+  (`TakeWhile(v => v < 3)` on 1..5 yields 1,2; `TakeThrough` yields 1,2,3).
 - **Sources**: `Source.Empty<T>()`, `Source.Single(value)`,
   `Source.Repeat(value, count)` (bounded; unbounded repeat arrives only
   together with `Take`-style bounds and is still spelled with an explicit
   count or a `Take`), `Source.Range(start, count)`, `Source.FromTask(task)`
-  (one element or the task's failure), `Source.Failed<T>(exception)`,
-  `Source.Unfold(seed, generator)` (generator returns null/none to
-  complete; bounded by construction only through its own logic — documented
-  as author-bounded).
+  (one element, or the run faults with the task's original exception
+  unwrapped; a task cancelled elsewhere faults the run — the run's own
+  token was never the cause, so reporting cancellation would misattribute
+  it), `Source.Failed<T>(exception)`, and `Source.Unfold(seed, generator)`
+  where the generator is the try-shape delegate
+  `bool UnfoldGenerator<TState, T>(TState state, out T value, out TState next)`
+  — chosen over a nullable step struct because the try-shape infers both
+  type arguments at the call site, names its outputs, and cannot confuse
+  "no more elements" with an element equal to `default(T)`. Author-bounded.
 - **Sinks**: `Sink.ForEach(Action<T>)` (awaited per element, the sequential
   callback boundary), `Sink.ForEachAsync(ParallelismOptions, callback)`
   (bounded-parallel callback with the async-stage semantics),

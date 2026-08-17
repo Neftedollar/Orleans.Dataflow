@@ -100,6 +100,98 @@ internal static class LocalParameterPayload
         return true;
     }
 
+    /// <summary>Reads a member that has to be an integer of at least zero.</summary>
+    /// <param name="payload">The payload object.</param>
+    /// <param name="member">The member name.</param>
+    /// <param name="violations">The report under construction, appended to when the member is wrong.</param>
+    /// <param name="value">
+    /// When this method returns <see langword="true"/>, the value; otherwise zero.
+    /// </param>
+    /// <returns><see langword="true"/> when the member is present and is an integer of at least zero.</returns>
+    /// <remarks>
+    /// The counted stages differ from the bounded ones in exactly this: a buffer of zero elements and an
+    /// asynchronous stage running zero callbacks describe nothing that could run, while taking zero
+    /// elements, skipping zero, and repeating a value zero times all describe something perfectly
+    /// ordinary. Zero is therefore admitted here and refused there.
+    /// </remarks>
+    internal static bool TryReadNonNegativeInteger(
+        JsonElement payload,
+        string member,
+        List<string> violations,
+        out int value)
+    {
+        value = 0;
+
+        if (!TryReadInteger(payload, member, "an integer of zero or more", violations, out int number))
+        {
+            return false;
+        }
+
+        if (number < 0)
+        {
+            violations.Add(string.Create(
+                CultureInfo.InvariantCulture,
+                $"the member '{member}' is {number}, and it is an integer of zero or more"));
+
+            return false;
+        }
+
+        value = number;
+
+        return true;
+    }
+
+    /// <summary>Reads a member that has to be an integer, of any sign.</summary>
+    /// <param name="payload">The payload object.</param>
+    /// <param name="member">The member name.</param>
+    /// <param name="expected">What the member has to be, read after "and it is".</param>
+    /// <param name="violations">The report under construction, appended to when the member is wrong.</param>
+    /// <param name="value">
+    /// When this method returns <see langword="true"/>, the value; otherwise zero.
+    /// </param>
+    /// <returns><see langword="true"/> when the member is present and fits in a 32-bit signed integer.</returns>
+    /// <remarks>
+    /// The one member with no sign restriction is a range's start, which counts down from a negative
+    /// number as legitimately as it counts up from a positive one. The 32-bit bound is not a restriction of
+    /// this reader's own: canonical JSON admits integers up to 64 bits, and an element index this runtime
+    /// cannot hold in an <see cref="int"/> is one it could not enumerate either.
+    /// </remarks>
+    internal static bool TryReadInteger(
+        JsonElement payload,
+        string member,
+        string expected,
+        List<string> violations,
+        out int value)
+    {
+        value = 0;
+
+        if (!payload.TryGetProperty(member, out JsonElement declared))
+        {
+            violations.Add(DescribeMissing(member));
+
+            return false;
+        }
+
+        if (declared.ValueKind is not JsonValueKind.Number)
+        {
+            violations.Add(DescribeWrongKind(member, declared, expected));
+
+            return false;
+        }
+
+        if (!declared.TryGetInt32(out int number))
+        {
+            violations.Add(
+                $"the member '{member}' is {declared.GetRawText()}, and it is {expected} between {int.MinValue.ToString(CultureInfo.InvariantCulture)} and {int.MaxValue.ToString(CultureInfo.InvariantCulture)}");
+
+            return false;
+        }
+
+        value = number;
+
+        return true;
+    }
+
     /// <summary>Reports every member of a payload that the stage does not declare.</summary>
     /// <param name="payload">The payload object.</param>
     /// <param name="declared">The member names the stage declares, in payload order.</param>

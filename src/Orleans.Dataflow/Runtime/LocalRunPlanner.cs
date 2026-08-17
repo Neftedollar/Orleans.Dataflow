@@ -37,10 +37,12 @@ namespace Orleans.Dataflow.Runtime;
 /// <para>
 /// <b>Fusion.</b> The chain is cut into segments at boundaries and nowhere else, so adjacent synchronous
 /// stages end up in one segment and one loop. A <c>buffer</c> declares the channel of the next cut; an
-/// asynchronous stage cuts and heads the segment that follows. A buffer standing immediately before an
-/// asynchronous stage is that stage's own input channel rather than a second one with an empty relay
-/// segment between them — which is what an author who writes <c>Buffer(8).SelectAsync(...)</c> means, and
-/// it keeps the count of channels equal to the count of boundaries the author wrote.
+/// asynchronous stage cuts and heads the segment that follows, whether it maps its elements or is the
+/// callback sink that ends the chain. A buffer standing immediately before an asynchronous stage is that
+/// stage's own input channel rather than a second one with an empty relay segment between them — which is
+/// what an author who writes <c>Buffer(8).SelectAsync(...)</c> means, and it keeps the count of channels
+/// equal to the count of boundaries the author wrote. Every operator this checkpoint adds fuses, so a
+/// chain of them is still one loop holding one element.
 /// </para>
 /// <para>
 /// None of the rejections here is reachable through the authoring API. Its generic signatures make the
@@ -68,8 +70,10 @@ internal static class LocalRunPlanner
         IEnumerable? elements = null;
         LocalAsyncStage? head = null;
         LocalBoundary? pending = null;
-        Func<object?, object?, object?>? folder = null;
+        LocalTerminal? terminal = null;
         object? seed = null;
+        bool produces = false;
+        int completesAtStart = -1;
 
         for (int index = 0; index < order.Count; index++)
         {
@@ -83,13 +87,59 @@ internal static class LocalRunPlanner
                 case LocalStageKind.FromEnumerable when first && !last:
                     elements = LocalDelegateAdapter.Elements(descriptor.Behavior);
                     break;
+                case LocalStageKind.Empty when first && !last:
+                    elements = LocalSequence.Empty();
+                    break;
+                case LocalStageKind.Single when first && !last:
+                    elements = LocalSequence.Single(descriptor.Behavior);
+                    break;
+                case LocalStageKind.Repeat when first && !last:
+                    elements = LocalSequence.Repeat(descriptor.Behavior, Count(declaration));
+                    break;
+                case LocalStageKind.Range when first && !last:
+                    elements = Range(declaration);
+                    break;
+                case LocalStageKind.FromTask when first && !last:
+                    elements = LocalSequence.Deferred(LocalDelegateAdapter.TaskValue(descriptor.Behavior));
+                    break;
+                case LocalStageKind.Failed when first && !last:
+                    elements = LocalSequence.Failed(LocalDelegateAdapter.Failure(descriptor.Behavior));
+                    break;
+                case LocalStageKind.Unfold when first && !last:
+                    elements = LocalSequence.Unfold(
+                        descriptor.Seed,
+                        LocalDelegateAdapter.Generator(descriptor.Behavior));
+                    break;
                 case LocalStageKind.Select when !first && !last:
-                    Settle();
-                    stages.Add(LocalElementStage.Select(LocalDelegateAdapter.Selector(descriptor.Behavior)));
+                    Fuse(LocalElementStage.Select(LocalDelegateAdapter.Selector(descriptor.Behavior)));
                     break;
                 case LocalStageKind.Where when !first && !last:
-                    Settle();
-                    stages.Add(LocalElementStage.Where(LocalDelegateAdapter.Predicate(descriptor.Behavior)));
+                    Fuse(LocalElementStage.Where(Predicate(descriptor)));
+                    break;
+                case LocalStageKind.Scan when !first && !last:
+                    Fuse(LocalElementStage.Scan(
+                        descriptor.Seed,
+                        LocalDelegateAdapter.Folder(descriptor.Behavior, descriptor.Kind)));
+                    break;
+                case LocalStageKind.Take when !first && !last:
+                    Fuse(LocalElementStage.Take(Count(declaration)));
+                    break;
+                case LocalStageKind.Skip when !first && !last:
+                    Fuse(LocalElementStage.Skip(Count(declaration)));
+                    break;
+                case LocalStageKind.TakeWhile when !first && !last:
+                    Fuse(LocalElementStage.TakeWhile(Predicate(descriptor), inclusive: false));
+                    break;
+                case LocalStageKind.TakeThrough when !first && !last:
+                    Fuse(LocalElementStage.TakeWhile(Predicate(descriptor), inclusive: true));
+                    break;
+                case LocalStageKind.SkipWhile when !first && !last:
+                    Fuse(LocalElementStage.SkipWhile(Predicate(descriptor)));
+                    break;
+                case LocalStageKind.Distinct when !first && !last:
+                    Fuse(LocalElementStage.Distinct(
+                        Distinct(declaration),
+                        LocalDelegateAdapter.Comparer(descriptor.Behavior)));
                     break;
                 case LocalStageKind.Buffer when !first && !last:
                     Settle();
@@ -101,11 +151,33 @@ internal static class LocalRunPlanner
                     break;
                 case LocalStageKind.Fold when last:
                     Settle();
-                    folder = LocalDelegateAdapter.Folder(descriptor.Behavior);
+                    terminal = LocalTerminal.Folding(
+                        LocalDelegateAdapter.Folder(descriptor.Behavior, descriptor.Kind));
                     seed = descriptor.Seed;
+                    produces = true;
                     break;
                 case LocalStageKind.Ignore when last:
                     Settle();
+                    break;
+                case LocalStageKind.ForEach when last:
+                    Settle();
+                    terminal = LocalTerminal.Calling(LocalDelegateAdapter.Action(descriptor.Behavior));
+                    break;
+                case LocalStageKind.ForEachAsync when last && !first:
+                    Cut(pending ?? LocalBoundary.Handoff);
+                    head = Asynchronous(declaration, descriptor);
+                    break;
+                case LocalStageKind.First or LocalStageKind.FirstOrDefault when last:
+                    Settle();
+                    terminal = LocalTerminal.FirstElement(descriptor.Kind is LocalStageKind.First);
+                    seed = descriptor.Seed;
+                    produces = true;
+                    break;
+                case LocalStageKind.Count when last:
+                    Settle();
+                    terminal = LocalTerminal.Counting();
+                    seed = descriptor.Seed;
+                    produces = true;
                     break;
                 default:
                     throw Foreign(
@@ -113,7 +185,7 @@ internal static class LocalRunPlanner
             }
         }
 
-        segments.Add(new LocalSegment(elements, head, [.. stages], folder));
+        segments.Add(new LocalSegment(elements, head, [.. stages], terminal));
 
         if (segments[0].Elements is null)
         {
@@ -124,12 +196,27 @@ internal static class LocalRunPlanner
             segments,
             boundaries,
             seed,
-            Slot(graph.Document, order[^1], folder is not null));
+            Slot(graph.Document, order[^1], produces),
+            completesAtStart);
+
+        // Adds one synchronous stage to the segment under construction, opening the segment a pending
+        // buffer declared if this is the first thing to stand on its far side, and remembering a stage
+        // whose stream is over before the run begins.
+        void Fuse(LocalElementStage stage)
+        {
+            Settle();
+            stages.Add(stage);
+
+            if (stage.CompletesBeforeAnyElement)
+            {
+                completesAtStart = Math.Max(completesAtStart, segments.Count);
+            }
+        }
 
         // Closes the segment under construction at a boundary and starts the next one.
         void Cut(LocalBoundary boundary)
         {
-            segments.Add(new LocalSegment(elements, head, [.. stages], folder: null));
+            segments.Add(new LocalSegment(elements, head, [.. stages], terminal: null));
             boundaries.Add(boundary);
             pending = null;
             elements = null;
@@ -203,6 +290,53 @@ internal static class LocalRunPlanner
             : throw Foreign(
                 $"the buffer '{node.Id}' carries parameters this runtime cannot read: {string.Join("; ", violations)}");
 
+    /// <summary>Reads a counted node's payload as the number of elements it declares.</summary>
+    /// <param name="node">The node as the document declares it.</param>
+    /// <returns>The count.</returns>
+    /// <exception cref="InvalidOperationException">The payload is not a count payload.</exception>
+    /// <remarks>
+    /// Unreachable for a document validated against the local catalog, whose counted stages run the very
+    /// same reader as their parameter check. It is here because this type is also handed documents that
+    /// were never validated, and a count it could not read would otherwise become a bound of some silently
+    /// chosen size.
+    /// </remarks>
+    private static int Count(StageNode node) =>
+        LocalCountParameters.TryRead(node.Parameters, out int count, out IReadOnlyList<string> violations)
+            ? count
+            : throw Foreign(
+                $"the node '{node.Id}' carries parameters this runtime cannot read: {string.Join("; ", violations)}");
+
+    /// <summary>Reads a range node's payload as the sequence it declares.</summary>
+    /// <param name="node">The node as the document declares it.</param>
+    /// <returns>The sequence of integers.</returns>
+    /// <exception cref="InvalidOperationException">The payload is not a range payload.</exception>
+    private static IEnumerable Range(StageNode node) =>
+        LocalRangeParameters.TryRead(node.Parameters, out int start, out int count, out IReadOnlyList<string> violations)
+            ? LocalSequence.Range(start, count)
+            : throw Foreign(
+                $"the range '{node.Id}' carries parameters this runtime cannot read: {string.Join("; ", violations)}");
+
+    /// <summary>Reads a distinct node's payload as the key bound it declares.</summary>
+    /// <param name="node">The node as the document declares it.</param>
+    /// <returns>The greatest number of keys the stage may remember.</returns>
+    /// <exception cref="InvalidOperationException">The payload is not a distinct payload.</exception>
+    private static int Distinct(StageNode node) =>
+        LocalDistinctParameters.TryRead(node.Parameters, out DistinctOptions? options, out IReadOnlyList<string> violations)
+            ? options!.MaxTrackedKeys
+            : throw Foreign(
+                $"the distinct stage '{node.Id}' carries parameters this runtime cannot read: {string.Join("; ", violations)}");
+
+    /// <summary>Reads a node's binding as the predicate its shape requires.</summary>
+    /// <param name="descriptor">The occurrence, which carries the kind and the bound delegate.</param>
+    /// <returns>The wrapped predicate.</returns>
+    /// <exception cref="InvalidOperationException">The binding is not a predicate.</exception>
+    /// <remarks>
+    /// Four shapes test elements with a predicate and are told apart by their stage reference alone, so the
+    /// kind travels into the diagnostic and the wrapping is one call.
+    /// </remarks>
+    private static Func<object?, bool> Predicate(LocalStageDescriptor descriptor) =>
+        LocalDelegateAdapter.Predicate(descriptor.Behavior, descriptor.Kind);
+
     /// <summary>Reads an asynchronous node's payload and binding as the stage that heads a segment.</summary>
     /// <param name="node">The node as the document declares it.</param>
     /// <param name="descriptor">The occurrence, which carries the kind and the bound callback.</param>
@@ -227,7 +361,9 @@ internal static class LocalRunPlanner
         }
 
         return new LocalAsyncStage(
-            LocalDelegateAdapter.AsyncSelector(descriptor.Behavior, descriptor.Kind),
+            descriptor.Kind is LocalStageKind.ForEachAsync
+                ? LocalDelegateAdapter.AsyncCallback(descriptor.Behavior)
+                : LocalDelegateAdapter.AsyncSelector(descriptor.Behavior, descriptor.Kind),
             options!.MaxConcurrency,
             descriptor.Kind is LocalStageKind.SelectAsync);
     }

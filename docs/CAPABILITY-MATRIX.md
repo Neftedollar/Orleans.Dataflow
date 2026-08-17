@@ -55,7 +55,7 @@ Every row starts at **Research** and advances only together with its evidence; I
 |---|---:|---:|---|---|
 | Completion propagation | P0 | M2 | Implemented | Downstream completion and upstream resource release are deterministic. |
 | Failure propagation | P0 | M2 | Implemented | Downstream receives failure; upstream receives cancellation unless recovery intercepts it. |
-| Downstream cancellation | P0 | M2 | Research | Early sinks cancel upstream and release resources. |
+| Downstream cancellation | P0 | M2 | Implemented | Early sinks cancel upstream and release resources. |
 | Cancellation of async work | P0 | M2 | Research | Stage cancellation reaches `Task`, `ValueTask`, and later F# `Async` adapters. |
 | Supervision: stop | P1 | M5 | Research | The failing stage fails the defined section or graph. |
 | Supervision: resume | P1 | M5 | Research | The failing element is dropped while compatible stage state is retained. |
@@ -73,7 +73,7 @@ Every row starts at **Research** and advances only together with its evidence; I
 | Async mapping | ordered parallel map, unordered parallel map, sequential async map | P0 | M2 | Implemented |
 | Stateful mapping | stateful map-concat, scan, async scan | P1 | M2 | Research |
 | Reduction | fold/aggregate, async fold, reduce | P1 | M2 | Research |
-| Slicing | skip/drop, take, skip-while, take-while, take-through | P1 | M2 | Research |
+| Slicing | skip/drop, take, skip-while, take-while, take-through | P1 | M2 | Implemented |
 | Batching | grouped, sliding, grouped-within, weighted grouped-within | P1 | M4 | Research |
 | Timing | delay, initial delay, take-within, skip-within, timeout, valve | P1 | M4 | Research |
 | Rate | throttle by element/cost, shaping versus enforcing mode | P1 | M4 | Research |
@@ -124,7 +124,7 @@ C# names should follow .NET expectations where possible. If the Akka.NET behavio
 | First/last/optional first/last | P0 | M2 | Research | Early cancellation and empty behavior are explicit. |
 | Collect to bounded result | P1 | M2 | Research | Maximum element/byte bound is required. |
 | Fold/reduce/sum | P1 | M2 | Research | Final result and overflow behavior are specified. |
-| Sequential and bounded-parallel callback | P0 | M2 | Research | Ordering and exception behavior are explicit. |
+| Sequential and bounded-parallel callback | P0 | M2 | Implemented | Ordering and exception behavior are explicit. |
 | Bounded channel/queue output | P1 | M2 | Research | Write acceptance and downstream consumption are distinct. |
 
 ## Orleans-native capabilities

@@ -95,4 +95,87 @@ public static class Sink
 
         return new SinkWithResult<T, TState>(LocalStageChain.Of(LocalStageDescriptor.Fold(seed, folder)));
     }
+
+    /// <summary>Creates a sink that hands every element to a callback, one at a time and in order.</summary>
+    /// <typeparam name="T">The element type to consume.</typeparam>
+    /// <param name="callback">The action applied to every element.</param>
+    /// <returns>The sink.</returns>
+    /// <exception cref="ArgumentNullException"><paramref name="callback"/> is <see langword="null"/>.</exception>
+    /// <remarks>
+    /// The callback is finished with one element before the next is pulled, so a slow callback is
+    /// backpressure and not a queue. It runs on the run's own thread, like every other synchronous stage,
+    /// and an exception it throws faults the run with that very instance.
+    /// </remarks>
+    public static Sink<T> ForEach<T>(Action<T> callback)
+    {
+        ArgumentNullException.ThrowIfNull(callback);
+
+        return new Sink<T>(LocalStageChain.Of(LocalStageDescriptor.ForEach(callback)));
+    }
+
+    /// <summary>Creates a sink that hands every element to an asynchronous callback.</summary>
+    /// <typeparam name="T">The element type to consume.</typeparam>
+    /// <param name="options">The greatest number of callbacks in flight at one time.</param>
+    /// <param name="callback">The callback applied to every element.</param>
+    /// <returns>The sink.</returns>
+    /// <exception cref="ArgumentNullException">
+    /// <paramref name="options"/> or <paramref name="callback"/> is <see langword="null"/>.
+    /// </exception>
+    /// <exception cref="ArgumentOutOfRangeException">
+    /// <see cref="ParallelismOptions.MaxConcurrency"/> is below one.
+    /// </exception>
+    /// <remarks>
+    /// The same bounds as the asynchronous mapping stages, and the same token: the callback receives the
+    /// run's own, which is cancelled when the run is cancelled and when anything in the run fails, and a
+    /// failing callback faults the run and cancels the ones beside it. Nothing is emitted, so there is no
+    /// order to preserve and a slot is freed the moment a callback finishes; the run completes only once
+    /// every callback it started has.
+    /// </remarks>
+    public static Sink<T> ForEachAsync<T>(
+        ParallelismOptions options,
+        Func<T, CancellationToken, Task> callback)
+    {
+        ArgumentNullException.ThrowIfNull(options);
+        ArgumentNullException.ThrowIfNull(callback);
+
+        return new Sink<T>(LocalStageChain.Of(
+            LocalStageDescriptor.ForEachAsync(LocalOptionGuard.Parallelism(options, nameof(options)), callback)));
+    }
+
+    /// <summary>Creates a sink that exposes the first element and completes the run there.</summary>
+    /// <typeparam name="T">The element type to consume.</typeparam>
+    /// <returns>The result-bearing sink.</returns>
+    /// <remarks>
+    /// The first element completes the run the way <c>Take(1)</c> does: everything upstream stops and is
+    /// released, and the result resolves with that element. A run whose stream ends without one faults with
+    /// an <see cref="InvalidOperationException"/>, matching what the base class library does for the same
+    /// question; <see cref="FirstOrDefault{T}"/> is the variant that answers with the element type's
+    /// default value instead of failing.
+    /// </remarks>
+    public static SinkWithResult<T, T> First<T>() =>
+        new(LocalStageChain.Of(LocalStageDescriptor.First()));
+
+    /// <summary>Creates a sink that exposes the first element, or the default value when there is none.</summary>
+    /// <typeparam name="T">The element type to consume.</typeparam>
+    /// <returns>The result-bearing sink.</returns>
+    /// <remarks>
+    /// The honest variant of <see cref="First{T}"/>: it completes the run at the first element in exactly
+    /// the same way, and resolves <c>default(T)</c> — <see langword="null"/> for a reference type, the zero
+    /// value for a value type — when the stream ended without one. An author who cannot tell that answer
+    /// apart from a first element that happens to be the default value wants <see cref="First{T}"/>, whose
+    /// failure says which case it was.
+    /// </remarks>
+    public static SinkWithResult<T, T?> FirstOrDefault<T>() =>
+        new(LocalStageChain.Of(LocalStageDescriptor.FirstOrDefault(default(T))));
+
+    /// <summary>Creates a sink that counts the elements and exposes the count.</summary>
+    /// <typeparam name="T">The element type to consume.</typeparam>
+    /// <returns>The result-bearing sink.</returns>
+    /// <remarks>
+    /// Counted in 64 bits, because a run has no length limit of its own, and starting from zero in every
+    /// run. The count is the number of elements that reached this sink, which is what the operators
+    /// upstream of it left.
+    /// </remarks>
+    public static SinkWithResult<T, long> Count<T>() =>
+        new(LocalStageChain.Of(LocalStageDescriptor.Count()));
 }

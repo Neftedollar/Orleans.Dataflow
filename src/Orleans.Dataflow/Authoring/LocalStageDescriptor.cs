@@ -31,18 +31,19 @@ namespace Orleans.Dataflow.Authoring;
 /// </para>
 /// <para>
 /// <see cref="Parameters"/> is the other half of the split and goes the other way. A buffer's capacity and
-/// policy, and an asynchronous stage's concurrency bound, are configuration rather than behavior: they are
-/// numbers and names a document can state, they change what a graph observably does, and they therefore
-/// belong in the payload and in the fingerprint. Every other shape carries the empty object, because a
-/// delegate is all it has and a delegate is never durable topology.
+/// policy, an asynchronous stage's concurrency bound, a count of elements, a range's bounds, and a
+/// deduplication key bound are configuration rather than behavior: they are numbers and names a document
+/// can state, they change what a graph observably does, and they therefore belong in the payload and in the
+/// fingerprint. Every other shape carries the empty object, because a delegate is all it has and a delegate
+/// is never durable topology.
 /// </para>
 /// </remarks>
 internal sealed class LocalStageDescriptor : StageOccurrence
 {
     /// <summary>Initializes a new instance of the <see cref="LocalStageDescriptor"/> class.</summary>
     /// <param name="kind">The stage shape.</param>
-    /// <param name="behavior">The bound delegate or sequence, or <see langword="null"/> when the shape has none.</param>
-    /// <param name="seed">The fold seed, which is meaningful only for <see cref="LocalStageKind.Fold"/>.</param>
+    /// <param name="behavior">The bound delegate, sequence, or value, or <see langword="null"/> when the shape has none.</param>
+    /// <param name="seed">The initial state, which is meaningful only for the shapes that carry one.</param>
     /// <param name="parameters">The parameter payload the node carries.</param>
     private LocalStageDescriptor(
         LocalStageKind kind,
@@ -60,26 +61,32 @@ internal sealed class LocalStageDescriptor : StageOccurrence
     internal LocalStageKind Kind { get; }
 
     /// <summary>
-    /// Gets the bound behavior: the sequence for a source, the selector, the predicate, or the folder.
+    /// Gets the bound behavior: the sequence, task, exception, or value a source carries, or the selector,
+    /// the predicate, the folder, the generator, the comparer, or the callback of everything else.
     /// </summary>
     /// <value>
-    /// <see langword="null"/> only for <see cref="LocalStageKind.Ignore"/>, which has nothing to do to an
-    /// element, and <see cref="LocalStageKind.Buffer"/>, whose whole behavior is stated by its parameters.
+    /// <see langword="null"/> for the shapes whose whole behavior is stated by their parameters or by their
+    /// stage reference — <see cref="LocalStageKind.Buffer"/>, <see cref="LocalStageKind.Empty"/>,
+    /// <see cref="LocalStageKind.Range"/>, <see cref="LocalStageKind.Ignore"/>,
+    /// <see cref="LocalStageKind.First"/>, <see cref="LocalStageKind.FirstOrDefault"/>, and
+    /// <see cref="LocalStageKind.Count"/> — and legitimately <see langword="null"/> for a source bound to a
+    /// null element. <see cref="Kind"/> and not this value decides what a binding has to be.
     /// </value>
     internal object? Behavior { get; }
 
-    /// <summary>Gets the initial state of a fold.</summary>
+    /// <summary>Gets the initial state of a stage that carries one.</summary>
     /// <value>
-    /// The seed for <see cref="LocalStageKind.Fold"/>, which may itself legitimately be
-    /// <see langword="null"/> when the state type is a nullable one; <see langword="null"/> for every other
-    /// shape. <see cref="Kind"/> and not this value decides whether a seed exists.
+    /// The seed of a fold, a scan, or an unfold, the count a counting sink starts from, and the default
+    /// value the honest first-element sink resolves when it saw nothing; any of them may itself
+    /// legitimately be <see langword="null"/> when the state type is a nullable one.
+    /// <see cref="Kind"/> and not this value decides whether a seed exists.
     /// </value>
     internal object? Seed { get; }
 
     /// <inheritdoc/>
     /// <value>
-    /// The buffer's capacity and policy, the asynchronous stage's concurrency bound, or the empty object
-    /// for every shape whose behavior is only a delegate.
+    /// The numbers the shape declares, or the empty object for every shape whose behavior is only a
+    /// delegate.
     /// </value>
     internal override CanonicalJsonValue Parameters { get; }
 
@@ -98,25 +105,25 @@ internal sealed class LocalStageDescriptor : StageOccurrence
 
     /// <inheritdoc/>
     /// <value>
-    /// The one local input port name for every shape that consumes elements; <see langword="null"/> for
-    /// the source, which consumes none.
+    /// The one local input port name for every shape that consumes elements; <see langword="null"/> for a
+    /// source, which consumes none.
     /// </value>
     internal override PortId? InputPort =>
-        Kind is LocalStageKind.FromEnumerable ? null : LocalVocabulary.InputPort;
+        LocalVocabulary.ConsumesElements(Kind) ? LocalVocabulary.InputPort : null;
 
     /// <inheritdoc/>
     /// <value>
-    /// The one local output port name for every shape that produces elements; <see langword="null"/> for
-    /// the two terminating shapes.
+    /// The one local output port name for every shape that produces elements; <see langword="null"/> for a
+    /// terminal, which produces none.
     /// </value>
     internal override PortId? OutputPort =>
-        Kind is LocalStageKind.Fold or LocalStageKind.Ignore ? null : LocalVocabulary.OutputPort;
+        LocalVocabulary.ProducesElements(Kind) ? LocalVocabulary.OutputPort : null;
 
     /// <inheritdoc/>
-    /// <value>The fold's result port; <see langword="null"/> for every other shape.</value>
+    /// <value>The result port of a result-bearing sink; <see langword="null"/> for every other shape.</value>
     internal override ResultPortSpecification? ResultPort =>
-        Kind is LocalStageKind.Fold
-            ? ResultPortSpecification.Create(LocalVocabulary.ResultPort, LocalVocabulary.FoldResultContract)
+        LocalVocabulary.ResultContractOf(Kind) is { } contract
+            ? ResultPortSpecification.Create(LocalVocabulary.ResultPort, contract)
             : null;
 
     /// <inheritdoc/>
@@ -135,6 +142,59 @@ internal sealed class LocalStageDescriptor : StageOccurrence
     internal static LocalStageDescriptor FromEnumerable(object elements) =>
         new(LocalStageKind.FromEnumerable, elements, seed: null, LocalVocabulary.EmptyParameters);
 
+    /// <summary>Creates a source that emits nothing.</summary>
+    /// <returns>The descriptor.</returns>
+    internal static LocalStageDescriptor Empty() =>
+        new(LocalStageKind.Empty, behavior: null, seed: null, LocalVocabulary.EmptyParameters);
+
+    /// <summary>Creates a source over one element.</summary>
+    /// <param name="value">The element, which may legitimately be <see langword="null"/>.</param>
+    /// <returns>The descriptor.</returns>
+    internal static LocalStageDescriptor Single(object? value) =>
+        new(LocalStageKind.Single, value, seed: null, LocalVocabulary.EmptyParameters);
+
+    /// <summary>Creates a source that emits one element a declared number of times.</summary>
+    /// <param name="value">The element, which may legitimately be <see langword="null"/>.</param>
+    /// <param name="count">The validated number of times to emit it.</param>
+    /// <returns>The descriptor.</returns>
+    /// <remarks>
+    /// The count is payload and the element is binding, which is the split everywhere else too: how many
+    /// times is a number a document can state, and what is repeated is a value of an element type the
+    /// document knows nothing about.
+    /// </remarks>
+    internal static LocalStageDescriptor Repeat(object? value, int count) =>
+        new(LocalStageKind.Repeat, value, seed: null, LocalCountParameters.Write(count));
+
+    /// <summary>Creates a source over a run of consecutive integers.</summary>
+    /// <param name="start">The validated first element.</param>
+    /// <param name="count">The validated number of elements.</param>
+    /// <returns>The descriptor.</returns>
+    /// <remarks>
+    /// The second shape with no delegate at all, after the buffer: its elements are integers, and a
+    /// document can state exactly which ones.
+    /// </remarks>
+    internal static LocalStageDescriptor Range(int start, int count) =>
+        new(LocalStageKind.Range, behavior: null, seed: null, LocalRangeParameters.Write(start, count));
+
+    /// <summary>Creates a source over the value of one task.</summary>
+    /// <param name="task">The task, as the authoring value received it.</param>
+    /// <returns>The descriptor.</returns>
+    internal static LocalStageDescriptor FromTask(object task) =>
+        new(LocalStageKind.FromTask, task, seed: null, LocalVocabulary.EmptyParameters);
+
+    /// <summary>Creates a source that fails the run.</summary>
+    /// <param name="exception">The exception the run faults with.</param>
+    /// <returns>The descriptor.</returns>
+    internal static LocalStageDescriptor Failed(Exception exception) =>
+        new(LocalStageKind.Failed, exception, seed: null, LocalVocabulary.EmptyParameters);
+
+    /// <summary>Creates a source driven by a generator over its own state.</summary>
+    /// <param name="seed">The initial state, which may legitimately be <see langword="null"/>.</param>
+    /// <param name="generator">The generator delegate, as the authoring value received it.</param>
+    /// <returns>The descriptor.</returns>
+    internal static LocalStageDescriptor Unfold(object? seed, object generator) =>
+        new(LocalStageKind.Unfold, generator, seed, LocalVocabulary.EmptyParameters);
+
     /// <summary>Creates a mapping stage.</summary>
     /// <param name="selector">The mapping delegate, as the authoring value received it.</param>
     /// <returns>The descriptor.</returns>
@@ -147,12 +207,62 @@ internal sealed class LocalStageDescriptor : StageOccurrence
     internal static LocalStageDescriptor Where(object predicate) =>
         new(LocalStageKind.Where, predicate, seed: null, LocalVocabulary.EmptyParameters);
 
+    /// <summary>Creates a running fold that emits its intermediate states.</summary>
+    /// <param name="seed">The initial state, which may be <see langword="null"/>.</param>
+    /// <param name="folder">The folding delegate, as the authoring value received it.</param>
+    /// <returns>The descriptor.</returns>
+    internal static LocalStageDescriptor Scan(object? seed, object folder) =>
+        new(LocalStageKind.Scan, folder, seed, LocalVocabulary.EmptyParameters);
+
+    /// <summary>Creates a stage that passes a declared number of elements.</summary>
+    /// <param name="count">The validated number of elements to pass.</param>
+    /// <returns>The descriptor.</returns>
+    internal static LocalStageDescriptor Take(int count) =>
+        new(LocalStageKind.Take, behavior: null, seed: null, LocalCountParameters.Write(count));
+
+    /// <summary>Creates a stage that drops a declared number of elements.</summary>
+    /// <param name="count">The validated number of elements to drop.</param>
+    /// <returns>The descriptor.</returns>
+    internal static LocalStageDescriptor Skip(int count) =>
+        new(LocalStageKind.Skip, behavior: null, seed: null, LocalCountParameters.Write(count));
+
+    /// <summary>Creates a stage that passes elements while a predicate holds.</summary>
+    /// <param name="predicate">The predicate delegate, as the authoring value received it.</param>
+    /// <returns>The descriptor.</returns>
+    internal static LocalStageDescriptor TakeWhile(object predicate) =>
+        new(LocalStageKind.TakeWhile, predicate, seed: null, LocalVocabulary.EmptyParameters);
+
+    /// <summary>Creates a stage that passes elements up to and including the one a predicate accepts.</summary>
+    /// <param name="predicate">The predicate delegate, as the authoring value received it.</param>
+    /// <returns>The descriptor.</returns>
+    internal static LocalStageDescriptor TakeThrough(object predicate) =>
+        new(LocalStageKind.TakeThrough, predicate, seed: null, LocalVocabulary.EmptyParameters);
+
+    /// <summary>Creates a stage that drops elements while a predicate holds.</summary>
+    /// <param name="predicate">The predicate delegate, as the authoring value received it.</param>
+    /// <returns>The descriptor.</returns>
+    internal static LocalStageDescriptor SkipWhile(object predicate) =>
+        new(LocalStageKind.SkipWhile, predicate, seed: null, LocalVocabulary.EmptyParameters);
+
+    /// <summary>Creates a stage that drops repeated elements.</summary>
+    /// <param name="options">The validated key bound.</param>
+    /// <param name="comparer">
+    /// The element type's default equality, which is an <see cref="System.Collections.IEqualityComparer"/>.
+    /// </param>
+    /// <returns>The descriptor.</returns>
+    /// <remarks>
+    /// The comparer is the binding, because equality belongs to an element type the document cannot name;
+    /// the bound is the payload, because it is a number that changes what the graph does.
+    /// </remarks>
+    internal static LocalStageDescriptor Distinct(DistinctOptions options, object comparer) =>
+        new(LocalStageKind.Distinct, comparer, seed: null, LocalDistinctParameters.Write(options));
+
     /// <summary>Creates a bounded buffer.</summary>
     /// <param name="options">The validated capacity and overflow policy.</param>
     /// <returns>The descriptor.</returns>
     /// <remarks>
-    /// A buffer has no delegate at all: the whole of it is in the payload, which is why it is the one shape
-    /// whose behavior a document states completely.
+    /// A buffer has no delegate at all: the whole of it is in the payload, which is why it was the first
+    /// shape whose behavior a document states completely.
     /// </remarks>
     internal static LocalStageDescriptor Buffer(BufferOptions options) =>
         new(LocalStageKind.Buffer, behavior: null, seed: null, LocalBufferParameters.Write(options));
@@ -186,6 +296,46 @@ internal sealed class LocalStageDescriptor : StageOccurrence
     /// </remarks>
     internal static LocalStageDescriptor Ignore() =>
         new(LocalStageKind.Ignore, behavior: null, seed: null, LocalVocabulary.EmptyParameters);
+
+    /// <summary>Creates a sink that hands every element to a synchronous callback.</summary>
+    /// <param name="callback">The callback delegate, as the authoring value received it.</param>
+    /// <returns>The descriptor.</returns>
+    internal static LocalStageDescriptor ForEach(object callback) =>
+        new(LocalStageKind.ForEach, callback, seed: null, LocalVocabulary.EmptyParameters);
+
+    /// <summary>Creates a sink that hands every element to an asynchronous callback.</summary>
+    /// <param name="options">The validated concurrency bound.</param>
+    /// <param name="callback">The asynchronous callback, as the authoring value received it.</param>
+    /// <returns>The descriptor.</returns>
+    internal static LocalStageDescriptor ForEachAsync(ParallelismOptions options, object callback) =>
+        new(LocalStageKind.ForEachAsync, callback, seed: null, LocalParallelismParameters.Write(options));
+
+    /// <summary>Creates a sink that takes the first element and requires one.</summary>
+    /// <returns>The descriptor.</returns>
+    internal static LocalStageDescriptor First() =>
+        new(LocalStageKind.First, behavior: null, seed: null, LocalVocabulary.EmptyParameters);
+
+    /// <summary>Creates a sink that takes the first element or the element type's default value.</summary>
+    /// <param name="defaultValue">
+    /// The value to resolve when the sink saw no element, which is <c>default(T)</c> boxed by the caller.
+    /// </param>
+    /// <returns>The descriptor.</returns>
+    /// <remarks>
+    /// The default value is carried rather than computed, because the runtime works in boxed elements and
+    /// has no type argument to take a default of; the authoring surface has one and hands the answer over.
+    /// </remarks>
+    internal static LocalStageDescriptor FirstOrDefault(object? defaultValue) =>
+        new(LocalStageKind.FirstOrDefault, behavior: null, defaultValue, LocalVocabulary.EmptyParameters);
+
+    /// <summary>Creates a counting sink.</summary>
+    /// <returns>The descriptor.</returns>
+    /// <remarks>
+    /// The seed is the zero the count starts from, held here rather than in the runtime for the same reason
+    /// a fold's is: a run's state starts from the value the authoring surface fixed and never from where
+    /// another run left off.
+    /// </remarks>
+    internal static LocalStageDescriptor Count() =>
+        new(LocalStageKind.Count, behavior: null, 0L, LocalVocabulary.EmptyParameters);
 
     /// <summary>Returns a one-line diagnostic summary of this occurrence.</summary>
     /// <returns>The stage reference text, such as <c>local:select@1</c>.</returns>

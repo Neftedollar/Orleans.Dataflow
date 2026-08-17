@@ -7,8 +7,8 @@ using Orleans.Dataflow.Identity;
 namespace Orleans.Dataflow.Runtime;
 
 /// <summary>
-/// One materialized run of one graph: the segments that move elements, the state the fold accumulates, and
-/// the terminal outcome every observer of the run shares.
+/// One materialized run of one graph: the segments that move elements, the state the terminal accumulates,
+/// and the terminal outcome every observer of the run shares.
 /// </summary>
 /// <remarks>
 /// <para>
@@ -24,7 +24,7 @@ namespace Orleans.Dataflow.Runtime;
 /// an <see cref="IEnumerable"/> pull is a synchronous call: both may block for as long as the author's
 /// code blocks, and neither may be allowed to occupy a thread-pool thread for that long. An asynchronous
 /// segment gets a dedicated thread on the same argument rather than an exception to it: its callbacks are
-/// awaited, but the fused stages it emits into and the fold it may terminate are still synchronous author
+/// awaited, but the fused stages it emits into and the terminal it may reach are still synchronous author
 /// code on that thread. Waiting is therefore done by blocking the segment's own thread, which is what the
 /// thread is for. No lock is taken on the element path. Every member of this type is safe to call from any
 /// thread at any time, including concurrently with the segments and with itself.
@@ -38,6 +38,14 @@ namespace Orleans.Dataflow.Runtime;
 /// that awaits completion and then reads the result never waits twice and never observes a leaked
 /// enumerator.
 /// </para>
+/// <para>
+/// <b>Downstream completion.</b> A stage that has taken everything it was asked for ends the stream where
+/// it stands, and that is a success rather than a stop: the segments at and above it stop pulling and
+/// release what they hold, the segments below it drain what already passed, and the run reports what it
+/// accumulated. It reaches an upstream segment two ways at once, because one of them alone would leave a
+/// deadlock: a flag it examines between elements, and the closing of the channels it writes into, which is
+/// what releases a source parked in a full buffer's offer.
+/// </para>
 /// </remarks>
 internal sealed class LocalRun
 {
@@ -50,7 +58,9 @@ internal sealed class LocalRun
     private readonly Channel<object?>[] _channels;
     private int _running;
     private long _dropped;
+    private int _completedAt = -1;
     private object? _state;
+    private bool _observed;
     private Exception? _failure;
     private volatile bool _canceled;
     private bool _cancellationReleased;
@@ -107,7 +117,9 @@ internal sealed class LocalRun
     /// A drop is never silent, and this counter is what makes that true today: an overflow policy that
     /// discards elements says how many it discarded. It is deliberately one number for the whole run
     /// rather than one per boundary, because a per-boundary breakdown is a monitor's shape and monitors are
-    /// a later checkpoint; the contract this pins is that dropping is observable at all.
+    /// a later checkpoint; the contract this pins is that dropping is observable at all. Elements abandoned
+    /// upstream of a completed stream are not drops and are not counted: nothing discarded them, the stream
+    /// they were travelling to had ended.
     /// </remarks>
     internal long DroppedElements => Interlocked.Read(ref _dropped);
 
@@ -205,13 +217,25 @@ internal sealed class LocalRun
 
     /// <summary>Starts every segment of the plan, each on a thread of its own.</summary>
     /// <remarks>
+    /// <para>
     /// A dedicated thread rather than a pooled one, because a segment calls synchronous author delegates
     /// and, at the head of the plan, a synchronous enumerator, either of which may block for an unbounded
     /// time. Occupying a pool thread for that long starves every other work item in the process, including
     /// the caller waiting for this run.
+    /// </para>
+    /// <para>
+    /// A plan whose stream is over before it began — a <c>Take</c> of no elements — is completed before
+    /// anything starts, so its segments observe the end of the stream at their first look and its source is
+    /// never touched at all.
+    /// </para>
     /// </remarks>
     private void Launch()
     {
+        if (_plan.CompletesAtStart >= 0)
+        {
+            Complete(_plan.CompletesAtStart);
+        }
+
         for (int index = 0; index < _plan.Segments.Count; index++)
         {
             int segment = index;
@@ -278,10 +302,10 @@ internal sealed class LocalRun
     /// <returns><see langword="true"/> when the loop stopped because the run was canceled.</returns>
     /// <remarks>
     /// Cancellation is examined once per element, before the pull, so an element already in flight is
-    /// finished rather than abandoned halfway through a chain; the same point observes a shutdown request,
-    /// and cancellation is examined first, so a run that is asked to do both ends canceled. The enumerator
-    /// is obtained at the first pull rather than before the loop, so a run stopped before its first
-    /// element never touches the source at all.
+    /// finished rather than abandoned halfway through a chain; the same point observes a shutdown request
+    /// and the end of a stream something downstream completed, and cancellation is examined first, so a run
+    /// that is asked to do both ends canceled. The enumerator is obtained at the first pull rather than
+    /// before the loop, so a run stopped before its first element never touches the source at all.
     /// </remarks>
     private bool Pull(LocalSegment segment, int index, IEnumerable source, ref IEnumerator? elements)
     {
@@ -292,7 +316,7 @@ internal sealed class LocalRun
                 return true;
             }
 
-            if (_shutdownRequested)
+            if (_shutdownRequested || Stopping(index))
             {
                 return false;
             }
@@ -306,7 +330,10 @@ internal sealed class LocalRun
                 return false;
             }
 
-            Deliver(segment, index, elements.Current);
+            if (!Deliver(segment, index, elements.Current))
+            {
+                return false;
+            }
         }
     }
 
@@ -318,7 +345,8 @@ internal sealed class LocalRun
     /// The channel completing is the drain: a graceful stop reaches this segment as the end of its input,
     /// so everything the boundary was holding is delivered before the segment finishes. Cancellation is a
     /// different question, examined before every element, and it abandons whatever the channel still
-    /// holds.
+    /// holds; so is a stream something downstream of this segment completed, which abandons it too, because
+    /// there is no longer anywhere for it to go.
     /// </remarks>
     private bool Push(LocalSegment segment, int index)
     {
@@ -331,9 +359,17 @@ internal sealed class LocalRun
                 return true;
             }
 
+            if (Stopping(index))
+            {
+                return false;
+            }
+
             if (reader.TryRead(out object? element))
             {
-                Deliver(segment, index, element);
+                if (!Deliver(segment, index, element))
+                {
+                    return false;
+                }
 
                 continue;
             }
@@ -369,6 +405,14 @@ internal sealed class LocalRun
     /// finishing while any are outstanding. When it is interested in neither, its input is exhausted and
     /// its window is empty, which is the only way this segment ends of its own accord.
     /// </para>
+    /// <para>
+    /// A stream completed downstream of this segment stops admission at once and then waits for the
+    /// callbacks already in flight, whose results are discarded. Draining rather than cancelling is the
+    /// same choice shutdown makes, and for the same reason: the run is ending successfully, and cancelling
+    /// an author's callback to end a successful run would report a cancellation nobody asked for. A
+    /// callback that fails while it is being drained still faults the run, because failure wins over
+    /// everything, including over an ending nobody can see yet.
+    /// </para>
     /// </remarks>
     private bool Map(LocalSegment segment, int index, LocalAsyncStage stage)
     {
@@ -383,12 +427,19 @@ internal sealed class LocalRun
         Task<bool>? arrival = null;
         int outstanding = 0;
         bool exhausted = false;
+        bool stopping = false;
 
         while (true)
         {
             if (_token.IsCancellationRequested)
             {
                 return true;
+            }
+
+            if (!stopping && Stopping(index))
+            {
+                stopping = true;
+                exhausted = true;
             }
 
             if (stage.Ordered)
@@ -398,7 +449,7 @@ internal sealed class LocalRun
                     Task<object?> completed = window.Dequeue();
 
                     outstanding--;
-                    Deliver(segment, index, completed.GetAwaiter().GetResult());
+                    Emit(completed);
                 }
             }
             else
@@ -406,7 +457,7 @@ internal sealed class LocalRun
                 while (finished.TryDequeue(out Task<object?>? completed))
                 {
                     outstanding--;
-                    Deliver(segment, index, completed.GetAwaiter().GetResult());
+                    Emit(completed);
                 }
             }
 
@@ -458,6 +509,24 @@ internal sealed class LocalRun
             {
                 exhausted = !arrival.GetAwaiter().GetResult();
                 arrival = null;
+            }
+        }
+
+        // Delivers one finished callback's result, unless this segment is only draining what it started.
+        // The result of an abandoned callback is deliberately not even read: its outcome was already
+        // observed when it finished, and reading it again here would raise a failure the run has already
+        // recorded on a thread whose job is now to stop.
+        void Emit(Task<object?> completed)
+        {
+            if (stopping)
+            {
+                return;
+            }
+
+            if (!Deliver(segment, index, completed.GetAwaiter().GetResult()))
+            {
+                stopping = true;
+                exhausted = true;
             }
         }
     }
@@ -547,40 +616,86 @@ internal sealed class LocalRun
     /// <param name="segment">The segment doing the work.</param>
     /// <param name="index">Its position in the plan.</param>
     /// <param name="element">The element arriving from this segment's head.</param>
+    /// <returns>
+    /// <see langword="true"/> when this segment should go on to the next element; <see langword="false"/>
+    /// when the stream is over and the segment should stop.
+    /// </returns>
     /// <remarks>
+    /// <para>
     /// A filter that drops the element ends the push immediately, so no stage downstream of a drop is
     /// asked about an element that is not there. What follows the stages is the next boundary when there
     /// is one and the terminal when there is not, which is the only place a segment's position in the plan
     /// changes what it does.
+    /// </para>
+    /// <para>
+    /// A stage that ends the stream ends it for this segment and for everything above it, whether or not
+    /// the element it ended on was emitted first, and whether or not a later stage then dropped that
+    /// element: an ended stream stays ended, which is why the decision is carried to the end of the push
+    /// rather than acted on where it was made.
+    /// </para>
     /// </remarks>
-    private void Deliver(LocalSegment segment, int index, object? element)
+    private bool Deliver(LocalSegment segment, int index, object? element)
     {
         IReadOnlyList<LocalElementStage> stages = segment.Stages;
+        bool completing = false;
 
         for (int stage = 0; stage < stages.Count; stage++)
         {
-            if (!stages[stage].TryApply(element, out element))
+            LocalStageOutcome outcome = stages[stage].Apply(element, out element);
+
+            if (outcome is LocalStageOutcome.EmitAndComplete)
             {
-                return;
+                completing = true;
+
+                continue;
             }
+
+            if (outcome is LocalStageOutcome.Emit)
+            {
+                continue;
+            }
+
+            if (outcome is LocalStageOutcome.Complete || completing)
+            {
+                Complete(index);
+
+                return false;
+            }
+
+            return true;
         }
 
         if (index < _channels.Length)
         {
-            Offer(index, element);
-
-            return;
+            if (!Offer(index, element))
+            {
+                return false;
+            }
         }
-
-        if (segment.Folder is { } folder)
+        else if (segment.Terminal is { } terminal)
         {
-            _state = folder(_state, element);
+            _observed = true;
+            _state = terminal.Folder(_state, element);
+            completing |= terminal.CompletesOnFirstElement;
         }
+
+        if (!completing)
+        {
+            return true;
+        }
+
+        Complete(index);
+
+        return false;
     }
 
     /// <summary>Offers one element to a boundary, applying its overflow policy if it is full.</summary>
     /// <param name="index">The boundary's position, which is also the offering segment's.</param>
     /// <param name="element">The element to offer.</param>
+    /// <returns>
+    /// <see langword="true"/> when the element was accepted or discarded by policy; <see langword="false"/>
+    /// when the segment below has ended its stream and there is nothing left to offer to.
+    /// </returns>
     /// <exception cref="BufferOverflowException">
     /// The boundary is full and its policy is <see cref="OverflowPolicy.Fail"/>.
     /// </exception>
@@ -592,18 +707,30 @@ internal sealed class LocalRun
     /// discarding branch and the failing branch can both assume the channel really was full.
     /// </para>
     /// <para>
+    /// A refused write means one of two different things, and telling them apart is what keeps a completed
+    /// stream from looking like an overflow: a channel closed by a downstream completion refuses every
+    /// write, and an element that arrives at one is abandoned rather than dropped, counted, or failed on.
+    /// The flag is examined after the refusal because it is set before the channel is closed, so a writer
+    /// that saw the refusal is guaranteed to see the flag.
+    /// </para>
+    /// <para>
     /// Exactly one segment ever offers to any boundary, so the discard and the write that follows it are
     /// not racing another writer for the room they just made; the reader may take elements at the same
     /// moment, and taking elements is delivery rather than loss.
     /// </para>
     /// </remarks>
-    private void Offer(int index, object? element)
+    private bool Offer(int index, object? element)
     {
         Channel<object?> channel = _channels[index];
 
         if (channel.Writer.TryWrite(element))
         {
-            return;
+            return true;
+        }
+
+        if (Stopping(index))
+        {
+            return false;
         }
 
         switch (_plan.Boundaries[index].Policy)
@@ -616,15 +743,69 @@ internal sealed class LocalRun
 
                 _ = channel.Writer.TryWrite(element);
 
-                return;
+                return true;
             case OverflowPolicy.Fail:
                 throw BufferOverflowException.Full(_plan.Boundaries[index].Capacity);
             default:
-                channel.Writer.WriteAsync(element, _token).AsTask().GetAwaiter().GetResult();
+                try
+                {
+                    channel.Writer.WriteAsync(element, _token).AsTask().GetAwaiter().GetResult();
+                }
+                catch (ChannelClosedException) when (Stopping(index))
+                {
+                    // The wait this segment was parked in is exactly the deadlock a downstream completion
+                    // has to break: closing the channel is what releases it, and the release is a clean
+                    // end rather than a failure.
+                    return false;
+                }
 
-                return;
+                return true;
         }
     }
+
+    /// <summary>Ends the stream at one segment and stops everything above it.</summary>
+    /// <param name="index">The position of the segment whose stream is over.</param>
+    /// <remarks>
+    /// <para>
+    /// Two things happen and both are needed. The flag is raised first, so that every segment at or above
+    /// this one stops between elements rather than continuing to produce for a stream that has ended; then
+    /// every channel above this segment is completed, which releases a writer parked in a full one and
+    /// wakes a reader waiting on an empty one. A flag alone would deadlock a source waiting for room that
+    /// will never be taken, and a closed channel alone would leave an idle segment asleep.
+    /// </para>
+    /// <para>
+    /// The position is raised to the furthest downstream completion and never lowered, because completing
+    /// further downstream subsumes completing above it: the segments a lower completion stops are a subset
+    /// of the ones a higher one does. Segments below this one are untouched — they drain what already
+    /// passed, which is what makes an early completion a success rather than a stop.
+    /// </para>
+    /// </remarks>
+    private void Complete(int index)
+    {
+        int seen = Volatile.Read(ref _completedAt);
+
+        while (index > seen)
+        {
+            int actual = Interlocked.CompareExchange(ref _completedAt, index, seen);
+
+            if (actual == seen)
+            {
+                break;
+            }
+
+            seen = actual;
+        }
+
+        for (int channel = 0; channel < index; channel++)
+        {
+            _ = _channels[channel].Writer.TryComplete();
+        }
+    }
+
+    /// <summary>Reports whether one segment's stream has been ended from below.</summary>
+    /// <param name="index">The segment's position in the plan.</param>
+    /// <returns><see langword="true"/> when this segment has nowhere left to deliver to.</returns>
+    private bool Stopping(int index) => index <= Volatile.Read(ref _completedAt);
 
     /// <summary>Releases a segment's resources and folds a release failure into its outcome.</summary>
     /// <param name="elements">The enumerator to dispose, or <see langword="null"/> when none was obtained.</param>
@@ -714,7 +895,8 @@ internal sealed class LocalRun
     /// completion. Every transition is a <c>TrySet</c>, so a terminal state, once reached, is the run's
     /// answer forever. Failure is examined before cancellation because a failure cancels the run itself,
     /// and reporting that self-inflicted cancellation instead of the exception would hide the thing worth
-    /// reading.
+    /// reading; a terminal that needed an element and never saw one is examined after both, because it is
+    /// a statement about a stream that ended and neither a cancelled nor a failed run has one.
     /// </remarks>
     private void Settle()
     {
@@ -730,11 +912,44 @@ internal sealed class LocalRun
             _result?.TrySetCanceled(_token);
             _completion.TrySetCanceled(_token);
         }
+        else if (Missing() is { } missing)
+        {
+            _result?.TrySetException(missing);
+            _completion.TrySetException(missing);
+        }
         else
         {
             _result?.TrySetResult(_state);
             _completion.TrySetResult();
         }
+    }
+
+    /// <summary>Builds the failure of a run whose terminal needed an element and never saw one.</summary>
+    /// <returns>The exception, or <see langword="null"/> when the run has nothing to complain about.</returns>
+    /// <remarks>
+    /// <para>
+    /// An <see cref="InvalidOperationException"/> carrying the base class library's own wording, because
+    /// this is the same question <c>Enumerable.First</c> answers and an author who has met one has met
+    /// both. The message names the result as well, because a run can declare several one day and the
+    /// sentence has to say which of them has no value.
+    /// </para>
+    /// <para>
+    /// Whether an element was seen is a fact and not a comparison against the seed: an element that is
+    /// itself <see langword="null"/>, or that equals the default value of its type, was seen, and a
+    /// terminal that inferred emptiness from its state would report the wrong answer for exactly those two.
+    /// </para>
+    /// </remarks>
+    private InvalidOperationException? Missing()
+    {
+        if (_plan.Segments[^1].Terminal is not { RequiresElement: true } || _observed)
+        {
+            return null;
+        }
+
+        string result = _plan.Slot is { } slot ? $"the result '{slot}'" : "this run's result";
+
+        return new InvalidOperationException(
+            $"Sequence contains no elements: the stream ended without one, and {result} is its first element. Close the graph with a first-or-default sink to resolve the element type's default value instead of failing.");
     }
 
     /// <summary>Waits for the run to stop without reporting how it stopped.</summary>

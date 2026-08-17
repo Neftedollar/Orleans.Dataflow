@@ -71,6 +71,122 @@ public sealed class Flow<TIn, TOut>
         return new Flow<TIn, TOut>(LocalStageChain.Append(Stages, LocalStageDescriptor.Where(predicate)));
     }
 
+    /// <summary>Extends this flow with a running fold that emits every intermediate state.</summary>
+    /// <typeparam name="TState">The type of the state, which becomes the element type.</typeparam>
+    /// <param name="seed">The initial state, which is not emitted.</param>
+    /// <param name="folder">The function combining the running state with the next element.</param>
+    /// <returns>A new flow; this one is unchanged.</returns>
+    /// <exception cref="ArgumentNullException"><paramref name="folder"/> is <see langword="null"/>.</exception>
+    /// <remarks>
+    /// One state out per element in, so a scan over three elements emits three states and an empty stream
+    /// emits nothing at all. The seed is where the fold starts and not something that happened, which is
+    /// why it is not emitted. The state is allocated per run, so a flow carrying a scan starts from the
+    /// seed in every graph it is composed into and in every run of each of them.
+    /// </remarks>
+    public Flow<TIn, TState> Scan<TState>(TState seed, Func<TState, TOut, TState> folder)
+    {
+        ArgumentNullException.ThrowIfNull(folder);
+
+        return new Flow<TIn, TState>(LocalStageChain.Append(Stages, LocalStageDescriptor.Scan(seed, folder)));
+    }
+
+    /// <summary>Extends this flow with a stage that passes a declared number of elements.</summary>
+    /// <param name="count">How many elements to pass; zero or more.</param>
+    /// <returns>A new flow; this one is unchanged.</returns>
+    /// <exception cref="ArgumentOutOfRangeException"><paramref name="count"/> is negative.</exception>
+    /// <remarks>
+    /// Reaching the bound completes the run the way the source running out does: everything upstream stops
+    /// and is released, whatever it was holding is abandoned, and the run reports success. A flow carrying
+    /// a take carries that completion into every graph it is composed into.
+    /// </remarks>
+    public Flow<TIn, TOut> Take(int count) =>
+        new(LocalStageChain.Append(
+            Stages,
+            LocalStageDescriptor.Take(LocalOptionGuard.Count(count, nameof(count)))));
+
+    /// <summary>Extends this flow with a stage that drops a declared number of elements.</summary>
+    /// <param name="count">How many elements to drop; zero or more.</param>
+    /// <returns>A new flow; this one is unchanged.</returns>
+    /// <exception cref="ArgumentOutOfRangeException"><paramref name="count"/> is negative.</exception>
+    /// <remarks>
+    /// The dropped elements are still produced and still travel to this stage; skipping is not a way to
+    /// avoid work upstream of it.
+    /// </remarks>
+    public Flow<TIn, TOut> Skip(int count) =>
+        new(LocalStageChain.Append(
+            Stages,
+            LocalStageDescriptor.Skip(LocalOptionGuard.Count(count, nameof(count)))));
+
+    /// <summary>Extends this flow with a stage that passes elements while a predicate holds.</summary>
+    /// <param name="predicate">The test each element must pass for the stream to continue.</param>
+    /// <returns>A new flow; this one is unchanged.</returns>
+    /// <exception cref="ArgumentNullException"><paramref name="predicate"/> is <see langword="null"/>.</exception>
+    /// <remarks>
+    /// The boundary is exclusive, per the naming rules of ADR 0004 section 7: the first element the
+    /// predicate rejects is not emitted, and the run completes as if the source had ended there.
+    /// <see cref="TakeThrough"/> is the inclusive spelling and is a different word rather than a flag.
+    /// </remarks>
+    public Flow<TIn, TOut> TakeWhile(Func<TOut, bool> predicate)
+    {
+        ArgumentNullException.ThrowIfNull(predicate);
+
+        return new Flow<TIn, TOut>(LocalStageChain.Append(Stages, LocalStageDescriptor.TakeWhile(predicate)));
+    }
+
+    /// <summary>Extends this flow with a stage that passes elements up to and including one the predicate accepts.</summary>
+    /// <param name="predicate">The test that decides which element is the last one.</param>
+    /// <returns>A new flow; this one is unchanged.</returns>
+    /// <exception cref="ArgumentNullException"><paramref name="predicate"/> is <see langword="null"/>.</exception>
+    /// <remarks>
+    /// The inclusive counterpart of <see cref="TakeWhile"/>: the element the predicate accepts is emitted
+    /// and the run completes after it, which is how a stream ends at a terminator it has to deliver.
+    /// </remarks>
+    public Flow<TIn, TOut> TakeThrough(Func<TOut, bool> predicate)
+    {
+        ArgumentNullException.ThrowIfNull(predicate);
+
+        return new Flow<TIn, TOut>(LocalStageChain.Append(Stages, LocalStageDescriptor.TakeThrough(predicate)));
+    }
+
+    /// <summary>Extends this flow with a stage that drops elements while a predicate holds.</summary>
+    /// <param name="predicate">The test that decides which elements to drop.</param>
+    /// <returns>A new flow; this one is unchanged.</returns>
+    /// <exception cref="ArgumentNullException"><paramref name="predicate"/> is <see langword="null"/>.</exception>
+    /// <remarks>
+    /// Exclusive in the same sense <see cref="TakeWhile"/> is: the first element the predicate rejects is
+    /// emitted, and so is everything after it, whether or not the predicate would accept it again.
+    /// </remarks>
+    public Flow<TIn, TOut> SkipWhile(Func<TOut, bool> predicate)
+    {
+        ArgumentNullException.ThrowIfNull(predicate);
+
+        return new Flow<TIn, TOut>(LocalStageChain.Append(Stages, LocalStageDescriptor.SkipWhile(predicate)));
+    }
+
+    /// <summary>Extends this flow with a stage that passes the first occurrence of every element.</summary>
+    /// <param name="options">The greatest number of distinct elements the stage may remember.</param>
+    /// <returns>A new flow; this one is unchanged.</returns>
+    /// <exception cref="ArgumentNullException"><paramref name="options"/> is <see langword="null"/>.</exception>
+    /// <exception cref="ArgumentOutOfRangeException">
+    /// <see cref="DistinctOptions.MaxTrackedKeys"/> is below one.
+    /// </exception>
+    /// <remarks>
+    /// Elements are compared with <see cref="EqualityComparer{T}.Default"/>. The bound is required and is
+    /// not a hint: an element that would be the one key past it faults the run with a
+    /// <see cref="TrackedKeyOverflowException"/> rather than evicting an older key. The remembered keys are
+    /// per run, so a flow carrying a distinct deduplicates within a run and never across two.
+    /// </remarks>
+    public Flow<TIn, TOut> Distinct(DistinctOptions options)
+    {
+        ArgumentNullException.ThrowIfNull(options);
+
+        return new Flow<TIn, TOut>(LocalStageChain.Append(
+            Stages,
+            LocalStageDescriptor.Distinct(
+                LocalOptionGuard.Distinct(options, nameof(options)),
+                EqualityComparer<TOut>.Default)));
+    }
+
     /// <summary>Extends this flow with a bounded buffer.</summary>
     /// <param name="options">The capacity and the overflow policy.</param>
     /// <returns>A new flow; this one is unchanged.</returns>

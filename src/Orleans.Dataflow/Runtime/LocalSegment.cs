@@ -17,7 +17,8 @@ namespace Orleans.Dataflow.Runtime;
 /// Exactly one of <see cref="Elements"/> and <see cref="Async"/> is set, and only for the segments that
 /// have a head of their own: the first segment of a plan pulls from a sequence, a segment that begins at
 /// an asynchronous stage drives that stage, and every other segment simply reads its input channel.
-/// <see cref="Folder"/> is set on the last segment and only when the graph's terminal folds.
+/// <see cref="Terminal"/> is set on the last segment and only when the graph's terminal has something to
+/// do with an element.
 /// </para>
 /// </remarks>
 internal sealed class LocalSegment
@@ -26,17 +27,17 @@ internal sealed class LocalSegment
     /// <param name="elements">The sequence to pull from, or <see langword="null"/>.</param>
     /// <param name="async">The asynchronous stage that heads this segment, or <see langword="null"/>.</param>
     /// <param name="stages">The fused synchronous stages, in flow order.</param>
-    /// <param name="folder">The terminal fold, or <see langword="null"/>.</param>
+    /// <param name="terminal">What the graph's terminal does with an element, or <see langword="null"/>.</param>
     internal LocalSegment(
         IEnumerable? elements,
         LocalAsyncStage? async,
         IReadOnlyList<LocalElementStage> stages,
-        Func<object?, object?, object?>? folder)
+        LocalTerminal? terminal)
     {
         Elements = elements;
         Async = async;
         Stages = stages;
-        Folder = folder;
+        Terminal = terminal;
     }
 
     /// <summary>Gets the sequence this segment pulls from.</summary>
@@ -61,10 +62,12 @@ internal sealed class LocalSegment
     /// </value>
     internal IReadOnlyList<LocalElementStage> Stages { get; }
 
-    /// <summary>Gets the terminal fold.</summary>
+    /// <summary>Gets what the graph's terminal does with an element that reaches it.</summary>
     /// <value>
-    /// The folder over boxed state and boxed elements on the last segment of a plan, or
-    /// <see langword="null"/> when the terminal discards or when this is not the last segment.
+    /// The terminal on the last segment of a plan, or <see langword="null"/> when this is not the last
+    /// segment, when the terminal discards its elements, and when the terminal is an asynchronous callback
+    /// sink — whose work is the callback <see cref="Async"/> already drives, leaving nothing to do with the
+    /// nothing it emits.
     /// </value>
-    internal Func<object?, object?, object?>? Folder { get; }
+    internal LocalTerminal? Terminal { get; }
 }

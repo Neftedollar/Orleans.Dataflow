@@ -22,10 +22,10 @@ namespace Orleans.Dataflow;
 /// </para>
 /// <para>
 /// <b>Scope of this checkpoint.</b> The host executes the local, lambda-implemented vocabulary as one
-/// linear chain with exactly one element in flight, which is the strongest possible bound. Buffering,
-/// parallelism, async stages, pause and resume, a controllable clock, and every operator beyond
-/// <c>Select</c>, <c>Where</c>, <c>Aggregate</c>, and <c>Ignore</c> are later checkpoints of the same
-/// milestone and are absent here rather than approximated.
+/// linear chain. Adjacent synchronous stages fuse into one loop holding one element, and a queue exists
+/// only where the author asked for one with a buffer or an asynchronous stage. Pause and resume, a
+/// controllable clock, and every operator that would need one — windows, throttling, timeouts — are later
+/// milestones and are absent here rather than approximated.
 /// </para>
 /// </remarks>
 public sealed class LocalDataflowHost

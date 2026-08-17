@@ -46,6 +46,18 @@ internal static class LocalDelegateAdapter
     /// <summary>The template closed to wrap an asynchronous mapping delegate.</summary>
     private static readonly MethodInfo AsyncSelectorTemplate = Template(nameof(BoxAsyncSelector));
 
+    /// <summary>The template closed to wrap an asynchronous callback with no result.</summary>
+    private static readonly MethodInfo AsyncCallbackTemplate = Template(nameof(BoxAsyncCallback));
+
+    /// <summary>The template closed to wrap a per-element action.</summary>
+    private static readonly MethodInfo ActionTemplate = Template(nameof(BoxAction));
+
+    /// <summary>The template closed to wrap an unfold generator.</summary>
+    private static readonly MethodInfo GeneratorTemplate = Template(nameof(BoxGenerator));
+
+    /// <summary>The template closed to read the value of a task.</summary>
+    private static readonly MethodInfo TaskValueTemplate = Template(nameof(BoxTaskValue));
+
     /// <summary>Reads a source binding as a sequence the run loop can enumerate.</summary>
     /// <param name="behavior">The bound sequence, as the authoring value received it.</param>
     /// <returns>The sequence, viewed through the non-generic interface every sequence implements.</returns>
@@ -70,19 +82,46 @@ internal static class LocalDelegateAdapter
         return (Func<object?, object?>)Close(SelectorTemplate, [arguments[0], arguments[1]], behavior);
     }
 
+    /// <summary>Reads a source binding as the exception the run is to fail with.</summary>
+    /// <param name="behavior">The bound exception, as the authoring value received it.</param>
+    /// <returns>The exception.</returns>
+    /// <exception cref="InvalidOperationException"><paramref name="behavior"/> is not an exception.</exception>
+    internal static Exception Failure(object? behavior) =>
+        behavior as Exception ??
+        throw new InvalidOperationException(
+            $"A '{LocalStageKind.Failed}' stage must be bound to an exception to fail with, and this one is bound to {Describe(behavior)}.");
+
+    /// <summary>Reads a distinct binding as the equality it deduplicates by.</summary>
+    /// <param name="behavior">The bound comparer, as the authoring value received it.</param>
+    /// <returns>The comparer, viewed through the non-generic interface every comparer implements.</returns>
+    /// <exception cref="InvalidOperationException"><paramref name="behavior"/> is not an equality comparer.</exception>
+    /// <remarks>
+    /// The non-generic view is what makes deduplication reflection-free: every
+    /// <see cref="EqualityComparer{T}.Default"/> implements it, its members already answer for
+    /// <see langword="null"/> and for a value of the wrong type, and the run loop only ever has elements as
+    /// <see cref="object"/>.
+    /// </remarks>
+    internal static IEqualityComparer Comparer(object? behavior) =>
+        behavior as IEqualityComparer ??
+        throw new InvalidOperationException(
+            $"A '{LocalStageKind.Distinct}' stage must be bound to an equality comparer, and this one is bound to {Describe(behavior)}.");
+
     /// <summary>Wraps a predicate delegate into one over boxed elements.</summary>
     /// <param name="behavior">The bound <c>Func&lt;T, bool&gt;</c>.</param>
+    /// <param name="kind">The stage shape, for the diagnostic.</param>
     /// <returns>The wrapped predicate.</returns>
     /// <exception cref="InvalidOperationException">
     /// <paramref name="behavior"/> is not a one-argument function returning <see cref="bool"/>.
     /// </exception>
-    internal static Func<object?, bool> Predicate(object? behavior)
+    internal static Func<object?, bool> Predicate(object? behavior, LocalStageKind kind)
     {
-        Type[] arguments = Arguments(behavior, typeof(Func<,>), LocalStageKind.Where, "Func<T, bool>");
+        const string Expected = "Func<T, bool>";
+
+        Type[] arguments = Arguments(behavior, typeof(Func<,>), kind, Expected);
 
         if (arguments[1] != typeof(bool))
         {
-            throw Mismatch(behavior, LocalStageKind.Where, "Func<T, bool>");
+            throw Mismatch(behavior, kind, Expected);
         }
 
         return (Func<object?, bool>)Close(PredicateTemplate, [arguments[0]], behavior);
@@ -90,18 +129,84 @@ internal static class LocalDelegateAdapter
 
     /// <summary>Wraps a folding delegate into one over boxed state and boxed elements.</summary>
     /// <param name="behavior">The bound <c>Func&lt;TState, T, TState&gt;</c>.</param>
+    /// <param name="kind">The stage shape, for the diagnostic.</param>
     /// <returns>The wrapped folder.</returns>
     /// <exception cref="InvalidOperationException"><paramref name="behavior"/> is not a two-argument function.</exception>
-    internal static Func<object?, object?, object?> Folder(object? behavior)
+    /// <remarks>
+    /// One wrapper for the two shapes that fold, because they fold identically and differ only in what the
+    /// run does with the state afterwards: a sink keeps it and a scan emits it.
+    /// </remarks>
+    internal static Func<object?, object?, object?> Folder(object? behavior, LocalStageKind kind)
     {
-        Type[] arguments = Arguments(behavior, typeof(Func<,,>), LocalStageKind.Fold, "Func<TState, T, TState>");
+        const string Expected = "Func<TState, T, TState>";
+
+        Type[] arguments = Arguments(behavior, typeof(Func<,,>), kind, Expected);
 
         if (arguments[2] != arguments[0])
         {
-            throw Mismatch(behavior, LocalStageKind.Fold, "Func<TState, T, TState>");
+            throw Mismatch(behavior, kind, Expected);
         }
 
         return (Func<object?, object?, object?>)Close(FolderTemplate, [arguments[0], arguments[1]], behavior);
+    }
+
+    /// <summary>Wraps a per-element action into one over boxed elements.</summary>
+    /// <param name="behavior">The bound <c>Action&lt;T&gt;</c>.</param>
+    /// <returns>The wrapped action.</returns>
+    /// <exception cref="InvalidOperationException"><paramref name="behavior"/> is not a one-argument action.</exception>
+    internal static Action<object?> Action(object? behavior)
+    {
+        Type[] arguments = Arguments(behavior, typeof(Action<>), LocalStageKind.ForEach, "Action<T>");
+
+        return (Action<object?>)Close(ActionTemplate, [arguments[0]], behavior);
+    }
+
+    /// <summary>Wraps an unfold generator into one over boxed state and boxed elements.</summary>
+    /// <param name="behavior">The bound <c>UnfoldGenerator&lt;TState, T&gt;</c>.</param>
+    /// <returns>The wrapped generator.</returns>
+    /// <exception cref="InvalidOperationException">
+    /// <paramref name="behavior"/> is not an <see cref="UnfoldGenerator{TState, T}"/>.
+    /// </exception>
+    internal static LocalGenerator Generator(object? behavior)
+    {
+        Type[] arguments = Arguments(
+            behavior,
+            typeof(UnfoldGenerator<,>),
+            LocalStageKind.Unfold,
+            "UnfoldGenerator<TState, T>");
+
+        return (LocalGenerator)Close(GeneratorTemplate, [arguments[0], arguments[1]], behavior);
+    }
+
+    /// <summary>Wraps a task into a function that reads its value, blocking until it has one.</summary>
+    /// <param name="behavior">The bound <c>Task&lt;T&gt;</c>.</param>
+    /// <returns>The reader.</returns>
+    /// <exception cref="InvalidOperationException"><paramref name="behavior"/> is not a task with a value.</exception>
+    /// <remarks>
+    /// The result type is found by walking the base types rather than by reading the bound object's own
+    /// type, because a task an <see langword="async"/> method returns is an instance of a private class
+    /// deriving from <see cref="Task{TResult}"/> rather than of <see cref="Task{TResult}"/> itself. A check
+    /// that compared the constructed type would accept <c>Task.FromResult</c> and reject every task an
+    /// author actually awaits.
+    /// </remarks>
+    internal static Func<object?> TaskValue(object? behavior)
+    {
+        const string Expected = "Task<T>";
+
+        if (behavior is null)
+        {
+            throw Mismatch(behavior, LocalStageKind.FromTask, Expected);
+        }
+
+        for (Type? type = behavior.GetType(); type is not null; type = type.BaseType)
+        {
+            if (type.IsGenericType && type.GetGenericTypeDefinition() == typeof(Task<>))
+            {
+                return (Func<object?>)Close(TaskValueTemplate, [type.GetGenericArguments()[0]], behavior);
+            }
+        }
+
+        throw Mismatch(behavior, LocalStageKind.FromTask, Expected);
     }
 
     /// <summary>Wraps an asynchronous mapping delegate into one over boxed elements.</summary>
@@ -135,6 +240,36 @@ internal static class LocalDelegateAdapter
         return (Func<object?, CancellationToken, Task<object?>>)Close(
             AsyncSelectorTemplate,
             [arguments[0], arguments[2].GetGenericArguments()[0]],
+            behavior);
+    }
+
+    /// <summary>Wraps an asynchronous callback with no result into one over boxed elements.</summary>
+    /// <param name="behavior">The bound <c>Func&lt;T, CancellationToken, Task&gt;</c>.</param>
+    /// <returns>The wrapped callback, whose task always produces <see langword="null"/>.</returns>
+    /// <exception cref="InvalidOperationException">
+    /// <paramref name="behavior"/> is not a two-argument function taking a
+    /// <see cref="CancellationToken"/> and returning a <see cref="Task"/>.
+    /// </exception>
+    /// <remarks>
+    /// A callback sink is an asynchronous stage that emits nothing, so it is executed as one that emits
+    /// <see langword="null"/> and whose segment has nothing to hand it to. That is what gives it the
+    /// concurrency bound, the token, the failure semantics, and the "completion awaits every callback"
+    /// promise of the mapping stages without a second implementation of any of them.
+    /// </remarks>
+    internal static Func<object?, CancellationToken, Task<object?>> AsyncCallback(object? behavior)
+    {
+        const string Expected = "Func<T, CancellationToken, Task>";
+
+        Type[] arguments = Arguments(behavior, typeof(Func<,,>), LocalStageKind.ForEachAsync, Expected);
+
+        if (arguments[1] != typeof(CancellationToken) || arguments[2] != typeof(Task))
+        {
+            throw Mismatch(behavior, LocalStageKind.ForEachAsync, Expected);
+        }
+
+        return (Func<object?, CancellationToken, Task<object?>>)Close(
+            AsyncCallbackTemplate,
+            [arguments[0]],
             behavior);
     }
 
@@ -240,4 +375,70 @@ internal static class LocalDelegateAdapter
     /// <remarks>Invoked only by reflection, over the type arguments recovered from the delegate itself.</remarks>
     private static Func<object?, object?, object?> BoxFolder<TState, TIn>(Func<TState, TIn, TState> folder) =>
         (state, element) => folder((TState)state!, (TIn)element!);
+
+    /// <summary>Wraps a typed action into one over boxed elements.</summary>
+    /// <typeparam name="TIn">The element type the action consumes.</typeparam>
+    /// <param name="callback">The author's delegate.</param>
+    /// <returns>The wrapper.</returns>
+    /// <remarks>Invoked only by reflection, over the type argument recovered from the delegate itself.</remarks>
+    private static Action<object?> BoxAction<TIn>(Action<TIn> callback) =>
+        element => callback((TIn)element!);
+
+    /// <summary>Wraps a typed asynchronous callback into one over boxed elements.</summary>
+    /// <typeparam name="TIn">The element type the callback consumes.</typeparam>
+    /// <param name="callback">The author's delegate.</param>
+    /// <returns>The wrapper.</returns>
+    /// <remarks>
+    /// Invoked only by reflection, over the type argument recovered from the delegate itself. An
+    /// asynchronous method rather than a continuation, for the reason
+    /// <see cref="BoxAsyncSelector{TIn, TOut}"/> is one: a callback that throws before returning a task
+    /// produces a faulted task exactly as one that throws afterwards does.
+    /// </remarks>
+    private static Func<object?, CancellationToken, Task<object?>> BoxAsyncCallback<TIn>(
+        Func<TIn, CancellationToken, Task> callback) =>
+        async (element, token) =>
+        {
+            Task pending = callback((TIn)element!, token) ??
+                throw new InvalidOperationException(
+                    "The callback of an asynchronous sink returned no task. A callback a graph is bound to has to produce something to await.");
+
+            await pending.ConfigureAwait(false);
+
+            return null;
+        };
+
+    /// <summary>Wraps a typed unfold generator into one over boxed state and boxed elements.</summary>
+    /// <typeparam name="TState">The state type the generator carries.</typeparam>
+    /// <typeparam name="T">The element type the generator produces.</typeparam>
+    /// <param name="generator">The author's delegate.</param>
+    /// <returns>The wrapper.</returns>
+    /// <remarks>
+    /// Invoked only by reflection, over the type arguments recovered from the delegate itself. The two
+    /// outputs are copied out whatever the generator answered, because a generator that stopped has
+    /// assigned them both and the caller ignores them; reading them only on the true path would make the
+    /// wrapper's rules differ from the delegate's.
+    /// </remarks>
+    private static LocalGenerator BoxGenerator<TState, T>(UnfoldGenerator<TState, T> generator) =>
+        (object? state, out object? value, out object? next) =>
+        {
+            bool produced = generator((TState)state!, out T element, out TState following);
+
+            value = element;
+            next = following;
+
+            return produced;
+        };
+
+    /// <summary>Wraps a typed task into a function that reads its value.</summary>
+    /// <typeparam name="T">The task's result type, which is the element type.</typeparam>
+    /// <param name="task">The author's task.</param>
+    /// <returns>The wrapper.</returns>
+    /// <remarks>
+    /// Invoked only by reflection, over the result type recovered from the task's own type hierarchy. The
+    /// value is read through the awaiter rather than through <see cref="Task{TResult}.Result"/>, which is
+    /// what makes a failing task fault the run with the author's own exception instead of with the
+    /// <see cref="AggregateException"/> a task wraps it in.
+    /// </remarks>
+    private static Func<object?> BoxTaskValue<T>(Task<T> task) =>
+        () => task.GetAwaiter().GetResult();
 }

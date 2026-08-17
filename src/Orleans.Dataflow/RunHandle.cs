@@ -29,9 +29,9 @@ namespace Orleans.Dataflow;
 /// concurrently with any other member. Two callers awaiting one result observe one outcome.
 /// </para>
 /// <para>
-/// <b>What this checkpoint does not do.</b> The run keeps exactly one element in flight, so there is no
-/// buffering to configure and no parallelism to observe; there is no pausing, no resuming, and no abort
-/// distinct from cancellation; and nothing here consults a clock.
+/// <b>What this checkpoint does not do.</b> There is no pausing, no resuming, and no abort distinct from
+/// cancellation; the elements a buffer discarded are counted but not yet exposed, because what an author
+/// will read them through is a monitor; and nothing here consults a clock.
 /// </para>
 /// </remarks>
 public sealed class RunHandle : IAsyncDisposable

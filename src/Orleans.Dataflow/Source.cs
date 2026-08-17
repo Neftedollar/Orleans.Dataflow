@@ -1,3 +1,4 @@
+using System.Diagnostics.CodeAnalysis;
 using System.Globalization;
 using Orleans.Dataflow.Authoring;
 using Orleans.Dataflow.Identity;
@@ -59,6 +60,128 @@ public sealed class Source<T>
         ArgumentNullException.ThrowIfNull(predicate);
 
         return new Source<T>(LocalStageChain.Append(Stages, LocalStageDescriptor.Where(predicate)));
+    }
+
+    /// <summary>Extends this source with a running fold that emits every intermediate state.</summary>
+    /// <typeparam name="TState">The type of the state, which becomes the element type.</typeparam>
+    /// <param name="seed">The initial state, which is not emitted.</param>
+    /// <param name="folder">The function combining the running state with the next element.</param>
+    /// <returns>A new source; this one is unchanged.</returns>
+    /// <exception cref="ArgumentNullException"><paramref name="folder"/> is <see langword="null"/>.</exception>
+    /// <remarks>
+    /// One state out per element in, so a scan over three elements emits three states and an empty stream
+    /// emits nothing at all. The seed is where the fold starts and not something that happened, which is
+    /// why it is not emitted; an author who wants it emitted writes it into the stream. The state is
+    /// allocated per run, like an aggregate's, so two runs of one graph never continue each other.
+    /// </remarks>
+    public Source<TState> Scan<TState>(TState seed, Func<TState, T, TState> folder)
+    {
+        ArgumentNullException.ThrowIfNull(folder);
+
+        return new Source<TState>(LocalStageChain.Append(Stages, LocalStageDescriptor.Scan(seed, folder)));
+    }
+
+    /// <summary>Extends this source with a stage that passes a declared number of elements.</summary>
+    /// <param name="count">How many elements to pass; zero or more.</param>
+    /// <returns>A new source; this one is unchanged.</returns>
+    /// <exception cref="ArgumentOutOfRangeException"><paramref name="count"/> is negative.</exception>
+    /// <remarks>
+    /// Reaching the bound completes the run the way the source running out does: everything upstream stops
+    /// and is released, whatever it was holding is abandoned, and the run reports success with the results
+    /// it has. <c>Take(0)</c> therefore completes a run that never touches its source at all, and a
+    /// <c>Take</c> of more elements than arrive is simply never reached.
+    /// </remarks>
+    public Source<T> Take(int count) =>
+        new(LocalStageChain.Append(
+            Stages,
+            LocalStageDescriptor.Take(LocalOptionGuard.Count(count, nameof(count)))));
+
+    /// <summary>Extends this source with a stage that drops a declared number of elements.</summary>
+    /// <param name="count">How many elements to drop; zero or more.</param>
+    /// <returns>A new source; this one is unchanged.</returns>
+    /// <exception cref="ArgumentOutOfRangeException"><paramref name="count"/> is negative.</exception>
+    /// <remarks>
+    /// The dropped elements are still produced and still travel to this stage; skipping is not a way to
+    /// avoid work upstream of it. A skip of more elements than arrive passes nothing and completes with the
+    /// source.
+    /// </remarks>
+    public Source<T> Skip(int count) =>
+        new(LocalStageChain.Append(
+            Stages,
+            LocalStageDescriptor.Skip(LocalOptionGuard.Count(count, nameof(count)))));
+
+    /// <summary>Extends this source with a stage that passes elements while a predicate holds.</summary>
+    /// <param name="predicate">The test each element must pass for the stream to continue.</param>
+    /// <returns>A new source; this one is unchanged.</returns>
+    /// <exception cref="ArgumentNullException"><paramref name="predicate"/> is <see langword="null"/>.</exception>
+    /// <remarks>
+    /// The boundary is exclusive, per the naming rules of ADR 0004 section 7: the first element the
+    /// predicate rejects is not emitted, and the run completes as if the source had ended there.
+    /// <see cref="TakeThrough"/> is the inclusive spelling and is a different word rather than a flag.
+    /// </remarks>
+    public Source<T> TakeWhile(Func<T, bool> predicate)
+    {
+        ArgumentNullException.ThrowIfNull(predicate);
+
+        return new Source<T>(LocalStageChain.Append(Stages, LocalStageDescriptor.TakeWhile(predicate)));
+    }
+
+    /// <summary>Extends this source with a stage that passes elements up to and including one the predicate accepts.</summary>
+    /// <param name="predicate">The test that decides which element is the last one.</param>
+    /// <returns>A new source; this one is unchanged.</returns>
+    /// <exception cref="ArgumentNullException"><paramref name="predicate"/> is <see langword="null"/>.</exception>
+    /// <remarks>
+    /// The inclusive counterpart of <see cref="TakeWhile"/>, and the streaming name rather than a LINQ one
+    /// because LINQ has no such operator to borrow from: the element the predicate accepts is emitted and
+    /// the run completes after it. This is how a stream ends at a terminator it has to deliver — the last
+    /// page, the closing record, the sentinel.
+    /// </remarks>
+    public Source<T> TakeThrough(Func<T, bool> predicate)
+    {
+        ArgumentNullException.ThrowIfNull(predicate);
+
+        return new Source<T>(LocalStageChain.Append(Stages, LocalStageDescriptor.TakeThrough(predicate)));
+    }
+
+    /// <summary>Extends this source with a stage that drops elements while a predicate holds.</summary>
+    /// <param name="predicate">The test that decides which elements to drop.</param>
+    /// <returns>A new source; this one is unchanged.</returns>
+    /// <exception cref="ArgumentNullException"><paramref name="predicate"/> is <see langword="null"/>.</exception>
+    /// <remarks>
+    /// Exclusive in the same sense <see cref="TakeWhile"/> is: the first element the predicate rejects is
+    /// emitted, and so is everything after it, whether or not the predicate would accept it again. The
+    /// predicate is not consulted after that element at all.
+    /// </remarks>
+    public Source<T> SkipWhile(Func<T, bool> predicate)
+    {
+        ArgumentNullException.ThrowIfNull(predicate);
+
+        return new Source<T>(LocalStageChain.Append(Stages, LocalStageDescriptor.SkipWhile(predicate)));
+    }
+
+    /// <summary>Extends this source with a stage that passes the first occurrence of every element.</summary>
+    /// <param name="options">The greatest number of distinct elements the stage may remember.</param>
+    /// <returns>A new source; this one is unchanged.</returns>
+    /// <exception cref="ArgumentNullException"><paramref name="options"/> is <see langword="null"/>.</exception>
+    /// <exception cref="ArgumentOutOfRangeException">
+    /// <see cref="DistinctOptions.MaxTrackedKeys"/> is below one.
+    /// </exception>
+    /// <remarks>
+    /// Elements are compared with <see cref="EqualityComparer{T}.Default"/>, so a type that defines its own
+    /// equality is deduplicated by it. The bound is required and is not a hint: an element that would be
+    /// the one key past it faults the run with a <see cref="TrackedKeyOverflowException"/> rather than
+    /// evicting an older key, because an evicted key would be emitted twice and the stream would silently
+    /// stop being distinct. A repeated element is recognized and dropped without occupying anything new.
+    /// </remarks>
+    public Source<T> Distinct(DistinctOptions options)
+    {
+        ArgumentNullException.ThrowIfNull(options);
+
+        return new Source<T>(LocalStageChain.Append(
+            Stages,
+            LocalStageDescriptor.Distinct(
+                LocalOptionGuard.Distinct(options, nameof(options)),
+                EqualityComparer<T>.Default)));
     }
 
     /// <summary>Extends this source with a bounded buffer.</summary>
@@ -680,6 +803,133 @@ public static class Source
         ArgumentNullException.ThrowIfNull(elements);
 
         return new Source<T>(LocalStageChain.Of(LocalStageDescriptor.FromEnumerable(elements)));
+    }
+
+    /// <summary>Starts a source that emits nothing and completes at once.</summary>
+    /// <typeparam name="T">The element type the graph downstream of it is typed by.</typeparam>
+    /// <returns>The source, ready to be extended with operators.</returns>
+    /// <remarks>
+    /// A real source rather than a degenerate one: it is what a graph is tested against when the question
+    /// is what happens with no elements at all, and it is what a conditional composition yields when there
+    /// is nothing to read. A run of it completes successfully, and an aggregate resolves its seed.
+    /// </remarks>
+    public static Source<T> Empty<T>() => new(LocalStageChain.Of(LocalStageDescriptor.Empty()));
+
+    /// <summary>Starts a source that emits one element and completes.</summary>
+    /// <typeparam name="T">The element type.</typeparam>
+    /// <param name="value">The element to emit, which may be <see langword="null"/>.</param>
+    /// <returns>The source, ready to be extended with operators.</returns>
+    /// <remarks>
+    /// The element is captured as it is given and emitted once per run, so two runs of one graph deliver
+    /// the same instance twice. What that instance is, and whether handing it to two runs is safe, is the
+    /// author's to decide, exactly as for a sequence.
+    /// </remarks>
+    [SuppressMessage(
+        "Naming",
+        "CA1720:Identifier contains type name",
+        Justification = "The type name it collides with is the CLR name of the 32-bit floating-point type, which nothing on a source factory could be mistaken for. 'Single' is what a stream of one element is called in every vocabulary this API borrows from, LINQ's own included, and renaming it to avoid an alias for 'float' would cost every reader the word they came looking for.")]
+    public static Source<T> Single<T>(T value) => new(LocalStageChain.Of(LocalStageDescriptor.Single(value)));
+
+    /// <summary>Starts a source that emits one element a declared number of times.</summary>
+    /// <typeparam name="T">The element type.</typeparam>
+    /// <param name="value">The element to emit, which may be <see langword="null"/>.</param>
+    /// <param name="count">How many times to emit it; zero or more.</param>
+    /// <returns>The source, ready to be extended with operators.</returns>
+    /// <exception cref="ArgumentOutOfRangeException"><paramref name="count"/> is negative.</exception>
+    /// <remarks>
+    /// The count is required and there is no endless spelling. A source that never ends is
+    /// <see cref="Unfold{TState, T}"/>, whose author writes the logic that ends it, and either shape is
+    /// bounded downstream by <c>Take</c>; a repeat with no count would be an endless stream nobody had to
+    /// ask for.
+    /// </remarks>
+    public static Source<T> Repeat<T>(T value, int count) =>
+        new(LocalStageChain.Of(LocalStageDescriptor.Repeat(value, LocalOptionGuard.Count(count, nameof(count)))));
+
+    /// <summary>Starts a source that emits a run of consecutive integers.</summary>
+    /// <param name="start">The first integer to emit.</param>
+    /// <param name="count">How many integers to emit; zero or more.</param>
+    /// <returns>The source, ready to be extended with operators.</returns>
+    /// <exception cref="ArgumentOutOfRangeException">
+    /// <paramref name="count"/> is negative, or the last integer would be past
+    /// <see cref="int.MaxValue"/>.
+    /// </exception>
+    /// <remarks>
+    /// The one source with no behavior at all: a document states both numbers, so a range is the same
+    /// stream wherever it is run. The elements are <paramref name="start"/> through
+    /// <c>start + count - 1</c>, ascending.
+    /// </remarks>
+    public static Source<int> Range(int start, int count) =>
+        new(LocalStageChain.Of(LocalStageDescriptor.Range(start, LocalOptionGuard.Range(start, count))));
+
+    /// <summary>Starts a source that emits the value of one task.</summary>
+    /// <typeparam name="T">The element type.</typeparam>
+    /// <param name="task">The task whose value is the single element.</param>
+    /// <returns>The source, ready to be extended with operators.</returns>
+    /// <exception cref="ArgumentNullException"><paramref name="task"/> is <see langword="null"/>.</exception>
+    /// <remarks>
+    /// <para>
+    /// The task is awaited once per run and its value emitted as one element. A task that has already
+    /// finished replays its value into every run, because a completed task is a value and not an event; a
+    /// task that fails faults the run with the exception it failed with, unwrapped from the
+    /// <see cref="AggregateException"/> a task carries it in. A task that was cancelled faults the run too,
+    /// with the <see cref="OperationCanceledException"/> it carries: the run itself was not asked to stop,
+    /// and a source that cannot produce its element is a source that failed, whatever the reason.
+    /// </para>
+    /// <para>
+    /// A run whose task has not finished waits inside its first pull, exactly as it would for any source
+    /// that takes a long time to produce its first element; cancellation is observed between elements, so
+    /// such a run stops once the task settles.
+    /// </para>
+    /// </remarks>
+    public static Source<T> FromTask<T>(Task<T> task)
+    {
+        ArgumentNullException.ThrowIfNull(task);
+
+        return new Source<T>(LocalStageChain.Of(LocalStageDescriptor.FromTask(task)));
+    }
+
+    /// <summary>Starts a source that fails without emitting anything.</summary>
+    /// <typeparam name="T">The element type the graph downstream of it is typed by.</typeparam>
+    /// <param name="exception">The failure every run of the graph reports.</param>
+    /// <returns>The source, ready to be extended with operators.</returns>
+    /// <exception cref="ArgumentNullException"><paramref name="exception"/> is <see langword="null"/>.</exception>
+    /// <remarks>
+    /// The run faults with this very instance, so a caller that compares exceptions by identity sees the
+    /// one it supplied. The instance is shared by every run of the graph, which is what makes that identity
+    /// meaningful and also means its stack trace is the one of the most recent throw.
+    /// </remarks>
+    public static Source<T> Failed<T>(Exception exception)
+    {
+        ArgumentNullException.ThrowIfNull(exception);
+
+        return new Source<T>(LocalStageChain.Of(LocalStageDescriptor.Failed(exception)));
+    }
+
+    /// <summary>Starts a source that produces its elements from a state it carries.</summary>
+    /// <typeparam name="TState">The type of the state carried between elements.</typeparam>
+    /// <typeparam name="T">The element type.</typeparam>
+    /// <param name="seed">The state the first call receives.</param>
+    /// <param name="generator">The function producing the next element and the next state.</param>
+    /// <returns>The source, ready to be extended with operators.</returns>
+    /// <exception cref="ArgumentNullException"><paramref name="generator"/> is <see langword="null"/>.</exception>
+    /// <remarks>
+    /// <para>
+    /// Every run starts from <paramref name="seed"/> again, so two runs of one graph produce the same
+    /// elements; state the generator keeps outside its parameters is the author's to keep fresh, exactly as
+    /// for every other lambda.
+    /// </para>
+    /// <para>
+    /// The generator decides when the source ends by returning <see langword="false"/>, and nothing else
+    /// bounds it: an unfold that never says so is an endless source, which is a legitimate thing to write
+    /// and is bounded downstream by <c>Take</c>. An exception the generator throws faults the run, as any
+    /// stage's does.
+    /// </para>
+    /// </remarks>
+    public static Source<T> Unfold<TState, T>(TState seed, UnfoldGenerator<TState, T> generator)
+    {
+        ArgumentNullException.ThrowIfNull(generator);
+
+        return new Source<T>(LocalStageChain.Of(LocalStageDescriptor.Unfold(seed, generator)));
     }
 
     /// <summary>Starts a source at one named occurrence of a registered stage.</summary>

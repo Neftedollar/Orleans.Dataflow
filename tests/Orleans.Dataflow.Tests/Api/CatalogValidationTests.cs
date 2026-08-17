@@ -38,16 +38,16 @@ public sealed class CatalogValidationTests
     public void EveryChainLengthAndEveryTerminationValidates()
     {
         // The reachable shape space of this API is exactly one linear chain: a source, any number of
-        // mappings, filters, buffers and asynchronous mappings, and one of the two terminations. Sweeping
-        // it re-derives the claim that every expressible graph is valid, instead of restating a list of
-        // graphs already known to be — including for the operators added after the list was written.
-        for (int operators = 0; operators <= 12; operators++)
+        // operators, and one termination. Sweeping it re-derives the claim that every expressible graph is
+        // valid, instead of restating a list of graphs already known to be — including for the operators
+        // added after the list was written.
+        for (int operators = 0; operators <= 24; operators++)
         {
             Source<long> source = Source.From<long>([1L, 2L, 3L]);
 
             for (int index = 0; index < operators; index++)
             {
-                source = (index % 5) switch
+                source = (index % 11) switch
                 {
                     0 => source.Select(value => value + 1),
                     1 => source.Where(value => value > 0),
@@ -55,25 +55,40 @@ public sealed class CatalogValidationTests
                     3 => source.SelectAsync(
                         new ParallelismOptions { MaxConcurrency = index + 1 },
                         (value, _) => Task.FromResult(value)),
-                    _ => source.SelectAsyncUnordered(
+                    4 => source.SelectAsyncUnordered(
                         new ParallelismOptions { MaxConcurrency = index + 1 },
                         (value, _) => Task.FromResult(value)),
+                    5 => source.Scan(0L, (sum, value) => sum + value),
+                    6 => source.Take(index + 100),
+                    7 => source.Skip(index),
+                    8 => source.TakeWhile(value => value < long.MaxValue),
+                    9 => source.TakeThrough(value => value < long.MaxValue),
+                    _ => source.Distinct(new DistinctOptions { MaxTrackedKeys = index + 1 }),
                 };
             }
 
-            RunnableGraph discarded = source.To(Sink.Ignore<long>());
-            RunnableGraph counted = source.To(s => s.Aggregate(0L, (sum, value) => sum + value), "total", out ResultSlot<long> _);
+            foreach ((string name, RunnableGraph graph) in Terminations(source))
+            {
+                Assert.Equal(operators + 2, graph.Document.Nodes.Count);
+                Assert.Equal(operators + 1, graph.Document.Edges.Count);
+                Assert.True(
+                    GraphCompiler.Validate(graph.Document, LocalStageCatalog.Instance).IsValid,
+                    $"{name} chain of {operators}");
+            }
+        }
+    }
 
-            Assert.Equal(operators + 2, discarded.Document.Nodes.Count);
-            Assert.Equal(operators + 1, discarded.Document.Edges.Count);
-            Assert.Equal(operators + 2, counted.Document.Nodes.Count);
+    [Fact]
+    public void EverySourceTheApiCanStartFromValidates()
+    {
+        // The other end of the same sweep. Every source is closed with the same discarding sink, so what
+        // is under test is the source alone.
+        foreach ((string name, RunnableGraph graph) in Sources())
+        {
+            GraphValidationReport report = GraphCompiler.Validate(graph.Document, LocalStageCatalog.Instance);
 
-            Assert.True(
-                GraphCompiler.Validate(discarded.Document, LocalStageCatalog.Instance).IsValid,
-                $"discarded chain of {operators}");
-            Assert.True(
-                GraphCompiler.Validate(counted.Document, LocalStageCatalog.Instance).IsValid,
-                $"counted chain of {operators}");
+            Assert.True(report.IsValid, $"{name}: {report}");
+            Assert.Equal(2, graph.Document.Nodes.Count);
         }
     }
 
@@ -109,20 +124,63 @@ public sealed class CatalogValidationTests
     }
 
     [Fact]
-    public void TheCatalogDeclaresExactlyTheEightLocalStages()
+    public void TheCatalogDeclaresExactlyTheLocalStages()
     {
+        // Spelled out rather than derived, and in the catalog's own canonical order. The catalog is built
+        // from the enumeration of shapes, so a list derived the same way would agree with it whatever
+        // either said; this list is the independent statement of what the vocabulary is.
         Assert.Equal(
             [
                 LocalStage("buffer"),
+                LocalStage("count"),
+                LocalStage("distinct"),
+                LocalStage("empty"),
+                LocalStage("failed"),
+                LocalStage("first"),
+                LocalStage("first-or-default"),
                 LocalStage("fold"),
+                LocalStage("for-each"),
+                LocalStage("for-each-async"),
                 LocalStage("from-enumerable"),
+                LocalStage("from-task"),
                 LocalStage("ignore"),
+                LocalStage("range"),
+                LocalStage("repeat"),
+                LocalStage("scan"),
                 LocalStage("select"),
                 LocalStage("select-async"),
                 LocalStage("select-async-unordered"),
+                LocalStage("single"),
+                LocalStage("skip"),
+                LocalStage("skip-while"),
+                LocalStage("take"),
+                LocalStage("take-through"),
+                LocalStage("take-while"),
+                LocalStage("unfold"),
                 LocalStage("where"),
             ],
             LocalStageCatalog.Instance.Specifications.Select(specification => specification.Stage));
+    }
+
+    [Fact]
+    public void EveryStageDeclaresThePortsItsPlaceInAChainImplies()
+    {
+        // The ports are derived from where a shape stands, so this is where that derivation is checked
+        // against a list written by hand: a source consumes nothing, a sink produces nothing, and
+        // everything else does both. A shape that moved between the three would keep validating and start
+        // executing somewhere it cannot stand.
+        string[] sources =
+            ["empty", "failed", "from-enumerable", "from-task", "range", "repeat", "single", "unfold"];
+        string[] sinks =
+            ["count", "first", "first-or-default", "fold", "for-each", "for-each-async", "ignore"];
+
+        foreach (StageSpecification specification in LocalStageCatalog.Instance.Specifications)
+        {
+            string stage = specification.Stage.Stage.Value;
+
+            Assert.Equal(sources.Contains(stage) ? 0 : 1, specification.InputPorts.Count);
+            Assert.Equal(sinks.Contains(stage) ? 0 : 1, specification.OutputPorts.Count);
+        }
     }
 
     [Fact]
@@ -170,12 +228,31 @@ public sealed class CatalogValidationTests
             new Dictionary<string, string>(StringComparer.Ordinal)
             {
                 ["buffer"] = "local-buffer-parameters",
+                ["count"] = "local-parameters",
+                ["distinct"] = "local-distinct-parameters",
+                ["empty"] = "local-parameters",
+                ["failed"] = "local-parameters",
+                ["first"] = "local-parameters",
+                ["first-or-default"] = "local-parameters",
                 ["fold"] = "local-parameters",
+                ["for-each"] = "local-parameters",
+                ["for-each-async"] = "local-parallelism-parameters",
                 ["from-enumerable"] = "local-parameters",
+                ["from-task"] = "local-parameters",
                 ["ignore"] = "local-parameters",
+                ["range"] = "local-range-parameters",
+                ["repeat"] = "local-count-parameters",
+                ["scan"] = "local-parameters",
                 ["select"] = "local-parameters",
                 ["select-async"] = "local-parallelism-parameters",
                 ["select-async-unordered"] = "local-parallelism-parameters",
+                ["single"] = "local-parameters",
+                ["skip"] = "local-count-parameters",
+                ["skip-while"] = "local-parameters",
+                ["take"] = "local-count-parameters",
+                ["take-through"] = "local-parameters",
+                ["take-while"] = "local-parameters",
+                ["unfold"] = "local-parameters",
                 ["where"] = "local-parameters",
             },
             contracts);
@@ -215,18 +292,25 @@ public sealed class CatalogValidationTests
                     Assert.False(port.IsIgnorable);
                 });
 
+            // Two opaque result contracts and not one: 'local-fold-result' is the identity a fold's result
+            // port has always declared, and a durable contract identifier is not renamed to cover sinks
+            // that do not fold, so the sinks that arrived later declare the general one instead.
             Assert.All(
                 specification.ResultPorts,
                 port =>
                 {
                     Assert.Equal("result", port.Id.Value);
-                    Assert.Equal(Contract("local-fold-result"), port.ResultContract);
+                    Assert.Equal(
+                        specification.Stage.Stage.Value == "fold"
+                            ? Contract("local-fold-result")
+                            : Contract("local-result"),
+                        port.ResultContract);
                 });
         }
     }
 
     [Fact]
-    public void OnlyTheFoldDeclaresAResultPort()
+    public void OnlyTheResultBearingSinksDeclareAResultPort()
     {
         Dictionary<string, int> resultPorts = LocalStageCatalog.Instance.Specifications.ToDictionary(
             specification => specification.Stage.Stage.Value,
@@ -237,12 +321,31 @@ public sealed class CatalogValidationTests
             new Dictionary<string, int>(StringComparer.Ordinal)
             {
                 ["buffer"] = 0,
+                ["count"] = 1,
+                ["distinct"] = 0,
+                ["empty"] = 0,
+                ["failed"] = 0,
+                ["first"] = 1,
+                ["first-or-default"] = 1,
                 ["fold"] = 1,
+                ["for-each"] = 0,
+                ["for-each-async"] = 0,
                 ["from-enumerable"] = 0,
+                ["from-task"] = 0,
                 ["ignore"] = 0,
+                ["range"] = 0,
+                ["repeat"] = 0,
+                ["scan"] = 0,
                 ["select"] = 0,
                 ["select-async"] = 0,
                 ["select-async-unordered"] = 0,
+                ["single"] = 0,
+                ["skip"] = 0,
+                ["skip-while"] = 0,
+                ["take"] = 0,
+                ["take-through"] = 0,
+                ["take-while"] = 0,
+                ["unfold"] = 0,
                 ["where"] = 0,
             },
             resultPorts);
@@ -352,6 +455,92 @@ public sealed class CatalogValidationTests
                 .To(s => s.Aggregate(0m, (sum, total) => sum + total), "total", out ResultSlot<decimal> _));
 
         yield return ("twelve occurrences", LongChain());
+
+        yield return (
+            "source through every counted operator to ignore",
+            Source.From(OrderEvents)
+                .Skip(1)
+                .Take(2)
+                .Distinct(new DistinctOptions { MaxTrackedKeys = 16 })
+                .To(Sink.Ignore<OrderCreated>()));
+
+        yield return (
+            "source through every predicate operator to for-each",
+            Source.From(OrderEvents)
+                .TakeWhile(order => order.IsValid)
+                .TakeThrough(order => order.Total < 100m)
+                .SkipWhile(order => order.Total < 0m)
+                .To(s => s.ForEach(_ => { })));
+
+        yield return (
+            "source scanned to first",
+            Source.From(OrderEvents)
+                .Scan(0m, (total, order) => total + order.Total)
+                .To(s => s.First(), "head", out ResultSlot<decimal> _));
+
+        yield return (
+            "source to first-or-default",
+            Source.From(OrderEvents).To(s => s.FirstOrDefault(), "head", out ResultSlot<OrderCreated?> _));
+
+        yield return (
+            "source to count",
+            Source.From(OrderEvents).To(s => s.Count(), "counted", out ResultSlot<long> _));
+
+        yield return (
+            "source to an asynchronous callback sink",
+            Source.From(OrderEvents)
+                .To(s => s.ForEachAsync(
+                    new ParallelismOptions { MaxConcurrency = 2 },
+                    (_, _) => Task.CompletedTask)));
+
+        foreach ((string name, RunnableGraph graph) in Sources())
+        {
+            yield return (name, graph);
+        }
+    }
+
+    /// <summary>Builds one graph per source the API can start from, closed by the same discarding sink.</summary>
+    /// <returns>The named graphs.</returns>
+    private static IEnumerable<(string Name, RunnableGraph Graph)> Sources()
+    {
+        yield return ("empty source", Source.Empty<int>().To(Sink.Ignore<int>()));
+        yield return ("single-element source", Source.Single(1).To(Sink.Ignore<int>()));
+        yield return ("repeating source", Source.Repeat(1, 3).To(Sink.Ignore<int>()));
+        yield return ("range source", Source.Range(-1, 4).To(Sink.Ignore<int>()));
+        yield return ("task source", Source.FromTask(Task.FromResult(1)).To(Sink.Ignore<int>()));
+        yield return (
+            "failed source",
+            Source.Failed<int>(new InvalidOperationException("no")).To(Sink.Ignore<int>()));
+        yield return (
+            "unfolded source",
+            Source.Unfold(
+                    0,
+                    (int state, out int value, out int next) =>
+                    {
+                        value = state;
+                        next = state + 1;
+
+                        return state < 3;
+                    })
+                .To(Sink.Ignore<int>()));
+    }
+
+    /// <summary>Closes one chain with each termination the API offers.</summary>
+    /// <param name="source">The chain to close.</param>
+    /// <returns>The named graphs.</returns>
+    private static IEnumerable<(string Name, RunnableGraph Graph)> Terminations(Source<long> source)
+    {
+        yield return ("discarded", source.To(Sink.Ignore<long>()));
+        yield return (
+            "folded",
+            source.To(s => s.Aggregate(0L, (sum, value) => sum + value), "total", out ResultSlot<long> _));
+        yield return ("called", source.To(s => s.ForEach(_ => { })));
+        yield return (
+            "called asynchronously",
+            source.To(s => s.ForEachAsync(new ParallelismOptions { MaxConcurrency = 1 }, (_, _) => Task.CompletedTask)));
+        yield return ("first", source.To(s => s.First(), "head", out ResultSlot<long> _));
+        yield return ("first or default", source.To(s => s.FirstOrDefault(), "head", out ResultSlot<long> _));
+        yield return ("counted", source.To(s => s.Count(), "counted", out ResultSlot<long> _));
     }
 
     /// <summary>Builds a chain long enough that ordinal identifier order differs from authoring order.</summary>
