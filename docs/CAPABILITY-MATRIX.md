@@ -45,7 +45,7 @@ Every row starts at **Research** and advances only together with its evidence; I
 | Operator fusion | P1 | M2 | Implemented | Compatible adjacent stages share an executor without changing element semantics. |
 | Explicit async boundary | P1 | M2 | Research | Placement/concurrency changes are visible; ordering contract remains explicit. |
 | Credit protocol across Orleans boundaries | P0 | M3 | Implemented | A call in flight is credit spent and its reply is the grant; nothing on the wire carries credit. Neither an awaited grain call nor a stream publication is counted as downstream demand: each adapter's bound is what admits the next element. |
-| Partition-aware placement | P1 | M3 | Research | Partition ownership, rebalance, ordering, and failover are specified. Half of it exists on `main` and the row does not advance on half: placement of run grains and per-key executor grains is a hosting option (cluster default, random, prefer-local, hash-based) and per-key ordering is proven, while ownership, rebalance, and failover are M3 phase 4b and a single-silo suite cannot show where activations landed. |
+| Partition-aware placement | P1 | M3 | Research | Partition ownership, rebalance, ordering, and failover are specified. Half of it exists on `main` and the row does not advance on half: placement of run grains and per-key executor grains is a hosting option (cluster default, random, prefer-local, hash-based) and per-key ordering is proven, while ownership, rebalance, and cross-silo keyed evidence are a recorded M3 deferral (see the roadmap) and a single-silo suite cannot show where activations landed. |
 | Pause, resume, drain, shutdown, and abort | P1 | M2 | Implemented | Each control has distinct state transitions and in-flight behavior. |
 | Kill switch and external shutdown control | P1 | M2 | Implemented | Single-run control is a RunHandle intrinsic (ADR 0004): shutdown drains, disposal cancels; a switch shared across runs is a separate documented contract. |
 
@@ -142,7 +142,7 @@ C# names should follow .NET expectations where possible. If the Akka.NET behavio
 | Reminder trigger source | P1 | M3 | Implemented | Definition survives restart, but missed ticks are not replayed; a tick reactivating a grain with no live run unregisters the reminder. |
 | Observer bridge | P2 | M3 | Implemented | Best-effort made observable: every push answers Accepted/Dropped/Closed/Failed; per-run bridge identity; no replay. |
 | Broadcast Channel bridge | P2 | M3 | Implemented | Both directions exist: a publication sink whose declared `FireAndForgetDelivery` is checked against the silo's provider, and a subscription source whose relay grain per channel key holds the delivery registry of the runs listening to it. Best-effort and no history are surfaced rather than described — a publication with nothing attached is dropped silently, one that finds a full ingress is dropped or fails by the declared policy, and the backpressuring policy is refused because a shared relay cannot honor it. Consumption is confined to one package-owned channel namespace, which is Orleans' implicit-only subscription showing through and not a choice; probed, along with the per-key activation, the per-provider subscription callback, and the untyped attach the relay depends on. |
-| Durable graph coordinator | P0 | M3 | Research | Single logical ownership, failover fencing, and run state transitions. |
+| Durable graph coordinator | P0 | M3 | Implemented | Single logical ownership and failover fencing are proven under silo death: one activation cluster-wide, epochs monotonic across kills, deactivation, and cluster-wide collection, a superseded writer refused by the store's ETag while the fresh activation reads the truth. The coordinator persists one counter; the durable store behind the provider name is the deployment's, and the tests prove the fencing against a real ETag-enforcing store precisely because Orleans' memory storage dies with its silo (measured). Run state transitions stay the run grain's, unpersisted until M5. |
 | Checkpointed stage state | P1 | M5 | Research | Schema version, atomicity boundary, and migration policy. |
 | Rolling upgrade/catalog negotiation | P1 | M5 | Research | A run never executes an incompatible stage catalog silently. |
 
@@ -168,7 +168,7 @@ C# names should follow .NET expectations where possible. If the Akka.NET behavio
 | Virtual/manual clock for time operators | P1 | M2 | Research |
 | Lifecycle and materialized-value assertions | P0 | M2 | Implemented |
 | Fault injection at source/stage/sink/boundary | P1 | M3-M5 | Research |
-| Multi-silo placement/failover harness | P0 | M3 | Research |
+| Multi-silo placement/failover harness | P0 | M3 | Implemented | A three-silo in-process fixture with tuned-down membership, a silo-surviving ETag store, kill-restore per test, and helpers that locate and count activations cluster-wide; ten failover tests run on it. Measured and recorded in its remarks: an in-process kill is self-announced, so the tuning bounds only the unannounced path. |
 | OpenTelemetry metrics, traces, and context propagation | P1 | M5 | Research |
 | Stage/run monitor snapshots | P1 | M5 | Research |
 | Compatibility and golden serialization tests | P0 | M0 onward | Implemented |

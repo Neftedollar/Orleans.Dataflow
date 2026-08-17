@@ -69,7 +69,19 @@ Exit criteria:
 - every terminal path releases enumerators, resources, registrations, and in-flight work;
 - a graph can be materialized more than once without sharing accidental stage state.
 
-## M3 — Orleans runtime
+## M3 — Orleans runtime (closed 2026-08-17; three recorded deferrals)
+
+Deferred deliberately, with their rationale: cross-silo evidence for the
+distributed keyed stage (executors proven to land on and answer from more
+than one silo, cancellation and the credit bound observed across a real
+hop) moves to the milestone that builds partition ownership and rebalance
+— the capability row honestly says Research, and the protocol itself is
+transport-independent by construction; the observer-push completion
+channel remains an open question beside the polling that phase 4
+hardened; and the result-slot size cap is carried to M4, where
+Collect-shaped terminals make it unavoidable. The .NET event source is
+not deferred but settled: the matrix records it as a documented one-line
+IObservable wrap, deliberately not a second stage.
 
 Deliverables:
 

@@ -394,10 +394,16 @@ uses a mailbox as an unbounded buffer.
 ## Open questions (answered by their phase, not guessed now)
 
 1. Remote `RunHandle`: polling versus observer for completion/results, and
-   what `GetValueAsync` latency contract a remote slot carries.
+   what `GetValueAsync` latency contract a remote slot carries. **Half
+   settled by M3's close**: polling won phase 1 and phase 4 hardened it —
+   an undelivered poll is retried rather than surfaced, because silence is
+   not a fact about the run — while an observer push channel remains
+   unbuilt and moves to M4+ with the rest of this question.
 2. Whether the run grain streams large results or caps result-slot payload
    sizes (Collect over a cluster is a foot-gun; a cap with a named error is
-   the likely answer).
+   the likely answer). **Carried past M3 deliberately**: no cap exists yet
+   and the foot-gun stands; M4's operator breadth (Collect-like terminals)
+   is where the answer becomes unavoidable.
 3. ~~The exact credit protocol wire shape for phase 4 (grant-on-reply versus
    explicit credit messages)~~ **Resolved by probe (phase 4a)**: grant-on-reply,
    in its strongest form — the reply *is* the grant and there is no credit
