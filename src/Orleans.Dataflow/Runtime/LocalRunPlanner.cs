@@ -577,10 +577,75 @@ internal static class LocalRunPlanner
                             Fuse(LocalElementStage.SkipWhile(Predicate(descriptor)));
                             break;
                         case LocalStageKind.Distinct when !first && !last:
+                        {
+                            DistinctOptions deduplication = Distinct(declaration);
+
                             Fuse(LocalElementStage.Distinct(
-                                Distinct(declaration),
+                                deduplication.MaxTrackedKeys,
+                                deduplication.OverflowPolicy is KeyOverflowPolicy.EvictOldest,
+                                LocalDelegateAdapter.Comparer(descriptor.Behavior)));
+
+                            break;
+                        }
+
+                        case LocalStageKind.DeduplicateConsecutive when !first && !last:
+                            Fuse(LocalElementStage.DeduplicateConsecutive(
                                 LocalDelegateAdapter.Comparer(descriptor.Behavior)));
                             break;
+                        case LocalStageKind.SelectMany when !first && !last:
+                            Fuse(LocalElementStage.SelectMany(
+                                LocalDelegateAdapter.Flattener(descriptor.Behavior)));
+                            break;
+                        case LocalStageKind.Grouped when !first && !last:
+                            Fuse(LocalElementStage.Grouped(
+                                Count(declaration),
+                                LocalDelegateAdapter.Freeze(descriptor.Behavior, descriptor.Kind)));
+                            break;
+                        case LocalStageKind.Sliding when !first && !last:
+                        {
+                            (int size, int step) = Windowing(declaration);
+
+                            Fuse(LocalElementStage.Sliding(
+                                size,
+                                step,
+                                LocalDelegateAdapter.Freeze(descriptor.Behavior, descriptor.Kind)));
+
+                            break;
+                        }
+
+                        case LocalStageKind.GroupedWithin when !first && !last:
+                        {
+                            (int maxElements, TimeSpan window) = Batching(declaration);
+
+                            // A boundary of its own, like an asynchronous stage and unlike every other stage
+                            // that reads a clock. This one has to emit while nothing is arriving, and the
+                            // only segment a timer can wake is one asleep on its own input channel: fused
+                            // into a source's loop it would sit behind whatever the source is doing, and a
+                            // window that closed would wait for the next element to notice it, which is the
+                            // one case this operator exists for.
+                            Open(pending ?? LocalBoundary.Handoff);
+                            Fuse(LocalAttachedStages.GroupedWithin(
+                                maxElements,
+                                maxWeight: 0,
+                                window,
+                                cost: null,
+                                LocalDelegateAdapter.Freeze(descriptor.Behavior, descriptor.Kind)));
+
+                            break;
+                        }
+
+                        case LocalStageKind.GroupedWeightedWithin when !first && !last:
+                        {
+                            (int maxElements, int maxWeight, TimeSpan window) = Weighing(declaration);
+                            (Func<object?, int> weight, Func<object?, object?> freeze) =
+                                LocalDelegateAdapter.Weighted(descriptor.Behavior);
+
+                            Open(pending ?? LocalBoundary.Handoff);
+                            Fuse(LocalAttachedStages.GroupedWithin(maxElements, maxWeight, window, weight, freeze));
+
+                            break;
+                        }
+
                         case LocalStageKind.Buffer when !first && !last:
                             Settle();
                             pending = Boundary(declaration);
@@ -710,7 +775,7 @@ internal static class LocalRunPlanner
                             Settle();
                             terminal = LocalTerminal.Collecting(
                                 Collected(declaration),
-                                LocalDelegateAdapter.Freeze(descriptor.Behavior));
+                                LocalDelegateAdapter.Freeze(descriptor.Behavior, descriptor.Kind));
                             seedFactory = static () => new List<object?>();
                             produces = true;
                             break;
@@ -1688,11 +1753,50 @@ internal static class LocalRunPlanner
     /// <param name="node">The node as the document declares it.</param>
     /// <returns>The greatest number of keys the stage may remember.</returns>
     /// <exception cref="InvalidOperationException">The payload is not a distinct payload.</exception>
-    private static int Distinct(StageNode node) =>
+    private static DistinctOptions Distinct(StageNode node) =>
         LocalDistinctParameters.TryRead(node.Parameters, out DistinctOptions? options, out IReadOnlyList<string> violations)
-            ? options!.MaxTrackedKeys
+            ? options!
             : throw Foreign(
                 $"the distinct stage '{node.Id}' carries parameters this runtime cannot read: {string.Join("; ", violations)}");
+
+    /// <summary>Reads a sliding window's payload as the size and step it declares.</summary>
+    /// <param name="node">The node as the document declares it.</param>
+    /// <returns>How many elements a window carries and how far it advances.</returns>
+    /// <exception cref="InvalidOperationException">The payload is not a sliding-window payload.</exception>
+    private static (int Size, int Step) Windowing(StageNode node) =>
+        LocalWindowParameters.TryRead(node.Parameters, out int size, out int step, out IReadOnlyList<string> violations)
+            ? (size, step)
+            : throw Foreign(
+                $"the sliding stage '{node.Id}' carries parameters this runtime cannot read: {string.Join("; ", violations)}");
+
+    /// <summary>Reads a batch's payload as the element bound and the window it declares.</summary>
+    /// <param name="node">The node as the document declares it.</param>
+    /// <returns>How many elements close a group and how long one stays open.</returns>
+    /// <exception cref="InvalidOperationException">The payload is not a grouped-within payload.</exception>
+    private static (int MaxElements, TimeSpan Window) Batching(StageNode node) =>
+        LocalGroupedWithinParameters.TryRead(
+            node.Parameters,
+            out int maxElements,
+            out TimeSpan window,
+            out IReadOnlyList<string> violations)
+            ? (maxElements, window)
+            : throw Foreign(
+                $"the grouped-within stage '{node.Id}' carries parameters this runtime cannot read: {string.Join("; ", violations)}");
+
+    /// <summary>Reads a weighted batch's payload as the three bounds it declares.</summary>
+    /// <param name="node">The node as the document declares it.</param>
+    /// <returns>How many elements, how much weight, and how long a group stays open.</returns>
+    /// <exception cref="InvalidOperationException">The payload is not a weighted-batch payload.</exception>
+    private static (int MaxElements, int MaxWeight, TimeSpan Window) Weighing(StageNode node) =>
+        LocalGroupedWeightedParameters.TryRead(
+            node.Parameters,
+            out int maxElements,
+            out int maxWeight,
+            out TimeSpan window,
+            out IReadOnlyList<string> violations)
+            ? (maxElements, maxWeight, window)
+            : throw Foreign(
+                $"the weighted batch '{node.Id}' carries parameters this runtime cannot read: {string.Join("; ", violations)}");
 
     /// <summary>Reads a node's binding as the predicate its shape requires.</summary>
     /// <param name="descriptor">The occurrence, which carries the kind and the bound delegate.</param>

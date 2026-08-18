@@ -1442,3 +1442,265 @@ host's; a registered stage receives the run's tokens and whatever its own
 provider gave it, and the Orleans path materializes with `TimeProvider.System`
 because no stage it can execute reads a clock at all. A silo-wide controlled
 clock is not a thing this milestone has.
+
+## M4.3 wave 2 (batching, flattening, deduplication, sequence edits) — as implemented
+
+Wave 1 gave the runtime a clock. This wave gives it two things it had never
+had: a stage that **holds elements back** and hands them over when its stream
+ends, and a stage that answers one element with **several**. Everything below
+follows from those two, plus one consequence of the first that needed the
+clock — a group closed by a window rather than by a count.
+
+### Three seams, and why each of them is the smallest one
+
+Until this wave every stage of this vocabulary was a function from one element
+to at most one element, applied by one loop that walked a segment's fused
+stages in order. Three additions widen that, and each is a widening of the
+existing walk rather than a new pump.
+
+**A residue at the end of a stream.** `LocalElementStage.Flush` asks a stage
+what it is still holding, and the run asks it once per stage, in flow order, on
+the segment's own thread, after the loop that fed it has ended. Each residue is
+pushed through the stages *below* the one that gave it — the same walk an
+element takes, entered part way down — so a group is an ordinary element to
+everything downstream of the batch that built it, including to a `Take` that
+may end the stream on it. Nothing else in the vocabulary answers this question,
+and nothing else pays for it.
+
+**A sequence instead of an element.** `LocalStageOutcome.EmitMany` hands the
+run an enumerator rather than an element, and the run owns it from that moment:
+it advances it, pushes each element it yields through the stages below, and
+releases it on every path including the ones where a stage below ends the
+stream part way through. The run's token and the pause gate are examined
+between two inner elements exactly as the source pump examines them between two
+pulls — which is what makes an author's endless inner sequence a stream this
+runtime paces rather than a loop a run disappears into. The recursion is one
+frame per flattening stage in a segment and never one per element.
+
+**A wake with no element behind it.** A batch closed by a clock has to emit
+while nothing is arriving, and emitting is the one thing a timer of this
+runtime must never do itself: two threads walking one segment's stages is not a
+race worth having. So the timer signals — through the very `LocalWakeup` latch
+an asynchronous segment already sleeps on beside its input — and the segment
+that owns the stage wakes, asks `Due`, and emits. One thread still builds,
+closes, and hands over every group, so the stage needs no lock.
+
+The third seam has a price and it is stated rather than hidden: **a
+grouped-within is a boundary.** It is opened into a segment of its own with one
+bounded handoff in front of it, exactly as an asynchronous stage is, because
+only a segment waiting on its own input channel can be woken. Fused into a
+source's loop it would sit behind whatever the source was doing, and a window
+that closed would wait for the next element to notice it — which is the one
+case the operator exists for. `Grouped` and `Sliding` fuse like any other
+stage, and the difference is measured rather than described: a run of the first
+pulls its source exactly as far as the open group, and a run of the second runs
+ahead by its handoff.
+
+**A boundary is not the same thing as a relieving boundary.** A cycle is legal
+only when it passes a declared buffer whose overflow policy is not
+backpressure, and a grouped-within's handoff waits like every other boundary
+this engine has, so a loop relieved only by one is refused exactly as a loop
+relieved only by a delay is. That predicate is unchanged and this wave adds
+nothing to it.
+
+### What the residue walk is, exactly
+
+The rule is one sentence: **when a segment's loop ends without being cancelled,
+every fused stage is asked for its residue in flow order, and each answer
+travels through the stages below the one that gave it.** Asking every stage
+rather than only the ones below whatever ended the stream is what makes the
+answer independent of fusion — and three existing mechanisms are what make it
+correct rather than merely convenient.
+
+- **A spent bound refuses.** `Grouped(3).Take(1)` emits one group: the take's
+  own arithmetic refuses the residue offered to it afterwards, exactly as it
+  refuses any element past its bound. `Take(5).Grouped(3)` emits `[1,2,3]` and
+  `[4,5]`, because the take ending the stream *is* the batch's end of stream.
+- **A closed boundary refuses.** A segment stopped from below has had its
+  output channel completed before it was marked stopped, so a residue offered
+  into it is refused and abandoned — the same thing this engine already does
+  everywhere for an element arriving at a channel a downstream completion
+  closed, and not counted as a drop for the same reason.
+- **The walk stops at the first residue that ends the stream.** Both the
+  end-of-stream walk and the window walk return as soon as pushing a residue
+  answers "the stream is over", so no stage is asked after the stream it feeds
+  has ended.
+
+`TakeWhile` was made to latch its rejection as part of this wave, and it is
+worth being honest about why: **nothing reaches it twice today.** The third
+rule above is what guarantees that, and it is a property of two loops in
+`LocalRun` rather than of the stage. Every other stage that ends a stream
+already refuses on its own — a spent take by arithmetic, a closed window by
+elapsed time — so the latch puts the invariant where a reader looks for it
+instead of leaving one stage relying on its caller. A test asserts the
+reachable half of the claim; the latch itself is defensive and is recorded as
+defensive.
+
+A cancellation asks for no residue at all: what a batch was holding is
+abandoned with everything else in flight. A shutdown does ask, because a
+shutdown ends the stream as running out would and the elements in the group
+were admitted.
+
+### The operators, and what each one turned out to mean
+
+**`Grouped(n)` is the simple one and its only interesting moment is the end.**
+A group is emitted the moment it fills, so the stage holds at most `n` elements
+and that is the whole of its bound. The last group is the only one that may be
+partial, an empty group is never emitted, and a stream whose length is a
+multiple of `n` gives exactly the groups it filled.
+
+**`Sliding(n, step)` is three operators wearing one name**, and the relation
+between the two numbers is which one an author gets: a step below the size
+overlaps windows, a step equal to it partitions the stream, and a step above it
+samples one — the elements between two windows are counted past rather than
+buffered, so a sampling window costs no more memory than a partitioning one.
+The end-of-stream rule is the part worth stating: **the buffer leaves as a final
+window only if it holds an element no window has carried.** That single rule
+gives both familiar behaviours without a special case for either — a stream
+shorter than the window emits everything it had, and a stream that ended in the
+middle of an overlap emits nothing new, because everything it still holds has
+already been seen.
+
+**`GroupedWithin(n, window)` closes a group on size or on time, whichever comes
+first, and the window belongs to the group.** It starts when the group's first
+element arrives and it is gone the moment the group is emitted, which makes
+"an empty window emits nothing" a consequence rather than a rule: with no group
+open there is no window running, so a stream that goes quiet for an hour costs
+one disarmed timer and the group after the quiet is timed from its own first
+element. The timer follows wave 1's discipline exactly — created disarmed,
+armed when a group opens, clamped to what the clock accepts, and a fire is a
+question rather than a verdict, so a wake that finds the window still open
+re-arms for the remainder.
+
+**The weighted form closes the group before the element that would break its
+bound**, so the bound is never exceeded rather than exceeded once per group.
+That element starts the next group and the next window is timed from *its*
+arrival, which is the only reading under which the two bounds do not
+contradict each other. The cost function runs once per element, on the
+segment's own thread, before the element joins anything, and two answers fail
+the run for the reasons a throttle's do: a negative weight, which would let an
+element lighten a group, and a weight above the whole bound, which no group
+could ever carry — waiting for one that could would never end.
+
+**`SelectMany` is concat-map and is bounded by construction.** One inner
+sequence is read to its end before the next element is asked for, so the order
+of the result is a function of the input alone; a function answering an empty
+sequence drops its element, which makes filtering a special case of flattening
+rather than a second operator; and a function answering `null` fails the run
+rather than being read as "nothing", because reading one meaning into the other
+hides a mistake that costs elements. Nothing here ever holds a whole inner
+sequence, which is the property that makes the operator safe to write over an
+author's generator.
+
+**`DeduplicateConsecutive` is the deduplicator that needs no bound**, because
+its bound is one element and is a fact about the shape rather than a number an
+author chose. It collapses runs and never compares across them.
+
+**`Distinct` gained a policy, and the policy changes what the operator means.**
+`Fail` is the default and is what the operator promised when it had no choice:
+everything emitted was the first of its key, and a bound sized on a wrong
+assumption reports that instead of quietly becoming something weaker.
+`EvictOldest` is the deliberate weakening — an element whose key was evicted is
+emitted a second time if it arrives again, so the stream is distinct over a
+window of the last `MaxTrackedKeys` keys and not over its history. Age is when
+a key was *first* remembered rather than when it was last seen, so a repeat
+does not refresh a key; the set and a queue of the same keys are kept side by
+side, hold exactly the same keys at every moment, and an eviction is therefore
+the head of the queue and needs no search.
+
+**The sequence edits add no stage at all.** `Append` is `Concat` under the
+name the vocabulary uses and builds a byte-identical document; `Prepend` is the
+same junction with its inputs swapped, which is what "before" means when
+argument order is identity-bearing; and `DivertTo` is a two-legged partition
+with the main line on its first leg — the same shape `AlsoTo` gives a
+broadcast, and the reason the receiver stays an expression rather than becoming
+one branch of a closed graph. Each therefore inherits its junction's contract
+whole, including the parts that cost something: a concat's later input is
+running and parked in its own bounded channel while the earlier one plays out,
+and a partition holds one element and waits for the leg that element belongs
+on, so a slow diverted branch holds the main line up for exactly that long.
+
+### The engine gap: bounded-parallel flattening
+
+**`MergeMap(maxConcurrency)` is not implemented, and it is not one call away.**
+The matrix row says "concat-map, merge-map with bounded parallelism" and half
+of it ships here; this is what the other half would cost, measured against the
+code rather than guessed.
+
+The asynchronous pump is a window of `Task<object?>`: it admits up to the
+declared number of callbacks, frees a slot when a *result is emitted*, and
+sleeps on "an element arrived" or "a callback finished". Every one of those
+three is wrong for a flattening stage. A merge-map's window holds
+*enumerations* rather than tasks; a slot is freed when an enumeration **ends**
+rather than when it produces; and the pump has to sleep on "any of N
+enumerations has an element", which is a different wait — `Task.WaitAny` over
+one pending `MoveNextAsync` per live inner sequence, re-armed per inner
+element. Emission order is then arrival order across N live enumerations, which
+is a statement no existing pump makes.
+
+That is a new pump shape rather than a variation of one, roughly the size of
+the asynchronous pump itself, and it brings its own control-plane surface:
+where a pause parks when three inner sequences are mid-flight, what a shutdown
+drains, and what disposal must return from. Shipping it beside four batching
+operators and a flattening one would have meant shipping it without that
+surface proven, so it is named here and left for a wave of its own.
+
+**What an author can write today, and what it costs.** `SelectAsyncUnordered(n,
+x => collect(x))` followed by `SelectMany(batch => batch)` runs `n` inner
+computations at once and flattens their results — but it materializes each
+inner result completely, so it is bounded only by what the author knows about
+the inner sizes. That is an honest workaround for small inners and an honest
+non-answer for a stream of sequences, which is why it is written here rather
+than offered as an overload.
+
+### What this wave does not do
+
+**No graph-valued flatten.** `SelectMany` flattens a `Func<T,IEnumerable<TNext>>`
+— a local sub-enumeration on the segment's own thread. A source of sources, in
+which each inner stream is a graph with its own stages, boundaries, and
+junctions, is a different feature: it needs sub-graphs materialized per element
+and torn down per element, which is nothing this engine has a shape for. The
+matrix words "concat-map, merge-map" are the operator family and not a promise
+of graph-valued flattening.
+
+**No asynchronous inner sequence.** `Func<T,IAsyncEnumerable<TNext>>` is not
+offered. The mechanism is straightforward — the segment's thread already blocks
+on this runtime's own waits, so an inner `MoveNextAsync` would take the same
+`Idle`/`Busy` bracket every other wait takes — but "straightforward" is not
+"tested", and the pause, shutdown, and cancellation behaviour of a wait inside
+an inner enumeration is exactly the surface that has to be proven rather than
+argued.
+
+**Termination watch and monitor are deferred, with a reason each.**
+`WatchTermination` wants to report *how* a stream ended as a value, and ADR
+0002's slot model is what makes that awkward rather than obvious: a result slot
+resolves at the end of a run and **carries the run's outcome**, so a slot typed
+"how it ended" would fault when the run failed instead of resolving to
+"failed". The honest shape is therefore a *control* — resolved when the run
+starts, carrying a task the author awaits — and the contract that control would
+have to state is the one that needs measuring: a failure anywhere cancels the
+run's token, so a stage above the failure sees cancellation rather than that
+failure, and the run's own `Completion` is where the failure is. That is a
+statement worth proving before it is published. `Monitor` is deferred to where
+it already belongs: the matrix's "Stage/run monitor snapshots" row targets M5,
+`RunHandle.DroppedElements` is already internal and already says a monitor is
+what an author will read it through, and inventing a second, weaker snapshot
+shape here would fix that design by accident.
+
+**A completion callback needs no operator.** `RunHandle.Completion` is the
+run's own task and reports exactly how the run ended — success, the author's
+own exception unwrapped, or cancellation — with the run's resources released
+and its slots settled before it transitions. A `Sink.OnComplete` beside it
+would be a second spelling of one fact.
+
+**The bounds are proven as how far a held source got**, which is the accounting
+every bounded-memory test in this suite makes: a count-closed batch's fusion is
+asserted as a source pulled exactly as far as its open group, and a timed
+batch's boundary as a source that ran ahead of it. Neither is a measurement of
+a stage's own memory.
+
+**Nothing here is proven under a fault injected mid-residue.** A stage that
+throws while the run is draining a segment's residues faults the run — the
+walk runs inside the same `try` an ordinary element does — but a partial
+residue walk, in which one stage's group was delivered and the next stage's
+was not, is reasoned about rather than measured.

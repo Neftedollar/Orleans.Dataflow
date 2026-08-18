@@ -38,6 +38,9 @@ internal static class LocalDelegateAdapter
     /// <summary>The template closed to wrap a mapping delegate.</summary>
     private static readonly MethodInfo SelectorTemplate = Template(nameof(BoxSelector));
 
+    /// <summary>The template closed to wrap a flattening delegate.</summary>
+    private static readonly MethodInfo FlattenerTemplate = Template(nameof(BoxFlattener));
+
     /// <summary>The template closed to wrap a predicate delegate.</summary>
     private static readonly MethodInfo PredicateTemplate = Template(nameof(BoxPredicate));
 
@@ -103,6 +106,35 @@ internal static class LocalDelegateAdapter
         Type[] arguments = Arguments(behavior, typeof(Func<,>), LocalStageKind.Select, "Func<TIn, TOut>");
 
         return (Func<object?, object?>)Close(SelectorTemplate, [arguments[0], arguments[1]], behavior);
+    }
+
+    /// <summary>Wraps a flattening delegate into one over boxed elements.</summary>
+    /// <param name="behavior">The bound <c>Func&lt;TIn, IEnumerable&lt;TOut&gt;&gt;</c>.</param>
+    /// <returns>The wrapped mapping, which answers a sequence rather than an element.</returns>
+    /// <exception cref="InvalidOperationException">
+    /// <paramref name="behavior"/> is not a one-argument function answering a generic sequence.
+    /// </exception>
+    /// <remarks>
+    /// The wrapper answers the non-generic <see cref="IEnumerable"/>, because the run enumerates it with
+    /// elements as <see cref="object"/> exactly as it enumerates a source's sequence. Nothing is copied and
+    /// nothing is counted here: what the author returns is handed to the run, which reads it one element at
+    /// a time under this runtime's own pause and stop discipline.
+    /// </remarks>
+    internal static Func<object?, IEnumerable> Flattener(object? behavior)
+    {
+        const string Expected = "Func<TIn, IEnumerable<TOut>>";
+
+        Type[] arguments = Arguments(behavior, typeof(Func<,>), LocalStageKind.SelectMany, Expected);
+
+        if (!arguments[1].IsGenericType || arguments[1].GetGenericTypeDefinition() != typeof(IEnumerable<>))
+        {
+            throw Mismatch(behavior, LocalStageKind.SelectMany, Expected);
+        }
+
+        return (Func<object?, IEnumerable>)Close(
+            FlattenerTemplate,
+            [arguments[0], arguments[1].GetGenericArguments()[0]],
+            behavior);
     }
 
     /// <summary>Wraps a junction's row projections into ones over boxed elements.</summary>
@@ -545,14 +577,42 @@ internal static class LocalDelegateAdapter
         throw new InvalidOperationException(
             $"A '{LocalStageKind.SinkProbe}' stage must be bound to a factory of its typed control, and this one is bound to {Describe(behavior)}.");
 
-    /// <summary>Reads a sink binding as the projection of a collected list into its result type.</summary>
+    /// <summary>Reads a binding as the projection of a list of boxed elements into its typed form.</summary>
     /// <param name="behavior">The bound projection, which the authoring surface closed over the element type.</param>
+    /// <param name="kind">The stage shape, for the diagnostic.</param>
     /// <returns>The projection.</returns>
     /// <exception cref="InvalidOperationException"><paramref name="behavior"/> is not such a projection.</exception>
-    internal static Func<object?, object?> Freeze(object? behavior) =>
+    /// <remarks>
+    /// Shared by the collecting sink and by every batching stage, because all of them face the same problem:
+    /// the run accumulates elements as <see cref="object"/> and the author declared a list of their own type,
+    /// and one closed-over projection per occurrence is what bridges the two without the run ever naming a
+    /// type it cannot see.
+    /// </remarks>
+    internal static Func<object?, object?> Freeze(object? behavior, LocalStageKind kind) =>
         behavior as Func<object?, object?> ??
         throw new InvalidOperationException(
-            $"A '{LocalStageKind.Collect}' stage must be bound to a projection of its collected elements, and this one is bound to {Describe(behavior)}.");
+            $"A '{kind}' stage must be bound to a projection of its collected elements, and this one is bound to {Describe(behavior)}.");
+
+    /// <summary>Reads a weighted batch's binding as the cost function and the projection it pairs.</summary>
+    /// <param name="behavior">The bound pair, in that order.</param>
+    /// <returns>The wrapped cost function and the projection.</returns>
+    /// <exception cref="InvalidOperationException"><paramref name="behavior"/> is not such a pair.</exception>
+    /// <remarks>
+    /// The one stage of this vocabulary that binds two delegates, which is why it binds an array rather than
+    /// a delegate: what an element weighs and how a group becomes a typed list are two different answers, and
+    /// neither is derivable from the other.
+    /// </remarks>
+    internal static (Func<object?, int> Cost, Func<object?, object?> Freeze) Weighted(object? behavior)
+    {
+        const LocalStageKind Kind = LocalStageKind.GroupedWeightedWithin;
+
+        if (behavior is not object?[] { Length: 2 } pair)
+        {
+            throw Mismatch(behavior, Kind, "pair of a Func<T, int> cost and a projection of its groups");
+        }
+
+        return (Cost(pair[0]), Freeze(pair[1], Kind));
+    }
 
     /// <summary>Bridges a channel reader into the boxed vocabulary a pull loop speaks.</summary>
     /// <param name="behavior">The bound <c>ChannelReader&lt;T&gt;</c>.</param>
@@ -662,6 +722,22 @@ internal static class LocalDelegateAdapter
     /// <remarks>Invoked only by reflection, over the type arguments recovered from the delegate itself.</remarks>
     private static Func<object?, object?> BoxSelector<TIn, TOut>(Func<TIn, TOut> selector) =>
         element => selector((TIn)element!);
+
+    /// <summary>Wraps a typed flattening mapping into one over boxed elements.</summary>
+    /// <typeparam name="TIn">The element type the mapping consumes.</typeparam>
+    /// <typeparam name="TOut">The element type the sequence it answers carries.</typeparam>
+    /// <param name="selector">The author's delegate.</param>
+    /// <returns>The wrapper.</returns>
+    /// <remarks>
+    /// Invoked only by reflection, over the type arguments recovered from the delegate itself. A function
+    /// that answers <see langword="null"/> is refused rather than read as an empty sequence: the spelling
+    /// for "this element produces nothing" is an empty sequence, and reading one meaning into the other
+    /// would hide a mistake that costs elements.
+    /// </remarks>
+    private static Func<object?, IEnumerable> BoxFlattener<TIn, TOut>(Func<TIn, IEnumerable<TOut>> selector) =>
+        element => selector((TIn)element!) ??
+            throw new InvalidOperationException(
+                $"A '{LocalStageKind.SelectMany}' stage's function answered null for an element, and what it answers is flattened into the stream. An element that produces nothing is an empty sequence.");
 
     /// <summary>Wraps a typed predicate into one over boxed elements.</summary>
     /// <typeparam name="TIn">The element type the predicate tests.</typeparam>

@@ -93,6 +93,7 @@ internal sealed class LocalRun
     private readonly int[] _live;
     private readonly object?[] _states;
     private readonly bool[] _observed;
+    private readonly LocalWakeup?[] _wakeups;
     private int _running;
     private long _dropped;
     private Exception? _failure;
@@ -114,6 +115,7 @@ internal sealed class LocalRun
         _plan = plan;
         _states = new object?[plan.Endings.Count];
         _observed = new bool[plan.Endings.Count];
+        _wakeups = new LocalWakeup?[plan.Segments.Count];
         _results = new TaskCompletionSource<object?>?[plan.Endings.Count];
         _cancellation = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
         _token = _cancellation.Token;
@@ -465,6 +467,14 @@ internal sealed class LocalRun
                                 ? Row(segment, index, joining, combining)
                                 : Join(segment, index, joining)
                             : Push(segment, index);
+
+            // Inside the try, because a residue travels through the author's own stages and an exception one
+            // of them raises is this run's outcome exactly as an ordinary element's would be; and after the
+            // loop, because what a batch was still holding is only knowable once nothing more can arrive.
+            if (!canceled)
+            {
+                Drain(segment, index);
+            }
         }
         catch (OperationCanceledException) when (_token.IsCancellationRequested)
         {
@@ -519,7 +529,15 @@ internal sealed class LocalRun
         {
             if (segment.Stages[stage] is LocalAttachedStage attached)
             {
-                attachment ??= new LocalStageAttachment(_context, () => Complete(index), Fail);
+                // Allocated here rather than lazily inside the closure, so that the field is written before
+                // any timer of this segment can fire: a wake for a latch that does not exist yet would be a
+                // signal nobody could ever observe, and a controlled clock can make a timer fire while the
+                // run is still being launched.
+                _wakeups[index] ??= new LocalWakeup();
+
+                LocalWakeup latch = _wakeups[index]!;
+
+                attachment ??= new LocalStageAttachment(_context, () => Complete(index), Fail, latch.Signal);
 
                 attached.Attach(attachment);
             }
@@ -634,6 +652,14 @@ internal sealed class LocalRun
     {
         ChannelReader<object?> reader = _channels[segment.Inputs[0]].Reader;
 
+        // Read once rather than per pass. A segment that holds no stage acting on silence never asks either
+        // question, which is every segment of every graph written before this vocabulary could batch. The
+        // latch is the one the run built when it attached this segment's stages: every stage that emits on
+        // silence needs the run, so a segment that answers here always has one.
+        bool silent = Silent(segment);
+        LocalWakeup? wakeup = silent ? _wakeups[index] : null;
+        Task<bool>? arrival = null;
+
         while (true)
         {
             if (_token.IsCancellationRequested)
@@ -651,6 +677,14 @@ internal sealed class LocalRun
                 continue;
             }
 
+            // Before the read rather than after it, so a group whose window closed while an element was
+            // already waiting is emitted before that element joins the next one. The order of two elements
+            // is never in question here — the group closed at a moment that came first.
+            if (silent && !Due(segment, index))
+            {
+                return false;
+            }
+
             if (reader.TryRead(out object? element))
             {
                 if (!Deliver(segment, index, element))
@@ -661,30 +695,130 @@ internal sealed class LocalRun
                 continue;
             }
 
-            if (!Arrival(reader))
+            if (!Arrival(reader, wakeup, ref arrival))
             {
                 return false;
             }
         }
     }
 
-    /// <summary>Waits for an element to arrive on a segment's input channel.</summary>
+    /// <summary>Reports whether a segment holds a stage that can produce an element with none arriving.</summary>
+    /// <param name="segment">The segment being executed.</param>
+    /// <returns><see langword="true"/> when at least one of its stages emits on silence.</returns>
+    private static bool Silent(LocalSegment segment)
+    {
+        for (int stage = 0; stage < segment.Stages.Count; stage++)
+        {
+            if (segment.Stages[stage].EmitsOnSilence)
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    /// <summary>Emits whatever the stages of a segment have been holding past their own deadlines.</summary>
+    /// <param name="segment">The segment being executed.</param>
+    /// <param name="index">Its position in the plan.</param>
+    /// <returns>
+    /// <see langword="true"/> when this segment should go on; <see langword="false"/> when the stream is
+    /// over and the segment should stop.
+    /// </returns>
+    /// <remarks>
+    /// In flow order, and each answer travels through the stages below the one that gave it, exactly as an
+    /// element would: a group closed by its window is an ordinary element to everything downstream of the
+    /// batch that closed it, including to a <c>Take</c> that may end the stream on it.
+    /// </remarks>
+    private bool Due(LocalSegment segment, int index)
+    {
+        IReadOnlyList<LocalElementStage> stages = segment.Stages;
+
+        for (int stage = 0; stage < stages.Count; stage++)
+        {
+            if (stages[stage].Due(_plan.Clock, out object? residue) &&
+                !Advance(segment, index, residue, stage + 1))
+            {
+                return false;
+            }
+        }
+
+        return true;
+    }
+
+    /// <summary>Waits for an element to arrive on a channel, with nothing else to wake for.</summary>
     /// <param name="reader">The channel to wait on.</param>
     /// <returns><see langword="false"/> when the channel is completed and empty.</returns>
     /// <exception cref="OperationCanceledException">The run was cancelled.</exception>
     /// <remarks>
+    /// What every junction pump and every segment with no clock-driven stage in it asks. The wait is always
+    /// run to its end here, so there is nothing to carry between passes and the caller keeps no state.
+    /// </remarks>
+    private bool Arrival(ChannelReader<object?> reader)
+    {
+        Task<bool>? pending = null;
+
+        return Arrival(reader, wakeup: null, ref pending);
+    }
+
+    /// <summary>Waits for an element to arrive on a segment's input channel, or for a stage to have work.</summary>
+    /// <param name="reader">The channel to wait on.</param>
+    /// <param name="wakeup">
+    /// The latch a stage acting on silence signals through, or <see langword="null"/> when this segment
+    /// holds none.
+    /// </param>
+    /// <param name="arrival">
+    /// The outstanding wait on the channel, held across passes so that a segment woken by its latch does not
+    /// leave a second waiter behind on every wake.
+    /// </param>
+    /// <returns><see langword="false"/> when the channel is completed and empty.</returns>
+    /// <exception cref="OperationCanceledException">The run was cancelled.</exception>
+    /// <remarks>
+    /// <para>
     /// One of this runtime's own waits, so it reports itself to the pause gate: a segment whose upstream
     /// has been parked would otherwise never reach its own park point, and a pause would wait forever on
     /// the very quiet it caused. The caller returns to the top of its loop afterwards, where the pause is
     /// examined before the element that has just arrived is touched.
+    /// </para>
+    /// <para>
+    /// A segment holding a batch closed by a clock waits on two things at once, exactly as an asynchronous
+    /// segment does: the element and the latch. Waking on the latch answers <see langword="true"/> without
+    /// an element being there, which is what the caller's second look at its stages is for; the channel's
+    /// own completion is still the only thing that ends this loop. The pending wait is carried in
+    /// <paramref name="arrival"/> for the same reason the asynchronous pump carries its own — a wait
+    /// abandoned once per wake would leave one waiter per closed window on a channel that may never be
+    /// written to again.
+    /// </para>
     /// </remarks>
-    private bool Arrival(ChannelReader<object?> reader)
+    private bool Arrival(ChannelReader<object?> reader, LocalWakeup? wakeup, ref Task<bool>? arrival)
     {
         _pause.Idle();
 
         try
         {
-            return reader.WaitToReadAsync(_token).AsTask().GetAwaiter().GetResult();
+            arrival ??= reader.WaitToReadAsync(_token).AsTask();
+
+            if (wakeup is null)
+            {
+                bool waiting = arrival.GetAwaiter().GetResult();
+
+                arrival = null;
+
+                return waiting;
+            }
+
+            _ = Task.WaitAny([arrival, wakeup.Next()], _token);
+
+            if (!arrival.IsCompleted)
+            {
+                return true;
+            }
+
+            bool ready = arrival.GetAwaiter().GetResult();
+
+            arrival = null;
+
+            return ready;
         }
         finally
         {
@@ -1903,7 +2037,7 @@ internal sealed class LocalRun
     /// <remarks>
     /// <para>
     /// The wait of a merge and of both row-building junctions; a concat and an interleave wait on the one
-    /// input whose turn it is, which is an ordinary <see cref="Arrival"/>. The shape is the fan-out balance
+    /// input whose turn it is, which is an ordinary <see cref="Arrival(System.Threading.Channels.ChannelReader{object})"/>. The shape is the fan-out balance
     /// arm's, and the cached waits matter for the same reason — a wait-any consumes one of the tasks it was
     /// given and abandons the rest, so the rest have to be the very tasks the next pass waits on again.
     /// </para>
@@ -2055,13 +2189,44 @@ internal sealed class LocalRun
     /// element: an ended stream stays ended, which is why the decision is carried to the end of the push
     /// rather than acted on where it was made.
     /// </para>
+    /// <para>
+    /// This is the entry point for an element arriving from a segment's head, which is what every pump has.
+    /// <see cref="Advance"/> is the same walk entered part way down, for the elements that did not come
+    /// from upstream at all — a flattening stage's sequence, a batch's group closed by its own window, and
+    /// a batch's last partial group as the stream ends.
+    /// </para>
     /// </remarks>
-    private bool Deliver(LocalSegment segment, int index, object? element)
+    private bool Deliver(LocalSegment segment, int index, object? element) =>
+        Advance(segment, index, element, 0);
+
+    /// <summary>Pushes one element through a segment's fused stages from one of them onwards.</summary>
+    /// <param name="segment">The segment doing the work.</param>
+    /// <param name="index">Its position in the plan.</param>
+    /// <param name="element">The element entering the stage named by <paramref name="from"/>.</param>
+    /// <param name="from">The first stage to apply, which is zero for an element arriving from the head.</param>
+    /// <returns>
+    /// <see langword="true"/> when this segment should go on to the next element; <see langword="false"/>
+    /// when the stream is over and the segment should stop.
+    /// </returns>
+    /// <remarks>
+    /// <para>
+    /// Everything <see cref="Deliver"/> says holds here; the extra parameter is what lets an element that
+    /// did not come from the head enter part way down. Three things produce one: a flattening stage's
+    /// sequence, a batch closed by its own window, and a batch handing over its last partial group as the
+    /// stream ends. All three are ordinary elements to the stages below the one that produced them, which
+    /// is the whole of why they enter here rather than through a path of their own.
+    /// </para>
+    /// <para>
+    /// The recursion is one frame per flattening stage in this segment and never one per element, because
+    /// the elements of one sequence are pushed by a loop.
+    /// </para>
+    /// </remarks>
+    private bool Advance(LocalSegment segment, int index, object? element, int from)
     {
         IReadOnlyList<LocalElementStage> stages = segment.Stages;
         bool completing = false;
 
-        for (int stage = 0; stage < stages.Count; stage++)
+        for (int stage = from; stage < stages.Count; stage++)
         {
             LocalStageOutcome outcome = stages[stage].Apply(element, out element);
 
@@ -2075,6 +2240,25 @@ internal sealed class LocalRun
             if (outcome is LocalStageOutcome.Emit)
             {
                 continue;
+            }
+
+            if (outcome is LocalStageOutcome.EmitMany)
+            {
+                bool going = Expand(segment, index, (IEnumerator)element!, stage + 1);
+
+                if (!going)
+                {
+                    return false;
+                }
+
+                if (!completing)
+                {
+                    return true;
+                }
+
+                Complete(index);
+
+                return false;
             }
 
             if (outcome is LocalStageOutcome.Complete || completing)
@@ -2098,9 +2282,17 @@ internal sealed class LocalRun
         {
             int ending = segment.Ending;
 
-            _observed[ending] = true;
-            _states[ending] = terminal.Folder(_states[ending], element, _context);
-            completing |= terminal.CompletesOnFirstElement;
+            // A first-element sink keeps the first element it was given and never a second. Nothing
+            // upstream delivers one today — the run stops at the very element that completed it — but since
+            // M4.3 wave 2 an element can enter this walk *after* that stop, as a batch's residue, and a
+            // batch is empty at the moment it emits only by an invariant of a different class. The rule
+            // belongs where a reader looks for it rather than in that invariant.
+            if (!terminal.CompletesOnFirstElement || !_observed[ending])
+            {
+                _observed[ending] = true;
+                _states[ending] = terminal.Folder(_states[ending], element, _context);
+                completing |= terminal.CompletesOnFirstElement;
+            }
         }
 
         if (!completing)
@@ -2111,6 +2303,99 @@ internal sealed class LocalRun
         Complete(index);
 
         return false;
+    }
+
+    /// <summary>Pushes every element of one stage's sequence through the stages below it.</summary>
+    /// <param name="segment">The segment doing the work.</param>
+    /// <param name="index">Its position in the plan.</param>
+    /// <param name="inner">The sequence the stage produced, which this method owns and releases.</param>
+    /// <param name="from">The first stage below the one that produced the sequence.</param>
+    /// <returns>
+    /// <see langword="true"/> when this segment should go on; <see langword="false"/> when the stream ended
+    /// part way through the sequence, in which case the rest of it is abandoned.
+    /// </returns>
+    /// <exception cref="OperationCanceledException">The run was cancelled while the sequence was being read.</exception>
+    /// <remarks>
+    /// <para>
+    /// The inner elements are the segment's elements while they are being pushed, so they pay everything an
+    /// element pays: the run's token and the pause gate are examined between them exactly as the source pump
+    /// examines them between its own pulls, and a boundary below this segment backpressures the enumeration
+    /// rather than draining it into a buffer. That is what keeps a flattening stage bounded by construction —
+    /// nothing here ever holds a whole inner sequence — and it is why an author's endless inner sequence is a
+    /// stream this runtime paces rather than a loop it disappears into.
+    /// </para>
+    /// <para>
+    /// The enumerator is released on every path, the author's own sequence is advanced on the segment's own
+    /// thread, and an exception it raises is not caught here: it travels to the run loop like any other
+    /// stage's, which is where what a failure means to a run is stated once.
+    /// </para>
+    /// </remarks>
+    private bool Expand(LocalSegment segment, int index, IEnumerator inner, int from)
+    {
+        try
+        {
+            while (true)
+            {
+                _token.ThrowIfCancellationRequested();
+
+                // Before the pull as well as after it, which is the second look the source pump takes: an
+                // element obtained from a sequence that waited began arriving before the pause did.
+                while (_pause.Park())
+                {
+                    _token.ThrowIfCancellationRequested();
+                }
+
+                if (!inner.MoveNext())
+                {
+                    return true;
+                }
+
+                while (_pause.Park())
+                {
+                    _token.ThrowIfCancellationRequested();
+                }
+
+                if (!Advance(segment, index, inner.Current, from))
+                {
+                    return false;
+                }
+            }
+        }
+        finally
+        {
+            (inner as IDisposable)?.Dispose();
+        }
+    }
+
+    /// <summary>Emits whatever the stages of a segment were still holding when its stream ended.</summary>
+    /// <param name="segment">The segment that has run out of input.</param>
+    /// <param name="index">Its position in the plan.</param>
+    /// <remarks>
+    /// <para>
+    /// In flow order, and each residue travels through the stages below the one that gave it, exactly as an
+    /// element would. Asking every stage rather than only the ones below whatever ended the stream is what
+    /// makes the answer independent of fusion: a spent <c>Take</c> refuses a residue offered to it, a closed
+    /// boundary refuses one offered to it, and a segment stopped from below therefore emits nothing however
+    /// its stages happen to be grouped.
+    /// </para>
+    /// <para>
+    /// Called on the segment's own thread when its loop ended without being cancelled, which covers every
+    /// way a stream ends successfully: the source ran out, the input channel completed and drained, a stage
+    /// reached its own bound, a shutdown was asked for. A cancellation abandons what was held, and so does a
+    /// failure — the exception left the loop before this point and is what the run reports.
+    /// </para>
+    /// </remarks>
+    private void Drain(LocalSegment segment, int index)
+    {
+        IReadOnlyList<LocalElementStage> stages = segment.Stages;
+
+        for (int stage = 0; stage < stages.Count; stage++)
+        {
+            if (stages[stage].Flush(out object? residue) && !Advance(segment, index, residue, stage + 1))
+            {
+                return;
+            }
+        }
     }
 
     /// <summary>Offers one element to a boundary, applying its overflow policy if it is full.</summary>

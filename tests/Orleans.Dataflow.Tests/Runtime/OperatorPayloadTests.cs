@@ -105,9 +105,13 @@ public sealed class OperatorPayloadTests
     }
 
     [Theory]
-    [InlineData("""{"maxTrackedKeys":0}""", "is 0, and it is a positive integer")]
-    [InlineData("""{}""", "the member 'maxTrackedKeys' is missing")]
-    [InlineData("""{"maxTrackedKeys":4,"evict":true}""", "'evict' is not one this stage declares")]
+    [InlineData("""{"maxTrackedKeys":0,"overflowPolicy":"fail"}""", "is 0, and it is a positive integer")]
+    [InlineData("""{"overflowPolicy":"fail"}""", "the member 'maxTrackedKeys' is missing")]
+    [InlineData("""{"maxTrackedKeys":4}""", "the member 'overflowPolicy' is missing")]
+    [InlineData("""{"maxTrackedKeys":4,"overflowPolicy":"evict"}""", "one of 'fail' and 'evict-oldest'")]
+    [InlineData(
+        """{"evict":true,"maxTrackedKeys":4,"overflowPolicy":"fail"}""",
+        "'evict' is not one this stage declares")]
     public async Task ADistinctPayloadThisVocabularyCouldNotHaveWrittenIsRefusedWhereItIsRead(
         string payload,
         string reason)
@@ -164,7 +168,9 @@ public sealed class OperatorPayloadTests
     public async Task AnOperatorBoundToSomethingItsShapeDoesNotAcceptIsRefused(string stage, string expected)
     {
         string contract = stage == "distinct" ? "local-distinct-parameters" : "local-parameters";
-        string payload = stage == "distinct" ? """{"maxTrackedKeys":4}""" : "{}";
+        string payload = stage == "distinct"
+            ? """{"maxTrackedKeys":4,"overflowPolicy":"fail"}"""
+            : "{}";
 
         RunnableGraph graph = Graph(
             Document(

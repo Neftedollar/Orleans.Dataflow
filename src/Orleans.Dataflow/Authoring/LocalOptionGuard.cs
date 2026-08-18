@@ -148,6 +148,62 @@ internal static class LocalOptionGuard
                     $"A range of {count} elements from {start} ends at {(long)start + count - 1L}, which is past {int.MaxValue}. A range's last element is start plus count minus one and has to be an integer this runtime can hold."));
     }
 
+    /// <summary>Checks the size of a batch or of a sliding window.</summary>
+    /// <param name="size">The size the author supplied.</param>
+    /// <param name="parameterName">The name of the operator's parameter it arrived in.</param>
+    /// <returns>The same size.</returns>
+    /// <exception cref="ArgumentOutOfRangeException"><paramref name="size"/> is below one.</exception>
+    /// <remarks>
+    /// One is a legal size and a real one — a batch of one is every element in a list of its own, which is
+    /// what a downstream stage typed in lists wants from a stream that is not batched — where zero would be
+    /// a group that is full before it holds anything and a window that never moves. This is stricter than
+    /// <see cref="Count"/>, which admits zero, and it is stricter on purpose: a take of nothing means
+    /// something and a group of nothing does not.
+    /// </remarks>
+    internal static int Size(int size, string parameterName) =>
+        size >= 1
+            ? size
+            : throw new ArgumentOutOfRangeException(
+                parameterName,
+                size,
+                "A group holds at least one element, so the size must be 1 or more. A group of no elements is one that is full before anything arrives.");
+
+    /// <summary>Checks the step of a sliding window.</summary>
+    /// <param name="step">The step the author supplied.</param>
+    /// <param name="parameterName">The name of the operator's parameter it arrived in.</param>
+    /// <returns>The same step.</returns>
+    /// <exception cref="ArgumentOutOfRangeException"><paramref name="step"/> is below one.</exception>
+    /// <remarks>
+    /// A step above the size is legal and is the sampling window: the elements between two windows are
+    /// passed over and never carried. A step of zero is the one that has no meaning, because a window that
+    /// does not move would emit the same elements forever.
+    /// </remarks>
+    internal static int Step(int step, string parameterName) =>
+        step >= 1
+            ? step
+            : throw new ArgumentOutOfRangeException(
+                parameterName,
+                step,
+                "A sliding window advances by at least one element, so the step must be 1 or more. A window that does not advance would emit the same elements forever.");
+
+    /// <summary>Checks the weight bound of a weighted batch.</summary>
+    /// <param name="maxWeight">The bound the author supplied.</param>
+    /// <param name="parameterName">The name of the operator's parameter it arrived in.</param>
+    /// <returns>The same bound.</returns>
+    /// <exception cref="ArgumentOutOfRangeException"><paramref name="maxWeight"/> is below one.</exception>
+    /// <remarks>
+    /// Zero is refused rather than read as "do not bound by weight": a group that may weigh nothing could
+    /// never accept an element that weighs something, and the spelling for an unweighted batch is the
+    /// overload that takes no cost function.
+    /// </remarks>
+    internal static int Weight(int maxWeight, string parameterName) =>
+        maxWeight >= 1
+            ? maxWeight
+            : throw new ArgumentOutOfRangeException(
+                parameterName,
+                maxWeight,
+                "A weighted group carries at least one unit of weight, so the bound must be 1 or more. The spelling for a batch that is not bounded by weight is the overload with no cost function.");
+
     /// <summary>Checks the options of a deduplicating stage.</summary>
     /// <param name="options">The options the author supplied, already known to be non-null.</param>
     /// <param name="parameterName">The name of the operator's parameter the options arrived in.</param>
@@ -155,13 +211,28 @@ internal static class LocalOptionGuard
     /// <exception cref="ArgumentOutOfRangeException">
     /// <see cref="DistinctOptions.MaxTrackedKeys"/> is below one.
     /// </exception>
-    internal static DistinctOptions Distinct(DistinctOptions options, string parameterName) =>
-        options.MaxTrackedKeys >= 1
-            ? options
-            : throw new ArgumentOutOfRangeException(
+    internal static DistinctOptions Distinct(DistinctOptions options, string parameterName)
+    {
+        if (options.MaxTrackedKeys < 1)
+        {
+            throw new ArgumentOutOfRangeException(
                 parameterName,
                 options.MaxTrackedKeys,
                 $"A deduplicating stage remembers at least one key, so {nameof(DistinctOptions.MaxTrackedKeys)} must be 1 or more. There is no spelling for unbounded key tracking: what a stream of unrepeated elements would accumulate is unbounded memory, and a stage that could remember nothing could not pass its first element.");
+        }
+
+        if (LocalDistinctParameters.Spell(options.OverflowPolicy) is null)
+        {
+            throw new ArgumentOutOfRangeException(
+                parameterName,
+                options.OverflowPolicy,
+                string.Create(
+                    CultureInfo.InvariantCulture,
+                    $"The value {(int)options.OverflowPolicy} is not a declared {nameof(KeyOverflowPolicy)}, so there is no answer for the key past the bound. The declared policies are {nameof(KeyOverflowPolicy.Fail)}, which fails the run, and {nameof(KeyOverflowPolicy.EvictOldest)}, which forgets the key remembered longest."));
+        }
+
+        return options;
+    }
 
     /// <summary>Checks the options of a collecting sink.</summary>
     /// <param name="options">The options the author supplied, already known to be non-null.</param>

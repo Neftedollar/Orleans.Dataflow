@@ -42,6 +42,8 @@ Orleans.Dataflow.DistinctOptions.DistinctOptions() -> void
 Orleans.Dataflow.DistinctOptions.Equals(Orleans.Dataflow.DistinctOptions? other) -> bool
 Orleans.Dataflow.DistinctOptions.MaxTrackedKeys.get -> int
 Orleans.Dataflow.DistinctOptions.MaxTrackedKeys.init -> void
+Orleans.Dataflow.DistinctOptions.OverflowPolicy.get -> Orleans.Dataflow.KeyOverflowPolicy
+Orleans.Dataflow.DistinctOptions.OverflowPolicy.init -> void
 Orleans.Dataflow.ElementContract
 Orleans.Dataflow.ElementContract<T>
 Orleans.Dataflow.ElementContract<T>.ElementContract() -> void
@@ -52,18 +54,24 @@ Orleans.Dataflow.ElementContract<T>.Reference.get -> Orleans.Dataflow.Identity.C
 Orleans.Dataflow.Flow
 Orleans.Dataflow.Flow<TIn, TOut>
 Orleans.Dataflow.Flow<TIn, TOut>.Buffer(Orleans.Dataflow.BufferOptions! options) -> Orleans.Dataflow.Flow<TIn, TOut>!
+Orleans.Dataflow.Flow<TIn, TOut>.DeduplicateConsecutive() -> Orleans.Dataflow.Flow<TIn, TOut>!
 Orleans.Dataflow.Flow<TIn, TOut>.Delay(System.TimeSpan delay, Orleans.Dataflow.BufferOptions! holdback) -> Orleans.Dataflow.Flow<TIn, TOut>!
 Orleans.Dataflow.Flow<TIn, TOut>.Distinct(Orleans.Dataflow.DistinctOptions! options) -> Orleans.Dataflow.Flow<TIn, TOut>!
+Orleans.Dataflow.Flow<TIn, TOut>.Grouped(int size) -> Orleans.Dataflow.Flow<TIn, System.Collections.Generic.IReadOnlyList<TOut>!>!
+Orleans.Dataflow.Flow<TIn, TOut>.GroupedWithin(int maxElements, System.TimeSpan window) -> Orleans.Dataflow.Flow<TIn, System.Collections.Generic.IReadOnlyList<TOut>!>!
+Orleans.Dataflow.Flow<TIn, TOut>.GroupedWithin(int maxElements, int maxWeight, System.TimeSpan window, System.Func<TOut, int>! cost) -> Orleans.Dataflow.Flow<TIn, System.Collections.Generic.IReadOnlyList<TOut>!>!
 Orleans.Dataflow.Flow<TIn, TOut>.InitialDelay(System.TimeSpan delay) -> Orleans.Dataflow.Flow<TIn, TOut>!
 Orleans.Dataflow.Flow<TIn, TOut>.Scan<TState>(TState seed, System.Func<TState, TOut, TState>! folder) -> Orleans.Dataflow.Flow<TIn, TState>!
 Orleans.Dataflow.Flow<TIn, TOut>.Select<TNext>(System.Func<TOut, TNext>! selector) -> Orleans.Dataflow.Flow<TIn, TNext>!
 Orleans.Dataflow.Flow<TIn, TOut>.SelectAsync<TNext>(Orleans.Dataflow.ParallelismOptions! options, System.Func<TOut, System.Threading.CancellationToken, System.Threading.Tasks.Task<TNext>!>! selector) -> Orleans.Dataflow.Flow<TIn, TNext>!
 Orleans.Dataflow.Flow<TIn, TOut>.SelectAsyncUnordered<TNext>(Orleans.Dataflow.ParallelismOptions! options, System.Func<TOut, System.Threading.CancellationToken, System.Threading.Tasks.Task<TNext>!>! selector) -> Orleans.Dataflow.Flow<TIn, TNext>!
+Orleans.Dataflow.Flow<TIn, TOut>.SelectMany<TNext>(System.Func<TOut, System.Collections.Generic.IEnumerable<TNext>!>! selector) -> Orleans.Dataflow.Flow<TIn, TNext>!
 Orleans.Dataflow.Flow<TIn, TOut>.SelectValueTaskAsync<TNext>(Orleans.Dataflow.ParallelismOptions! options, System.Func<TOut, System.Threading.CancellationToken, System.Threading.Tasks.ValueTask<TNext>>! selector) -> Orleans.Dataflow.Flow<TIn, TNext>!
 Orleans.Dataflow.Flow<TIn, TOut>.SelectValueTaskAsyncUnordered<TNext>(Orleans.Dataflow.ParallelismOptions! options, System.Func<TOut, System.Threading.CancellationToken, System.Threading.Tasks.ValueTask<TNext>>! selector) -> Orleans.Dataflow.Flow<TIn, TNext>!
 Orleans.Dataflow.Flow<TIn, TOut>.Skip(int count) -> Orleans.Dataflow.Flow<TIn, TOut>!
 Orleans.Dataflow.Flow<TIn, TOut>.SkipWhile(System.Func<TOut, bool>! predicate) -> Orleans.Dataflow.Flow<TIn, TOut>!
 Orleans.Dataflow.Flow<TIn, TOut>.SkipWithin(System.TimeSpan window) -> Orleans.Dataflow.Flow<TIn, TOut>!
+Orleans.Dataflow.Flow<TIn, TOut>.Sliding(int size, int step) -> Orleans.Dataflow.Flow<TIn, System.Collections.Generic.IReadOnlyList<TOut>!>!
 Orleans.Dataflow.Flow<TIn, TOut>.Take(int count) -> Orleans.Dataflow.Flow<TIn, TOut>!
 Orleans.Dataflow.Flow<TIn, TOut>.TakeThrough(System.Func<TOut, bool>! predicate) -> Orleans.Dataflow.Flow<TIn, TOut>!
 Orleans.Dataflow.Flow<TIn, TOut>.TakeWhile(System.Func<TOut, bool>! predicate) -> Orleans.Dataflow.Flow<TIn, TOut>!
@@ -97,6 +105,9 @@ Orleans.Dataflow.IValve
 Orleans.Dataflow.IValve.Close() -> void
 Orleans.Dataflow.IValve.IsOpen.get -> bool
 Orleans.Dataflow.IValve.Open() -> void
+Orleans.Dataflow.KeyOverflowPolicy
+Orleans.Dataflow.KeyOverflowPolicy.EvictOldest = 1 -> Orleans.Dataflow.KeyOverflowPolicy
+Orleans.Dataflow.KeyOverflowPolicy.Fail = 0 -> Orleans.Dataflow.KeyOverflowPolicy
 Orleans.Dataflow.LocalDataflowHost
 Orleans.Dataflow.LocalDataflowHost.LocalDataflowHost() -> void
 Orleans.Dataflow.LocalDataflowHost.LocalDataflowHost(System.Action<Orleans.Dataflow.Hosting.IDotnetDataflowBuilder!>! configure) -> void
@@ -197,29 +208,40 @@ Orleans.Dataflow.SinkWithResult<TIn, TResult>.ToSink() -> Orleans.Dataflow.Sink<
 Orleans.Dataflow.Source
 Orleans.Dataflow.Source<T>
 Orleans.Dataflow.Source<T>.AlsoTo(Orleans.Dataflow.Branch<T>! side) -> Orleans.Dataflow.Source<T>!
+Orleans.Dataflow.Source<T>.Append(Orleans.Dataflow.Source<T>! tail) -> Orleans.Dataflow.Source<T>!
+Orleans.Dataflow.Source<T>.Append(params T[]! elements) -> Orleans.Dataflow.Source<T>!
 Orleans.Dataflow.Source<T>.BalanceTo(params Orleans.Dataflow.Branch<T>![]! branches) -> Orleans.Dataflow.RunnableGraph!
 Orleans.Dataflow.Source<T>.BroadcastTo(params Orleans.Dataflow.Branch<T>![]! branches) -> Orleans.Dataflow.RunnableGraph!
 Orleans.Dataflow.Source<T>.Buffer(Orleans.Dataflow.BufferOptions! options) -> Orleans.Dataflow.Source<T>!
 Orleans.Dataflow.Source<T>.CombineLatest<T2, TOut>(Orleans.Dataflow.Source<T2>! other, System.Func<T, T2, TOut>! combine) -> Orleans.Dataflow.Source<TOut>!
 Orleans.Dataflow.Source<T>.Concat(Orleans.Dataflow.Source<T>! next) -> Orleans.Dataflow.Source<T>!
+Orleans.Dataflow.Source<T>.DeduplicateConsecutive() -> Orleans.Dataflow.Source<T>!
 Orleans.Dataflow.Source<T>.Delay(System.TimeSpan delay, Orleans.Dataflow.BufferOptions! holdback) -> Orleans.Dataflow.Source<T>!
 Orleans.Dataflow.Source<T>.Distinct(Orleans.Dataflow.DistinctOptions! options) -> Orleans.Dataflow.Source<T>!
+Orleans.Dataflow.Source<T>.DivertTo(System.Func<T, bool>! predicate, Orleans.Dataflow.Branch<T>! side) -> Orleans.Dataflow.Source<T>!
 Orleans.Dataflow.Source<T>.Fork<T1, T2>(Orleans.Dataflow.Flow<T, T1>! left, Orleans.Dataflow.Flow<T, T2>! right) -> Orleans.Dataflow.Fork<T1, T2>!
 Orleans.Dataflow.Source<T>.ForkMerge<TOut>(Orleans.Dataflow.Flow<T, TOut>! left, Orleans.Dataflow.Flow<T, TOut>! right) -> Orleans.Dataflow.Source<TOut>!
+Orleans.Dataflow.Source<T>.Grouped(int size) -> Orleans.Dataflow.Source<System.Collections.Generic.IReadOnlyList<T>!>!
+Orleans.Dataflow.Source<T>.GroupedWithin(int maxElements, System.TimeSpan window) -> Orleans.Dataflow.Source<System.Collections.Generic.IReadOnlyList<T>!>!
+Orleans.Dataflow.Source<T>.GroupedWithin(int maxElements, int maxWeight, System.TimeSpan window, System.Func<T, int>! cost) -> Orleans.Dataflow.Source<System.Collections.Generic.IReadOnlyList<T>!>!
 Orleans.Dataflow.Source<T>.InitialDelay(System.TimeSpan delay) -> Orleans.Dataflow.Source<T>!
 Orleans.Dataflow.Source<T>.Interleave(Orleans.Dataflow.Source<T>! other, int segmentSize) -> Orleans.Dataflow.Source<T>!
 Orleans.Dataflow.Source<T>.Merge(Orleans.Dataflow.Source<T>! other) -> Orleans.Dataflow.Source<T>!
 Orleans.Dataflow.Source<T>.Merge(Orleans.Dataflow.Source<T>! second, Orleans.Dataflow.Source<T>! third) -> Orleans.Dataflow.Source<T>!
 Orleans.Dataflow.Source<T>.PartitionTo(System.Func<T, int>! router, params Orleans.Dataflow.Branch<T>![]! branches) -> Orleans.Dataflow.RunnableGraph!
+Orleans.Dataflow.Source<T>.Prepend(Orleans.Dataflow.Source<T>! head) -> Orleans.Dataflow.Source<T>!
+Orleans.Dataflow.Source<T>.Prepend(params T[]! elements) -> Orleans.Dataflow.Source<T>!
 Orleans.Dataflow.Source<T>.Scan<TState>(TState seed, System.Func<TState, T, TState>! folder) -> Orleans.Dataflow.Source<TState>!
 Orleans.Dataflow.Source<T>.Select<TOut>(System.Func<T, TOut>! selector) -> Orleans.Dataflow.Source<TOut>!
 Orleans.Dataflow.Source<T>.SelectAsync<TOut>(Orleans.Dataflow.ParallelismOptions! options, System.Func<T, System.Threading.CancellationToken, System.Threading.Tasks.Task<TOut>!>! selector) -> Orleans.Dataflow.Source<TOut>!
 Orleans.Dataflow.Source<T>.SelectAsyncUnordered<TOut>(Orleans.Dataflow.ParallelismOptions! options, System.Func<T, System.Threading.CancellationToken, System.Threading.Tasks.Task<TOut>!>! selector) -> Orleans.Dataflow.Source<TOut>!
+Orleans.Dataflow.Source<T>.SelectMany<TNext>(System.Func<T, System.Collections.Generic.IEnumerable<TNext>!>! selector) -> Orleans.Dataflow.Source<TNext>!
 Orleans.Dataflow.Source<T>.SelectValueTaskAsync<TOut>(Orleans.Dataflow.ParallelismOptions! options, System.Func<T, System.Threading.CancellationToken, System.Threading.Tasks.ValueTask<TOut>>! selector) -> Orleans.Dataflow.Source<TOut>!
 Orleans.Dataflow.Source<T>.SelectValueTaskAsyncUnordered<TOut>(Orleans.Dataflow.ParallelismOptions! options, System.Func<T, System.Threading.CancellationToken, System.Threading.Tasks.ValueTask<TOut>>! selector) -> Orleans.Dataflow.Source<TOut>!
 Orleans.Dataflow.Source<T>.Skip(int count) -> Orleans.Dataflow.Source<T>!
 Orleans.Dataflow.Source<T>.SkipWhile(System.Func<T, bool>! predicate) -> Orleans.Dataflow.Source<T>!
 Orleans.Dataflow.Source<T>.SkipWithin(System.TimeSpan window) -> Orleans.Dataflow.Source<T>!
+Orleans.Dataflow.Source<T>.Sliding(int size, int step) -> Orleans.Dataflow.Source<System.Collections.Generic.IReadOnlyList<T>!>!
 Orleans.Dataflow.Source<T>.Take(int count) -> Orleans.Dataflow.Source<T>!
 Orleans.Dataflow.Source<T>.TakeThrough(System.Func<T, bool>! predicate) -> Orleans.Dataflow.Source<T>!
 Orleans.Dataflow.Source<T>.TakeWhile(System.Func<T, bool>! predicate) -> Orleans.Dataflow.Source<T>!

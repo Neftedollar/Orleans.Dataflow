@@ -375,6 +375,83 @@ internal sealed class LocalStageDescriptor : StageOccurrence
     internal static LocalStageDescriptor Distinct(DistinctOptions options, object comparer) =>
         new(LocalStageKind.Distinct, comparer, seed: null, LocalDistinctParameters.Write(options));
 
+    /// <summary>Creates a stage that drops an element equal to the one immediately before it.</summary>
+    /// <param name="comparer">
+    /// The element type's default equality, which is an <see cref="System.Collections.IEqualityComparer"/>.
+    /// </param>
+    /// <returns>The descriptor.</returns>
+    /// <remarks>
+    /// No payload at all, unlike <see cref="Distinct"/>: this stage's bound is one element and is a fact
+    /// about the shape rather than a number an author chose, so there is nothing for a document to state.
+    /// </remarks>
+    internal static LocalStageDescriptor DeduplicateConsecutive(object comparer) =>
+        new(LocalStageKind.DeduplicateConsecutive, comparer, seed: null, LocalVocabulary.EmptyParameters);
+
+    /// <summary>Creates a stage that replaces every element with the sequence a function answers.</summary>
+    /// <param name="selector">The function, as the authoring value received it.</param>
+    /// <returns>The descriptor.</returns>
+    /// <remarks>
+    /// The whole of the stage is the function, so the payload is empty. What it does to the shape of the
+    /// stream — one element in, a sequence out — is the stage reference's to say.
+    /// </remarks>
+    internal static LocalStageDescriptor SelectMany(object selector) =>
+        new(LocalStageKind.SelectMany, selector, seed: null, LocalVocabulary.EmptyParameters);
+
+    /// <summary>Creates a stage that collects a declared number of elements into one list.</summary>
+    /// <param name="size">The validated group size.</param>
+    /// <param name="freeze">The projection of a group into the typed list the author declared.</param>
+    /// <returns>The descriptor.</returns>
+    /// <remarks>
+    /// The count contract, shared with <c>take</c>, <c>skip</c>, and <c>repeat</c> for the reason those
+    /// three share it: a count is a count, and which of them a node is is the stage reference's job to say.
+    /// </remarks>
+    internal static LocalStageDescriptor Grouped(int size, object freeze) =>
+        new(LocalStageKind.Grouped, freeze, seed: null, LocalCountParameters.Write(size));
+
+    /// <summary>Creates a stage that emits a window of a declared size, advancing by a declared step.</summary>
+    /// <param name="size">The validated window size.</param>
+    /// <param name="step">The validated step.</param>
+    /// <param name="freeze">The projection of a window into the typed list the author declared.</param>
+    /// <returns>The descriptor.</returns>
+    internal static LocalStageDescriptor Sliding(int size, int step, object freeze) =>
+        new(LocalStageKind.Sliding, freeze, seed: null, LocalWindowParameters.Write(size, step));
+
+    /// <summary>Creates a stage that closes a group by a declared count or by a declared window.</summary>
+    /// <param name="maxElements">The validated element bound.</param>
+    /// <param name="window">The validated window.</param>
+    /// <param name="freeze">The projection of a group into the typed list the author declared.</param>
+    /// <returns>The descriptor.</returns>
+    internal static LocalStageDescriptor GroupedWithin(int maxElements, TimeSpan window, object freeze) =>
+        new(
+            LocalStageKind.GroupedWithin,
+            freeze,
+            seed: null,
+            LocalGroupedWithinParameters.Write(maxElements, window));
+
+    /// <summary>Creates a stage that closes a group by a count, a weight, or a window.</summary>
+    /// <param name="maxElements">The validated element bound.</param>
+    /// <param name="maxWeight">The validated weight bound.</param>
+    /// <param name="window">The validated window.</param>
+    /// <param name="cost">The cost function, as the authoring value received it.</param>
+    /// <param name="freeze">The projection of a group into the typed list the author declared.</param>
+    /// <returns>The descriptor.</returns>
+    /// <remarks>
+    /// The three bounds are the payload and the cost function is the binding, which is the same split a
+    /// throttle by cost makes and for the same reason: a bound is a number a document can state and a
+    /// function is never durable topology.
+    /// </remarks>
+    internal static LocalStageDescriptor GroupedWeightedWithin(
+        int maxElements,
+        int maxWeight,
+        TimeSpan window,
+        object cost,
+        object freeze) =>
+        new(
+            LocalStageKind.GroupedWeightedWithin,
+            new object?[] { cost, freeze },
+            seed: null,
+            LocalGroupedWeightedParameters.Write(maxElements, maxWeight, window));
+
     /// <summary>Creates a bounded buffer.</summary>
     /// <param name="options">The validated capacity and overflow policy.</param>
     /// <returns>The descriptor.</returns>

@@ -14,11 +14,15 @@ namespace Orleans.Dataflow;
 /// <para>
 /// <see cref="MaxTrackedKeys"/> is <see langword="required"/> and has no unbounded spelling. Remembering
 /// every key an unbounded stream ever carried is an unbounded amount of memory, and a default would be a
-/// leak nobody wrote down. Exceeding the bound faults the run with a
-/// <see cref="TrackedKeyOverflowException"/>: evicting a key silently would change what the operator means,
-/// because an element whose key was evicted would be emitted a second time and the stream would no longer
-/// be distinct. Policies that trade exactness for a smaller footprint on purpose — windows, decay,
-/// approximate membership — are named deduplication policies and arrive as their own vocabulary.
+/// leak nobody wrote down.
+/// </para>
+/// <para>
+/// <see cref="OverflowPolicy"/> is what the bound costs when it is reached, and it defaults to failing
+/// because that is the value that keeps the operator's own promise: evicting a key changes what the stage
+/// means, since an element whose key was evicted is emitted a second time and the stream is then distinct
+/// over a window rather than over its history. <see cref="KeyOverflowPolicy.EvictOldest"/> is that trade
+/// spelled out and chosen on purpose. Policies that trade exactness for a smaller footprint in other ways —
+/// decay, approximate membership — are their own vocabulary and are not here.
 /// </para>
 /// <para>
 /// The value is checked where the stage is placed rather than here, so <c>with</c> expressions and object
@@ -35,12 +39,26 @@ public sealed record class DistinctOptions
     /// </remarks>
     public required int MaxTrackedKeys { get; init; }
 
+    /// <summary>Gets what the stage does with the key that would be one past the bound.</summary>
+    /// <value>
+    /// <see cref="KeyOverflowPolicy.Fail"/> by default, which is exact deduplication over the whole run.
+    /// </value>
+    /// <remarks>
+    /// Defaulted rather than required, unlike the bound beside it, and the two are different questions. How
+    /// much a stage may remember has no answer this library could guess; what to do when it has remembered
+    /// that much has one honest answer, which is to report that the bound was wrong instead of silently
+    /// becoming a weaker operator.
+    /// </remarks>
+    public KeyOverflowPolicy OverflowPolicy { get; init; }
+
     /// <summary>Returns a one-line diagnostic summary of these options.</summary>
-    /// <returns>Text of the form <c>distinct (up to 1000 tracked keys)</c>.</returns>
+    /// <returns>Text of the form <c>distinct (up to 1000 tracked keys, Fail)</c>.</returns>
     /// <remarks>
     /// The count is formatted with the invariant culture and the method never throws, including for a bound
-    /// that placing a stage would reject.
+    /// or a policy that placing a stage would reject.
     /// </remarks>
     public override string ToString() =>
-        string.Create(CultureInfo.InvariantCulture, $"distinct (up to {MaxTrackedKeys} tracked keys)");
+        string.Create(
+            CultureInfo.InvariantCulture,
+            $"distinct (up to {MaxTrackedKeys} tracked keys, {OverflowPolicy})");
 }

@@ -33,7 +33,15 @@ namespace Orleans.Dataflow.Runtime;
 /// <param name="context">The tokens, the pause gate, and the clock of the run.</param>
 /// <param name="complete">Ends the stream at the segment that owns this stage, as a downstream stop does.</param>
 /// <param name="fail">Records a failure of the run, as a throwing stage does.</param>
-internal sealed class LocalStageAttachment(LocalRunContext context, Action complete, Action<Exception> fail)
+/// <param name="wake">
+/// Reports to the segment that owns this stage that there may be work, as an asynchronous callback finishing
+/// does.
+/// </param>
+internal sealed class LocalStageAttachment(
+    LocalRunContext context,
+    Action complete,
+    Action<Exception> fail,
+    Action wake)
 {
     /// <summary>The longest due time a timer of the system clock accepts.</summary>
     /// <remarks>
@@ -78,6 +86,17 @@ internal sealed class LocalStageAttachment(LocalRunContext context, Action compl
     /// Safe from any thread, a timer's included.
     /// </remarks>
     internal void Fail(Exception error) => fail(error);
+
+    /// <summary>Reports that this stage may have something to emit.</summary>
+    /// <remarks>
+    /// The third hook, and the one M4.3 wave 2 needed: a batch closed by a clock has to emit when nothing is
+    /// arriving, and emitting is the one thing a timer of this runtime must never do itself. So the timer
+    /// says only that there may be work, and the segment that owns the stage — the single thread that builds
+    /// its group — wakes, asks the stage, and emits. That is the very latch an asynchronous segment sleeps
+    /// on beside its input, reused rather than reinvented, and a spurious signal costs one harmless pass.
+    /// Safe from any thread, and a signal to a segment that has already stopped is discarded.
+    /// </remarks>
+    internal void Wake() => wake();
 
     /// <summary>Creates a disarmed timer on the run's clock.</summary>
     /// <param name="callback">What to run when it fires.</param>

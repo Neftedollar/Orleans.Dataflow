@@ -68,6 +68,25 @@ internal static class LocalAttachedStages
         Func<object?, int>? cost) =>
         new Pacing(elements, per, burst, enforcing, cost);
 
+    /// <summary>Creates a stage that collects elements into groups closed by a size or by a clock.</summary>
+    /// <param name="maxElements">The greatest number of elements one group holds; at least one.</param>
+    /// <param name="maxWeight">
+    /// The greatest weight one group holds, which is read only when <paramref name="cost"/> is given.
+    /// </param>
+    /// <param name="window">How long a group stays open once its first element has arrived.</param>
+    /// <param name="cost">What one element weighs, or <see langword="null"/> when weight is not counted.</param>
+    /// <param name="freeze">
+    /// The projection from the boxed elements of one group into the typed list the author declared.
+    /// </param>
+    /// <returns>The stage.</returns>
+    internal static LocalAttachedStage GroupedWithin(
+        int maxElements,
+        int maxWeight,
+        TimeSpan window,
+        Func<object?, int>? cost,
+        Func<object?, object?> freeze) =>
+        new Batching(maxElements, maxWeight, window, cost, freeze);
+
     /// <summary>A stage that holds elements while its valve is closed.</summary>
     /// <param name="valve">The run's valve, which the author's control flips.</param>
     /// <remarks>
@@ -417,6 +436,209 @@ internal static class LocalAttachedStages
 
             _refilled = now;
             _credit = refilled < _capacity ? refilled : _capacity;
+        }
+    }
+
+    /// <summary>A stage that collects elements into groups closed by a size, a weight, or a clock.</summary>
+    /// <param name="maxElements">The greatest number of elements one group holds; at least one.</param>
+    /// <param name="maxWeight">The greatest weight one group holds, read only when a cost function is given.</param>
+    /// <param name="window">How long a group stays open once its first element has arrived.</param>
+    /// <param name="cost">What one element weighs, or <see langword="null"/> when weight is not counted.</param>
+    /// <param name="freeze">The projection of one group into the typed list the author declared.</param>
+    /// <remarks>
+    /// <para>
+    /// <b>The window belongs to the group and not to the stage.</b> It starts when the group's first element
+    /// arrives and it is gone the moment the group is emitted, which is what makes "an empty window emits
+    /// nothing" a consequence rather than a special case: with no group open there is no window running, and
+    /// a stream that goes quiet for an hour costs one disarmed timer.
+    /// </para>
+    /// <para>
+    /// <b>The timer never touches an element.</b> It signals the run that there may be work, exactly as an
+    /// asynchronous callback finishing does, and the segment that owns this stage wakes, asks
+    /// <see cref="Due"/>, and emits the group itself. So the group is built, closed, and handed downstream by
+    /// one thread and needs no lock, and the timer keeps this runtime's rule that a fire is a question rather
+    /// than a verdict: a wake that finds the window still open re-arms for the remainder.
+    /// </para>
+    /// <para>
+    /// <b>Three things close a group and the first of them wins.</b> The count reaching
+    /// <paramref name="maxElements"/>, the weight that would pass <paramref name="maxWeight"/> — which
+    /// closes the group <em>before</em> the element that would have overflowed it, so the element starts the
+    /// next one and the bound is never exceeded — and the window elapsing. The end of the stream is not a
+    /// fourth: it is <see cref="LocalElementStage.Flush"/>, which every batching stage of this vocabulary
+    /// answers the same way.
+    /// </para>
+    /// </remarks>
+    private sealed class Batching(
+        int maxElements,
+        int maxWeight,
+        TimeSpan window,
+        Func<object?, int>? cost,
+        Func<object?, object?> freeze) : LocalAttachedStage
+    {
+        private readonly List<object?> _group = [];
+        private ITimer? _closing;
+        private long _opened;
+        private int _weight;
+
+        /// <inheritdoc/>
+        internal override bool EmitsOnSilence => true;
+
+        /// <inheritdoc/>
+        /// <exception cref="InvalidOperationException">
+        /// The author's cost function answered a negative weight, or a weight no group of this stage could
+        /// ever hold.
+        /// </exception>
+        internal override LocalStageOutcome Apply(object? element, out object? result)
+        {
+            int charge = Charge(element);
+
+            // Closed before the element joins rather than after, so the declared weight is a bound the group
+            // never passes rather than one it passes once per group. An element arriving at an empty group
+            // cannot trigger this, because a charge above the bound was already refused above.
+            if (_group.Count > 0 && _weight + charge > maxWeight)
+            {
+                result = Close();
+
+                // The element that closed the group is the next group's first, so the next window starts
+                // from its arrival and not from the emission that preceded it.
+                Open(charge, element);
+
+                return LocalStageOutcome.Emit;
+            }
+
+            if (_group.Count == 0)
+            {
+                Open(charge, element);
+            }
+            else
+            {
+                _weight += charge;
+                _group.Add(element);
+            }
+
+            if (_group.Count < maxElements)
+            {
+                result = null;
+
+                return LocalStageOutcome.Drop;
+            }
+
+            result = Close();
+
+            return LocalStageOutcome.Emit;
+        }
+
+        /// <inheritdoc/>
+        internal override bool Flush(out object? residue)
+        {
+            if (_group.Count == 0)
+            {
+                residue = null;
+
+                return false;
+            }
+
+            residue = Close();
+
+            return true;
+        }
+
+        /// <inheritdoc/>
+        /// <remarks>
+        /// Asked at the top of the segment's loop, so the answer is read at the moment the segment is free
+        /// to act on it rather than at the moment the timer fired. A window that has not closed re-arms for
+        /// what is left of it, which is what makes a wake for any other reason harmless and what lets a
+        /// window longer than the clock's own timer bound work at all.
+        /// </remarks>
+        internal override bool Due(TimeProvider clock, out object? residue)
+        {
+            residue = null;
+
+            if (_group.Count == 0)
+            {
+                return false;
+            }
+
+            TimeSpan remaining = window - clock.GetElapsedTime(_opened);
+
+            if (remaining > TimeSpan.Zero)
+            {
+                if (_closing is { } waiting)
+                {
+                    LocalStageAttachment.Rearm(waiting, remaining);
+                }
+
+                return false;
+            }
+
+            residue = Close();
+
+            return true;
+        }
+
+        /// <inheritdoc/>
+        internal override void Detach() => _closing?.Dispose();
+
+        /// <inheritdoc/>
+        private protected override void Arm() =>
+            _closing = Run.CreateTimer(_ => Run.Wake());
+
+        /// <summary>Asks the author's function what one element weighs, and checks the answer.</summary>
+        /// <param name="element">The element that arrived.</param>
+        /// <returns>The weight, or one when weight is not counted.</returns>
+        private int Charge(object? element)
+        {
+            if (cost is null)
+            {
+                return 0;
+            }
+
+            int charge = cost(element);
+
+            if (charge < 0)
+            {
+                throw new InvalidOperationException(string.Create(
+                    CultureInfo.InvariantCulture,
+                    $"A weighted batch's cost function answered {charge} for an element, and a weight is zero or more. An element cannot make a group lighter."));
+            }
+
+            return charge <= maxWeight
+                ? charge
+                : throw new InvalidOperationException(string.Create(
+                    CultureInfo.InvariantCulture,
+                    $"A weighted batch's cost function answered {charge} for an element, and the greatest weight a group of this batch holds is {maxWeight}. No group could ever carry that element, so waiting for one would never end."));
+        }
+
+        /// <summary>Starts a group with one element and starts the window that closes it.</summary>
+        /// <param name="charge">What that element weighs.</param>
+        /// <param name="element">The element.</param>
+        private void Open(int charge, object? element)
+        {
+            _weight = charge;
+            _group.Add(element);
+            _opened = Run.Clock.GetTimestamp();
+
+            if (_closing is { } timer)
+            {
+                LocalStageAttachment.Rearm(timer, window);
+            }
+        }
+
+        /// <summary>Takes the open group, leaving this stage holding nothing.</summary>
+        /// <returns>The group, as the typed list that travels downstream.</returns>
+        /// <remarks>
+        /// The projection copies the group out, so the buffer this stage reuses is never a list an author is
+        /// holding. The timer is left where it is: the next group arms it again from its own first element,
+        /// and a fire in between finds no group and does nothing.
+        /// </remarks>
+        private object? Close()
+        {
+            object? closed = freeze(_group);
+
+            _group.Clear();
+            _weight = 0;
+
+            return closed;
         }
     }
 }

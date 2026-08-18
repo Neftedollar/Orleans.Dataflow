@@ -78,9 +78,9 @@ public sealed class OperatorAuthoringTests
 
         Assert.Equal(LocalStage("distinct"), distinct.Stage);
         Assert.Equal(Contract("local-distinct-parameters"), distinct.ParameterContract);
-        Assert.Equal("""{"maxTrackedKeys":1000}""", distinct.Parameters.ToString());
+        Assert.Equal("""{"maxTrackedKeys":1000,"overflowPolicy":"fail"}""", distinct.Parameters.ToString());
         Assert.Equal(
-            Encoding.UTF8.GetBytes("""{"maxTrackedKeys":1000}"""),
+            Encoding.UTF8.GetBytes("""{"maxTrackedKeys":1000,"overflowPolicy":"fail"}"""),
             distinct.Parameters.CanonicalUtf8Bytes.ToArray());
     }
 
@@ -223,7 +223,9 @@ public sealed class OperatorAuthoringTests
             GraphDocumentSerializer.Fingerprint(document),
             GraphDocumentSerializer.Fingerprint(decoded));
         Assert.Equal("""{"count":3,"start":7}""", decoded.Nodes[0].Parameters.ToString());
-        Assert.Equal("""{"maxTrackedKeys":64}""", decoded.Nodes[2].Parameters.ToString());
+        Assert.Equal(
+            """{"maxTrackedKeys":64,"overflowPolicy":"fail"}""",
+            decoded.Nodes[2].Parameters.ToString());
     }
 
     [Fact]
@@ -329,11 +331,17 @@ public sealed class OperatorAuthoringTests
     public void TheOptionRecordRendersItselfForALogLine()
     {
         Assert.Equal(
-            "distinct (up to 1000 tracked keys)",
+            "distinct (up to 1000 tracked keys, Fail)",
             new DistinctOptions { MaxTrackedKeys = 1000 }.ToString());
+        Assert.Equal(
+            "distinct (up to 8 tracked keys, EvictOldest)",
+            new DistinctOptions { MaxTrackedKeys = 8, OverflowPolicy = KeyOverflowPolicy.EvictOldest }
+                .ToString());
 
         // Never throws, including for a value placing a stage would refuse.
-        Assert.Equal("distinct (up to 0 tracked keys)", new DistinctOptions { MaxTrackedKeys = 0 }.ToString());
+        Assert.Equal(
+            "distinct (up to 0 tracked keys, Fail)",
+            new DistinctOptions { MaxTrackedKeys = 0 }.ToString());
     }
 
     [Fact]

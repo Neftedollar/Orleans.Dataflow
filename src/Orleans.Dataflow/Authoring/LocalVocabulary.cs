@@ -233,6 +233,33 @@ internal static class LocalVocabulary
     internal static readonly StageRef Distinct =
         StageRef.Create(Provider, StageId.Create("distinct"), StageRef.FirstMajorVersion);
 
+    /// <summary>The stage reference of a stage that drops an element equal to the one before it.</summary>
+    internal static readonly StageRef DeduplicateConsecutive =
+        StageRef.Create(Provider, StageId.Create("deduplicate-consecutive"), StageRef.FirstMajorVersion);
+
+    /// <summary>The stage reference of a stage that flattens one sequence per element.</summary>
+    internal static readonly StageRef SelectMany =
+        StageRef.Create(Provider, StageId.Create("select-many"), StageRef.FirstMajorVersion);
+
+    /// <summary>The stage reference of a stage that collects a declared number of elements per group.</summary>
+    internal static readonly StageRef Grouped =
+        StageRef.Create(Provider, StageId.Create("grouped"), StageRef.FirstMajorVersion);
+
+    /// <summary>The stage reference of a stage that emits a window of a declared size and step.</summary>
+    internal static readonly StageRef Sliding =
+        StageRef.Create(Provider, StageId.Create("sliding"), StageRef.FirstMajorVersion);
+
+    /// <summary>The stage reference of a stage that closes a group by a count or by a window.</summary>
+    internal static readonly StageRef GroupedWithin =
+        StageRef.Create(Provider, StageId.Create("grouped-within"), StageRef.FirstMajorVersion);
+
+    /// <summary>The stage reference of a stage that closes a group by a count, a weight, or a window.</summary>
+    internal static readonly StageRef GroupedWeightedWithin =
+        StageRef.Create(
+            Provider,
+            StageId.Create("grouped-weighted-within"),
+            StageRef.FirstMajorVersion);
+
     /// <summary>The stage reference of a bounded buffer.</summary>
     internal static readonly StageRef Buffer =
         StageRef.Create(Provider, StageId.Create("buffer"), StageRef.FirstMajorVersion);
@@ -468,6 +495,38 @@ internal static class LocalVocabulary
     internal static readonly ContractReference ValveParameterContract =
         ContractReference.Create(ContractId.Create("local-valve-parameters"), ContractReference.FirstMajorVersion);
 
+    /// <summary>The parameter contract a sliding window declares.</summary>
+    /// <remarks>
+    /// A size and a step, which is two numbers that mean different things and therefore a contract of its
+    /// own rather than a share of the count contract. <see cref="LocalWindowParameters"/> owns the shape.
+    /// </remarks>
+    internal static readonly ContractReference WindowParameterContract =
+        ContractReference.Create(
+            ContractId.Create("local-window-parameters"),
+            ContractReference.FirstMajorVersion);
+
+    /// <summary>The parameter contract a batch closed by a count or a window declares.</summary>
+    /// <remarks>
+    /// A count and a duration together, which neither the shared count contract nor the shared duration
+    /// contract can say. <see cref="LocalGroupedWithinParameters"/> owns the shape.
+    /// </remarks>
+    internal static readonly ContractReference GroupedWithinParameterContract =
+        ContractReference.Create(
+            ContractId.Create("local-grouped-within-parameters"),
+            ContractReference.FirstMajorVersion);
+
+    /// <summary>The parameter contract a batch closed by a count, a weight, or a window declares.</summary>
+    /// <remarks>
+    /// The three bounds are configuration and are written down; what an element weighs is behavior and is
+    /// not. A contract of its own beside <see cref="GroupedWithinParameterContract"/> rather than an
+    /// optional member on it, because a document that could leave the weight out could describe a stage
+    /// whose binding table disagreed with it. <see cref="LocalGroupedWeightedParameters"/> owns the shape.
+    /// </remarks>
+    internal static readonly ContractReference GroupedWeightedParameterContract =
+        ContractReference.Create(
+            ContractId.Create("local-grouped-weighted-parameters"),
+            ContractReference.FirstMajorVersion);
+
     /// <summary>The parameter contract a collecting sink declares.</summary>
     /// <remarks>
     /// The bound on collected elements is configuration and is written down; the element type is not, for
@@ -648,6 +707,12 @@ internal static class LocalVocabulary
         LocalStageKind.TakeThrough => TakeThrough,
         LocalStageKind.SkipWhile => SkipWhile,
         LocalStageKind.Distinct => Distinct,
+        LocalStageKind.DeduplicateConsecutive => DeduplicateConsecutive,
+        LocalStageKind.SelectMany => SelectMany,
+        LocalStageKind.Grouped => Grouped,
+        LocalStageKind.Sliding => Sliding,
+        LocalStageKind.GroupedWithin => GroupedWithin,
+        LocalStageKind.GroupedWeightedWithin => GroupedWeightedWithin,
         LocalStageKind.Buffer => Buffer,
         LocalStageKind.SelectAsync => SelectAsync,
         LocalStageKind.SelectAsyncUnordered => SelectAsyncUnordered,
@@ -701,7 +766,13 @@ internal static class LocalVocabulary
             LocalStageKind.SelectValueTaskAsync or
             LocalStageKind.SelectValueTaskAsyncUnordered or
             LocalStageKind.ForEachAsync => ParallelismParameterContract,
-        LocalStageKind.Take or LocalStageKind.Skip or LocalStageKind.Repeat => CountParameterContract,
+        LocalStageKind.Take or
+            LocalStageKind.Skip or
+            LocalStageKind.Repeat or
+            LocalStageKind.Grouped => CountParameterContract,
+        LocalStageKind.Sliding => WindowParameterContract,
+        LocalStageKind.GroupedWithin => GroupedWithinParameterContract,
+        LocalStageKind.GroupedWeightedWithin => GroupedWeightedParameterContract,
         LocalStageKind.Range => RangeParameterContract,
         LocalStageKind.Tick => TickParameterContract,
         LocalStageKind.Delay => DelayParameterContract,
@@ -737,6 +808,8 @@ internal static class LocalVocabulary
             LocalStageKind.Zip or
             LocalStageKind.CombineLatest or
             LocalStageKind.Where or
+            LocalStageKind.DeduplicateConsecutive or
+            LocalStageKind.SelectMany or
             LocalStageKind.Scan or
             LocalStageKind.TakeWhile or
             LocalStageKind.TakeThrough or
@@ -775,6 +848,9 @@ internal static class LocalVocabulary
             _ when contract == CountParameterContract => LocalCountParameters.Validator,
             _ when contract == RangeParameterContract => LocalRangeParameters.Validator,
             _ when contract == DistinctParameterContract => LocalDistinctParameters.Validator,
+            _ when contract == WindowParameterContract => LocalWindowParameters.Validator,
+            _ when contract == GroupedWithinParameterContract => LocalGroupedWithinParameters.Validator,
+            _ when contract == GroupedWeightedParameterContract => LocalGroupedWeightedParameters.Validator,
             _ when contract == CollectParameterContract => LocalCollectParameters.Validator,
             _ when contract == InterleaveParameterContract => LocalInterleaveParameters.Validator,
             _ when contract == DurationParameterContract => LocalDurationParameters.Validator,
@@ -817,6 +893,8 @@ internal static class LocalVocabulary
             LocalStageKind.Tick => LocalStagePlace.Source,
         LocalStageKind.Select or
             LocalStageKind.Where or
+            LocalStageKind.DeduplicateConsecutive or
+            LocalStageKind.SelectMany or
             LocalStageKind.Scan or
             LocalStageKind.Take or
             LocalStageKind.Skip or
@@ -824,6 +902,12 @@ internal static class LocalVocabulary
             LocalStageKind.TakeThrough or
             LocalStageKind.SkipWhile or
             LocalStageKind.Distinct or
+            LocalStageKind.DeduplicateConsecutive or
+            LocalStageKind.SelectMany or
+            LocalStageKind.Grouped or
+            LocalStageKind.Sliding or
+            LocalStageKind.GroupedWithin or
+            LocalStageKind.GroupedWeightedWithin or
             LocalStageKind.Buffer or
             LocalStageKind.SelectAsync or
             LocalStageKind.SelectAsyncUnordered or

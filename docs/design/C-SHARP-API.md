@@ -290,6 +290,80 @@ drops an element. The state it starts in is `ValveMode.Open` unless the author
 says otherwise, and that state is in the document because a graph whose valve
 starts closed produces nothing until something opens it.
 
+## Batching, flattening, deduplication, and sequence edits
+
+The M4.3 wave-2 operators are ordinary members of `Source<T>` and
+`Flow<TIn,TOut>` wherever a chain can hold them, and .NET-first in name:
+
+| Spelling | What it does | What it takes |
+|---|---|---|
+| `Grouped(size)` | collects elements into lists of a declared size | a positive count |
+| `Sliding(size, step)` | emits a window of the declared size every time it holds one, advancing by the step | two positive counts |
+| `GroupedWithin(maxElements, window)` | closes a group on its count or on its window, whichever comes first | a positive count and a positive duration |
+| `GroupedWithin(maxElements, maxWeight, window, cost)` | the same, with a third bound on what the group weighs | two positive counts, a positive duration, and `Func<T,int>` |
+| `SelectMany(selector)` | replaces every element with the elements of the sequence it answers | `Func<T,IEnumerable<TNext>>` |
+| `Distinct(options)` | passes the first occurrence of every element, within a declared bound | `DistinctOptions` |
+| `DeduplicateConsecutive()` | drops an element equal to the one immediately before it | nothing |
+| `Prepend(source)` / `Prepend(elements)` | emits another stream, or a fixed run, before this one | a `Source<T>` or a `params T[]` |
+| `Append(source)` / `Append(elements)` | emits another stream, or a fixed run, after this one | a `Source<T>` or a `params T[]` |
+| `DivertTo(predicate, branch)` | sends the accepted elements to a branch and continues with the rest | `Func<T,bool>` and a `Branch<T>` |
+
+**Every batch emits its last partial group when its stream ends**, and never an
+empty one, so a stream of seven grouped by three gives three groups and a
+stream of six gives two. `Sliding` is the one with a subtler rule and it is one
+sentence: the end of the stream emits the buffer as a final window *only if it
+holds an element no window has carried*, which covers both familiar cases — a
+stream shorter than the window emits everything it had, and a stream that ended
+mid-overlap emits nothing new. The groups are `IReadOnlyList<T>`, copied out per
+group, so a group an author keeps is theirs.
+
+**A batch closed by a clock is a boundary and a batch closed by a count is
+not.** `GroupedWithin` runs as its own segment with one bounded handoff in
+front of it, exactly as an asynchronous stage does, because only a segment
+waiting on its own input can be woken by a clock while nothing is arriving —
+and emitting on silence is the whole reason to write it instead of `Grouped`.
+The window belongs to the group rather than to the stage: it starts when the
+group's first element arrives, so an empty window emits nothing because no
+window is running. The weighted form closes the group *before* the element that
+would break its bound, so the bound is never exceeded; a negative weight and a
+weight no group could ever carry both fail the run, as they do for a throttle
+by cost.
+
+**`SelectMany` is concat-map: one inner sequence read to its end before the
+next element is asked for**, so the order of the result is a function of the
+input alone. The inner sequence is never collected — the run reads it one
+element at a time, a bounded boundary below the stage backpressures the
+enumeration, a pause parks between two inner elements, and a cancellation
+abandons the rest — so an endless inner sequence is a stream this runtime paces
+rather than a loop the run disappears into. A function answering an empty
+sequence drops its element; one answering `null` fails the run. **Bounded-parallel
+flattening (`MergeMap`) is not here** and is not one call away: see
+LOCAL-RUNTIME.md for what it would cost the engine.
+
+**`DistinctOptions` now carries a policy beside its bound.**
+`KeyOverflowPolicy.Fail` is the default and keeps the operator's promise
+exactly — everything emitted was the first of its key, and a bound that was
+sized wrong says so with `TrackedKeyOverflowException`.
+`KeyOverflowPolicy.EvictOldest` is the deliberate weakening, and what it costs
+is worth reading twice: an element whose key was evicted is emitted again if it
+arrives again, so the stream is distinct over a window of the last
+`MaxTrackedKeys` keys rather than over its history. Age is when a key was first
+remembered, so a repeat does not refresh it. `DeduplicateConsecutive` is the
+other one and needs no bound at all: one element of memory, whatever the stream
+carries, and it collapses runs rather than history.
+
+**The sequence edits add no stage to the vocabulary**, which is the honest thing
+to say about them. `a.Append(b)` and `a.Concat(b)` build the same document and
+fingerprint identically; `a.Prepend(b)` is `b.Concat(a)`; and `DivertTo` is a
+two-legged partition with the main line on its first leg, the same shape
+`AlsoTo` gives a broadcast. So each inherits its junction's contract whole,
+including the parts that cost something — a concat holds its later input's
+source parked in a bounded channel while the earlier one plays out, and a
+partition holds one element and waits for the leg it belongs on, so a slow
+diverted branch holds the main line up for exactly that long. **They are on
+`Source<T>` only**: a junction joins two streams and a `Flow<TIn,TOut>` is a
+chain with one open input, so there is nowhere for the second stream to enter.
+
 ## Delegates and deployability
 
 Lambda-based operators (`Select(x => ...)`) construct graphs that carry the

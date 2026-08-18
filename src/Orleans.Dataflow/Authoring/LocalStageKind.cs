@@ -20,16 +20,20 @@ namespace Orleans.Dataflow.Authoring;
 /// port, and the three result-bearing terminals declare a result port on top of that.
 /// </para>
 /// <para>
-/// Seven of the shapes are boundaries: <see cref="Buffer"/>, <see cref="SelectAsync"/>,
+/// Nine of the shapes are boundaries: <see cref="Buffer"/>, <see cref="SelectAsync"/>,
 /// <see cref="SelectAsyncUnordered"/>, <see cref="SelectValueTaskAsync"/>,
 /// <see cref="SelectValueTaskAsyncUnordered"/>, <see cref="ForEachAsync"/>, and <see cref="Delay"/> each cut
-/// the chain into segments the runtime executes as separate loops joined by one bounded channel. Every other
-/// shape fuses, which is what makes fusion the default and a queue something an author asked for.
+/// the chain into segments the runtime executes as separate loops joined by one bounded channel, and
+/// M4.3 wave 2 added <see cref="GroupedWithin"/> and <see cref="GroupedWeightedWithin"/> to them for a
+/// reason of their own: a batch closed by a clock has to emit while nothing is arriving, and only a segment
+/// waiting on its own input channel can be woken to do that. Every other shape fuses, which is what makes
+/// fusion the default and a queue something an author asked for.
 /// </para>
 /// <para>
-/// Six of the shapes read a clock, and every one of them reads the run's own: <see cref="Tick"/>,
-/// <see cref="Delay"/>, <see cref="InitialDelay"/>, <see cref="Timeout"/>, <see cref="TakeWithin"/>, and
-/// <see cref="SkipWithin"/>, together with <see cref="Throttle"/>, which reads one to measure a rate. The
+/// Eight of the shapes read a clock, and every one of them reads the run's own: <see cref="Tick"/>,
+/// <see cref="Delay"/>, <see cref="InitialDelay"/>, <see cref="Timeout"/>, <see cref="TakeWithin"/>,
+/// <see cref="SkipWithin"/>, <see cref="GroupedWithin"/>, and <see cref="GroupedWeightedWithin"/>, together
+/// with <see cref="Throttle"/>, which reads one to measure a rate. The
 /// clock is the host's <see cref="System.TimeProvider"/>, resolved at materialization and carried by the run
 /// (ADR 0005); no stage of this vocabulary reads <see cref="System.TimeProvider.System"/> directly, which is
 /// what makes a deterministic test of one possible at all.
@@ -56,6 +60,14 @@ namespace Orleans.Dataflow.Authoring;
 /// what it does — hold an element until a receiver asks for it, on the segment's own thread, under this
 /// runtime's own stop and pause discipline — is runtime semantics, and a second implementation of those
 /// beside this one is exactly what a vocabulary exists to prevent.
+/// </para>
+/// <para>
+/// Five of the shapes hold elements back rather than answering each one as it arrives:
+/// <see cref="Grouped"/>, <see cref="Sliding"/>, <see cref="GroupedWithin"/>, and
+/// <see cref="GroupedWeightedWithin"/> each build a group, and <see cref="SelectMany"/> is the mirror image
+/// — one element in, a sequence out. Both are new shapes of answer rather than new pumps: the run pushes a
+/// residue or an inner element through the stages below the one that produced it, exactly as it pushes an
+/// element that arrived.
 /// </para>
 /// <para>
 /// The kind is never serialized. It is recoverable from the node's <see cref="Definition.StageNode.Stage"/>
@@ -165,6 +177,42 @@ internal enum LocalStageKind
     /// number of keys; one input port and one output port.
     /// </summary>
     Distinct,
+
+    /// <summary>
+    /// Drops an element equal to the one immediately before it, remembering exactly one; one input port and
+    /// one output port.
+    /// </summary>
+    DeduplicateConsecutive,
+
+    /// <summary>
+    /// Replaces every element with the elements of the sequence a function answers, one inner sequence at a
+    /// time; one input port and one output port.
+    /// </summary>
+    SelectMany,
+
+    /// <summary>
+    /// Collects a declared number of elements into one list and emits the last partial one when the stream
+    /// ends; one input port and one output port.
+    /// </summary>
+    Grouped,
+
+    /// <summary>
+    /// Emits a window of a declared size every time it holds one, advancing by a declared step; one input
+    /// port and one output port.
+    /// </summary>
+    Sliding,
+
+    /// <summary>
+    /// Collects elements into groups closed by a declared count or by a declared window, whichever comes
+    /// first; one input port and one output port.
+    /// </summary>
+    GroupedWithin,
+
+    /// <summary>
+    /// Collects elements into groups closed by a declared count, a declared weight, or a declared window,
+    /// whichever comes first; one input port and one output port.
+    /// </summary>
+    GroupedWeightedWithin,
 
     /// <summary>
     /// Holds up to a declared number of elements between two segments; one input port and one output port.

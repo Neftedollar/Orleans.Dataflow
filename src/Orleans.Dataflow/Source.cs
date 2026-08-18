@@ -199,6 +199,182 @@ public sealed class Source<T>
                 EqualityComparer<T>.Default)));
     }
 
+    /// <summary>Extends this source with a stage that drops an element equal to the one before it.</summary>
+    /// <returns>A new source; this one is unchanged.</returns>
+    /// <remarks>
+    /// The bounded deduplicator, and bounded by what it is rather than by a number an author declared: it
+    /// remembers exactly one element, whatever the stream carries, so there is nothing to declare and
+    /// nothing that can overflow. It collapses runs and never compares across them — <c>a a b b a</c>
+    /// becomes <c>a b a</c> — which makes it the operator for repeats that are adjacent by construction and
+    /// the wrong one for repeats that are not. <see cref="Distinct"/> is the other one, and it costs a
+    /// declared bound because it has to.
+    /// </remarks>
+    public Source<T> DeduplicateConsecutive() =>
+        new Source<T>(Shape.Append(LocalStageDescriptor.DeduplicateConsecutive(EqualityComparer<T>.Default)));
+
+    /// <summary>Extends this source with a stage that replaces every element with a sequence.</summary>
+    /// <typeparam name="TNext">The element type the sequences carry.</typeparam>
+    /// <param name="selector">The function answering one sequence per element.</param>
+    /// <returns>A new source; this one is unchanged.</returns>
+    /// <exception cref="ArgumentNullException"><paramref name="selector"/> is <see langword="null"/>.</exception>
+    /// <remarks>
+    /// <para>
+    /// The LINQ name is used because the LINQ semantics hold: the sequences are flattened in order, one
+    /// inner sequence read to its end before the next element is asked for, so this is concat-map and the
+    /// order of the result is a function of the input alone. A function answering an empty sequence drops
+    /// its element, which is what makes filtering a special case of flattening rather than a second
+    /// operator.
+    /// </para>
+    /// <para>
+    /// The inner sequence is read one element at a time and never collected: a bounded boundary below this
+    /// stage backpressures the enumeration, a pause parks between two inner elements, and a cancellation
+    /// abandons the rest of the sequence. An endless inner sequence is therefore a stream this runtime
+    /// paces rather than a loop the run disappears into — and it is also a stream nothing after it will
+    /// ever see the end of, which is worth knowing before writing one.
+    /// </para>
+    /// <para>
+    /// A function answering <see langword="null"/> fails the run. An element that produces nothing is an
+    /// empty sequence, and reading one meaning into the other would hide a mistake that costs elements.
+    /// </para>
+    /// </remarks>
+    public Source<TNext> SelectMany<TNext>(Func<T, IEnumerable<TNext>> selector)
+    {
+        ArgumentNullException.ThrowIfNull(selector);
+
+        return new Source<TNext>(Shape.Append(LocalStageDescriptor.SelectMany(selector)));
+    }
+
+    /// <summary>Extends this source with a stage that collects elements into lists of a declared size.</summary>
+    /// <param name="size">How many elements one group holds; at least one.</param>
+    /// <returns>A new source of groups; this one is unchanged.</returns>
+    /// <exception cref="ArgumentOutOfRangeException"><paramref name="size"/> is below one.</exception>
+    /// <remarks>
+    /// A group is emitted the moment it fills, so the stage holds at most <paramref name="size"/> elements
+    /// and that is the whole of its memory bound. <b>The last group is emitted when the stream ends and is
+    /// the only one that may be partial</b> — a stream of seven elements grouped by three gives three
+    /// groups, the last of them holding one — and an empty group is never emitted, so a stream whose length
+    /// is a multiple of the size gives exactly the groups it filled and a stream with no elements gives
+    /// none. A stop that drains delivers that last partial group, because the elements in it were admitted;
+    /// a cancellation abandons it, as it abandons every element in flight.
+    /// </remarks>
+    public Source<IReadOnlyList<T>> Grouped(int size) =>
+        new Source<IReadOnlyList<T>>(Shape.Append(LocalStageDescriptor.Grouped(
+            LocalOptionGuard.Size(size, nameof(size)),
+            GroupOf<T>())));
+
+    /// <summary>Extends this source with a stage that emits a window of a declared size and step.</summary>
+    /// <param name="size">How many elements one window holds; at least one.</param>
+    /// <param name="step">How far the window advances after each emission; at least one.</param>
+    /// <returns>A new source of windows; this one is unchanged.</returns>
+    /// <exception cref="ArgumentOutOfRangeException">
+    /// <paramref name="size"/> or <paramref name="step"/> is below one.
+    /// </exception>
+    /// <remarks>
+    /// <para>
+    /// A window is emitted every time the stage holds <paramref name="size"/> elements, and the oldest
+    /// <paramref name="step"/> of them are then forgotten. The relation between the two numbers is the
+    /// operator: a step below the size overlaps windows, which is the moving average; a step equal to it
+    /// partitions the stream, which is <see cref="Grouped"/> written the long way; and a step above it
+    /// samples the stream, passing over the elements between two windows so that they never appear in one
+    /// at all.
+    /// </para>
+    /// <para>
+    /// <b>The end of the stream emits the buffer as one final window only if it holds an element no window
+    /// has carried.</b> That one rule covers both familiar cases without a special case for either: a
+    /// stream shorter than the window emits everything it had, and a stream that ended in the middle of an
+    /// overlap emits nothing new, because everything it still held has already been seen.
+    /// </para>
+    /// </remarks>
+    public Source<IReadOnlyList<T>> Sliding(int size, int step) =>
+        new Source<IReadOnlyList<T>>(Shape.Append(LocalStageDescriptor.Sliding(
+            LocalOptionGuard.Size(size, nameof(size)),
+            LocalOptionGuard.Step(step, nameof(step)),
+            GroupOf<T>())));
+
+    /// <summary>Extends this source with a stage that closes a group by a count or by a window.</summary>
+    /// <param name="maxElements">How many elements close a group; at least one.</param>
+    /// <param name="window">How long a group stays open once its first element has arrived.</param>
+    /// <returns>A new source of groups; this one is unchanged.</returns>
+    /// <exception cref="ArgumentOutOfRangeException">
+    /// <paramref name="maxElements"/> is below one, or <paramref name="window"/> is not positive.
+    /// </exception>
+    /// <remarks>
+    /// <para>
+    /// <b>A group is emitted when it reaches <paramref name="maxElements"/> elements or when
+    /// <paramref name="window"/> has passed since its first element arrived, whichever comes first.</b> The
+    /// window belongs to the group rather than to the stage, which is what makes "an empty window emits
+    /// nothing" a consequence rather than a rule: with no group open there is no window running, so a
+    /// stream that goes quiet for an hour emits nothing during it and the group that follows is timed from
+    /// its own first element.
+    /// </para>
+    /// <para>
+    /// The clock is the host's, resolved when the graph is materialized, and time passes while a run is
+    /// paused — so a group whose window closes during a pause is emitted when the run resumes, at the
+    /// safe point every held element is delivered from. The end of the stream emits the open group, and a
+    /// cancellation abandons it.
+    /// </para>
+    /// <para>
+    /// This stage is a boundary: it runs as its own segment with one bounded handoff in front of it,
+    /// exactly as an asynchronous stage does. That is not an implementation detail to work around but the
+    /// price of the contract — only a segment waiting on its own input can be woken by a clock while
+    /// nothing is arriving, and emitting on silence is the whole reason to write this operator instead of
+    /// <see cref="Grouped"/>.
+    /// </para>
+    /// </remarks>
+    public Source<IReadOnlyList<T>> GroupedWithin(int maxElements, TimeSpan window) =>
+        new Source<IReadOnlyList<T>>(Shape.Append(LocalStageDescriptor.GroupedWithin(
+            LocalOptionGuard.Size(maxElements, nameof(maxElements)),
+            LocalOptionGuard.Duration(window, nameof(window)),
+            GroupOf<T>())));
+
+    /// <summary>Extends this source with a stage that closes a group by a count, a weight, or a window.</summary>
+    /// <param name="maxElements">How many elements close a group; at least one.</param>
+    /// <param name="maxWeight">How much one group may weigh; at least one.</param>
+    /// <param name="window">How long a group stays open once its first element has arrived.</param>
+    /// <param name="cost">What one element weighs; zero or more.</param>
+    /// <returns>A new source of groups; this one is unchanged.</returns>
+    /// <exception cref="ArgumentNullException"><paramref name="cost"/> is <see langword="null"/>.</exception>
+    /// <exception cref="ArgumentOutOfRangeException">
+    /// <paramref name="maxElements"/> or <paramref name="maxWeight"/> is below one, or
+    /// <paramref name="window"/> is not positive.
+    /// </exception>
+    /// <remarks>
+    /// <para>
+    /// The weighted batch: everything <see cref="GroupedWithin(int, TimeSpan)"/> promises, with a third
+    /// bound that is what the elements are worth rather than how many there are — the batch to write when
+    /// what the consumer below can take is a number of rows, a number of bytes, or a request size rather
+    /// than a number of messages.
+    /// </para>
+    /// <para>
+    /// <b>The weight bound is never exceeded, because the group closes before the element that would break
+    /// it.</b> An element whose weight would push the open group past <paramref name="maxWeight"/> is not
+    /// added to it: the group is emitted as it stands and that element starts the next one, from whose
+    /// arrival the next window is timed. The function runs once per element, on the segment's own thread,
+    /// before the element joins anything.
+    /// </para>
+    /// <para>
+    /// Two answers fail the run rather than being absorbed, exactly as they do for a throttle by cost: a
+    /// negative weight, which would make an element lighten a group, and a weight above
+    /// <paramref name="maxWeight"/>, which no group of this stage could ever carry — waiting for one that
+    /// could would never end.
+    /// </para>
+    /// </remarks>
+    public Source<IReadOnlyList<T>> GroupedWithin(
+        int maxElements,
+        int maxWeight,
+        TimeSpan window,
+        Func<T, int> cost)
+    {
+        ArgumentNullException.ThrowIfNull(cost);
+
+        return new Source<IReadOnlyList<T>>(Shape.Append(LocalStageDescriptor.GroupedWeightedWithin(
+            LocalOptionGuard.Size(maxElements, nameof(maxElements)),
+            LocalOptionGuard.Weight(maxWeight, nameof(maxWeight)),
+            LocalOptionGuard.Duration(window, nameof(window)),
+            cost,
+            GroupOf<T>())));
+    }
+
     /// <summary>Extends this source with a bounded buffer.</summary>
     /// <param name="options">The capacity and the overflow policy.</param>
     /// <returns>A new source; this one is unchanged.</returns>
@@ -804,6 +980,118 @@ public sealed class Source<T>
 
         return new Source<TOut>(Split(LocalStageDescriptor.Broadcast(), left.Stages, right.Stages)
             .Combine(LocalStageDescriptor.Merge(), LocalJunctionGuard.FanInPorts(LocalVocabulary.MinFanIn)));
+    }
+
+    /// <summary>Emits another source's elements before this one's.</summary>
+    /// <param name="head">The source to emit first, which is not modified.</param>
+    /// <returns>A source of that stream followed by this one; neither argument is changed.</returns>
+    /// <exception cref="ArgumentNullException"><paramref name="head"/> is <see langword="null"/>.</exception>
+    /// <remarks>
+    /// <c>a.Prepend(b)</c> is <c>b.Concat(a)</c> and is exactly that document, junction and all: this is the
+    /// spelling for when the stream being extended is the one already in hand, which is what a chain of
+    /// operators leaves an author holding. Everything <see cref="Concat"/> promises therefore holds here,
+    /// including the one that costs something — the later input's source is running and parked in its own
+    /// bounded channel while the earlier one plays out, because a run starts every segment.
+    /// </remarks>
+    public Source<T> Prepend(Source<T> head)
+    {
+        ArgumentNullException.ThrowIfNull(head);
+
+        return head.Joined<T>(LocalStageDescriptor.Concat(), Shape);
+    }
+
+    /// <summary>Emits a fixed run of elements before this source's.</summary>
+    /// <param name="elements">The elements to emit first, in order.</param>
+    /// <returns>A source of those elements followed by this one's; this one is unchanged.</returns>
+    /// <exception cref="ArgumentNullException"><paramref name="elements"/> is <see langword="null"/>.</exception>
+    /// <remarks>
+    /// The convenience over <see cref="Prepend(Source{T})"/> for the common case of a header, a sentinel, or
+    /// a seed row: it is <c>Prepend(Source.From(elements))</c> and nothing more, so the array is enumerated
+    /// once per run exactly as any bound sequence is. An empty array builds a real concat junction over an
+    /// empty source rather than nothing at all, because a graph's shape is what the author wrote.
+    /// </remarks>
+    public Source<T> Prepend(params T[] elements)
+    {
+        ArgumentNullException.ThrowIfNull(elements);
+
+        return Prepend(Source.From(elements));
+    }
+
+    /// <summary>Emits another source's elements after this one's.</summary>
+    /// <param name="tail">The source to emit last, which is not modified.</param>
+    /// <returns>A source of this stream followed by that one; neither argument is changed.</returns>
+    /// <exception cref="ArgumentNullException"><paramref name="tail"/> is <see langword="null"/>.</exception>
+    /// <remarks>
+    /// The same junction <see cref="Concat"/> builds, under the name the sequence-edit vocabulary uses, and
+    /// it is deliberately the same document rather than a second one: <c>a.Append(b)</c> and
+    /// <c>a.Concat(b)</c> fingerprint identically because they are the same graph. Which word to write is a
+    /// question of what the author is saying — joining two streams, or extending one.
+    /// </remarks>
+    public Source<T> Append(Source<T> tail)
+    {
+        ArgumentNullException.ThrowIfNull(tail);
+
+        return Concat(tail);
+    }
+
+    /// <summary>Emits a fixed run of elements after this source's.</summary>
+    /// <param name="elements">The elements to emit last, in order.</param>
+    /// <returns>A source of this one's elements followed by those; this one is unchanged.</returns>
+    /// <exception cref="ArgumentNullException"><paramref name="elements"/> is <see langword="null"/>.</exception>
+    /// <remarks>
+    /// The mirror of <see cref="Prepend(T[])"/> and the spelling for a terminator or a footer row. The
+    /// elements are emitted after this source has ended and not after it has been stopped: a shutdown ends
+    /// the run rather than moving it on to its tail, so a trailer written this way is a statement about a
+    /// stream that finished.
+    /// </remarks>
+    public Source<T> Append(params T[] elements)
+    {
+        ArgumentNullException.ThrowIfNull(elements);
+
+        return Concat(Source.From(elements));
+    }
+
+    /// <summary>Sends the elements a predicate accepts to a branch, and continues with the rest.</summary>
+    /// <param name="predicate">The test that decides which elements leave the main line.</param>
+    /// <param name="side">The branch the accepted elements go to, which is not modified.</param>
+    /// <returns>A source of the elements the predicate rejected; the argument is not changed.</returns>
+    /// <exception cref="ArgumentNullException">
+    /// <paramref name="predicate"/> or <paramref name="side"/> is <see langword="null"/>.
+    /// </exception>
+    /// <remarks>
+    /// <para>
+    /// Partition sugar, and the two-legged partition exactly: the accepted elements go to
+    /// <paramref name="side"/> and nothing else does, so unlike <see cref="AlsoTo"/> this junction never
+    /// duplicates an element. It is the shape a validation stage wants — the rejects to a dead-letter sink,
+    /// everything else onward — and writing it this way keeps the main line an expression instead of making
+    /// it one branch of a closed graph.
+    /// </para>
+    /// <para>
+    /// What it costs is the partition's own rule and is worth stating rather than discovering: the junction
+    /// holds one element and waits for the leg that element belongs on, so a diverted element that the
+    /// branch is slow to take holds the main line up for exactly as long. A branch that has ended its own
+    /// stream does not fail the run — the elements routed to it are abandoned, which is what a partition
+    /// does everywhere — and the main line goes on.
+    /// </para>
+    /// <para>
+    /// A branch that declares a result is welcome here, exactly as it is at <see cref="AlsoTo"/>: its slot
+    /// travels with the graph and is declared when the graph is closed.
+    /// </para>
+    /// </remarks>
+    public Source<T> DivertTo(Func<T, bool> predicate, Branch<T> side)
+    {
+        ArgumentNullException.ThrowIfNull(predicate);
+        ArgumentNullException.ThrowIfNull(side);
+
+        LocalGraphShape shape = Split(
+            LocalStageDescriptor.Partition((Func<T, int>)(element => predicate(element) ? 1 : 0)),
+            [],
+            side.Stages);
+
+        return new Source<T>(
+            side.SlotName is { } name
+                ? shape.Declaring(new LocalSlotRequest(name, shape.Stages.Count - 1, side.Binding))
+                : shape);
     }
 
     /// <summary>Sends every element to a branch as well, and continues.</summary>
@@ -1436,6 +1724,29 @@ public sealed class Source<T>
             slotId,
             out slot);
     }
+
+    /// <summary>Builds the projection a batching stage turns one group of boxed elements into a list with.</summary>
+    /// <typeparam name="TElement">The element type the group carries.</typeparam>
+    /// <returns>The projection, closed over the element type.</returns>
+    /// <remarks>
+    /// The same bridge the collecting sink uses and for the same reason: the run accumulates elements as
+    /// <see cref="object"/> because a local graph's element types live in the C# type system, and the author
+    /// declared a list of their own type. The array is copied out per group, so nothing a batch emits shares
+    /// storage with the buffer the stage reuses.
+    /// </remarks>
+    private static Func<object?, object?> GroupOf<TElement>() =>
+        static group =>
+        {
+            List<object?> collected = (List<object?>)group!;
+            TElement[] elements = new TElement[collected.Count];
+
+            for (int index = 0; index < elements.Length; index++)
+            {
+                elements[index] = (TElement)collected[index]!;
+            }
+
+            return elements;
+        };
 }
 
 /// <summary>

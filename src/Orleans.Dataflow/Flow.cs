@@ -188,6 +188,186 @@ public sealed class Flow<TIn, TOut>
                 EqualityComparer<TOut>.Default)));
     }
 
+    /// <summary>Extends this flow with a stage that drops an element equal to the one before it.</summary>
+    /// <returns>A new flow; this one is unchanged.</returns>
+    /// <remarks>
+    /// The bounded deduplicator, and bounded by what it is rather than by a number an author declared: it
+    /// remembers exactly one element, whatever the stream carries, so there is nothing to declare and
+    /// nothing that can overflow. It collapses runs and never compares across them — <c>a a b b a</c>
+    /// becomes <c>a b a</c> — which makes it the operator for repeats that are adjacent by construction and
+    /// the wrong one for repeats that are not. <see cref="Distinct"/> is the other one, and it costs a
+    /// declared bound because it has to.
+    /// </remarks>
+    public Flow<TIn, TOut> DeduplicateConsecutive() =>
+        new Flow<TIn, TOut>(LocalStageChain.Append(
+            Stages,
+            LocalStageDescriptor.DeduplicateConsecutive(EqualityComparer<TOut>.Default)));
+
+    /// <summary>Extends this flow with a stage that replaces every element with a sequence.</summary>
+    /// <typeparam name="TNext">The element type the sequences carry.</typeparam>
+    /// <param name="selector">The function answering one sequence per element.</param>
+    /// <returns>A new flow; this one is unchanged.</returns>
+    /// <exception cref="ArgumentNullException"><paramref name="selector"/> is <see langword="null"/>.</exception>
+    /// <remarks>
+    /// <para>
+    /// The LINQ name is used because the LINQ semantics hold: the sequences are flattened in order, one
+    /// inner sequence read to its end before the next element is asked for, so this is concat-map and the
+    /// order of the result is a function of the input alone. A function answering an empty sequence drops
+    /// its element, which is what makes filtering a special case of flattening rather than a second
+    /// operator.
+    /// </para>
+    /// <para>
+    /// The inner sequence is read one element at a time and never collected: a bounded boundary below this
+    /// stage backpressures the enumeration, a pause parks between two inner elements, and a cancellation
+    /// abandons the rest of the sequence. An endless inner sequence is therefore a stream this runtime
+    /// paces rather than a loop the run disappears into — and it is also a stream nothing after it will
+    /// ever see the end of, which is worth knowing before writing one.
+    /// </para>
+    /// <para>
+    /// A function answering <see langword="null"/> fails the run. An element that produces nothing is an
+    /// empty sequence, and reading one meaning into the other would hide a mistake that costs elements.
+    /// </para>
+    /// </remarks>
+    public Flow<TIn, TNext> SelectMany<TNext>(Func<TOut, IEnumerable<TNext>> selector)
+    {
+        ArgumentNullException.ThrowIfNull(selector);
+
+        return new Flow<TIn, TNext>(LocalStageChain.Append(Stages, LocalStageDescriptor.SelectMany(selector)));
+    }
+
+    /// <summary>Extends this flow with a stage that collects elements into lists of a declared size.</summary>
+    /// <param name="size">How many elements one group holds; at least one.</param>
+    /// <returns>A new flow of groups; this one is unchanged.</returns>
+    /// <exception cref="ArgumentOutOfRangeException"><paramref name="size"/> is below one.</exception>
+    /// <remarks>
+    /// A group is emitted the moment it fills, so the stage holds at most <paramref name="size"/> elements
+    /// and that is the whole of its memory bound. <b>The last group is emitted when the stream ends and is
+    /// the only one that may be partial</b> — a stream of seven elements grouped by three gives three
+    /// groups, the last of them holding one — and an empty group is never emitted, so a stream whose length
+    /// is a multiple of the size gives exactly the groups it filled and a stream with no elements gives
+    /// none. A stop that drains delivers that last partial group, because the elements in it were admitted;
+    /// a cancellation abandons it, as it abandons every element in flight.
+    /// </remarks>
+    public Flow<TIn, IReadOnlyList<TOut>> Grouped(int size) =>
+        new Flow<TIn, IReadOnlyList<TOut>>(LocalStageChain.Append(Stages, LocalStageDescriptor.Grouped(
+            LocalOptionGuard.Size(size, nameof(size)),
+            GroupOf<TOut>())));
+
+    /// <summary>Extends this flow with a stage that emits a window of a declared size and step.</summary>
+    /// <param name="size">How many elements one window holds; at least one.</param>
+    /// <param name="step">How far the window advances after each emission; at least one.</param>
+    /// <returns>A new flow of windows; this one is unchanged.</returns>
+    /// <exception cref="ArgumentOutOfRangeException">
+    /// <paramref name="size"/> or <paramref name="step"/> is below one.
+    /// </exception>
+    /// <remarks>
+    /// <para>
+    /// A window is emitted every time the stage holds <paramref name="size"/> elements, and the oldest
+    /// <paramref name="step"/> of them are then forgotten. The relation between the two numbers is the
+    /// operator: a step below the size overlaps windows, which is the moving average; a step equal to it
+    /// partitions the stream, which is <see cref="Grouped"/> written the long way; and a step above it
+    /// samples the stream, passing over the elements between two windows so that they never appear in one
+    /// at all.
+    /// </para>
+    /// <para>
+    /// <b>The end of the stream emits the buffer as one final window only if it holds an element no window
+    /// has carried.</b> That one rule covers both familiar cases without a special case for either: a
+    /// stream shorter than the window emits everything it had, and a stream that ended in the middle of an
+    /// overlap emits nothing new, because everything it still held has already been seen.
+    /// </para>
+    /// </remarks>
+    public Flow<TIn, IReadOnlyList<TOut>> Sliding(int size, int step) =>
+        new Flow<TIn, IReadOnlyList<TOut>>(LocalStageChain.Append(Stages, LocalStageDescriptor.Sliding(
+            LocalOptionGuard.Size(size, nameof(size)),
+            LocalOptionGuard.Step(step, nameof(step)),
+            GroupOf<TOut>())));
+
+    /// <summary>Extends this flow with a stage that closes a group by a count or by a window.</summary>
+    /// <param name="maxElements">How many elements close a group; at least one.</param>
+    /// <param name="window">How long a group stays open once its first element has arrived.</param>
+    /// <returns>A new flow of groups; this one is unchanged.</returns>
+    /// <exception cref="ArgumentOutOfRangeException">
+    /// <paramref name="maxElements"/> is below one, or <paramref name="window"/> is not positive.
+    /// </exception>
+    /// <remarks>
+    /// <para>
+    /// <b>A group is emitted when it reaches <paramref name="maxElements"/> elements or when
+    /// <paramref name="window"/> has passed since its first element arrived, whichever comes first.</b> The
+    /// window belongs to the group rather than to the stage, which is what makes "an empty window emits
+    /// nothing" a consequence rather than a rule: with no group open there is no window running, so a
+    /// stream that goes quiet for an hour emits nothing during it and the group that follows is timed from
+    /// its own first element.
+    /// </para>
+    /// <para>
+    /// The clock is the host's, resolved when the graph is materialized, and time passes while a run is
+    /// paused — so a group whose window closes during a pause is emitted when the run resumes, at the
+    /// safe point every held element is delivered from. The end of the stream emits the open group, and a
+    /// cancellation abandons it.
+    /// </para>
+    /// <para>
+    /// This stage is a boundary: it runs as its own segment with one bounded handoff in front of it,
+    /// exactly as an asynchronous stage does. That is not an implementation detail to work around but the
+    /// price of the contract — only a segment waiting on its own input can be woken by a clock while
+    /// nothing is arriving, and emitting on silence is the whole reason to write this operator instead of
+    /// <see cref="Grouped"/>.
+    /// </para>
+    /// </remarks>
+    public Flow<TIn, IReadOnlyList<TOut>> GroupedWithin(int maxElements, TimeSpan window) =>
+        new Flow<TIn, IReadOnlyList<TOut>>(LocalStageChain.Append(Stages, LocalStageDescriptor.GroupedWithin(
+            LocalOptionGuard.Size(maxElements, nameof(maxElements)),
+            LocalOptionGuard.Duration(window, nameof(window)),
+            GroupOf<TOut>())));
+
+    /// <summary>Extends this flow with a stage that closes a group by a count, a weight, or a window.</summary>
+    /// <param name="maxElements">How many elements close a group; at least one.</param>
+    /// <param name="maxWeight">How much one group may weigh; at least one.</param>
+    /// <param name="window">How long a group stays open once its first element has arrived.</param>
+    /// <param name="cost">What one element weighs; zero or more.</param>
+    /// <returns>A new flow of groups; this one is unchanged.</returns>
+    /// <exception cref="ArgumentNullException"><paramref name="cost"/> is <see langword="null"/>.</exception>
+    /// <exception cref="ArgumentOutOfRangeException">
+    /// <paramref name="maxElements"/> or <paramref name="maxWeight"/> is below one, or
+    /// <paramref name="window"/> is not positive.
+    /// </exception>
+    /// <remarks>
+    /// <para>
+    /// The weighted batch: everything <see cref="GroupedWithin(int, TimeSpan)"/> promises, with a third
+    /// bound that is what the elements are worth rather than how many there are — the batch to write when
+    /// what the consumer below can take is a number of rows, a number of bytes, or a request size rather
+    /// than a number of messages.
+    /// </para>
+    /// <para>
+    /// <b>The weight bound is never exceeded, because the group closes before the element that would break
+    /// it.</b> An element whose weight would push the open group past <paramref name="maxWeight"/> is not
+    /// added to it: the group is emitted as it stands and that element starts the next one, from whose
+    /// arrival the next window is timed. The function runs once per element, on the segment's own thread,
+    /// before the element joins anything.
+    /// </para>
+    /// <para>
+    /// Two answers fail the run rather than being absorbed, exactly as they do for a throttle by cost: a
+    /// negative weight, which would make an element lighten a group, and a weight above
+    /// <paramref name="maxWeight"/>, which no group of this stage could ever carry — waiting for one that
+    /// could would never end.
+    /// </para>
+    /// </remarks>
+    public Flow<TIn, IReadOnlyList<TOut>> GroupedWithin(
+        int maxElements,
+        int maxWeight,
+        TimeSpan window,
+        Func<TOut, int> cost)
+    {
+        ArgumentNullException.ThrowIfNull(cost);
+
+        return new Flow<TIn, IReadOnlyList<TOut>>(LocalStageChain.Append(
+            Stages,
+            LocalStageDescriptor.GroupedWeightedWithin(
+            LocalOptionGuard.Size(maxElements, nameof(maxElements)),
+            LocalOptionGuard.Weight(maxWeight, nameof(maxWeight)),
+            LocalOptionGuard.Duration(window, nameof(window)),
+            cost,
+            GroupOf<TOut>())));
+    }
+
     /// <summary>Extends this flow with a bounded buffer.</summary>
     /// <param name="options">The capacity and the overflow policy.</param>
     /// <returns>A new flow; this one is unchanged.</returns>
@@ -861,6 +1041,29 @@ public sealed class Flow<TIn, TOut>
 
         return new Branch<TIn>(LocalStageChain.Concat(Stages, terminal), slotId, binding);
     }
+
+    /// <summary>Builds the projection a batching stage turns one group of boxed elements into a list with.</summary>
+    /// <typeparam name="TElement">The element type the group carries.</typeparam>
+    /// <returns>The projection, closed over the element type.</returns>
+    /// <remarks>
+    /// The same bridge the collecting sink uses and for the same reason: the run accumulates elements as
+    /// <see cref="object"/> because a local graph's element types live in the C# type system, and the author
+    /// declared a list of their own type. The array is copied out per group, so nothing a batch emits shares
+    /// storage with the buffer the stage reuses.
+    /// </remarks>
+    private static Func<object?, object?> GroupOf<TElement>() =>
+        static group =>
+        {
+            List<object?> collected = (List<object?>)group!;
+            TElement[] elements = new TElement[collected.Count];
+
+            for (int index = 0; index < elements.Length; index++)
+            {
+                elements[index] = (TElement)collected[index]!;
+            }
+
+            return elements;
+        };
 }
 
 /// <summary>
