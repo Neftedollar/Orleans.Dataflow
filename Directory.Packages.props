@@ -11,6 +11,7 @@
     <PackageVersion Include="Microsoft.Orleans.Server" Version="10.2.2" />
     <PackageVersion Include="Microsoft.Orleans.Streaming" Version="10.2.2" />
     <PackageVersion Include="Microsoft.Orleans.TestingHost" Version="10.2.2" />
+    <PackageVersion Include="FSharp.Core" Version="10.1.201" />
     <PackageVersion Include="xunit.v3.mtp-v2" Version="4.0.0" />
   </ItemGroup>
 </Project>

@@ -23,3 +23,14 @@ using System.Runtime.CompilerServices;
 // to let a test helper exist. What stays here is everything that is runtime semantics — the rendezvous, the
 // stop discipline, the pause accounting — so that there is one implementation of those and not two.
 [assembly: InternalsVisibleTo("Orleans.Dataflow.Testing")]
+
+// The F# frontend is an equal authoring frontend over this package's algebra — the shape, the descriptor
+// vocabulary, the graph builder, and the slot factory — and never over the C# fluent facade, whose
+// spellings are one language's and would import every C#-ism into a package that exists to not have them
+// (F-SHARP-API.md, binding rule). The seam is friend access rather than a public surface because what the
+// F# modules consume is the very state the fluent methods consume: publishing it would fix the algebra's
+// shape as API by accident, and the two frontends ship from one repository in lockstep. Drift between the
+// frontends is impossible by construction, not by discipline: both call the one descriptor vocabulary and
+// the one builder, and the runtime's delegate adapter is the single owner of how a typed lambda meets a
+// boxed element.
+[assembly: InternalsVisibleTo("Orleans.Dataflow.FSharp")]

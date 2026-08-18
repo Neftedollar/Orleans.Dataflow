@@ -3,9 +3,11 @@
     <Project Path="src/Orleans.Dataflow.Abstractions/Orleans.Dataflow.Abstractions.csproj" />
     <Project Path="src/Orleans.Dataflow/Orleans.Dataflow.csproj" />
     <Project Path="src/Orleans.Dataflow.Orleans/Orleans.Dataflow.Orleans.csproj" />
+    <Project Path="src/Orleans.Dataflow.FSharp/Orleans.Dataflow.FSharp.fsproj" />
     <Project Path="src/Orleans.Dataflow.Testing/Orleans.Dataflow.Testing.csproj" />
   </Folder>
   <Folder Name="/tests/">
+    <Project Path="tests/Orleans.Dataflow.FSharpTests/Orleans.Dataflow.FSharpTests.fsproj" />
     <Project Path="tests/Orleans.Dataflow.OrleansTests/Orleans.Dataflow.OrleansTests.csproj" />
     <Project Path="tests/Orleans.Dataflow.Tests/Orleans.Dataflow.Tests.csproj" />
   </Folder>

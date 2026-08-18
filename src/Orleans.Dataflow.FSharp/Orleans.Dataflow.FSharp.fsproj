@@ -1,0 +1,18 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <Description>Idiomatic F# authoring frontend for Orleans.Dataflow, over the same graph algebra as the C# API.</Description>
+    <GenerateDocumentationFile>true</GenerateDocumentationFile>
+    <!-- Directory.Build.props pins the C# language version, which is not a valid F# one. -->
+    <LangVersion>latest</LangVersion>
+  </PropertyGroup>
+  <ItemGroup>
+    <Compile Include="Shapes.fs" />
+    <Compile Include="Flow.fs" />
+    <Compile Include="Sink.fs" />
+    <Compile Include="Source.fs" />
+  </ItemGroup>
+  <ItemGroup>
+    <PackageReference Include="FSharp.Core" />
+    <ProjectReference Include="../Orleans.Dataflow/Orleans.Dataflow.csproj" />
+  </ItemGroup>
+</Project>

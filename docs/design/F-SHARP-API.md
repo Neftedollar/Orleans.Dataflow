@@ -1,9 +1,30 @@
 # F# API direction
 
-- Status: Design constraint and prototype target
-- Package direction: `Orleans.Dataflow.FSharp`
+- Status: M7 in flight (started 2026-08-18, after the M6 gate passed)
+- Package: `Orleans.Dataflow.FSharp`
 
-The F# frontend is not implemented yet. This document exists now so that C# and graph-core decisions cannot accidentally make an idiomatic F# API impossible.
+This document was written before any F# existed so that C# and graph-core
+decisions could not accidentally make an idiomatic F# API impossible; M7 now
+builds against it. The phase order:
+
+1. **M7.1 — seam and first vertical slice.** Friend-assembly access opens the
+   four seams the compile prototype proved sufficient (below); the package
+   skeleton, the `Source`/`Flow`/`Sink`/`Pipeline` modules in their minimal
+   form, and one end-to-end slice — author in F#, materialize on the local
+   host, resolve a slot — with the fingerprint-equality invariant as a test:
+   an F#-authored graph and its C#-authored twin produce byte-identical
+   documents. This phase fixes every convention, so it is authored by the
+   architect rather than delegated.
+2. **M7.2 — operator breadth** over the algebra: the effect-explicit map
+   families, filtering/choosing, batching, timing, rate, deduplication,
+   supervision and durable-scope spellings, per the C# vocabulary and this
+   document's naming rules.
+3. **M7.3 — junctions and the `Graph` module**: typed branches over the
+   fragment algebra, the nine junctions, `Fork` diamonds, cycles through
+   `GraphFragmentComposer.Wire`.
+4. **M7.4 — runs and hosts**: `RunHandle` (completion, watch, snapshot,
+   pause), durable options, the Orleans host, registered-stage spellings.
+5. **M7.5 — examples, docs authored as F#, and the M7 exit review.**
 
 ## Principles
 
