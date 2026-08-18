@@ -123,7 +123,7 @@ public sealed record class GraphFragment
     /// <remarks>
     /// <para>
     /// The structural invariants are: at least one node; no null node and no default element anywhere;
-    /// unique node identifiers; every edge endpoint naming a declared node; no self-loop edge; at most one
+    /// unique node identifiers; every edge endpoint naming a declared node; at most one
     /// edge originating at any output port; at most one edge terminating at any input port; every open
     /// port naming a declared node; no open port that is also an edge endpoint on the matching side; no
     /// repeated address within an open list; and no address that appears in both open lists.
@@ -346,15 +346,6 @@ public sealed record class GraphFragment
             {
                 violations.Add($"edges[{index}] is the default {nameof(GraphEdge)}, which connects nothing");
                 continue;
-            }
-
-            // Unreachable through GraphEdge.Create, which rejects a self-loop outright. The rule is
-            // restated here so that no future construction path can put a cycle into a fragment by
-            // bypassing the edge factory.
-            if (edge.From.Node == edge.To.Node)
-            {
-                violations.Add(
-                    $"edges[{index}] connects '{edge.From}' to '{edge.To}', a self-loop on node '{edge.From.Node}', and cycles require an explicit boundary contract in a later milestone");
             }
 
             if (origins.TryGetValue(edge.From, out int firstOrigin))

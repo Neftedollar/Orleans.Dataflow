@@ -6,7 +6,7 @@ using Orleans.Dataflow.Serialization;
 namespace Orleans.Dataflow.Authoring;
 
 /// <summary>
-/// Graph closure: the one place where a chain of stage occurrences becomes node identifiers, fragments, a
+/// Graph closure: the one place where a shape of stage occurrences becomes node identifiers, fragments, a
 /// graph document, and a fingerprint.
 /// </summary>
 /// <remarks>
@@ -14,10 +14,10 @@ namespace Orleans.Dataflow.Authoring;
 /// Everything that needs a position happens here and nowhere else. An occurrence the author named keeps
 /// its name; an unnamed one is numbered by its position in authoring order (<c>stage-0001</c>,
 /// <c>stage-0002</c>, per ADR 0004 section 6). Each occurrence becomes a one-node fragment through
-/// <see cref="GraphFragment.OfStage"/>, and the fragments are joined with
-/// <see cref="GraphFragmentComposer.Append"/> and closed with
-/// <see cref="GraphFragmentComposer.Close"/>. The algebra is the substrate; this type never builds a
-/// document any other way.
+/// <see cref="GraphFragment.OfStage"/>, the shape's links are laid down with
+/// <see cref="GraphFragmentComposer.Connect"/> and <see cref="GraphFragmentComposer.Wire"/>, and the result
+/// is closed with <see cref="GraphFragmentComposer.Close"/>. The algebra is the substrate; this type never
+/// builds a document any other way.
 /// </para>
 /// <para>
 /// The zero padding buys one invariant, and it is worth stating as an invariant rather than as a detail
@@ -28,14 +28,22 @@ namespace Orleans.Dataflow.Authoring;
 /// </para>
 /// <para>
 /// A registered occurrence numbers nothing, but it does occupy a position: the automatic numbers are the
-/// positions in the whole chain rather than a separate count of the unnamed ones. That keeps a
+/// positions in the whole shape rather than a separate count of the unnamed ones. That keeps a
 /// lambda-only graph numbered exactly as it was before registered stages existed, and it keeps
-/// <c>stage-0003</c> meaning "the third occurrence" in a mixed chain instead of "the third lambda".
+/// <c>stage-0003</c> meaning "the third occurrence" in a mixed graph instead of "the third lambda".
+/// </para>
+/// <para>
+/// Which composition operator lays down a link is decided by the link, not by the kind of graph: a link
+/// between two occurrences that are still in separate fragments is a <see cref="GraphFragmentComposer.Connect"/>,
+/// which is also what reports two occurrences sharing a name, and a link whose two ends are already in one
+/// fragment is a <see cref="GraphFragmentComposer.Wire"/>. A chain only ever produces the first kind, so its
+/// diagnostics are exactly what they always were; a diamond produces one of the second kind, which is the
+/// re-convergence a tree cannot express and the reason that operator exists.
 /// </para>
 /// <para>
 /// <see cref="GraphFragmentComposer.Import"/> is deliberately unused. Import exists to make two copies of
 /// one reusable fragment disjoint, and no fragment exists before closure here: identifiers are allocated
-/// once, over the whole chain, so every one-node fragment is already disjoint from every other — unless
+/// once, over the whole shape, so every one-node fragment is already disjoint from every other — unless
 /// the author gave two occurrences one name, which the composer reports naming the collision. A reused
 /// <see cref="Orleans.Dataflow.Flow{TIn, TOut}"/> of lambdas contributes its occurrences twice and they
 /// are numbered twice, which is the flat numbering ADR 0004 asks for rather than a nested scope.
@@ -43,22 +51,29 @@ namespace Orleans.Dataflow.Authoring;
 /// </remarks>
 internal static class LocalGraphBuilder
 {
+    /// <summary>Gets the request list of a graph that declares no result of its own.</summary>
+    /// <remarks>
+    /// Runtime controls are declared from the occurrences that produce them and are not requests, so a
+    /// graph closed with a resultless sink asks for nothing here and can still declare a queue's control.
+    /// </remarks>
+    internal static IReadOnlyList<LocalSlotRequest> NoSlots { get; } =
+        Array.AsReadOnly<LocalSlotRequest>([]);
+
     /// <summary>
-    /// Closes a chain of stage occurrences into a runnable graph.
+    /// Closes a shape of stage occurrences into a runnable graph.
     /// </summary>
-    /// <param name="stages">
-    /// The occurrences in authoring order. The chain is linear and complete: the first occurrence declares
-    /// no input port, the last declares no output port, and every adjacent pair connects.
+    /// <param name="shape">
+    /// The shape, which must be complete: every port that a link names is connected by that link, and
+    /// nothing is left open.
     /// </param>
-    /// <param name="slotId">
-    /// The name to expose the last occurrence's result port under, or <see langword="null"/> when the graph
-    /// declares no result.
+    /// <param name="slots">
+    /// The results to expose, in the order the author wrote them; empty when the graph declares none.
     /// </param>
     /// <returns>The closed, fingerprinted graph with its authoring-side binding table.</returns>
     /// <exception cref="ArgumentException">
     /// Two occurrences carry the same explicit name, which the fragment algebra reports naming every
-    /// collision; or the document the chain describes is not structurally valid, which is unreachable for
-    /// a chain built through the authoring types, whose shapes are enforced by the C# type system. Both
+    /// collision; or the document the shape describes is not structurally valid, which is unreachable for
+    /// a shape built through the authoring types, whose shapes are enforced by the C# type system. Both
     /// exceptions are the algebra's and are deliberately not translated.
     /// </exception>
     /// <exception cref="InvalidOperationException">
@@ -69,11 +84,13 @@ internal static class LocalGraphBuilder
     /// <remarks>
     /// <para>
     /// The capability tokens are derived from the occurrences rather than fixed here.
-    /// <see cref="CapabilityToken.Nondeployable"/> appears exactly when the chain holds a local stage,
+    /// <see cref="CapabilityToken.Nondeployable"/> appears exactly when the shape holds a local stage,
     /// because every local stage specification requires it and no registered one does;
     /// <see cref="CapabilityToken.EphemeralIdentity"/> appears exactly when some occurrence had no name to
-    /// keep. A fully registered, fully named chain therefore declares neither and is a pipeline candidate,
-    /// and a chain that mixes the two declares what it actually contains.
+    /// keep. A fully registered, fully named graph therefore declares neither and is a pipeline candidate,
+    /// and a graph that mixes the two declares what it actually contains. Every junction stage is a local
+    /// stage, so a graph with a junction in it declares <c>nondeployable</c> whatever its other stages are,
+    /// until a provider registers junctions of its own.
     /// </para>
     /// <para>
     /// The binding table is built after composition rather than during identifier allocation, so that two
@@ -81,21 +98,24 @@ internal static class LocalGraphBuilder
     /// a dictionary complaining about a duplicate key.
     /// </para>
     /// <para>
-    /// The result slot's producer is read from the allocated identifier of the last occurrence rather than
-    /// from the closed document's last node. The producer of a slot is the occurrence the author closed
-    /// the graph with, and reading it from the chain says so without depending on how the document happens
-    /// to sort — which, once explicit names exist, is no longer the authoring order at all.
+    /// Each result slot's producer is read from the allocated identifier of the occurrence the request
+    /// names rather than from the closed document's last node. The producer of a slot is the occurrence
+    /// that terminates the chain or the branch it belongs to, and reading it from the shape says so without
+    /// depending on how the document happens to sort — which, once explicit names or several terminals
+    /// exist, is no longer the authoring order at all.
+    /// </para>
+    /// <para>
+    /// A slot a branch declared is bound to the graph last, after the document exists, because that is the
+    /// first moment there is an identity to bind it to. A shape that fails to close therefore leaves every
+    /// branch slot unbound, and the branch can be handed to another junction call instead.
     /// </para>
     /// </remarks>
-    internal static RunnableGraph Close(IReadOnlyList<StageOccurrence> stages, ResultSlotId? slotId)
+    internal static RunnableGraph Close(LocalGraphShape shape, IReadOnlyList<LocalSlotRequest> slots)
     {
+        IReadOnlyList<StageOccurrence> stages = shape.Stages;
+        IReadOnlyList<LocalSlotRequest> declared = shape.Slots.Count == 0 ? slots : [.. shape.Slots, .. slots];
         NodeId[] ids = Allocate(stages);
-        GraphFragment composed = FragmentOf(stages[0], ids[0]);
-
-        for (int index = 1; index < stages.Count; index++)
-        {
-            composed = GraphFragmentComposer.Append(composed, FragmentOf(stages[index], ids[index]));
-        }
+        GraphFragment composed = Compose(shape, ids);
 
         Dictionary<NodeId, LocalStageDescriptor> bindings = new(stages.Count);
 
@@ -112,16 +132,132 @@ internal static class LocalGraphBuilder
             LocalVocabulary.AnonymousGraph,
             LocalVocabulary.FirstRevision,
             Capabilities(stages),
-            Slots(stages, ids, slotId));
+            Slots(stages, ids, declared));
 
-        return new RunnableGraph(
+        RunnableGraph graph = new(
             document,
             GraphDocumentSerializer.Fingerprint(document),
             bindings,
             Controls(stages));
+
+        for (int index = 0; index < declared.Count; index++)
+        {
+            declared[index].Binding?.Bind(graph.Fingerprint, graph.AuthoringNonce);
+        }
+
+        return graph;
     }
 
-    /// <summary>Collects the type of every runtime control the chain declares, by name.</summary>
+    /// <summary>Lays a shape's links down through the fragment algebra.</summary>
+    /// <param name="shape">The shape to compose.</param>
+    /// <param name="ids">The identifiers allocated to its occurrences, in the same positions.</param>
+    /// <returns>The one composed fragment, with no port left open.</returns>
+    /// <exception cref="InvalidOperationException">
+    /// The shape leaves a port open or falls into more than one piece, neither of which any authoring value
+    /// can express: both are defects in this assembly rather than mistakes an author could make.
+    /// </exception>
+    /// <remarks>
+    /// Each occurrence starts as a one-node fragment whose open ports are exactly the ports its links use,
+    /// so a junction opens the legs this graph wires and not the eight its specification declares. The links
+    /// are then laid down in authoring order, which decides nothing about the document — a fragment sorts its
+    /// nodes and edges canonically — and only decides which defect is reported first.
+    /// </remarks>
+    private static GraphFragment Compose(LocalGraphShape shape, NodeId[] ids)
+    {
+        IReadOnlyList<StageOccurrence> stages = shape.Stages;
+
+        if (shape.OpenOutputs.Count > 0)
+        {
+            throw new InvalidOperationException(
+                string.Create(
+                    CultureInfo.InvariantCulture,
+                    $"A graph is closed only when nothing is left to connect, and this shape still has {shape.OpenOutputs.Count} open outputs."));
+        }
+
+        List<PortId>[] openInputs = new List<PortId>[stages.Count];
+        List<PortId>[] openOutputs = new List<PortId>[stages.Count];
+
+        for (int index = 0; index < stages.Count; index++)
+        {
+            openInputs[index] = [];
+            openOutputs[index] = [];
+        }
+
+        for (int index = 0; index < shape.Links.Count; index++)
+        {
+            LocalStageLink link = shape.Links[index];
+
+            openOutputs[link.From].Add(link.FromPort);
+            openInputs[link.To].Add(link.ToPort);
+        }
+
+        GraphFragment?[] fragments = new GraphFragment?[stages.Count];
+        int[] owner = new int[stages.Count];
+
+        for (int index = 0; index < stages.Count; index++)
+        {
+            fragments[index] = GraphFragment.OfStage(
+                StageNode.Create(ids[index], stages[index].Stage, stages[index].ParameterContract, stages[index].Parameters),
+                openInputs[index],
+                openOutputs[index]);
+            owner[index] = index;
+        }
+
+        for (int index = 0; index < shape.Links.Count; index++)
+        {
+            LocalStageLink link = shape.Links[index];
+            PortAddress from = PortAddress.Create(ids[link.From], link.FromPort);
+            PortAddress to = PortAddress.Create(ids[link.To], link.ToPort);
+            int producing = owner[link.From];
+            int consuming = owner[link.To];
+
+            if (producing == consuming)
+            {
+                fragments[producing] = GraphFragmentComposer.Wire(fragments[producing]!, from, to);
+
+                continue;
+            }
+
+            fragments[producing] = GraphFragmentComposer.Connect(
+                fragments[producing]!,
+                from,
+                fragments[consuming]!,
+                to);
+            fragments[consuming] = null;
+
+            for (int stage = 0; stage < owner.Length; stage++)
+            {
+                if (owner[stage] == consuming)
+                {
+                    owner[stage] = producing;
+                }
+            }
+        }
+
+        GraphFragment? composed = null;
+
+        for (int index = 0; index < fragments.Length; index++)
+        {
+            if (fragments[index] is not { } piece)
+            {
+                continue;
+            }
+
+            if (composed is not null)
+            {
+                throw new InvalidOperationException(
+                    "This shape falls into more than one piece, and a graph is one connected document. Every authoring value connects what it adds, so a shape that does not is a defect in this assembly.");
+            }
+
+            composed = piece;
+        }
+
+        return composed ??
+            throw new InvalidOperationException(
+                "This shape declares no occurrence at all, and a graph always describes at least one stage.");
+    }
+
+    /// <summary>Collects the type of every runtime control the shape declares, by name.</summary>
     /// <param name="stages">The occurrences in authoring order.</param>
     /// <returns>The control types, keyed by the name each is declared under.</returns>
     /// <exception cref="ArgumentException">
@@ -144,22 +280,22 @@ internal static class LocalGraphBuilder
                 !controls.TryAdd(slot, type))
             {
                 throw new ArgumentException(
-                    $"Two stages of this chain declare a runtime control named '{slot}', and a name resolves one control. Give each control a name of its own; the names are what a run handle resolves them by.");
+                    $"Two stages of this graph declare a runtime control named '{slot}', and a name resolves one control. Give each control a name of its own; the names are what a run handle resolves them by.");
             }
         }
 
         return controls;
     }
 
-    /// <summary>Allocates the node identifier of every occurrence of a chain.</summary>
+    /// <summary>Allocates the node identifier of every occurrence of a shape.</summary>
     /// <param name="stages">The occurrences in authoring order.</param>
     /// <returns>The identifiers, in the same positions.</returns>
     /// <exception cref="InvalidOperationException">
     /// An occurrence with no name of its own stands past <see cref="LocalVocabulary.MaxAutoNamedPosition"/>.
     /// </exception>
     /// <remarks>
-    /// The bound is checked per occurrence rather than over the whole chain, because it is a statement
-    /// about automatic numbering and not about length: a chain of ten thousand named occurrences numbers
+    /// The bound is checked per occurrence rather than over the whole shape, because it is a statement
+    /// about automatic numbering and not about size: a graph of ten thousand named occurrences numbers
     /// nothing and breaks nothing.
     /// </remarks>
     private static NodeId[] Allocate(IReadOnlyList<StageOccurrence> stages)
@@ -182,7 +318,7 @@ internal static class LocalGraphBuilder
                 throw new InvalidOperationException(
                     string.Create(
                         CultureInfo.InvariantCulture,
-                        $"An occurrence with no name of its own stands at position {position} of {stages.Count} in this chain, and automatic node identifiers reach position {LocalVocabulary.MaxAutoNamedPosition} at most. They are numbered '{LocalVocabulary.AutoNamePrefix}0001' upwards and zero-padded to four digits so that a document's node order is its authoring order; a longer chain cannot be numbered that way. Name the occurrences past that position explicitly, which the registered-stage authoring surface does."));
+                        $"An occurrence with no name of its own stands at position {position} of {stages.Count} in this graph, and automatic node identifiers reach position {LocalVocabulary.MaxAutoNamedPosition} at most. They are numbered '{LocalVocabulary.AutoNamePrefix}0001' upwards and zero-padded to four digits so that a document's node order is its authoring order; a longer graph cannot be numbered that way. Name the occurrences past that position explicitly, which the registered-stage authoring surface does."));
             }
 
             ids[index] = LocalVocabulary.AutoName(position);
@@ -227,19 +363,19 @@ internal static class LocalGraphBuilder
     /// <summary>Builds every result slot a closed graph declares.</summary>
     /// <param name="stages">The occurrences in authoring order.</param>
     /// <param name="ids">The identifiers allocated to them, in the same positions.</param>
-    /// <param name="slotId">The slot name, or <see langword="null"/> when the graph declares no result.</param>
-    /// <returns>The slots: one per runtime control, and one more for the terminal's result when it has one.</returns>
+    /// <param name="requests">The results the closing call asked for, in the author's order.</param>
+    /// <returns>The slots: one per runtime control, and one more per request.</returns>
     /// <exception cref="InvalidOperationException">
-    /// A slot name was supplied for a terminal that declares no result port. That is unreachable through
+    /// A slot name was requested of an occurrence that declares no result port. That is unreachable through
     /// the authoring types, whose result-bearing overloads accept only a result-bearing sink, and it is a
     /// defect in this assembly rather than a mistake the author could make.
     /// </exception>
     /// <remarks>
     /// <para>
-    /// A control is a result slot and is declared here beside the terminal's, which is what ADR 0002 meant
-    /// by listing a queue control next to a fold result. The only difference is where the name came from:
-    /// a terminal's is an argument of <c>To</c>, and a control's was written on the stage that produces it,
-    /// because there is no closing call in the middle of a chain to hand one back from.
+    /// A control is a result slot and is declared here beside the requested ones, which is what ADR 0002
+    /// meant by listing a queue control next to a fold result. The only difference is where the name came
+    /// from: a terminal's is an argument of <c>To</c>, and a control's was written on the stage that
+    /// produces it, because there is no closing call in the middle of a chain to hand one back from.
     /// </para>
     /// <para>
     /// The port and the contract come from each occurrence's own declaration rather than from a constant,
@@ -251,7 +387,7 @@ internal static class LocalGraphBuilder
     private static ResultSlotDefinition[] Slots(
         IReadOnlyList<StageOccurrence> stages,
         NodeId[] ids,
-        ResultSlotId? slotId)
+        IReadOnlyList<LocalSlotRequest> requests)
     {
         List<ResultSlotDefinition> slots = [];
 
@@ -267,48 +403,23 @@ internal static class LocalGraphBuilder
             }
         }
 
-        if (slotId is not { } declared)
+        for (int index = 0; index < requests.Count; index++)
         {
-            return [.. slots];
-        }
+            LocalSlotRequest request = requests[index];
 
-        if (stages[^1].ResultPort is not { } result)
-        {
-            throw new InvalidOperationException(
-                $"The graph was closed under the result name '{declared}' by an occurrence of '{stages[^1].Stage}', which declares no result port to expose.");
-        }
+            if (stages[request.Stage].ResultPort is not { } result)
+            {
+                throw new InvalidOperationException(
+                    $"The graph was closed under the result name '{request.Id}' by an occurrence of '{stages[request.Stage].Stage}', which declares no result port to expose.");
+            }
 
-        slots.Add(ResultSlotDefinition.Create(declared, result.ResultContract, PortAddress.Create(ids[^1], result.Id)));
+            slots.Add(
+                ResultSlotDefinition.Create(
+                    request.Id,
+                    result.ResultContract,
+                    PortAddress.Create(ids[request.Stage], result.Id)));
+        }
 
         return [.. slots];
-    }
-
-    /// <summary>
-    /// Builds the one-node fragment of a single occurrence, leaving exactly the ports its shape declares
-    /// open.
-    /// </summary>
-    /// <param name="stage">The occurrence.</param>
-    /// <param name="id">The identifier allocated to it.</param>
-    /// <returns>The fragment.</returns>
-    /// <remarks>
-    /// <para>
-    /// A result port is never an open port. Open ports are what a later connection consumes, and a result
-    /// is exposed by declaring a slot against the closed graph, not by wiring an edge to it.
-    /// </para>
-    /// <para>
-    /// The port names, the parameter contract, and the payload all come from the occurrence rather than
-    /// from constants here, because none of them is the same for every shape: a local buffer and a local
-    /// asynchronous stage carry the options the author chose under contracts of their own, and a
-    /// registered stage carries whatever its specification declares, under whatever names it declares them.
-    /// </para>
-    /// </remarks>
-    private static GraphFragment FragmentOf(StageOccurrence stage, NodeId id)
-    {
-        StageNode node = StageNode.Create(id, stage.Stage, stage.ParameterContract, stage.Parameters);
-
-        PortId[] openInputs = stage.InputPort is { } input ? [input] : [];
-        PortId[] openOutputs = stage.OutputPort is { } output ? [output] : [];
-
-        return GraphFragment.OfStage(node, openInputs, openOutputs);
     }
 }

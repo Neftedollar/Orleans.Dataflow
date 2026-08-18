@@ -78,7 +78,9 @@ public sealed class GraphDocumentSerializerPayloadTests
 
     // A payload that is the JSON null value is now rejected by StageNode.Create itself (see
     // StageNodeTests), so no serializable document can carry one. The writer keeps its own refusal as
-    // defense against a future construction path, the same way GraphDocument restates the self-loop rule.
+    // defense against a future construction path. (It once had company: GraphDocument restated the
+    // self-loop rule the same way, until ADR 0005 subsumed that rule into the cycle rule and the
+    // restatement left with it.)
 
     [Fact]
     public void ANullValueInsideAPayloadIsFineBecauseOnlyTheWholePayloadIsAmbiguous()

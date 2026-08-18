@@ -36,10 +36,29 @@ public sealed class Source<T>
 {
     /// <summary>Initializes a new instance of the <see cref="Source{T}"/> class.</summary>
     /// <param name="stages">The occurrences this source contributes, in authoring order.</param>
-    internal Source(IReadOnlyList<StageOccurrence> stages) => Stages = stages;
+    /// <remarks>
+    /// The chain-shaped spelling, for a source that is a straight line of occurrences and nothing else,
+    /// which is every source a factory returns.
+    /// </remarks>
+    internal Source(IReadOnlyList<StageOccurrence> stages)
+        : this(LocalGraphShape.OfChain(stages))
+    {
+    }
+
+    /// <summary>Initializes a new instance of the <see cref="Source{T}"/> class.</summary>
+    /// <param name="shape">The partial graph this source carries, with exactly one open output.</param>
+    internal Source(LocalGraphShape shape) => Shape = shape;
+
+    /// <summary>Gets the partial graph this source carries.</summary>
+    /// <value>
+    /// The occurrences, the wiring between them, and the one output port everything downstream attaches to.
+    /// A source built from factories and operators is a chain; a source built by a fan-in combinator, or by
+    /// a tap, is a shape with a junction in it, and both are one open output away from being closed.
+    /// </value>
+    internal LocalGraphShape Shape { get; }
 
     /// <summary>Gets the occurrences this source contributes to a graph, in authoring order.</summary>
-    internal IReadOnlyList<StageOccurrence> Stages { get; }
+    internal IReadOnlyList<StageOccurrence> Stages => Shape.Stages;
 
     /// <summary>Extends this source with a mapping stage.</summary>
     /// <typeparam name="TOut">The element type the mapping produces.</typeparam>
@@ -50,7 +69,7 @@ public sealed class Source<T>
     {
         ArgumentNullException.ThrowIfNull(selector);
 
-        return new Source<TOut>(LocalStageChain.Append(Stages, LocalStageDescriptor.Select(selector)));
+        return new Source<TOut>(Shape.Append(LocalStageDescriptor.Select(selector)));
     }
 
     /// <summary>Extends this source with a filtering stage.</summary>
@@ -61,7 +80,7 @@ public sealed class Source<T>
     {
         ArgumentNullException.ThrowIfNull(predicate);
 
-        return new Source<T>(LocalStageChain.Append(Stages, LocalStageDescriptor.Where(predicate)));
+        return new Source<T>(Shape.Append(LocalStageDescriptor.Where(predicate)));
     }
 
     /// <summary>Extends this source with a running fold that emits every intermediate state.</summary>
@@ -80,7 +99,7 @@ public sealed class Source<T>
     {
         ArgumentNullException.ThrowIfNull(folder);
 
-        return new Source<TState>(LocalStageChain.Append(Stages, LocalStageDescriptor.Scan(seed, folder)));
+        return new Source<TState>(Shape.Append(LocalStageDescriptor.Scan(seed, folder)));
     }
 
     /// <summary>Extends this source with a stage that passes a declared number of elements.</summary>
@@ -94,9 +113,7 @@ public sealed class Source<T>
     /// <c>Take</c> of more elements than arrive is simply never reached.
     /// </remarks>
     public Source<T> Take(int count) =>
-        new(LocalStageChain.Append(
-            Stages,
-            LocalStageDescriptor.Take(LocalOptionGuard.Count(count, nameof(count)))));
+        new(Shape.Append(LocalStageDescriptor.Take(LocalOptionGuard.Count(count, nameof(count)))));
 
     /// <summary>Extends this source with a stage that drops a declared number of elements.</summary>
     /// <param name="count">How many elements to drop; zero or more.</param>
@@ -108,9 +125,7 @@ public sealed class Source<T>
     /// source.
     /// </remarks>
     public Source<T> Skip(int count) =>
-        new(LocalStageChain.Append(
-            Stages,
-            LocalStageDescriptor.Skip(LocalOptionGuard.Count(count, nameof(count)))));
+        new(Shape.Append(LocalStageDescriptor.Skip(LocalOptionGuard.Count(count, nameof(count)))));
 
     /// <summary>Extends this source with a stage that passes elements while a predicate holds.</summary>
     /// <param name="predicate">The test each element must pass for the stream to continue.</param>
@@ -125,7 +140,7 @@ public sealed class Source<T>
     {
         ArgumentNullException.ThrowIfNull(predicate);
 
-        return new Source<T>(LocalStageChain.Append(Stages, LocalStageDescriptor.TakeWhile(predicate)));
+        return new Source<T>(Shape.Append(LocalStageDescriptor.TakeWhile(predicate)));
     }
 
     /// <summary>Extends this source with a stage that passes elements up to and including one the predicate accepts.</summary>
@@ -142,7 +157,7 @@ public sealed class Source<T>
     {
         ArgumentNullException.ThrowIfNull(predicate);
 
-        return new Source<T>(LocalStageChain.Append(Stages, LocalStageDescriptor.TakeThrough(predicate)));
+        return new Source<T>(Shape.Append(LocalStageDescriptor.TakeThrough(predicate)));
     }
 
     /// <summary>Extends this source with a stage that drops elements while a predicate holds.</summary>
@@ -158,7 +173,7 @@ public sealed class Source<T>
     {
         ArgumentNullException.ThrowIfNull(predicate);
 
-        return new Source<T>(LocalStageChain.Append(Stages, LocalStageDescriptor.SkipWhile(predicate)));
+        return new Source<T>(Shape.Append(LocalStageDescriptor.SkipWhile(predicate)));
     }
 
     /// <summary>Extends this source with a stage that passes the first occurrence of every element.</summary>
@@ -179,9 +194,7 @@ public sealed class Source<T>
     {
         ArgumentNullException.ThrowIfNull(options);
 
-        return new Source<T>(LocalStageChain.Append(
-            Stages,
-            LocalStageDescriptor.Distinct(
+        return new Source<T>(Shape.Append(LocalStageDescriptor.Distinct(
                 LocalOptionGuard.Distinct(options, nameof(options)),
                 EqualityComparer<T>.Default)));
     }
@@ -204,9 +217,8 @@ public sealed class Source<T>
     {
         ArgumentNullException.ThrowIfNull(options);
 
-        return new Source<T>(LocalStageChain.Append(
-            Stages,
-            LocalStageDescriptor.Buffer(LocalOptionGuard.Buffer(options, nameof(options)))));
+        return new Source<T>(
+            Shape.Append(LocalStageDescriptor.Buffer(LocalOptionGuard.Buffer(options, nameof(options)))));
     }
 
     /// <summary>Extends this source with an asynchronous mapping stage that preserves input order.</summary>
@@ -233,8 +245,7 @@ public sealed class Source<T>
         ArgumentNullException.ThrowIfNull(options);
         ArgumentNullException.ThrowIfNull(selector);
 
-        return new Source<TOut>(LocalStageChain.Append(
-            Stages,
+        return new Source<TOut>(Shape.Append(
             LocalStageDescriptor.SelectAsync(LocalOptionGuard.Parallelism(options, nameof(options)), selector)));
     }
 
@@ -261,8 +272,7 @@ public sealed class Source<T>
         ArgumentNullException.ThrowIfNull(options);
         ArgumentNullException.ThrowIfNull(selector);
 
-        return new Source<TOut>(LocalStageChain.Append(
-            Stages,
+        return new Source<TOut>(Shape.Append(
             LocalStageDescriptor.SelectAsyncUnordered(
                 LocalOptionGuard.Parallelism(options, nameof(options)),
                 selector)));
@@ -309,8 +319,7 @@ public sealed class Source<T>
         ArgumentNullException.ThrowIfNull(options);
         ArgumentNullException.ThrowIfNull(selector);
 
-        return new Source<TOut>(LocalStageChain.Append(
-            Stages,
+        return new Source<TOut>(Shape.Append(
             LocalStageDescriptor.SelectValueTaskAsync(
                 LocalOptionGuard.Parallelism(options, nameof(options)),
                 selector)));
@@ -342,8 +351,7 @@ public sealed class Source<T>
         ArgumentNullException.ThrowIfNull(options);
         ArgumentNullException.ThrowIfNull(selector);
 
-        return new Source<TOut>(LocalStageChain.Append(
-            Stages,
+        return new Source<TOut>(Shape.Append(
             LocalStageDescriptor.SelectValueTaskAsyncUnordered(
                 LocalOptionGuard.Parallelism(options, nameof(options)),
                 selector)));
@@ -364,7 +372,7 @@ public sealed class Source<T>
     {
         ArgumentNullException.ThrowIfNull(flow);
 
-        return new Source<TOut>(LocalStageChain.Concat(Stages, flow.Stages));
+        return new Source<TOut>(Shape.Concat(flow.Stages));
     }
 
     /// <summary>Extends this source with one named occurrence of a registered stage.</summary>
@@ -400,9 +408,225 @@ public sealed class Source<T>
     {
         ArgumentNullException.ThrowIfNull(flow);
 
-        return new Source<TOut>(LocalStageChain.Append(
-            Stages,
+        return new Source<TOut>(Shape.Append(
             RegisteredAttachment.Occurrence(flow.Specification, occurrenceName, parameters)));
+    }
+
+    /// <summary>Joins this source with another, emitting from whichever of the two has an element.</summary>
+    /// <param name="other">The source to merge with, which is not modified.</param>
+    /// <returns>A source of both streams' elements; neither argument is changed.</returns>
+    /// <exception cref="ArgumentNullException"><paramref name="other"/> is <see langword="null"/>.</exception>
+    /// <remarks>
+    /// <para>
+    /// The elements of one input keep their order relative to each other and nothing is promised about how
+    /// the two interleave: a merge emits what has arrived, which is what makes it the junction to reach for
+    /// when the streams are independent and the order between them carries no meaning. The merged stream
+    /// ends when both inputs have.
+    /// </para>
+    /// <para>
+    /// Merging three streams is <c>a.Merge(b, c)</c> and merging four is <c>a.Merge(b, c).Merge(d)</c>. The
+    /// second is honestly two junctions rather than one: merge semantics are associative, but the two
+    /// documents are distinct and fingerprint differently, and ADR 0006 states that rather than papering over
+    /// it with a rewrite that flattens the chain.
+    /// </para>
+    /// </remarks>
+    public Source<T> Merge(Source<T> other)
+    {
+        ArgumentNullException.ThrowIfNull(other);
+
+        return Joined<T>(LocalStageDescriptor.Merge(), other.Shape);
+    }
+
+    /// <summary>Joins this source with two others, emitting from whichever of the three has an element.</summary>
+    /// <param name="second">The second source, which is not modified.</param>
+    /// <param name="third">The third source, which is not modified.</param>
+    /// <returns>A source of all three streams' elements; no argument is changed.</returns>
+    /// <exception cref="ArgumentNullException">
+    /// <paramref name="second"/> or <paramref name="third"/> is <see langword="null"/>.
+    /// </exception>
+    /// <remarks>
+    /// One junction with three inputs rather than two junctions, which is a different document from
+    /// <c>a.Merge(b).Merge(c)</c> and is the one to write when the three streams are peers. Three is where
+    /// the overloads stop: wider merges chain, and a chain says what it is.
+    /// </remarks>
+    public Source<T> Merge(Source<T> second, Source<T> third)
+    {
+        ArgumentNullException.ThrowIfNull(second);
+        ArgumentNullException.ThrowIfNull(third);
+
+        return Joined<T>(LocalStageDescriptor.Merge(), second.Shape, third.Shape);
+    }
+
+    /// <summary>Follows this source with another, emitting the second only after the first has ended.</summary>
+    /// <param name="next">The source to emit after this one, which is not modified.</param>
+    /// <returns>A source of this stream followed by that one; neither argument is changed.</returns>
+    /// <exception cref="ArgumentNullException"><paramref name="next"/> is <see langword="null"/>.</exception>
+    /// <remarks>
+    /// The ordered fan-in: every element of this source is emitted, in order, before the first element of
+    /// <paramref name="next"/> is asked for. That is the difference from <see cref="Merge(Source{T})"/> and
+    /// it is a difference in when the second source is pulled at all, not only in the order elements come
+    /// out: a concat holds its later inputs untouched until their turn.
+    /// </remarks>
+    public Source<T> Concat(Source<T> next)
+    {
+        ArgumentNullException.ThrowIfNull(next);
+
+        return Joined<T>(LocalStageDescriptor.Concat(), next.Shape);
+    }
+
+    /// <summary>Joins this source with another by taking a declared number of elements from each in turn.</summary>
+    /// <param name="other">The source to interleave with, which is not modified.</param>
+    /// <param name="segmentSize">How many elements to take from one input before moving to the next.</param>
+    /// <returns>A source of both streams' elements in a fixed rotation; neither argument is changed.</returns>
+    /// <exception cref="ArgumentNullException"><paramref name="other"/> is <see langword="null"/>.</exception>
+    /// <exception cref="ArgumentOutOfRangeException"><paramref name="segmentSize"/> is below one.</exception>
+    /// <remarks>
+    /// The deterministic fan-in: unlike a merge, the output order is decided by the rotation and not by
+    /// which input happened to have an element. An input that ends is dropped from the rotation and the
+    /// remaining ones carry on, so a shorter stream does not end the join.
+    /// </remarks>
+    public Source<T> Interleave(Source<T> other, int segmentSize)
+    {
+        ArgumentNullException.ThrowIfNull(other);
+
+        return Joined<T>(
+            LocalStageDescriptor.Interleave(LocalOptionGuard.SegmentSize(segmentSize, nameof(segmentSize))),
+            other.Shape);
+    }
+
+    /// <summary>Joins this source with another into a stream of pairs.</summary>
+    /// <typeparam name="T2">The element type of the other source.</typeparam>
+    /// <param name="other">The source to pair with, which is not modified.</param>
+    /// <returns>A source of one pair per element from each input; neither argument is changed.</returns>
+    /// <exception cref="ArgumentNullException"><paramref name="other"/> is <see langword="null"/>.</exception>
+    /// <remarks>
+    /// Positional and lockstep: the first element of each input makes the first pair, the second of each
+    /// makes the second, and the joined stream ends as soon as either input does — whatever the other still
+    /// had. The pair's members are named for the order the inputs were written in.
+    /// </remarks>
+    public Source<(T First, T2 Second)> Zip<T2>(Source<T2> other) =>
+        Zip(other, static (first, second) => (first, second));
+
+    /// <summary>Joins this source with another through a function of one element from each.</summary>
+    /// <typeparam name="T2">The element type of the other source.</typeparam>
+    /// <typeparam name="TOut">The element type the function produces.</typeparam>
+    /// <param name="other">The source to join with, which is not modified.</param>
+    /// <param name="combine">The function building one element from one element of each input.</param>
+    /// <returns>A source of one element per element from each input; neither argument is changed.</returns>
+    /// <exception cref="ArgumentNullException">
+    /// <paramref name="other"/> or <paramref name="combine"/> is <see langword="null"/>.
+    /// </exception>
+    /// <remarks>
+    /// The same lockstep join as <see cref="Zip{T2}(Source{T2})"/> with the row built by the author rather
+    /// than by the tuple, which is what keeps a join that immediately projects from allocating a pair only
+    /// to take it apart again. The function never enters the document, so a graph holding one is
+    /// <c>nondeployable</c> exactly as a graph holding any lambda is.
+    /// </remarks>
+    public Source<TOut> Zip<T2, TOut>(Source<T2> other, Func<T, T2, TOut> combine)
+    {
+        ArgumentNullException.ThrowIfNull(other);
+        ArgumentNullException.ThrowIfNull(combine);
+
+        return Joined<TOut>(LocalStageDescriptor.Zip(LocalRowCombiner.Of(combine)), other.Shape);
+    }
+
+    /// <summary>Joins this source with another by combining each arrival with the other's latest element.</summary>
+    /// <typeparam name="T2">The element type of the other source.</typeparam>
+    /// <typeparam name="TOut">The element type the function produces.</typeparam>
+    /// <param name="other">The source to join with, which is not modified.</param>
+    /// <param name="combine">The function building one element from the latest element of each input.</param>
+    /// <returns>A source of one element per arrival once both inputs have produced; neither argument is changed.</returns>
+    /// <exception cref="ArgumentNullException">
+    /// <paramref name="other"/> or <paramref name="combine"/> is <see langword="null"/>.
+    /// </exception>
+    /// <remarks>
+    /// Not a lockstep join and deliberately a different word for it: nothing is emitted until both inputs
+    /// have produced at least once, and after that every arrival on either side emits a row built from it
+    /// and from whatever the other side last produced. A fast input therefore produces many rows against one
+    /// slow element, which is the point — this is the join for a stream against a setting, not for two
+    /// streams of matching rows.
+    /// </remarks>
+    public Source<TOut> CombineLatest<T2, TOut>(Source<T2> other, Func<T, T2, TOut> combine)
+    {
+        ArgumentNullException.ThrowIfNull(other);
+        ArgumentNullException.ThrowIfNull(combine);
+
+        return Joined<TOut>(LocalStageDescriptor.CombineLatest(LocalRowCombiner.Of(combine)), other.Shape);
+    }
+
+    /// <summary>Sends every element down two flows at once, to be rejoined.</summary>
+    /// <typeparam name="T1">The element type the left flow produces.</typeparam>
+    /// <typeparam name="T2">The element type the right flow produces.</typeparam>
+    /// <param name="left">The first derivation, which is not modified.</param>
+    /// <param name="right">The second derivation, which is not modified.</param>
+    /// <returns>The fork, which is rejoined by one of its own calls.</returns>
+    /// <exception cref="ArgumentNullException">
+    /// <paramref name="left"/> or <paramref name="right"/> is <see langword="null"/>.
+    /// </exception>
+    /// <remarks>
+    /// The one shape a tree cannot express: the same element travels two paths and the paths meet again.
+    /// Every element is broadcast to both flows, so the two derived streams advance together — which is what
+    /// makes <see cref="Fork{T1, T2}.Zip()"/> a join that needs no buffer between the halves. The fork is a
+    /// value with two open ends and no way to close a graph, so a program that builds one has to rejoin it.
+    /// </remarks>
+    public Fork<T1, T2> Fork<T1, T2>(Flow<T, T1> left, Flow<T, T2> right)
+    {
+        ArgumentNullException.ThrowIfNull(left);
+        ArgumentNullException.ThrowIfNull(right);
+
+        return new Fork<T1, T2>(Split(LocalStageDescriptor.Broadcast(), left.Stages, right.Stages));
+    }
+
+    /// <summary>Sends every element down two flows at once and takes whichever result arrives first.</summary>
+    /// <typeparam name="TOut">The element type both flows produce.</typeparam>
+    /// <param name="left">The first derivation, which is not modified.</param>
+    /// <param name="right">The second derivation, which is not modified.</param>
+    /// <returns>A source of both derivations' elements; neither argument is changed.</returns>
+    /// <exception cref="ArgumentNullException">
+    /// <paramref name="left"/> or <paramref name="right"/> is <see langword="null"/>.
+    /// </exception>
+    /// <remarks>
+    /// The unordered rejoin, and the shape a race is written in: one element in produces two elements out —
+    /// one per path — in whatever order the paths finish. That is a merge and not a zip, so the two
+    /// derivations of one element are not paired and nothing waits for the slower path before emitting the
+    /// faster one. <see cref="Fork{T1, T2}"/> is the rejoin for when the two derivations belong together.
+    /// </remarks>
+    public Source<TOut> ForkMerge<TOut>(Flow<T, TOut> left, Flow<T, TOut> right)
+    {
+        ArgumentNullException.ThrowIfNull(left);
+        ArgumentNullException.ThrowIfNull(right);
+
+        return new Source<TOut>(Split(LocalStageDescriptor.Broadcast(), left.Stages, right.Stages)
+            .Combine(LocalStageDescriptor.Merge(), LocalJunctionGuard.FanInPorts(LocalVocabulary.MinFanIn)));
+    }
+
+    /// <summary>Sends every element to a branch as well, and continues.</summary>
+    /// <param name="side">The branch to tap into, which is not modified.</param>
+    /// <returns>A source of the same elements; the argument is not changed.</returns>
+    /// <exception cref="ArgumentNullException"><paramref name="side"/> is <see langword="null"/>.</exception>
+    /// <remarks>
+    /// <para>
+    /// The tap, and broadcast sugar underneath: a junction with the main line on its first leg and the
+    /// branch on its second, so every element reaches both. What that costs is the broadcast's own rule —
+    /// an element is delivered to every leg, so a branch that stops consuming holds the main line up. A tap
+    /// is not a fire-and-forget side effect, and this is the honest place to say so.
+    /// </para>
+    /// <para>
+    /// A branch that declares a result is welcome here: it named its slot where its sink was written, so the
+    /// result is carried until the graph is closed and declared then, beside whatever the main line
+    /// declares.
+    /// </para>
+    /// </remarks>
+    public Source<T> AlsoTo(Branch<T> side)
+    {
+        ArgumentNullException.ThrowIfNull(side);
+
+        LocalGraphShape shape = Split(LocalStageDescriptor.Broadcast(), [], side.Stages);
+
+        return new Source<T>(
+            side.SlotName is { } name
+                ? shape.Declaring(new LocalSlotRequest(name, shape.Stages.Count - 1, side.Binding))
+                : shape);
     }
 
     /// <summary>Closes this source with a sink that declares no result.</summary>
@@ -417,7 +641,7 @@ public sealed class Source<T>
     {
         ArgumentNullException.ThrowIfNull(sink);
 
-        return LocalGraphBuilder.Close(LocalStageChain.Concat(Stages, sink.Stages), slotId: null);
+        return CloseShape(Shape.Concat(sink.Stages));
     }
 
     /// <summary>Closes this source with a resultless sink built from the element type's own vocabulary.</summary>
@@ -464,11 +688,7 @@ public sealed class Source<T>
     {
         ArgumentNullException.ThrowIfNull(sink);
 
-        return LocalGraphBuilder.Close(
-            LocalStageChain.Append(
-                Stages,
-                RegisteredAttachment.Occurrence(sink.Specification, occurrenceName, parameters)),
-            slotId: null);
+        return CloseShape(Shape.Append(RegisteredAttachment.Occurrence(sink.Specification, occurrenceName, parameters)));
     }
 
     /// <summary>
@@ -692,6 +912,84 @@ public sealed class Source<T>
     public RunnableGraph To<TResult>(Func<SinkFactory<T>, SinkWithResult<T, TResult>> sink) =>
         throw new NotSupportedException(GuardOverload());
 
+    /// <summary>Closes this source by delivering every element to every branch.</summary>
+    /// <param name="branches">The branches, in the order they are wired to the junction's legs.</param>
+    /// <returns>The closed graph.</returns>
+    /// <exception cref="ArgumentNullException">
+    /// <paramref name="branches"/>, or one of its elements, is <see langword="null"/>.
+    /// </exception>
+    /// <exception cref="ArgumentException">
+    /// There are fewer than two branches or more than the eight a local junction declares legs for, or two
+    /// branches declare a result under one name.
+    /// </exception>
+    /// <remarks>
+    /// <para>
+    /// A terminal call, exactly as <c>To</c> is: the branches end in sinks, so nothing is left open and the
+    /// graph is closed here. Every element reaches every branch, which means a branch that stops consuming
+    /// holds up all of them — a broadcast asks each leg for room before it pulls, and that is the bounded
+    /// memory this junction buys.
+    /// </para>
+    /// <para>
+    /// Branch order is argument order and is identity-bearing: the first branch's occurrences are numbered
+    /// before the second's, so swapping two arguments builds a different document with a different
+    /// fingerprint. That is the same rule reordering a chain follows.
+    /// </para>
+    /// </remarks>
+    public RunnableGraph BroadcastTo(params Branch<T>[] branches) =>
+        FanOut(LocalStageDescriptor.Broadcast(), branches, nameof(branches));
+
+    /// <summary>Closes this source by delivering each element to one branch that has room.</summary>
+    /// <param name="branches">The branches, in the order they are wired to the junction's legs.</param>
+    /// <returns>The closed graph.</returns>
+    /// <exception cref="ArgumentNullException">
+    /// <paramref name="branches"/>, or one of its elements, is <see langword="null"/>.
+    /// </exception>
+    /// <exception cref="ArgumentException">
+    /// There are fewer than two branches or more than the eight a local junction declares legs for, or two
+    /// branches declare a result under one name.
+    /// </exception>
+    /// <remarks>
+    /// Every element goes to exactly one branch and which one is not defined: a balance hands an element to
+    /// whichever leg is ready for it, which is what makes it the junction for spreading work rather than for
+    /// classifying it. The branches are usually the same pipeline written twice, and nothing requires them
+    /// to be.
+    /// </remarks>
+    public RunnableGraph BalanceTo(params Branch<T>[] branches) =>
+        FanOut(LocalStageDescriptor.Balance(), branches, nameof(branches));
+
+    /// <summary>Closes this source by sending each element to the branch a function names.</summary>
+    /// <param name="router">The function answering the zero-based position of the branch for an element.</param>
+    /// <param name="branches">The branches, in the order the router's answers index them.</param>
+    /// <returns>The closed graph.</returns>
+    /// <exception cref="ArgumentNullException">
+    /// <paramref name="router"/>, <paramref name="branches"/>, or one of its elements, is
+    /// <see langword="null"/>.
+    /// </exception>
+    /// <exception cref="ArgumentException">
+    /// There are fewer than two branches or more than the eight a local junction declares legs for, or two
+    /// branches declare a result under one name.
+    /// </exception>
+    /// <remarks>
+    /// <para>
+    /// The classifying fan-out: the router sees the element and answers which branch it belongs on, so the
+    /// branches are the classes and their order is the numbering the router answers in. Every element goes
+    /// to exactly one branch, so unlike a broadcast this junction never duplicates and unlike a balance it
+    /// is completely determined by the element.
+    /// </para>
+    /// <para>
+    /// An answer outside the wired branches faults the run when it happens, not when the graph is built: how
+    /// many branches this occurrence has is stated by its edges, and a function is not something a document
+    /// can check. The router never enters the document either, which is why a partitioned graph is
+    /// <c>nondeployable</c>.
+    /// </para>
+    /// </remarks>
+    public RunnableGraph PartitionTo(Func<T, int> router, params Branch<T>[] branches)
+    {
+        ArgumentNullException.ThrowIfNull(router);
+
+        return FanOut(LocalStageDescriptor.Partition(router), branches, nameof(branches));
+    }
+
     /// <summary>Returns a one-line diagnostic summary of this source.</summary>
     /// <returns>Text of the form <c>source (3 stages)</c>, singular for one (<c>source (1 stage)</c>).</returns>
     /// <remarks>The count is formatted with the invariant culture, and the method never throws.</remarks>
@@ -708,6 +1006,98 @@ public sealed class Source<T>
     /// </remarks>
     private static string GuardOverload() =>
         $"This {nameof(To)} overload exists only as a compile-time guard against closing a graph with a result-bearing sink and no name for its result. It is marked as an error and is never a legal call; nothing in this library invokes it.";
+    /// <summary>Joins this source and others into one through a fan-in junction.</summary>
+    /// <typeparam name="TOut">The element type the junction emits.</typeparam>
+    /// <param name="junction">The junction occurrence.</param>
+    /// <param name="others">The shapes of the sources to join with, in argument order.</param>
+    /// <returns>The joined source.</returns>
+    /// <remarks>
+    /// The receiver's occurrences come first and the arguments' follow in order, so the numbering of a join
+    /// is the order it was written in and the junction's input ports follow the same order: this source
+    /// reaches <c>in-0</c>, the first argument <c>in-1</c>, and so on.
+    /// </remarks>
+    private Source<TOut> Joined<TOut>(LocalStageDescriptor junction, params LocalGraphShape[] others)
+    {
+        LocalGraphShape joined = Shape;
+
+        for (int index = 0; index < others.Length; index++)
+        {
+            joined = joined.Union(others[index]);
+        }
+
+        return new Source<TOut>(joined.Combine(junction, LocalJunctionGuard.FanInPorts(others.Length + 1)));
+    }
+
+    /// <summary>Splits this source into two legs through a fan-out junction.</summary>
+    /// <param name="junction">The junction occurrence.</param>
+    /// <param name="left">The occurrences of the first leg, which may be none.</param>
+    /// <param name="right">The occurrences of the second leg, which may be none.</param>
+    /// <returns>The split shape, with one open end per leg that still produces.</returns>
+    /// <remarks>
+    /// The two-legged split every non-terminal fan-out is: a fork, its merging sibling, and a tap. A leg with
+    /// no occurrences of its own leaves the junction's own leg port open, which is how a tap keeps the main
+    /// line flowing and how a fork through the identity flow costs no stage.
+    /// </remarks>
+    private LocalGraphShape Split(
+        LocalStageDescriptor junction,
+        IReadOnlyList<StageOccurrence> left,
+        IReadOnlyList<StageOccurrence> right) =>
+        Shape.Split(junction, LocalJunctionGuard.FanOutPorts(LocalVocabulary.MinFanOut), [left, right]);
+
+    /// <summary>Closes this source into a graph through a fan-out junction and its branches.</summary>
+    /// <param name="junction">The junction occurrence.</param>
+    /// <param name="branches">The branches, unchecked.</param>
+    /// <param name="parameterName">The name of the calling parameter, for the diagnostics.</param>
+    /// <returns>The closed graph.</returns>
+    /// <remarks>
+    /// Every fan-out terminal funnels through here, which is what makes them one operation with three
+    /// junction stages rather than three implementations: what differs between a broadcast, a balance, and a
+    /// partition is the occurrence handed in, and everything else — the arity check, the leg order, the slot
+    /// each result-bearing branch asks for — is the same statement in all three.
+    /// </remarks>
+    private RunnableGraph FanOut(LocalStageDescriptor junction, Branch<T>[] branches, string parameterName)
+    {
+        LocalJunctionGuard.Branches(branches, parameterName);
+
+        int position = Shape.Stages.Count;
+        LocalGraphShape shape = Shape.Split(
+            junction,
+            LocalJunctionGuard.FanOutPorts(branches.Length),
+            LocalJunctionGuard.Chains(branches));
+
+        return LocalGraphBuilder.Close(shape, LocalJunctionGuard.Slots(position, branches));
+    }
+
+    /// <summary>Closes a shape that declares no result.</summary>
+    /// <param name="shape">The complete shape.</param>
+    /// <returns>The closed graph.</returns>
+    private static RunnableGraph CloseShape(LocalGraphShape shape) =>
+        LocalGraphBuilder.Close(shape, LocalGraphBuilder.NoSlots);
+
+    /// <summary>Closes a shape whose last occurrence declares the graph's result.</summary>
+    /// <typeparam name="TResult">The type of the declared result.</typeparam>
+    /// <param name="shape">The complete shape.</param>
+    /// <param name="slotId">The validated slot name.</param>
+    /// <param name="slot">When this method returns, the slot that resolves the result.</param>
+    /// <returns>The closed graph.</returns>
+    /// <remarks>
+    /// The producing occurrence is the shape's last, because a chain's terminal is where a chain ends. A
+    /// branch's terminal is not, which is why a branch's slot is asked for by position instead.
+    /// </remarks>
+    private static RunnableGraph CloseShape<TResult>(
+        LocalGraphShape shape,
+        ResultSlotId slotId,
+        out ResultSlot<TResult> slot)
+    {
+        RunnableGraph graph = LocalGraphBuilder.Close(
+            shape,
+            [new LocalSlotRequest(slotId, shape.Stages.Count - 1, null)]);
+
+        slot = ResultSlot<TResult>.Create(slotId, graph.Fingerprint, graph.AuthoringNonce);
+
+        return graph;
+    }
+
 
     /// <summary>Invokes a sink-factory lambda and rejects a <see langword="null"/> result.</summary>
     /// <typeparam name="TResult">The type of the declared result.</typeparam>
@@ -800,11 +1190,7 @@ public sealed class Source<T>
         ResultSlotId slotId,
         out ResultSlot<TResult> slot)
     {
-        RunnableGraph graph = LocalGraphBuilder.Close(LocalStageChain.Concat(Stages, sink.Stages), slotId);
-
-        slot = ResultSlot<TResult>.Create(slotId, graph.Fingerprint, graph.AuthoringNonce);
-
-        return graph;
+        return CloseShape(Shape.Concat(sink.Stages), slotId, out slot);
     }
 
     /// <summary>Closes this source with a named occurrence of a registered result-bearing stage.</summary>
@@ -839,15 +1225,10 @@ public sealed class Source<T>
 
         ResultSlotId slotId = ParseSlotName(slotName);
 
-        RunnableGraph graph = LocalGraphBuilder.Close(
-            LocalStageChain.Append(
-                Stages,
-                RegisteredAttachment.Occurrence(sink.Specification, occurrenceName, parameters)),
-            slotId);
-
-        slot = ResultSlot<TResult>.Create(slotId, graph.Fingerprint, graph.AuthoringNonce);
-
-        return graph;
+        return CloseShape(
+            Shape.Append(RegisteredAttachment.Occurrence(sink.Specification, occurrenceName, parameters)),
+            slotId,
+            out slot);
     }
 }
 
@@ -855,8 +1236,17 @@ public sealed class Source<T>
 /// The factories that start a source.
 /// </summary>
 /// <remarks>
+/// <para>
 /// The factories live on a non-generic companion class so that the element type is inferred from the
 /// argument wherever it can be, per ADR 0004 section 1.
+/// </para>
+/// <para>
+/// <see cref="UnzipTo{TLeft, TRight}"/> lives here too, and is the one junction call on a source that is an
+/// extension method rather than an instance method. Every other one applies to a source of any element type
+/// and is therefore an instance method, per ADR 0004 section 2; an unzip applies only to a source of pairs,
+/// and a receiver constrained to one shape of element type is exactly what an instance method cannot say.
+/// It reads identically at the call site.
+/// </para>
 /// </remarks>
 public static class Source
 {
@@ -1276,5 +1666,64 @@ public static class Source
 
         return new Source<T>(LocalStageChain.Of(
             RegisteredAttachment.Occurrence(source.Specification, occurrenceName, parameters)));
+    }
+
+    /// <summary>Closes a source of pairs by sending each half of every pair to a branch of its own.</summary>
+    /// <typeparam name="TLeft">The element type of the left half.</typeparam>
+    /// <typeparam name="TRight">The element type of the right half.</typeparam>
+    /// <param name="source">The source of pairs to split.</param>
+    /// <param name="left">The branch the left halves take.</param>
+    /// <param name="right">The branch the right halves take.</param>
+    /// <returns>The closed graph.</returns>
+    /// <exception cref="ArgumentNullException">
+    /// <paramref name="source"/>, <paramref name="left"/>, or <paramref name="right"/> is
+    /// <see langword="null"/>.
+    /// </exception>
+    /// <exception cref="ArgumentException">Both branches declare a result under one name.</exception>
+    /// <remarks>
+    /// <para>
+    /// The one fan-out whose legs are differently typed, and the reason its arity is fixed at two rather
+    /// than open like a broadcast's: the halves of a pair are two, and each one's type is a type argument.
+    /// Both halves of every pair are delivered, so this junction is a broadcast in its flow control — a
+    /// branch that stops consuming holds the other one up — and a split in its elements.
+    /// </para>
+    /// <para>
+    /// The two projections are ordinary functions of a pair and never enter the document, which is what
+    /// makes the halves' element types the C# compiler's business rather than the graph compiler's, and what
+    /// makes an unzipped graph <c>nondeployable</c> like every other local one.
+    /// </para>
+    /// </remarks>
+    public static RunnableGraph UnzipTo<TLeft, TRight>(
+        this Source<(TLeft Left, TRight Right)> source,
+        Branch<TLeft> left,
+        Branch<TRight> right)
+    {
+        ArgumentNullException.ThrowIfNull(source);
+        ArgumentNullException.ThrowIfNull(left);
+        ArgumentNullException.ThrowIfNull(right);
+
+        int position = source.Shape.Stages.Count;
+        LocalGraphShape shape = source.Shape.Split(
+            LocalStageDescriptor.Unzip(
+                (Func<(TLeft Left, TRight Right), TLeft>)(row => row.Left),
+                (Func<(TLeft Left, TRight Right), TRight>)(row => row.Right)),
+            [LocalVocabulary.LeftPort, LocalVocabulary.RightPort],
+            [left.Stages, right.Stages]);
+
+        List<LocalSlotRequest> slots = [];
+        int leftTerminal = position + left.Stages.Count;
+        int rightTerminal = leftTerminal + right.Stages.Count;
+
+        if (left.SlotName is { } leftName)
+        {
+            slots.Add(new LocalSlotRequest(leftName, leftTerminal, left.Binding));
+        }
+
+        if (right.SlotName is { } rightName)
+        {
+            slots.Add(new LocalSlotRequest(rightName, rightTerminal, right.Binding));
+        }
+
+        return LocalGraphBuilder.Close(shape, slots);
     }
 }

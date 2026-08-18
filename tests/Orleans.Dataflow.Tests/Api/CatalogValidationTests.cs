@@ -120,9 +120,11 @@ public sealed class CatalogValidationTests
     [Fact]
     public void ALinearGraphNeverDeclaresMoreThanOneResultSlotAndAnyNumberOfControls()
     {
-        // The reason the definition plane's duplicate-slot violation is unreachable from this API: a graph
-        // is closed by exactly one To, and every To carries at most one slot name. Two results in one graph
-        // arrive with graphs that have more than one sink.
+        // Why a linear graph never declares two results: it is closed by exactly one To, and every To
+        // carries at most one slot name. Two results in one graph arrive with graphs that have more than
+        // one sink, which is what the junction surface builds — a result-bearing branch names its own slot,
+        // so JunctionAuthoringTests carries this claim's counterpart and the case where two branches collide
+        // under one name.
         //
         // Controls are the other half of the same sentence and are not bounded by one, because they are not
         // declared by the closing call at all: a queue and a probe name theirs on the stage that produces

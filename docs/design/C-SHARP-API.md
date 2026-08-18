@@ -15,6 +15,8 @@ ADR 0003 (canonical documents).
 Source<T>           // reusable description of where elements enter a graph
 Flow<TIn, TOut>     // reusable typed transformation
 Sink<T>             // reusable terminal consumer
+Branch<TIn>         // one leg of a junction: everything it feeds, ending in a sink
+Fork<T1, T2>        // one stream through two flows, awaiting its rejoin
 RunnableGraph       // closed, validated graph; not generic over results
 ResultSlot<T>       // typed declaration of one result or runtime control
 RunHandle           // resolves slots for one materialized run
@@ -110,6 +112,121 @@ Attaching one sink value twice yields two distinct slots (two names), and a
 slot binds to the fingerprint of the document that declared it — plus, for
 nondeployable graphs, the built instance's authoring nonce (ADR 0004
 section 4) — never to the sink value itself.
+
+## Junctions: fan-out, fan-in, and the diamond
+
+Decided by [ADR 0006](../architecture/0006-multiport-authoring.md) on nine compile
+prototypes, which live on as tests. The cautionary tale is Akka's GraphDSL — a
+builder with port objects that its own users avoid — so the common shapes read as
+sentences on the values that already exist, and the full generality of the
+definition plane stays reachable through the fragment algebra rather than through
+a second DSL.
+
+**A branch is a value.** `Branch<TIn>` is a sink-terminated continuation:
+everything one junction leg feeds. It is built by a `To` family on
+`Flow<TIn, TOut>` that mirrors `Source<T>`'s — plain sinks, sink factories,
+result-bearing sinks with a mandatory slot name and an `out ResultSlot<TResult>`,
+and the registered-stage forms — and it exists as a type because a leg has no
+receiver to hang off: type information flows left to right from sources, and a leg
+is built right to left from its sink. `Flow.For<T>()` is the anchor that states the
+branch's input type, which is why it graduated from convenience to load-bearing.
+
+**Fan-out is a terminal call on the source**, closing the graph the way `To` closes
+a chain:
+
+```csharp
+RunnableGraph graph = orders.BroadcastTo(
+    Flow.For<Order>().To(s => s.Count(), "counted", out ResultSlot<long> counted),
+    Flow.For<Order>().To(s => s.Aggregate(0m, (sum, o) => sum + o.Amount), "totaled", out ResultSlot<decimal> totaled));
+```
+
+`BalanceTo` spreads work, `PartitionTo(router, …)` classifies by the element,
+`UnzipTo(left, right)` splits a source of pairs into two differently typed legs,
+and `AlsoTo(branch)` is the tap — broadcast sugar that keeps the main line
+flowing and returns a `Source<T>`.
+
+**Fan-in is a combinator on sources**, and each returns a `Source<T>` so the chain
+continues: `a.Merge(b)`, `a.Merge(b, c)`, `a.Concat(b)`,
+`a.Interleave(b, segmentSize)`, `a.Zip(b)` for pairs, `a.Zip(b, combine)`, and
+`a.CombineLatest(b, combine)`.
+
+**The diamond is a carrier.** `source.Fork(left, right)` broadcasts one stream
+through two flows and returns `Fork<T1, T2>`, whose `Zip()` / `Zip(combine)` rejoin
+positionally — legal without a buffer exactly because both sides descend from one
+broadcast — and `source.ForkMerge(left, right)` is the unordered rejoin for
+race-and-take-first shapes. A tree cannot express re-convergence, which is why the
+carrier exists and why nothing else needs one.
+
+### Named multiple results
+
+A result-bearing branch names its own slot where its sink is written, so a junction
+graph declares one result per such branch and one run resolves each of them. Two
+branches under one name are refused by the document's uniqueness rule.
+
+A branch's slot is the one slot that exists before its graph does: the branch is
+written as an argument of the junction call that consumes it, so the sink — and
+therefore the name — is fixed one expression before there is a document to
+fingerprint. The consequences are stated rather than hidden. The slot names its
+graph from the junction call onwards; reading `slot.Graph` earlier throws instead
+of answering with a fingerprint of nothing; and a branch that declares a result
+closes exactly one graph, because handing it to a second junction call would leave
+the first graph's slot pointing at the second graph. A branch that declares no
+result is reusable without limit, exactly as a flow is.
+
+### Order, identity, and what a junction costs
+
+Branch order is argument order and is identity-bearing: the first branch's
+occurrences are numbered before the second's, so swapping two arguments produces a
+different document with a different fingerprint — the same rule reordering a chain
+follows. Two builds of one program produce byte-identical documents.
+
+Every junction is a stage of the `local` vocabulary — `broadcast`, `balance`,
+`partition`, `unzip`, `merge`, `concat`, `interleave`, `zip`, `combine-latest` —
+and that has two consequences worth stating plainly:
+
+- A graph with a junction in it declares `nondeployable`, because every local stage
+  requires it, **and** `ephemeral-identity`, because this surface has no spelling
+  for naming a junction occurrence. Both hold even when the source, the flows, and
+  every branch sink are registered stages under names the author chose.
+- Local ports declare the opaque contract `local-opaque@v1`, so wiring a registered
+  stage to a junction is a seam and the graph compiler reports one
+  `element-contract-mismatch` per seam — the same rule a mixed chain has broken
+  since ADR 0004, at the same place, for the same reason.
+
+**A fan-out pipeline built entirely from registered stages therefore cannot exist
+today.** The junction between the registered stages cannot itself be registered,
+and that waits for the provider SDK to open junction registration. Until then a
+junction graph is a local graph whatever its branches are made of.
+
+### What is deliberately not here
+
+- **No fluent cycle spelling.** A loop is authored through the fragment algebra,
+  where edges are explicit; a fluent cycle would hide the one thing the cycle rule
+  needs an author to see, the relieving boundary. `GraphFragmentComposer.Wire`
+  joins an open output to an open input of one fragment and is that path — it is
+  also what re-convergence needs, which `Connect` cannot express because it merges
+  two fragments and can never join one to itself.
+- **No graph-builder DSL.** Nine programs covered every junction without one, and
+  the algebra remains the escape hatch for arbitrary topology.
+- **Two- and three-input overloads only.** Wider joins chain
+  (`a.Merge(b).Merge(c)`), and the chain is honest about being two nodes: merge is
+  associative, the two documents are not interchangeable, and that is stated rather
+  than papered over with a flattening rewrite.
+- **No tuple form of a branch's `To`.** An `out` parameter is legal on a branch
+  precisely because branches are built as arguments; a tuple there would have to be
+  unpacked into a statement first, which is the shape the fluent form avoids.
+
+### Guards against a dropped result
+
+The result-dropping foot-gun of ADR 0004 section 3 exists on a branch too, and is
+closed the same way: `Flow<TIn, TOut>.To(sinkWithResult)` and
+`To(s => s.Count())` are `[Obsolete(error: true)]` overloads whose diagnostic names
+the two correct spellings. Without them the compiler's one suggested repair is a
+cast to `Sink<TOut>`, which compiles and silently discards the result. Discarding
+one deliberately stays available and stays explicit: `To(s => s.Count().ToSink())`.
+The registered result-bearing form needs no guard, because
+`RegisteredSinkWithResult<TIn, TResult>` does not convert to `RegisteredSink<TIn>`
+at all.
 
 ## Local stage vocabulary
 

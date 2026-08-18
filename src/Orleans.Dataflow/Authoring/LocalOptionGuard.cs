@@ -103,6 +103,25 @@ internal static class LocalOptionGuard
                 count,
                 "A count of elements is zero or more. Zero is a legal count with a defined meaning, and a negative one has none.");
 
+    /// <summary>Checks the segment size of an interleaving junction.</summary>
+    /// <param name="segmentSize">The segment size the author supplied.</param>
+    /// <param name="parameterName">The name of the combinator's parameter it arrived in.</param>
+    /// <returns>The same segment size.</returns>
+    /// <exception cref="ArgumentOutOfRangeException"><paramref name="segmentSize"/> is below one.</exception>
+    /// <remarks>
+    /// One is the smallest rotation there is — one element from each input in turn — and zero would be a
+    /// junction that takes nothing from anybody and never advances. The payload contract requires a positive
+    /// integer for the same reason, so this rejects at the call site what the catalog would otherwise reject
+    /// at the document.
+    /// </remarks>
+    internal static int SegmentSize(int segmentSize, string parameterName) =>
+        segmentSize >= 1
+            ? segmentSize
+            : throw new ArgumentOutOfRangeException(
+                parameterName,
+                segmentSize,
+                "An interleave takes at least one element from an input before moving to the next, so the segment size must be 1 or more. A segment of none is a rotation that never advances.");
+
     /// <summary>Checks the bounds of a range source.</summary>
     /// <param name="start">The first element the author supplied.</param>
     /// <param name="count">The number of elements the author supplied.</param>

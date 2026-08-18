@@ -60,6 +60,18 @@ is out of M1 scope and is not prejudged here.
   `a`'s open outputs to one of `b`'s open inputs with a new edge; the result's
   open ports are the remaining ones in stable order. Linear convenience
   (`append`) joins the single open output to the single open input.
+- `Wire(fragment, output, input)`: joins one of a fragment's own open outputs
+  to one of its own open inputs. `Connect` merges two fragments and can
+  therefore never join a fragment to itself, which is exactly the edge two
+  legal document shapes need — a re-convergence, where a stream split by one
+  junction is rejoined by another, and a cycle, whose relieving edge runs back
+  into a node already there. Neither is reachable by folding `Connect`, so the
+  operator is part of the algebra rather than a private path around it. It
+  judges nothing about direction: a fragment cannot see which stage is upstream
+  of which, so wiring an output back into an input the stream already passed
+  through builds a cycle deliberately. What it checks is what a fragment can
+  check — both ports open, both declared, and no self-loop (added by M4.2, with
+  the junction authoring surface).
 - `Close(...)`: a fragment with no open ports, plus graph identity, revision,
   capabilities, and slot declarations, becomes a `GraphDocument` through
   `GraphDocument.Create` (which revalidates everything).
@@ -86,7 +98,8 @@ that closing a graph knows whether every identity is author-stable.
 ## Not in M1
 
 - junction shapes with more than one open port per side (the model supports
-  them; no constructor exposes them until M4);
+  them; `GraphFragment.OfStage` exposes them since M4.2, which is how the C#
+  junction surface opens a broadcast's legs and a merge's inputs);
 - importing closed graphs as fragments;
 - any operator vocabulary (operators are stage specifications plus authoring
   sugar; the algebra does not know operator names).

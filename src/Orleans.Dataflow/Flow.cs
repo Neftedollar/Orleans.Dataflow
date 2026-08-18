@@ -1,5 +1,6 @@
 using System.Globalization;
 using Orleans.Dataflow.Authoring;
+using Orleans.Dataflow.Identity;
 using Orleans.Dataflow.Serialization;
 
 namespace Orleans.Dataflow;
@@ -379,6 +380,226 @@ public sealed class Flow<TIn, TOut>
             RegisteredAttachment.Occurrence(flow.Specification, occurrenceName, parameters)));
     }
 
+    /// <summary>Ends this flow in a sink that declares no result, making a branch of it.</summary>
+    /// <param name="sink">The sink consuming what the flow produces.</param>
+    /// <returns>The branch, ready to be handed to a junction call.</returns>
+    /// <exception cref="ArgumentNullException"><paramref name="sink"/> is <see langword="null"/>.</exception>
+    /// <remarks>
+    /// The <c>To</c> family here mirrors <see cref="Source{T}"/>'s and differs in exactly one respect: it
+    /// produces a <see cref="Branch{TIn}"/> instead of a closed graph, because a leg of a junction is not a
+    /// graph until the junction call takes it. Everything else — the mandatory slot name, the sink-factory
+    /// lambdas that make inference total, the registered overloads, and the guards against a dropped result
+    /// — is the same surface for the same reasons (ADR 0004 sections 2 and 3).
+    /// </remarks>
+    public Branch<TIn> To(Sink<TOut> sink)
+    {
+        ArgumentNullException.ThrowIfNull(sink);
+
+        return new Branch<TIn>(LocalStageChain.Concat(Stages, sink.Stages));
+    }
+
+    /// <summary>Ends this flow in a resultless sink built from the element type's own vocabulary.</summary>
+    /// <param name="sink">A function choosing a sink from the factory for the element type this flow produces.</param>
+    /// <returns>The branch, ready to be handed to a junction call.</returns>
+    /// <exception cref="ArgumentNullException"><paramref name="sink"/> is <see langword="null"/>.</exception>
+    /// <exception cref="ArgumentException"><paramref name="sink"/> returned <see langword="null"/>.</exception>
+    /// <remarks>
+    /// The factory form of the one-argument close, so that <c>Flow.For&lt;Order&gt;().To(s =&gt; s.Ignore())</c>
+    /// reads the same way as the result-bearing factory overloads do.
+    /// </remarks>
+    public Branch<TIn> To(Func<SinkFactory<TOut>, Sink<TOut>> sink)
+    {
+        ArgumentNullException.ThrowIfNull(sink);
+
+        Sink<TOut> resolved = sink(SinkFactory<TOut>.Instance) ??
+            throw new ArgumentException(
+                $"The sink factory returned null, and a branch ends in a sink. Return a sink from the {nameof(SinkFactory<TOut>)} the lambda receives, such as 's => s.Ignore()'.",
+                nameof(sink));
+
+        return To(resolved);
+    }
+
+    /// <summary>Ends this flow in a result-bearing sink, handing back the slot as an output.</summary>
+    /// <typeparam name="TResult">The type of the declared result.</typeparam>
+    /// <param name="sink">The sink consuming what the flow produces.</param>
+    /// <param name="slotName">The author-stable name to expose the result under.</param>
+    /// <param name="slot">When this method returns, the slot that resolves the result.</param>
+    /// <returns>The branch, ready to be handed to a junction call.</returns>
+    /// <exception cref="ArgumentNullException">
+    /// <paramref name="sink"/> or <paramref name="slotName"/> is <see langword="null"/>.
+    /// </exception>
+    /// <exception cref="ArgumentException">
+    /// <paramref name="slotName"/> is not a valid <see cref="ResultSlotId"/>.
+    /// </exception>
+    /// <remarks>
+    /// <para>
+    /// There is one form rather than the two <see cref="Source{T}"/> offers, and the missing one is the
+    /// tuple. A branch is written as an argument of the junction call that consumes it — that is the whole
+    /// reason an <see langword="out"/> parameter is legal here, per ADR 0006 — and a tuple in that position
+    /// would have to be unpacked into a statement first, which is the shape the fluent form exists to avoid.
+    /// </para>
+    /// <para>
+    /// The slot names its graph from the junction call onwards, because that is the first moment a graph
+    /// exists. A branch that declares a result therefore closes exactly one graph; handing it to a second
+    /// junction call is refused rather than quietly repointing the first graph's slot.
+    /// </para>
+    /// </remarks>
+    public Branch<TIn> To<TResult>(
+        SinkWithResult<TOut, TResult> sink,
+        string slotName,
+        out ResultSlot<TResult> slot)
+    {
+        ArgumentNullException.ThrowIfNull(sink);
+
+        return Terminate(sink.Stages, LocalOptionGuard.SlotName(slotName, nameof(slotName)), out slot);
+    }
+
+    /// <summary>
+    /// Ends this flow in a result-bearing sink built from the element type's own vocabulary, handing back
+    /// the slot as an output.
+    /// </summary>
+    /// <typeparam name="TResult">The type of the declared result.</typeparam>
+    /// <param name="sink">A function choosing a sink from the factory for the element type this flow produces.</param>
+    /// <param name="slotName">The author-stable name to expose the result under.</param>
+    /// <param name="slot">When this method returns, the slot that resolves the result.</param>
+    /// <returns>The branch, ready to be handed to a junction call.</returns>
+    /// <exception cref="ArgumentNullException">
+    /// <paramref name="sink"/> or <paramref name="slotName"/> is <see langword="null"/>.
+    /// </exception>
+    /// <exception cref="ArgumentException">
+    /// <paramref name="sink"/> returned <see langword="null"/>, or <paramref name="slotName"/> is not a
+    /// valid <see cref="ResultSlotId"/>.
+    /// </exception>
+    /// <remarks>
+    /// This is what makes a branch infer completely: the element type is pinned by
+    /// <see cref="Flow.For{T}"/> at the head of the branch and the result type flows out of the lambda, so
+    /// <c>Flow.For&lt;Order&gt;().To(s =&gt; s.Count(), "counted", out ResultSlot&lt;long&gt; counted)</c> needs no
+    /// type argument and no lambda annotation. <paramref name="slotName"/> is validated before the lambda is
+    /// invoked, so a rejected name never costs the author a side effect.
+    /// </remarks>
+    public Branch<TIn> To<TResult>(
+        Func<SinkFactory<TOut>, SinkWithResult<TOut, TResult>> sink,
+        string slotName,
+        out ResultSlot<TResult> slot)
+    {
+        ArgumentNullException.ThrowIfNull(sink);
+
+        ResultSlotId slotId = LocalOptionGuard.SlotName(slotName, nameof(slotName));
+
+        SinkWithResult<TOut, TResult> resolved = sink(SinkFactory<TOut>.Instance) ??
+            throw new ArgumentException(
+                $"The sink factory returned null, and a branch ends in a sink. Return a sink from the {nameof(SinkFactory<TOut>)} the lambda receives, such as 's => s.Aggregate(seed, folder)'.",
+                nameof(sink));
+
+        return Terminate(resolved.Stages, slotId, out slot);
+    }
+
+    /// <summary>Ends this flow in one named occurrence of a registered stage that declares no result.</summary>
+    /// <param name="sink">The typed handle of the registered stage terminating the branch.</param>
+    /// <param name="occurrenceName">The author-stable name of this occurrence.</param>
+    /// <param name="parameters">The configuration this occurrence carries, in canonical form.</param>
+    /// <returns>The branch, ready to be handed to a junction call.</returns>
+    /// <exception cref="ArgumentNullException">
+    /// <paramref name="sink"/> or <paramref name="occurrenceName"/> is <see langword="null"/>.
+    /// </exception>
+    /// <exception cref="ArgumentException">
+    /// <paramref name="occurrenceName"/> is not a valid single-segment node identifier, or
+    /// <paramref name="parameters"/> is the default value or the JSON null value.
+    /// </exception>
+    /// <remarks>
+    /// A registered stage that does declare a result port is a
+    /// <see cref="RegisteredSinkWithResult{TIn, TResult}"/> and does not convert to a
+    /// <see cref="RegisteredSink{TIn}"/> at all, so this overload cannot drop a result: the mistake is a
+    /// conversion error naming both types rather than a branch that silently produces nothing readable.
+    /// </remarks>
+    public Branch<TIn> To(RegisteredSink<TOut> sink, string occurrenceName, CanonicalJsonValue parameters)
+    {
+        ArgumentNullException.ThrowIfNull(sink);
+
+        return new Branch<TIn>(LocalStageChain.Append(
+            Stages,
+            RegisteredAttachment.Occurrence(sink.Specification, occurrenceName, parameters)));
+    }
+
+    /// <summary>
+    /// Ends this flow in one named occurrence of a registered result-bearing stage, handing back the slot as
+    /// an output.
+    /// </summary>
+    /// <typeparam name="TResult">The type of the declared result.</typeparam>
+    /// <param name="sink">The typed handle of the registered stage terminating the branch.</param>
+    /// <param name="occurrenceName">The author-stable name of this occurrence.</param>
+    /// <param name="parameters">The configuration this occurrence carries, in canonical form.</param>
+    /// <param name="slotName">The author-stable name to expose the result under.</param>
+    /// <param name="slot">When this method returns, the slot that resolves the result.</param>
+    /// <returns>The branch, ready to be handed to a junction call.</returns>
+    /// <exception cref="ArgumentNullException">
+    /// <paramref name="sink"/>, <paramref name="occurrenceName"/>, or <paramref name="slotName"/> is
+    /// <see langword="null"/>.
+    /// </exception>
+    /// <exception cref="ArgumentException">
+    /// <paramref name="occurrenceName"/> is not a valid single-segment node identifier,
+    /// <paramref name="slotName"/> is not a valid <see cref="ResultSlotId"/>, or
+    /// <paramref name="parameters"/> is the default value or the JSON null value.
+    /// </exception>
+    /// <remarks>
+    /// The two names mean different things and neither is derivable from the other: the occurrence name is
+    /// the node's durable identity in the graph, and the slot name is what a run handle resolves the result
+    /// under. A branch built entirely from registered stages still ends in a graph that declares
+    /// <c>nondeployable</c> whenever a junction joins it, because the junction itself is a local stage.
+    /// </remarks>
+    public Branch<TIn> To<TResult>(
+        RegisteredSinkWithResult<TOut, TResult> sink,
+        string occurrenceName,
+        CanonicalJsonValue parameters,
+        string slotName,
+        out ResultSlot<TResult> slot)
+    {
+        ArgumentNullException.ThrowIfNull(sink);
+
+        ResultSlotId slotId = LocalOptionGuard.SlotName(slotName, nameof(slotName));
+
+        return Terminate(
+            LocalStageChain.Of(RegisteredAttachment.Occurrence(sink.Specification, occurrenceName, parameters)),
+            slotId,
+            out slot);
+    }
+
+    /// <summary>Ends this flow in a result-bearing sink and no name for the result. Never valid.</summary>
+    /// <typeparam name="TResult">The type of the result the sink declares.</typeparam>
+    /// <param name="sink">The sink that would terminate the branch.</param>
+    /// <returns>Nothing; the call cannot compile, and cannot be reached if it somehow does.</returns>
+    /// <exception cref="NotSupportedException">Always.</exception>
+    /// <remarks>
+    /// The branch half of the guard ADR 0004 section 3 introduced for chains. Without it,
+    /// <c>To(countingSink)</c> is a wrong-type call whose one compiler-suggested repair is a cast to
+    /// <see cref="Sink{TOut}"/> — which compiles, and silently drops the result the author asked for. A
+    /// branch that carries a result therefore has a real overload to bind to, and binding to it says what to
+    /// write instead.
+    /// </remarks>
+    [Obsolete(
+        "A result-bearing sink needs a name for its result: write To(sink, \"name\", out var slot). To run the sink on this branch and deliberately discard its result, write To(sink.ToSink()).",
+        error: true)]
+    public Branch<TIn> To<TResult>(SinkWithResult<TOut, TResult> sink) =>
+        throw new NotSupportedException(GuardOverload());
+
+    /// <summary>
+    /// Ends this flow in a sink-factory lambda that chooses a result-bearing sink, and no name for the
+    /// result. Never valid.
+    /// </summary>
+    /// <typeparam name="TResult">The type of the result the chosen sink declares.</typeparam>
+    /// <param name="sink">The function that would choose the sink.</param>
+    /// <returns>Nothing; the call cannot compile, and cannot be reached if it somehow does.</returns>
+    /// <exception cref="NotSupportedException">Always.</exception>
+    /// <remarks>
+    /// The factory-lambda half of the same guard, and the one an author is likelier to hit, because the
+    /// factory form is the one a branch is normally written in.
+    /// </remarks>
+    [Obsolete(
+        "A result-bearing sink needs a name for its result: write To(s => s.Count(), \"name\", out var slot). To run the sink on this branch and deliberately discard its result, write To(s => s.Count().ToSink()).",
+        error: true)]
+    public Branch<TIn> To<TResult>(Func<SinkFactory<TOut>, SinkWithResult<TOut, TResult>> sink) =>
+        throw new NotSupportedException(GuardOverload());
+
     /// <summary>Returns a one-line diagnostic summary of this flow.</summary>
     /// <returns>Text of the form <c>flow (2 stages)</c>, singular for one (<c>flow (1 stage)</c>).</returns>
     /// <remarks>The count is formatted with the invariant culture, and the method never throws.</remarks>
@@ -386,6 +607,38 @@ public sealed class Flow<TIn, TOut>
         string.Create(
             CultureInfo.InvariantCulture,
             $"flow ({Stages.Count} {(Stages.Count == 1 ? "stage" : "stages")})");
+
+    /// <summary>Builds the message a guard overload throws if it is ever reached.</summary>
+    /// <returns>The message.</returns>
+    /// <remarks>
+    /// The branch counterpart of <see cref="Source{T}"/>'s, and there is exactly one thing to say: this
+    /// member exists to fail at compile time and has no runtime behavior to fall back on.
+    /// </remarks>
+    private static string GuardOverload() =>
+        $"This {nameof(To)} overload exists only as a compile-time guard against ending a branch with a result-bearing sink and no name for its result. It is marked as an error and is never a legal call; nothing in this library invokes it.";
+
+    /// <summary>Ends this flow in a result-bearing terminal under a validated name.</summary>
+    /// <typeparam name="TResult">The type of the declared result.</typeparam>
+    /// <param name="terminal">The terminal's occurrences.</param>
+    /// <param name="slotId">The validated slot name.</param>
+    /// <param name="slot">When this method returns, the slot that resolves the result.</param>
+    /// <returns>The branch.</returns>
+    /// <remarks>
+    /// Every result-bearing branch funnels through here, which is what makes the lambda-implemented and the
+    /// registered forms produce the same kind of slot: one that names its graph from the junction call
+    /// onwards and refuses to name a second.
+    /// </remarks>
+    private Branch<TIn> Terminate<TResult>(
+        IReadOnlyList<StageOccurrence> terminal,
+        ResultSlotId slotId,
+        out ResultSlot<TResult> slot)
+    {
+        BranchSlotBinding binding = new();
+
+        slot = ResultSlot<TResult>.OnBranch(slotId, binding);
+
+        return new Branch<TIn>(LocalStageChain.Concat(Stages, terminal), slotId, binding);
+    }
 }
 
 /// <summary>

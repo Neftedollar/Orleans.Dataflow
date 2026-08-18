@@ -89,3 +89,44 @@ way, which is why the carrier exists and why nothing else needs it.
   break if it regresses.
 - `Flow.For<T>()` graduates from convenience to load-bearing: it is the
   branch anchor, and its doc says so.
+
+## Implementation notes (M4.2)
+
+Recorded here rather than discovered later; each is a place the built
+surface says more than this document did.
+
+- **Where the prototypes live.** `JunctionPrograms` in the C# test project
+  holds all nine verbatim, and they are asserted twice:
+  `JunctionAuthoringTests` reads the document each one closes, and
+  `FluentJunctionTests` runs them and asserts the results. Their compiling
+  with no explicit type argument is this ADR's inference claim, and it is
+  now a build break.
+- **Instance methods, not extensions.** The prototypes had to be extension
+  methods — they could not add members to the real assemblies — and the
+  built surface makes every junction call an instance method, per ADR 0004
+  section 2. The one exception is `Source.UnzipTo`, whose receiver is
+  constrained to a source of pairs, which is exactly what an instance
+  method cannot say. Call sites are identical either way.
+- **A branch's slot exists before its graph does.** The `out
+  ResultSlot<TResult>` above is assigned one expression before the junction
+  call closes a graph, so there is nothing to fingerprint yet. The slot is
+  therefore bound when the junction call closes the graph: reading it
+  before then throws, and a branch that declares a result closes exactly
+  one graph — a second junction call is refused rather than repointing the
+  first graph's slot. A branch that declares no result stays reusable
+  without limit.
+- **The fragment algebra gained one operator.** `Connect` merges two
+  fragments and can therefore never join a fragment to itself, which is
+  exactly the edge a diamond's rejoin and a cycle's relieving edge are.
+  `GraphFragmentComposer.Wire` joins an open output to an open input of one
+  fragment; it is what closes a fork's rejoin here, and it is the
+  explicit-edge path this ADR sends a loop to.
+- **A junction is a local stage, and it costs the graph both tokens.** A
+  graph with a junction declares `nondeployable` and `ephemeral-identity`
+  even when its source, its flows, and every branch sink are registered
+  stages under names the author chose, because the junction occurrence is
+  local and unnamed. Its ports declare `local-opaque@v1`, so each edge
+  between it and a registered stage is an `element-contract-mismatch` seam.
+  **A fan-out pipeline built entirely from registered stages is therefore
+  not expressible until a provider can register a junction**, which is the
+  provider SDK's business and not this one's.

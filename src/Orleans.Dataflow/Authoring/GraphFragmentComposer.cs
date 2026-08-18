@@ -207,6 +207,71 @@ public static class GraphFragmentComposer
     }
 
     /// <summary>
+    /// Joins one open output of a fragment to one open input of the same fragment.
+    /// </summary>
+    /// <param name="fragment">The fragment to wire.</param>
+    /// <param name="output">
+    /// The address to consume, which must be an element of <paramref name="fragment"/>'s open outputs.
+    /// </param>
+    /// <param name="input">
+    /// The address to consume, which must be an element of <paramref name="fragment"/>'s open inputs.
+    /// </param>
+    /// <returns>The same fragment with one more edge, and the two consumed ports no longer open.</returns>
+    /// <exception cref="ArgumentNullException"><paramref name="fragment"/> is <see langword="null"/>.</exception>
+    /// <exception cref="ArgumentException">
+    /// <paramref name="output"/> is not an open output of the fragment, or <paramref name="input"/> is not
+    /// an open input of it.
+    /// </exception>
+    /// <remarks>
+    /// <para>
+    /// <see cref="Connect"/> merges two fragments and can therefore never join a fragment to itself; that is
+    /// exactly what makes it safe, and exactly what makes it unable to express the two shapes where an edge
+    /// has both ends inside one partial graph. The first is re-convergence: a stream split by a junction and
+    /// rejoined by another is a diamond, and the edge that closes it runs between two nodes the earlier
+    /// connections already brought into one fragment. The second is a cycle, whose relieving edge runs
+    /// backwards into a node that is already there. Both are legal documents the engine runs, and neither is
+    /// reachable by folding <see cref="Connect"/>, so the algebra has this operator rather than an authoring
+    /// frontend having a private path around it.
+    /// </para>
+    /// <para>
+    /// Nothing here judges what the new edge means. A fragment does not know which stage is upstream of
+    /// which — that is the document's edge set to state and the planner's to read — so wiring an output back
+    /// to an input the stream already passed through builds a cycle, deliberately and without comment, and a
+    /// self-loop is simply the one-node case of that: ADR 0005 subsumed its old special refusal into the
+    /// cycle rule, so the loop is built here and judged where every loop is judged. What is checked is what
+    /// a fragment can check: both ports are open and both are declared.
+    /// </para>
+    /// <para>
+    /// The remaining open ports keep their relative order, so a caller that knows the rest of a boundary by
+    /// position still knows it after the wiring.
+    /// </para>
+    /// </remarks>
+    public static GraphFragment Wire(GraphFragment fragment, PortAddress output, PortAddress input)
+    {
+        ArgumentNullException.ThrowIfNull(fragment);
+
+        if (!fragment.OpenOutputs.Contains(output))
+        {
+            throw new ArgumentException(
+                DescribeUnopenPort(output, "open output", "wired", fragment.OpenOutputs),
+                nameof(output));
+        }
+
+        if (!fragment.OpenInputs.Contains(input))
+        {
+            throw new ArgumentException(
+                DescribeUnopenPort(input, "open input", "wired", fragment.OpenInputs),
+                nameof(input));
+        }
+
+        return GraphFragment.Create(
+            fragment.Nodes,
+            [.. fragment.Edges, GraphEdge.Create(output, input)],
+            Without(fragment.OpenInputs, input),
+            Without(fragment.OpenOutputs, output));
+    }
+
+    /// <summary>
     /// Closes a fragment with no open ports into a graph document.
     /// </summary>
     /// <param name="fragment">The fragment to close, which must have no open ports.</param>

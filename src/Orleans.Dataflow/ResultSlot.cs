@@ -1,4 +1,5 @@
 using System.Globalization;
+using Orleans.Dataflow.Authoring;
 using Orleans.Dataflow.Definition;
 using Orleans.Dataflow.Identity;
 
@@ -33,6 +34,15 @@ namespace Orleans.Dataflow;
 /// fingerprints that happen to differ.
 /// </para>
 /// <para>
+/// A slot a <see cref="Branch{TIn}"/> declared is the one slot that exists before its graph does, and it is
+/// worth stating plainly rather than leaving to the mechanics. A branch is built as an argument of the
+/// junction call that consumes it, so its sink and its name are fixed one expression before there is a
+/// document to fingerprint; the slot therefore names its graph from that junction call onwards, and reading
+/// <see cref="Graph"/> before then throws rather than answering with a fingerprint of nothing. The window is
+/// the width of one argument list, and a branch that declares a result closes exactly one graph — consuming
+/// it twice is refused, because the second graph would otherwise quietly take the first one's slot.
+/// </para>
+/// <para>
 /// Equality is over three components, and each one is load-bearing: the slot <see cref="Id"/>, because a
 /// graph may declare several results; the declaring document's <see cref="Graph"/> fingerprint, because a
 /// name means nothing apart from the document that declared it; and the declaring instance's authoring
@@ -57,6 +67,7 @@ public readonly record struct ResultSlot<TResult>
     private readonly ResultSlotId _id;
     private readonly GraphFingerprint _graph;
     private readonly Guid _authoringNonce;
+    private readonly BranchSlotBinding? _branch;
 
     /// <summary>Initializes a new instance of the <see cref="ResultSlot{TResult}"/> struct.</summary>
     /// <param name="id">The slot name, already validated.</param>
@@ -67,6 +78,18 @@ public readonly record struct ResultSlot<TResult>
         _id = id;
         _graph = graph;
         _authoringNonce = authoringNonce;
+        _branch = null;
+    }
+
+    /// <summary>Initializes a new instance of the <see cref="ResultSlot{TResult}"/> struct on a branch.</summary>
+    /// <param name="id">The slot name, already validated.</param>
+    /// <param name="branch">The binding the junction call fills when it closes the graph.</param>
+    private ResultSlot(ResultSlotId id, BranchSlotBinding branch)
+    {
+        _id = id;
+        _graph = default;
+        _authoringNonce = Guid.Empty;
+        _branch = branch;
     }
 
     /// <summary>Gets the author-chosen name of this slot.</summary>
@@ -76,17 +99,23 @@ public readonly record struct ResultSlot<TResult>
 
     /// <summary>Gets the fingerprint of the graph document that declared this slot.</summary>
     /// <value>The declaring document's identity.</value>
-    /// <exception cref="InvalidOperationException">This instance is the default value.</exception>
-    public GraphFingerprint Graph => IsDefault ? throw DefaultAccess() : _graph;
+    /// <exception cref="InvalidOperationException">
+    /// This instance is the default value, or it was declared by a branch whose junction call has not
+    /// closed a graph yet.
+    /// </exception>
+    public GraphFingerprint Graph => IsDefault ? throw DefaultAccess() : _branch?.Graph ?? _graph;
 
     /// <summary>Gets the per-instance identity of the graph that declared this slot.</summary>
     /// <value>The declaring <see cref="RunnableGraph"/>'s authoring nonce.</value>
-    /// <exception cref="InvalidOperationException">This instance is the default value.</exception>
+    /// <exception cref="InvalidOperationException">
+    /// This instance is the default value, or it was declared by a branch whose junction call has not
+    /// closed a graph yet.
+    /// </exception>
     /// <remarks>
     /// Internal: the nonce is how a run rejects a slot of a different graph instance, and nothing outside
     /// materialization has a use for it.
     /// </remarks>
-    internal Guid AuthoringNonce => IsDefault ? throw DefaultAccess() : _authoringNonce;
+    internal Guid AuthoringNonce => IsDefault ? throw DefaultAccess() : _branch?.AuthoringNonce ?? _authoringNonce;
 
     /// <summary>Gets a value indicating whether this slot was declared by a pipeline rather than a built graph.</summary>
     /// <value>
@@ -107,6 +136,42 @@ public readonly record struct ResultSlot<TResult>
     /// <value><see langword="true"/> when the instance names no slot.</value>
     /// <remarks>The default instance arises only from <c>default(ResultSlot&lt;T&gt;)</c>; no API returns one.</remarks>
     public bool IsDefault => _id.IsDefault;
+
+    /// <summary>Gets the declaring document's fingerprint without throwing for an unbound branch slot.</summary>
+    /// <value>The fingerprint, or the default value when no graph has been closed over the branch yet.</value>
+    /// <remarks>
+    /// Equality and text rendering read the components through this and <see cref="Instance"/>, because
+    /// neither operation may fail: a slot has to be comparable and loggable in every state it can be in,
+    /// and one of those states is a branch slot whose junction call has not run.
+    /// </remarks>
+    private GraphFingerprint Declaring => _branch?.GraphOrDefault ?? _graph;
+
+    /// <summary>Gets the declaring instance's nonce without throwing for an unbound branch slot.</summary>
+    /// <value>The nonce, or <see cref="Guid.Empty"/> when no graph has been closed over the branch yet.</value>
+    private Guid Instance => _branch?.AuthoringNonceOrDefault ?? _authoringNonce;
+
+    /// <summary>Determines whether this slot and <paramref name="other"/> name the same result.</summary>
+    /// <param name="other">The slot to compare with.</param>
+    /// <returns>
+    /// <see langword="true"/> when both slots have the same name, the same declaring document, and the same
+    /// declaring instance.
+    /// </returns>
+    /// <remarks>
+    /// Written out rather than synthesized, so that equality stays over exactly the three components the
+    /// type documents even though a branch slot reaches two of them through a binding it shares with its
+    /// branch. A branch slot whose graph has been closed is therefore equal to a slot of that same graph
+    /// under that same name, which is what "the same result" has to mean; two unbound branch slots of one
+    /// name are equal to each other, because neither names a graph yet and there is nothing else to tell
+    /// them apart. An unbound slot is consequently not a stable dictionary key — its components change once
+    /// the junction call closes the graph — and it is not meant to be one: the window in which a branch slot
+    /// is unbound is the width of the argument list it was written in.
+    /// </remarks>
+    public bool Equals(ResultSlot<TResult> other) =>
+        _id == other._id && Declaring == other.Declaring && Instance == other.Instance;
+
+    /// <summary>Returns a hash code over the three components equality is defined by.</summary>
+    /// <returns>A hash code consistent with <see cref="Equals(ResultSlot{TResult})"/>.</returns>
+    public override int GetHashCode() => HashCode.Combine(_id, Declaring, Instance);
 
     /// <summary>Returns the text form, or a diagnostic literal for the default value.</summary>
     /// <returns>
@@ -130,7 +195,9 @@ public readonly record struct ResultSlot<TResult>
     public override string ToString() =>
         IsDefault
             ? "(default ResultSlot)"
-            : $"{_id}@{_graph}#{_authoringNonce.ToString("N", CultureInfo.InvariantCulture)[..NonceDigits]}";
+            : _branch is { IsBound: false }
+                ? $"{_id}@(unclosed branch)"
+                : $"{_id}@{Declaring}#{Instance.ToString("N", CultureInfo.InvariantCulture)[..NonceDigits]}";
 
     /// <summary>Creates a slot bound to the graph instance that declared it.</summary>
     /// <param name="id">The validated slot name.</param>
@@ -143,6 +210,19 @@ public readonly record struct ResultSlot<TResult>
     /// </remarks>
     internal static ResultSlot<TResult> Create(ResultSlotId id, GraphFingerprint graph, Guid authoringNonce) =>
         new(id, graph, authoringNonce);
+
+    /// <summary>Creates a slot a branch declared, bound to the graph the branch will close.</summary>
+    /// <param name="id">The validated slot name.</param>
+    /// <param name="branch">The binding the junction call fills.</param>
+    /// <returns>The slot.</returns>
+    /// <remarks>
+    /// The one slot that exists before its graph does. A branch is written as an argument of the junction
+    /// call that consumes it, so its sink — and therefore its result name — is fixed one expression before
+    /// there is a document to fingerprint; ADR 0006 chose that spelling because everything else about a
+    /// branch infers from it. The slot is complete in every other respect and becomes complete in this one
+    /// the moment the junction call closes the graph.
+    /// </remarks>
+    internal static ResultSlot<TResult> OnBranch(ResultSlotId id, BranchSlotBinding branch) => new(id, branch);
 
     /// <summary>Builds the exception for reading a component of the default instance.</summary>
     /// <returns>The exception to throw.</returns>
