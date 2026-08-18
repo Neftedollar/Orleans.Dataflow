@@ -58,19 +58,31 @@ public sealed class GroupedWithinTests
         IIngressQueue<int> queue = await run.GetValueAsync(graph.Control<IIngressQueue<int>>("in"), TestToken);
 
         Assert.Equal(QueueOfferOutcome.Accepted, await queue.OfferAsync(1, TestToken));
-        Assert.Equal(QueueOfferOutcome.Accepted, await queue.OfferAsync(2, TestToken));
 
-        // Two elements and a bound of ten: nothing a count could close. The window is what closes it, and
-        // the timer that fires is armed from the first element's arrival.
+        // One element and a bound of ten: nothing a count could close, so the window is what closes it.
+        // Acceptance into the ingress says nothing about arrival at the stage — the element may still be
+        // travelling through the handoff when an advance lands, and a window cannot be armed by an element
+        // that is not there yet — so the fact awaited before the clock moves is the arming itself.
+        await clock.WaitForTimersAsync(1, TestToken);
         await clock.AdvanceAsync(1, Second, TestToken);
         await Reaches(() => observed.Count == 1, "the first window closing", TestToken);
 
-        Assert.Equal([1, 2], observed[0]);
+        Assert.Equal([1], observed[0]);
+
+        // The next window is timed from its own first element, so a second element offered after the
+        // first group left starts a fresh window and leaves in a group of its own.
+        Assert.Equal(QueueOfferOutcome.Accepted, await queue.OfferAsync(2, TestToken));
+
+        await clock.WaitForTimersAsync(1, TestToken);
+        await clock.AdvanceAsync(1, Second, TestToken);
+        await Reaches(() => observed.Count == 2, "the second window closing", TestToken);
+
+        Assert.Equal([2], observed[1]);
 
         queue.Complete();
         await run.Completion;
 
-        Assert.Single(observed);
+        Assert.Equal(2, observed.Count);
     }
 
     [Fact]
@@ -97,7 +109,9 @@ public sealed class GroupedWithinTests
         Assert.Equal(QueueOfferOutcome.Accepted, await queue.OfferAsync(7, TestToken));
 
         // The window that closes this group is timed from this element's arrival and not from the run's
-        // start, which the ten idle windows would otherwise have passed long ago.
+        // start, which the ten idle windows would otherwise have passed long ago. The arming is the fact
+        // awaited before the clock moves: acceptance into the ingress is not arrival at the stage.
+        await clock.WaitForTimersAsync(1, TestToken);
         await clock.AdvanceAsync(1, Second, TestToken);
         await Reaches(() => observed.Count == 1, "the window after the quiet", TestToken);
 
@@ -123,6 +137,10 @@ public sealed class GroupedWithinTests
 
         Assert.Equal(QueueOfferOutcome.Accepted, await queue.OfferAsync(1, TestToken));
 
+        // Without this rendezvous the test can pass without testing anything: an advance landing before
+        // the element reaches the stage arms nothing, and an empty observed list would then be the
+        // element's absence rather than the window's patience.
+        await clock.WaitForTimersAsync(1, TestToken);
         await clock.AdvanceAsync(1, Second - Instant, TestToken);
         await Task.Delay(TimeSpan.FromMilliseconds(50), TestToken);
 
@@ -208,6 +226,7 @@ public sealed class GroupedWithinTests
 
         Assert.Equal(QueueOfferOutcome.Accepted, await queue.OfferAsync(5, TestToken));
 
+        await clock.WaitForTimersAsync(1, TestToken);
         await clock.AdvanceAsync(1, Second, TestToken);
         await Reaches(() => observed.Count == 1, "the weighted window closing", TestToken);
 
