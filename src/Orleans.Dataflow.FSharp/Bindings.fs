@@ -34,17 +34,15 @@ module internal Bindings =
     /// </exception>
     /// <remarks>
     /// Two calls declare a result — the one that closes a graph and the one that ends a branch — and they
-    /// are in two files, so the check is here rather than duplicated in both. The caller's parameter name is
-    /// passed rather than inferred: inferring it would name this function's own parameter, and the author
-    /// wrote the closing call's.
+    /// are in two files, so the check is here rather than duplicated in both. It delegates to the very
+    /// guard the C# facade calls, because <c>ResultSlotId</c> owns the segment grammar and the diagnostic
+    /// for breaking it: this function once restated the message and the two frontends drifted into
+    /// different sentences for one refusal, which is exactly what the delegation exists to prevent. The
+    /// caller's parameter name is passed rather than inferred: inferring it would name this function's own
+    /// parameter, and the author wrote the closing call's.
     /// </remarks>
     let slotId (parameterName: string) (slotName: string) : ResultSlotId =
-        match ResultSlotId.TryCreate slotName with
-        | true, id -> id
-        | false, _ ->
-            invalidArg
-                parameterName
-                $"The slot name '{slotName}' is not a valid identifier segment. A result slot is named by a single lowercase segment, such as 'total'."
+        Orleans.Dataflow.Authoring.LocalOptionGuard.SlotName(slotName, parameterName)
 
     /// <summary>Starts an asynchronous computation as the task an asynchronous stage awaits.</summary>
     /// <param name="computation">The author's computation.</param>

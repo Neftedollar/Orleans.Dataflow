@@ -773,3 +773,37 @@ module Flow =
     /// </remarks>
     let andThen (next: Flow<'Middle, 'Out>) (current: Flow<'In, 'Middle>) : Flow<'In, 'Out> =
         Flow<'In, 'Out>(LocalStageChain.Concat(current.Stages, next.Stages))
+
+    /// <summary>Composes a flow with one named occurrence of a registered stage.</summary>
+    /// <param name="stage">The typed handle of the registered stage, resolved from a catalog.</param>
+    /// <param name="occurrenceName">The author-stable name of this occurrence.</param>
+    /// <param name="parameters">The configuration this occurrence carries, in canonical form.</param>
+    /// <param name="current">The flow applied first, which is unchanged.</param>
+    /// <returns>The composed flow.</returns>
+    /// <exception cref="T:System.ArgumentException">
+    /// <paramref name="occurrenceName"/> is not a valid single-segment node identifier, or
+    /// <paramref name="parameters"/> is the default value or the JSON null value.
+    /// </exception>
+    /// <remarks>
+    /// <para>
+    /// The deployable sibling of <see cref="M:Orleans.Dataflow.FSharp.Flow.andThen``3"/>, and the only way to
+    /// put a registered stage inside a leg: a branch is a flow ending in a terminal, so a leg whose middle is
+    /// registered is written here and closed by <see cref="T:Orleans.Dataflow.FSharp.Branch"/>.
+    /// </para>
+    /// <para>
+    /// The name is required, because a registered occurrence exists to be addressed across an edit, a
+    /// checkpoint, and an upgrade (ADR 0004 section 6). The payload is the raw canonical value the stage's
+    /// parameter contract describes, and it is checked against that contract by the graph compiler rather
+    /// than here, exactly as it is for the C# spelling.
+    /// </para>
+    /// </remarks>
+    let andThenRegistered
+        (stage: Orleans.Dataflow.RegisteredFlow<'Middle, 'Out>)
+        (occurrenceName: string)
+        (parameters: Orleans.Dataflow.Serialization.CanonicalJsonValue)
+        (current: Flow<'In, 'Middle>)
+        : Flow<'In, 'Out> =
+        Flow<'In, 'Out>(
+            LocalStageChain.Append(
+                current.Stages,
+                RegisteredAttachment.Occurrence(stage.Specification, occurrenceName, parameters)))

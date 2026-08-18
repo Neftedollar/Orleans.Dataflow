@@ -13,6 +13,8 @@
     <Compile Include="Branch.fs" />
     <Compile Include="Fork.fs" />
     <Compile Include="Source.fs" />
+    <Compile Include="Pipeline.fs" />
+    <Compile Include="Run.fs" />
   </ItemGroup>
   <ItemGroup>
     <PackageReference Include="FSharp.Core" />

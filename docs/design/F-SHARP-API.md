@@ -28,8 +28,23 @@ builds against it. The phase order:
    operations. Cycles stay algebra-only by the standing decision;
    fragment spellings are revisited with the registered vocabulary in
    M7.4 if a consumer appears.
-4. **M7.4 — runs and hosts**: `RunHandle` (completion, watch, snapshot,
-   pause), durable options, the Orleans host, registered-stage spellings.
+4. **M7.4 — runs, durability, and the registered vocabulary** (done
+   2026-08-19): the registered spellings on `Source`, `Flow`, and
+   `Branch` — one named function per C# attachment, `ofRegistered`,
+   `viaRegistered`, `andThenRegistered`, the `toRegistered` pair, and
+   the four registered junction attachments — plus a `Pipeline` module
+   whose one function is `define`. Hosts and run handles were **not**
+   wrapped: they are public runtime surface with no receiver-threading
+   to smooth over, so `MaterializeAsync`,
+   `MaterializeDurableAsync`, `MaterializeFromCheckpointAsync`,
+   `Completion`, `WatchTermination`, `Snapshot`, `PauseAsync`,
+   `ResumeAsync`, `ShutdownAsync`, `Control<'T>`, and
+   `DurableRunOptions` are written directly from F#, and the one
+   member with a pipeline shape worth reversing is `Run.value`. The
+   Orleans host this list once promised is likewise not wrapped, for
+   the same reason: past `AsPipeline` the authoring language is
+   invisible, so an F#-authored pipeline is bytes the C# cluster suite
+   already covers.
 5. **M7.5 — examples, docs authored as F#, and the M7 exit review.**
 
 ## Principles
@@ -61,11 +76,22 @@ module Flow = ...
 module Sink = ...
 
 [<RequireQualifiedAccess>]
-module Graph = ...
+module Branch = ...
+
+[<RequireQualifiedAccess>]
+module Fork = ...
 
 [<RequireQualifiedAccess>]
 module Pipeline = ...
+
+[<RequireQualifiedAccess>]
+module Run = ...
 ```
+
+The `Graph` module this list first sketched was deliberately not created
+(M7.3): every junction is a function of a source or of a branch, exactly
+where the C# facade puts it, and a `Graph` namespace would be a second
+place to look for the same operations.
 
 `[<AutoOpen>]` is not used for the main DSL. Qualified names make it immediately clear whether configuration or an operation belongs to a source, flow, sink, graph, or pipeline.
 
@@ -95,10 +121,19 @@ val Flow.andThen :
 Stream shapes carry element types only. Materialized results are typed named result slots resolved from a run handle ([ADR 0002](../architecture/0002-result-slots.md)), so no `'Materialized` parameter threads through composition:
 
 ```fsharp
-let result : ValueTask<'T> =
+let result : Task<'T> =
     runHandle
-    |> RunHandle.getValueTask resultSlot
+    |> Run.value resultSlot cancellationToken
 ```
+
+M7.4 built this as `Run.value` rather than as the `RunHandle.getValueTask`
+this document first sketched, and the two differences are both the
+runtime's rather than a choice: the member answers a `Task<'T>`, and it
+takes the run's own token, which is a required argument here rather than
+an omitted optional one so that an unbounded wait is never the shortest
+thing to write. The module is named `Run` because an F# module named
+`RunHandle` would shadow the type of the same name for anyone who opened
+both namespaces.
 
 The argument order and conceptual separation are stable requirements.
 

@@ -7,6 +7,7 @@
   </PropertyGroup>
   <ItemGroup>
     <Compile Include="Fixtures.fs" />
+    <Compile Include="RegisteredVocabulary.fs" />
     <Compile Include="AuthoringParityTests.fs" />
     <Compile Include="MaterializationTests.fs" />
     <Compile Include="OperatorParityTests.fs" />
@@ -14,6 +15,10 @@
     <Compile Include="TimingBehaviorTests.fs" />
     <Compile Include="JunctionParityTests.fs" />
     <Compile Include="JunctionBehaviorTests.fs" />
+    <Compile Include="RegisteredParityTests.fs" />
+    <Compile Include="RegisteredRunTests.fs" />
+    <Compile Include="RunControlTests.fs" />
+    <Compile Include="DurabilityTests.fs" />
   </ItemGroup>
   <ItemGroup>
     <PackageReference Include="FSharp.Core" />

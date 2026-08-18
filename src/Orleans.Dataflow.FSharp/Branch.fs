@@ -70,3 +70,68 @@ module Branch =
         let branch = Branch<'In>(LocalStageChain.Concat(flow.Stages, sink.Stages), ValueSome(slotId, binding))
 
         branch, Orleans.Dataflow.ResultSlot<'Result>.OnBranch(slotId, binding)
+
+    /// <summary>Ends a flow in one named occurrence of a registered terminal that declares no result.</summary>
+    /// <param name="stage">The typed handle of the registered stage terminating the leg.</param>
+    /// <param name="occurrenceName">The author-stable name of this occurrence.</param>
+    /// <param name="parameters">The configuration this occurrence carries, in canonical form.</param>
+    /// <param name="flow">The transformation the leg's elements go through, which is unchanged.</param>
+    /// <returns>The branch, ready to be handed to a junction call.</returns>
+    /// <exception cref="T:System.ArgumentException">
+    /// <paramref name="occurrenceName"/> is not a valid single-segment node identifier, or
+    /// <paramref name="parameters"/> is the default value or the JSON null value.
+    /// </exception>
+    /// <remarks>
+    /// The deployable leg. A registered fan-out whose legs end in lambda terminals closes a graph that still
+    /// declares <c>nondeployable</c>, so this is the call that makes a branching pipeline a pipeline: every
+    /// occurrence of it is named and resolves from a catalog.
+    /// </remarks>
+    let toRegistered
+        (stage: Orleans.Dataflow.RegisteredSink<'Out>)
+        (occurrenceName: string)
+        (parameters: Orleans.Dataflow.Serialization.CanonicalJsonValue)
+        (flow: Flow<'In, 'Out>)
+        : Branch<'In> =
+        Branch<'In>(
+            LocalStageChain.Append(
+                flow.Stages,
+                RegisteredAttachment.Occurrence(stage.Specification, occurrenceName, parameters)),
+            ValueNone)
+
+    /// <summary>Ends a flow in one named occurrence of a registered result-bearing terminal.</summary>
+    /// <param name="slotName">The author-stable name the run handle resolves the result by.</param>
+    /// <param name="stage">The typed handle of the registered stage terminating the leg.</param>
+    /// <param name="occurrenceName">The author-stable name of this occurrence.</param>
+    /// <param name="parameters">The configuration this occurrence carries, in canonical form.</param>
+    /// <param name="flow">The transformation the leg's elements go through, which is unchanged.</param>
+    /// <returns>The branch and the slot that resolves its result.</returns>
+    /// <exception cref="T:System.ArgumentException">
+    /// <paramref name="slotName"/> is not a valid single-segment identifier,
+    /// <paramref name="occurrenceName"/> is not a valid single-segment node identifier, or
+    /// <paramref name="parameters"/> is the default value or the JSON null value.
+    /// </exception>
+    /// <remarks>
+    /// The two names mean different things and neither is derivable from the other: the occurrence name is
+    /// the node's durable identity in the graph, and the slot name is what a run handle resolves the result
+    /// under. The slot's late binding is <see cref="M:Orleans.Dataflow.FSharp.Branch.toResult``3"/>'s
+    /// unchanged — a branch is written before the junction call that consumes it, so its slot names its graph
+    /// only from that call onwards, and a second junction call over one result-bearing branch is refused.
+    /// </remarks>
+    let toRegisteredResult
+        (slotName: string)
+        (stage: Orleans.Dataflow.RegisteredSinkWithResult<'Out, 'Result>)
+        (occurrenceName: string)
+        (parameters: Orleans.Dataflow.Serialization.CanonicalJsonValue)
+        (flow: Flow<'In, 'Out>)
+        : Branch<'In> * Orleans.Dataflow.ResultSlot<'Result> =
+        let slotId = Bindings.slotId (nameof slotName) slotName
+        let binding = BranchSlotBinding()
+
+        let branch =
+            Branch<'In>(
+                LocalStageChain.Append(
+                    flow.Stages,
+                    RegisteredAttachment.Occurrence(stage.Specification, occurrenceName, parameters)),
+                ValueSome(slotId, binding))
+
+        branch, Orleans.Dataflow.ResultSlot<'Result>.OnBranch(slotId, binding)

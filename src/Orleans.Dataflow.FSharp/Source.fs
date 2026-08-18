@@ -354,12 +354,70 @@ module Source =
                         Func<Orleans.Dataflow.Runtime.LocalIngressQueue, obj>(fun queue ->
                             Orleans.Dataflow.Runtime.IngressQueue<'T>(queue) :> obj)))))
 
+    /// <summary>Starts a source at one named occurrence of a registered stage.</summary>
+    /// <param name="stage">The typed handle of the registered stage, resolved from a catalog.</param>
+    /// <param name="occurrenceName">The author-stable name of this occurrence.</param>
+    /// <param name="parameters">The configuration this occurrence carries, in canonical form.</param>
+    /// <returns>The source, ready to be extended with operators.</returns>
+    /// <exception cref="T:System.ArgumentException">
+    /// <paramref name="occurrenceName"/> is not a valid single-segment node identifier, or
+    /// <paramref name="parameters"/> is the default value or the JSON null value.
+    /// </exception>
+    /// <remarks>
+    /// <para>
+    /// The deployable counterpart of <see cref="M:Orleans.Dataflow.FSharp.Source.ofSeq``1"/>: where that one
+    /// captures a sequence this process happens to hold, this one names a stage a catalog resolves, so the
+    /// document says everything about where the elements come from and no CLR value is bound behind it.
+    /// Building a graph still starts no work.
+    /// </para>
+    /// <para>
+    /// The handle is the shared plane's own value — this package mirrors none of the registered types,
+    /// because they are language-neutral already and a second spelling of one would be a second thing to
+    /// keep in step with a catalog. What differs between the frontends is only the shape of the call.
+    /// </para>
+    /// </remarks>
+    let ofRegistered
+        (stage: Orleans.Dataflow.RegisteredSource<'T>)
+        (occurrenceName: string)
+        (parameters: Orleans.Dataflow.Serialization.CanonicalJsonValue)
+        : Source<'T> =
+        Source<'T>(
+            LocalGraphShape.OfChain(
+                LocalStageChain.Of(
+                    RegisteredAttachment.Occurrence(stage.Specification, occurrenceName, parameters))))
+
     /// <summary>Extends a source with a flow.</summary>
     /// <param name="flow">The transformation to apply.</param>
     /// <param name="source">The source being extended, which is unchanged.</param>
     /// <returns>The extended source.</returns>
     let via (flow: Flow<'In, 'Out>) (source: Source<'In>) : Source<'Out> =
         Source<'Out>(source.State.Concat flow.Stages)
+
+    /// <summary>Extends a source with one named occurrence of a registered stage.</summary>
+    /// <param name="stage">The typed handle of the registered stage, resolved from a catalog.</param>
+    /// <param name="occurrenceName">The author-stable name of this occurrence.</param>
+    /// <param name="parameters">The configuration this occurrence carries, in canonical form.</param>
+    /// <param name="source">The source being extended, which is unchanged.</param>
+    /// <returns>The extended source.</returns>
+    /// <exception cref="T:System.ArgumentException">
+    /// <paramref name="occurrenceName"/> is not a valid single-segment node identifier, or
+    /// <paramref name="parameters"/> is the default value or the JSON null value.
+    /// </exception>
+    /// <remarks>
+    /// Two occurrences of one graph may not share a name; that is reported when the chain is closed, which is
+    /// where the whole chain is first visible. Typed parameter builders are provider-SDK sugar and are
+    /// deliberately not part of this surface either, for the reason the C# spelling gives: the payload is the
+    /// raw canonical value the stage's parameter contract describes, and the graph compiler is what checks it
+    /// against that contract.
+    /// </remarks>
+    let viaRegistered
+        (stage: Orleans.Dataflow.RegisteredFlow<'In, 'Out>)
+        (occurrenceName: string)
+        (parameters: Orleans.Dataflow.Serialization.CanonicalJsonValue)
+        (source: Source<'In>)
+        : Source<'Out> =
+        Source<'Out>(
+            source.State.Append(RegisteredAttachment.Occurrence(stage.Specification, occurrenceName, parameters)))
 
     /// <summary>Transforms every element of a source through a function.</summary>
     /// <param name="mapping">The function applied to each element.</param>
@@ -827,6 +885,95 @@ module Source =
 
         legs :> IReadOnlyList<BranchLeg>
 
+    /// <summary>Reads the branches of a registered fan-out call as legs, having checked how many there are.</summary>
+    /// <remarks>
+    /// A local junction's bound is a range, because the local specifications declare eight ports of which the
+    /// first two are required and the rest ignorable. A registered junction's arity is not a range at all: the
+    /// stage declares exactly the ports it has and every one of them is wired, so this is an equality and the
+    /// diagnostic names the stage that fixed it. The sentence is restated rather than called for the reason
+    /// <c>legsOf</c> gives — the guard that owns it is typed to the C# facade's own branch value — and the
+    /// registered arity parity case asserts the two frontends refuse the same call with the same words.
+    /// </remarks>
+    let private registeredLegsOf
+        (parameterName: string)
+        (legs: int)
+        (stage: StageRef)
+        (branches: Branch<'T> list)
+        : IReadOnlyList<BranchLeg> =
+        let wired = branches |> List.map legOf |> List.toArray
+
+        if wired.Length <> legs then
+            invalidArg
+                parameterName
+                $"The registered fan-out '{stage}' declares {legs} output ports, and this call has {wired.Length} branches. A junction's legs are the ports its stage declares, so a branch is written for each one; the order is the specification's own port order."
+
+        wired :> IReadOnlyList<BranchLeg>
+
+    /// <summary>Checks how many streams a registered fan-in call joins, counting the source it was written on.</summary>
+    /// <remarks>
+    /// The receiver counts, which is why the arithmetic is here rather than at the call site: joining one
+    /// source with one other is two streams, and a junction declaring two inputs is the one that fits.
+    /// </remarks>
+    let private registeredJoined
+        (parameterName: string)
+        (inputs: int)
+        (stage: StageRef)
+        (others: 'Other list)
+        : 'Other list =
+        let joined = List.length others + 1
+
+        if joined <> inputs then
+            invalidArg
+                parameterName
+                $"The registered fan-in '{stage}' declares {inputs} input ports, and this call joins {joined} streams counting the source it was written on. A junction's inputs are the ports its stage declares, so a source is written for each one; the order is the specification's own port order, with the receiver first."
+
+        others
+
+    /// <summary>Closes a source into a graph through a registered fan-out and its legs.</summary>
+    /// <remarks>
+    /// Both registered fan-out spellings funnel through here, which is what makes the like-legged and the
+    /// unlike-legged forms produce byte-identical documents from the same arguments. The ports are read from
+    /// the specification rather than from the local vocabulary's numbered names, which is the whole of what a
+    /// registered junction changes about composition: a provider names its own ports and the document names
+    /// those.
+    /// </remarks>
+    let private splitToRegistered
+        (specification: Orleans.Dataflow.Definition.StageSpecification)
+        (occurrenceName: string)
+        (parameters: Orleans.Dataflow.Serialization.CanonicalJsonValue)
+        (legs: IReadOnlyList<BranchLeg>)
+        (source: Source<'T>)
+        : Orleans.Dataflow.RunnableGraph =
+        let occurrence = RegisteredAttachment.Occurrence(specification, occurrenceName, parameters)
+        let position = source.State.Stages.Count
+
+        let shape =
+            source.State.Split(
+                occurrence,
+                LocalJunctionGuard.PortsOf specification.OutputPorts,
+                LocalJunctionGuard.Chains legs)
+
+        LocalGraphBuilder.Close(shape, LocalJunctionGuard.Slots(position, legs))
+
+    /// <summary>Joins a source and others into one through a registered fan-in.</summary>
+    /// <remarks>
+    /// The registered sibling of <c>joinedWith</c>, and the same composition: the source the call was written
+    /// on reaches the junction's first declared input port, the first argument the second, and so on.
+    /// </remarks>
+    let private combineIntoRegistered
+        (specification: Orleans.Dataflow.Definition.StageSpecification)
+        (occurrenceName: string)
+        (parameters: Orleans.Dataflow.Serialization.CanonicalJsonValue)
+        (others: LocalGraphShape list)
+        (source: Source<'T>)
+        : Source<'Out> =
+        let occurrence = RegisteredAttachment.Occurrence(specification, occurrenceName, parameters)
+
+        let placed =
+            others |> List.fold (fun (shape: LocalGraphShape) other -> shape.Union other) source.State
+
+        Source<'Out>(placed.Combine(occurrence, LocalJunctionGuard.PortsOf specification.InputPorts))
+
     /// <summary>Closes a source into a graph through a fan-out junction and its legs.</summary>
     /// <remarks>
     /// Every terminal fan-out funnels through here, which is what makes a broadcast, a balance, a partition,
@@ -1026,6 +1173,69 @@ module Source =
     let append (tail: Source<'T>) (source: Source<'T>) : Source<'T> =
         concat tail source
 
+    /// <summary>Joins a source and others through one named occurrence of a registered junction.</summary>
+    /// <param name="junction">The typed handle of the registered junction, whose input count is its stage's own.</param>
+    /// <param name="occurrenceName">The author-stable name of this occurrence.</param>
+    /// <param name="parameters">The configuration this occurrence carries, in canonical form.</param>
+    /// <param name="others">
+    /// The sources joined with this one, in the specification's own port order after it; each is unchanged.
+    /// </param>
+    /// <param name="source">The source being joined, which reaches the first input port and is unchanged.</param>
+    /// <returns>The joined source.</returns>
+    /// <exception cref="T:System.ArgumentException">
+    /// The source plus <paramref name="others"/> are not exactly the junction's declared inputs,
+    /// <paramref name="occurrenceName"/> is not a valid single-segment node identifier, or
+    /// <paramref name="parameters"/> is the default value or the JSON null value.
+    /// </exception>
+    /// <remarks>
+    /// A combinator on sources, exactly as <see cref="M:Orleans.Dataflow.FSharp.Source.merge``1"/> is: the
+    /// chain continues from the junction's one output. What the junction does with the streams it joins —
+    /// merge, concatenate, interleave — is the provider's and is stated by the runtime its factory builds,
+    /// which is why nothing here takes a combiner. That is the difference between a registered junction and a
+    /// local one, and it is the same difference every registered stage has.
+    /// </remarks>
+    let fanInRegistered
+        (junction: Orleans.Dataflow.RegisteredFanIn<'T, 'Out>)
+        (occurrenceName: string)
+        (parameters: Orleans.Dataflow.Serialization.CanonicalJsonValue)
+        (others: Source<'T> list)
+        (source: Source<'T>)
+        : Source<'Out> =
+        let joined = registeredJoined (nameof others) junction.Inputs junction.Stage others
+
+        combineIntoRegistered
+            junction.Specification
+            occurrenceName
+            parameters
+            (joined |> List.map (fun other -> other.State))
+            source
+
+    /// <summary>Joins a source and one unlike other through a named occurrence of a registered junction.</summary>
+    /// <param name="junction">The typed handle of the registered junction, whose two inputs carry unlike types.</param>
+    /// <param name="occurrenceName">The author-stable name of this occurrence.</param>
+    /// <param name="parameters">The configuration this occurrence carries, in canonical form.</param>
+    /// <param name="other">The source wired to the junction's second input port, which is unchanged.</param>
+    /// <param name="source">The source wired to its first input port, which is unchanged.</param>
+    /// <returns>The joined source.</returns>
+    /// <exception cref="T:System.ArgumentException">
+    /// <paramref name="occurrenceName"/> is not a valid single-segment node identifier, or
+    /// <paramref name="parameters"/> is the default value or the JSON null value.
+    /// </exception>
+    /// <remarks>
+    /// The zip-shaped join: two unlike streams in, one row out. It is a second name rather than an overload
+    /// because the two are different operations — one joins any number of like streams and reads its arity
+    /// from the stage, the other joins exactly two whose element types differ and could not be a list at all.
+    /// First and second are the specification's own port order.
+    /// </remarks>
+    let fanInRegisteredPair
+        (junction: Orleans.Dataflow.RegisteredFanIn<'T, 'Second, 'Out>)
+        (occurrenceName: string)
+        (parameters: Orleans.Dataflow.Serialization.CanonicalJsonValue)
+        (other: Source<'Second>)
+        (source: Source<'T>)
+        : Source<'Out> =
+        combineIntoRegistered junction.Specification occurrenceName parameters [ other.State ] source
+
     /// <summary>Sends every element to a branch as well, and continues.</summary>
     /// <param name="side">The branch to tap into, which is unchanged.</param>
     /// <param name="source">The source being tapped, which is unchanged.</param>
@@ -1119,6 +1329,80 @@ module Source =
         : Orleans.Dataflow.RunnableGraph * Orleans.Dataflow.ResultSlot<'Result> =
         let slotId = Bindings.slotId (nameof slotName) slotName
         let closed = source.State.Concat sink.Stages
+
+        let graph =
+            LocalGraphBuilder.Close(
+                closed,
+                [| LocalSlotRequest(slotId, closed.Stages.Count - 1, null) |])
+
+        graph, Orleans.Dataflow.ResultSlot<'Result>.Create(slotId, graph.Fingerprint, graph.AuthoringNonce)
+
+    /// <summary>Closes a source with one named occurrence of a registered terminal that declares no result.</summary>
+    /// <param name="stage">The typed handle of the registered stage terminating the graph.</param>
+    /// <param name="occurrenceName">The author-stable name of this occurrence.</param>
+    /// <param name="parameters">The configuration this occurrence carries, in canonical form.</param>
+    /// <param name="source">The source being closed, which is unchanged.</param>
+    /// <returns>The closed graph, ready to materialize.</returns>
+    /// <exception cref="T:System.ArgumentException">
+    /// <paramref name="occurrenceName"/> is not a valid single-segment node identifier, or
+    /// <paramref name="parameters"/> is the default value or the JSON null value.
+    /// </exception>
+    /// <remarks>
+    /// A registered stage that does declare a result port is a
+    /// <see cref="T:Orleans.Dataflow.RegisteredSinkWithResult`2"/> and does not convert to a
+    /// <see cref="T:Orleans.Dataflow.RegisteredSink`1"/> at all, so this function cannot drop a result: the
+    /// mistake is a type error naming both handles rather than a graph that silently produces nothing
+    /// readable. A chain of registered stages closed here declares neither <c>nondeployable</c> nor
+    /// <c>ephemeral-identity</c>, which is what <see cref="M:Orleans.Dataflow.FSharp.Pipeline.define"/>
+    /// requires of it.
+    /// </remarks>
+    let toRegistered
+        (stage: Orleans.Dataflow.RegisteredSink<'T>)
+        (occurrenceName: string)
+        (parameters: Orleans.Dataflow.Serialization.CanonicalJsonValue)
+        (source: Source<'T>)
+        : Orleans.Dataflow.RunnableGraph =
+        LocalGraphBuilder.Close(
+            source.State.Append(RegisteredAttachment.Occurrence(stage.Specification, occurrenceName, parameters)),
+            LocalGraphBuilder.NoSlots)
+
+    /// <summary>Closes a source with one named occurrence of a registered result-bearing terminal.</summary>
+    /// <param name="slotName">The author-stable name the run handle resolves the result by.</param>
+    /// <param name="stage">The typed handle of the registered stage terminating the graph.</param>
+    /// <param name="occurrenceName">The author-stable name of this occurrence.</param>
+    /// <param name="parameters">The configuration this occurrence carries, in canonical form.</param>
+    /// <param name="source">The source being closed, which is unchanged.</param>
+    /// <returns>The closed graph and the slot that resolves its result.</returns>
+    /// <exception cref="T:System.ArgumentException">
+    /// <paramref name="slotName"/> is not a valid single-segment identifier,
+    /// <paramref name="occurrenceName"/> is not a valid single-segment node identifier, or
+    /// <paramref name="parameters"/> is the default value or the JSON null value.
+    /// </exception>
+    /// <remarks>
+    /// <para>
+    /// The two names mean different things and neither is derivable from the other: the occurrence name is
+    /// the node's durable identity in the graph, and the slot name is what a run handle resolves the result
+    /// under. The slot name comes first because every result-declaring call in this package puts it there.
+    /// </para>
+    /// <para>
+    /// The slot binds to the authoring nonce exactly as a lambda graph's does, because this is still a
+    /// <see cref="T:Orleans.Dataflow.RunnableGraph"/>. A pipeline binds slots by fingerprint and lineage
+    /// without a nonce, and turning this graph into one is
+    /// <see cref="M:Orleans.Dataflow.FSharp.Pipeline.define"/>'s business; the slot a pipeline's run resolves
+    /// is recovered from the pipeline rather than kept from here.
+    /// </para>
+    /// </remarks>
+    let toRegisteredResult
+        (slotName: string)
+        (stage: Orleans.Dataflow.RegisteredSinkWithResult<'T, 'Result>)
+        (occurrenceName: string)
+        (parameters: Orleans.Dataflow.Serialization.CanonicalJsonValue)
+        (source: Source<'T>)
+        : Orleans.Dataflow.RunnableGraph * Orleans.Dataflow.ResultSlot<'Result> =
+        let slotId = Bindings.slotId (nameof slotName) slotName
+
+        let closed =
+            source.State.Append(RegisteredAttachment.Occurrence(stage.Specification, occurrenceName, parameters))
 
         let graph =
             LocalGraphBuilder.Close(
@@ -1249,3 +1533,73 @@ module Source =
             [| LocalVocabulary.LeftPort; LocalVocabulary.RightPort |]
             legs
             source
+
+    /// <summary>Closes a source through one named occurrence of a registered junction and its branches.</summary>
+    /// <param name="junction">The typed handle of the registered junction, whose leg count is its stage's own.</param>
+    /// <param name="occurrenceName">The author-stable name of this occurrence.</param>
+    /// <param name="parameters">The configuration this occurrence carries, in canonical form.</param>
+    /// <param name="branches">One branch per declared leg, in the specification's own port order.</param>
+    /// <param name="source">The source being closed, which is unchanged.</param>
+    /// <returns>The closed graph, ready to materialize.</returns>
+    /// <exception cref="T:System.ArgumentException">
+    /// There is not exactly one branch per declared leg, <paramref name="occurrenceName"/> is not a valid
+    /// single-segment node identifier, <paramref name="parameters"/> is the default value or the JSON null
+    /// value, or two branches declare a result under one name.
+    /// </exception>
+    /// <remarks>
+    /// <para>
+    /// A closing call, exactly as <see cref="M:Orleans.Dataflow.FSharp.Source.broadcastTo``1"/> is: the
+    /// branches end in terminals, so nothing is left open. What differs is that every part of it can be
+    /// registered — the junction is named, its ports carry real contracts, and its behavior is resolved from
+    /// a catalog — so this is the call that makes a branching pipeline deployable, provided its branches are
+    /// registered too.
+    /// </para>
+    /// <para>
+    /// Which leg is which is the specification's canonical port order, ordinal by port name, and not anything
+    /// this call decides. Branch order is argument order and is identity-bearing exactly as it is for a local
+    /// fan-out: the first branch's occurrences are numbered before the second's. What the junction does with
+    /// an element — every leg, one leg with room, the leg a function names — is the provider's; a document
+    /// says which stage stands here, and behavior is resolved by identity.
+    /// </para>
+    /// </remarks>
+    let fanOutToRegistered
+        (junction: Orleans.Dataflow.RegisteredFanOut<'T, 'Out>)
+        (occurrenceName: string)
+        (parameters: Orleans.Dataflow.Serialization.CanonicalJsonValue)
+        (branches: Branch<'Out> list)
+        (source: Source<'T>)
+        : Orleans.Dataflow.RunnableGraph =
+        let legs = registeredLegsOf (nameof branches) junction.Legs junction.Stage branches
+
+        splitToRegistered junction.Specification occurrenceName parameters legs source
+
+    /// <summary>Closes a source through a named occurrence of a registered junction with two unlike legs.</summary>
+    /// <param name="junction">The typed handle of the registered junction, whose legs carry unlike types.</param>
+    /// <param name="occurrenceName">The author-stable name of this occurrence.</param>
+    /// <param name="parameters">The configuration this occurrence carries, in canonical form.</param>
+    /// <param name="left">The branch wired to the junction's first output port, which is unchanged.</param>
+    /// <param name="right">The branch wired to its second output port, which is unchanged.</param>
+    /// <param name="source">The source being closed, which is unchanged.</param>
+    /// <returns>The closed graph, ready to materialize.</returns>
+    /// <exception cref="T:System.ArgumentException">
+    /// <paramref name="occurrenceName"/> is not a valid single-segment node identifier,
+    /// <paramref name="parameters"/> is the default value or the JSON null value, or both branches declare a
+    /// result under one name.
+    /// </exception>
+    /// <remarks>
+    /// The unzip-shaped close: one element in, two unlike things out. It is a second name rather than an
+    /// overload for the reason <see cref="M:Orleans.Dataflow.FSharp.Source.fanInRegisteredPair``3"/> is — the
+    /// two branches are two arguments because their element types differ and a list of them has no element
+    /// type. First and second are the specification's own port order.
+    /// </remarks>
+    let fanOutToRegisteredPair
+        (junction: Orleans.Dataflow.RegisteredFanOut<'T, 'Left, 'Right>)
+        (occurrenceName: string)
+        (parameters: Orleans.Dataflow.Serialization.CanonicalJsonValue)
+        (left: Branch<'Left>)
+        (right: Branch<'Right>)
+        (source: Source<'T>)
+        : Orleans.Dataflow.RunnableGraph =
+        let legs = [| legOf left; legOf right |] :> IReadOnlyList<BranchLeg>
+
+        splitToRegistered junction.Specification occurrenceName parameters legs source
