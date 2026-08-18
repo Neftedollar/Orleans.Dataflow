@@ -102,7 +102,26 @@ Exit criteria:
 - provider-specific Orleans Stream guarantees are reported rather than generalized;
 - an actor mailbox is never used as an unbounded substitute for demand.
 
-## M4 — Graph topology and operator breadth
+## M4 — Graph topology and operator breadth (closed 2026-08-18; recorded deferrals below)
+
+Deferred deliberately, with their rationale. The P2 substream family —
+split before/after, prefix-and-tail, and dynamic hubs — stays at Research
+targeted M4+, per the matrix's own tiers: the P1 substream (bounded
+group-by) shipped, cluster-side dynamic attachment already exists as the
+M3 bridges, and local graph-valued elements await a real consumer.
+Pipelines as branches is deferred the same way: fragments compose and
+rebase under import scopes since M0, and reopening a *closed* pipeline
+into a fragment is a distinct affordance whose honest consumer —
+cross-team pipeline reuse — has not yet appeared. WatchTermination moves
+to M5 beside the monitor snapshots it belongs with, on a recorded design
+tension: an ADR 0002 slot carries the run's outcome, so a slot typed
+"how it ended" would fault on failure instead of resolving to it, and
+the honest shape is a control. Reduce is missing in spelling rather than
+capability (a terminal seeded from the stream), and the optional
+external adapters were not allowed to delay the core, exactly as this
+milestone's own text ordered. A graph-builder DSL was deliberately not
+built — ADR 0006's nine compile prototypes needed none — and that is a
+decision, not a gap.
 
 Deliverables:
 

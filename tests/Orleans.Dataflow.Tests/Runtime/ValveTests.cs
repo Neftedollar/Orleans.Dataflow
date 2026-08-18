@@ -172,20 +172,24 @@ public sealed class ValveTests
     {
         List<int> observed = [];
 
-        RunnableGraph graph = Source.From([1, 2, 3])
+        RunnableGraph graph = TestSource.Probe<int>("emitted")
             .Valve("gate", ValveMode.Closed)
             .To(s => s.ForEach(observed.Add));
 
         await using RunHandle run = await Host.MaterializeAsync(graph, TestToken);
-        IValve valve = await run.GetValueAsync(graph.Control<IValve>("gate"), TestToken);
+        ISourceProbe<int> probe = await run.GetValueAsync(graph.Control<ISourceProbe<int>>("emitted"), TestToken);
 
-        await Reaches(() => !valve.IsOpen, "the valve being closed", TestToken);
+        // The emit completing is the rendezvous: the run has taken the element, so it is at the closed
+        // valve's gate before the shutdown is asked for. The first version checked that the valve was
+        // closed instead — true from materialization, proving nothing about the element — and a shutdown
+        // that won the race to the first pull delivered an empty hand.
+        await probe.EmitAsync(1, TestToken);
+
         await run.ShutdownAsync();
         await run.Completion;
 
         // A stop is not a stream: the element the valve was holding is kept rather than held for a switch
-        // nobody will flip, and the elements the source still had are not admitted, which is what "stop
-        // pulling and keep what you have" means at a valve.
+        // nobody will flip, which is what "stop pulling and keep what you have" means at a valve.
         Assert.Equal(TaskStatus.RanToCompletion, run.Completion.Status);
         Assert.Equal([1], observed);
     }
