@@ -88,9 +88,11 @@ internal static class LocalGraphBuilder
     /// because every local stage specification requires it and no registered one does;
     /// <see cref="CapabilityToken.EphemeralIdentity"/> appears exactly when some occurrence had no name to
     /// keep. A fully registered, fully named graph therefore declares neither and is a pipeline candidate,
-    /// and a graph that mixes the two declares what it actually contains. Every junction stage is a local
-    /// stage, so a graph with a junction in it declares <c>nondeployable</c> whatever its other stages are,
-    /// until a provider registers junctions of its own.
+    /// and a graph that mixes the two declares what it actually contains. Every stage of the <em>local</em>
+    /// junction vocabulary is a local stage, so a graph with one of those in it declares
+    /// <c>nondeployable</c> whatever its other stages are; a junction a provider registered is an ordinary
+    /// registered occurrence and costs a graph nothing, which is what makes a branching pipeline
+    /// deployable.
     /// </para>
     /// <para>
     /// The binding table is built after composition rather than during identifier allocation, so that two

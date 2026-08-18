@@ -130,6 +130,7 @@ internal static class LocalRunPlanner
         TimeProvider clock)
     {
         Dictionary<NodeId, StageNode> declarations = Declarations(document);
+        Dictionary<NodeId, ProvidedStage> provided = [];
         Dictionary<PortAddress, GraphEdge> downstream = new(document.Edges.Count);
         Dictionary<NodeId, List<GraphEdge>> leaving = new(document.Nodes.Count);
         Dictionary<NodeId, List<GraphEdge>> arriving = new(document.Nodes.Count);
@@ -364,13 +365,14 @@ internal static class LocalRunPlanner
 
                 if (!bindings.TryGetValue(declaration.Id, out LocalStageDescriptor? descriptor))
                 {
-                    StageRuntime provided = Provided(binder, declaration);
+                    ProvidedStage built = Provided(declaration);
+                    StageRuntime runtime = built.Runtime;
 
-                    switch (provided.Shape)
+                    switch (runtime.Shape)
                     {
                         case StageRuntimeShape.Source when first && !last:
                         {
-                            StageSourceOpener open = provided.Opener!;
+                            StageSourceOpener open = runtime.Opener!;
 
                             elements = context => LocalSequence.Async(
                                 _ => new LocalAsyncCursor<object?>(
@@ -382,24 +384,33 @@ internal static class LocalRunPlanner
                         }
 
                         case StageRuntimeShape.Element when !first && !last:
-                            Fuse(LocalElementStage.Select(provided.Map!));
+                            Fuse(LocalElementStage.Select(runtime.Map!));
                             break;
                         case StageRuntimeShape.ElementAsync when !first && !last:
                             Open(pending ?? LocalBoundary.Handoff);
                             asynchronous = new LocalAsyncStage(
-                                provided.AsAsyncCallback(),
-                                provided.MaxConcurrency,
-                                provided.Ordered);
+                                runtime.AsAsyncCallback(),
+                                runtime.MaxConcurrency,
+                                runtime.Ordered);
                             break;
                         case StageRuntimeShape.Terminal when last && !first:
                             Settle();
-                            terminal = LocalTerminal.Provided(provided.Fold!, provided.Finish);
-                            seedFactory = provided.Seed;
-                            produces = provided.ProducesResult;
+                            terminal = LocalTerminal.Provided(runtime.Fold!, runtime.Finish);
+                            seedFactory = runtime.Seed;
+                            produces = runtime.ProducesResult;
                             break;
+
+                        // A registered junction is planned exactly as a local one, and its legs are its own
+                        // specification's output ports in the catalog's canonical order rather than the
+                        // local vocabulary's 'out-n'. That is the whole of what a provider had to be given
+                        // to register a junction: the pump, the bounds, and the completion rules are the
+                        // engine's and are the same ones a local broadcast runs under.
+                        case StageRuntimeShape.FanOut when !first && !last:
+                            Split(declaration, built.Specification.OutputPorts, runtime.Splitting!);
+                            return;
                         default:
                             throw Foreign(
-                                $"the node '{declaration.Id}' is an occurrence of the stage '{declaration.Stage}', whose runtime factory built a '{provided.Shape}' shape, and that shape cannot stand at position {position} of {document.Nodes.Count}");
+                                $"the node '{declaration.Id}' is an occurrence of the stage '{declaration.Stage}', whose runtime factory built a '{runtime.Shape}' shape, and that shape cannot stand at position {position} of {document.Nodes.Count}");
                     }
                 }
 
@@ -691,21 +702,21 @@ internal static class LocalRunPlanner
                         }
 
                         case LocalStageKind.Broadcast when !first && !last:
-                            Split(declaration, descriptor.Kind, LocalFanOut.Broadcast());
+                            Split(declaration, LocalVocabulary.OutputPortsOf(descriptor.Kind), LocalFanOut.Broadcast());
                             return;
                         case LocalStageKind.Balance when !first && !last:
-                            Split(declaration, descriptor.Kind, LocalFanOut.Balance());
+                            Split(declaration, LocalVocabulary.OutputPortsOf(descriptor.Kind), LocalFanOut.Balance());
                             return;
                         case LocalStageKind.Partition when !first && !last:
                             Split(
                                 declaration,
-                                descriptor.Kind,
+                                LocalVocabulary.OutputPortsOf(descriptor.Kind),
                                 LocalFanOut.Partition(LocalDelegateAdapter.Router(descriptor.Behavior)));
                             return;
                         case LocalStageKind.Unzip when !first && !last:
                             Split(
                                 declaration,
-                                descriptor.Kind,
+                                LocalVocabulary.OutputPortsOf(descriptor.Kind),
                                 LocalFanOut.Unzip(LocalDelegateAdapter.Halves(descriptor.Behavior)));
                             return;
                         case LocalStageKind.Fold when last:
@@ -884,12 +895,11 @@ internal static class LocalRunPlanner
             // pump shape is what it is and nothing fuses with it: whatever was under construction is closed
             // at a boundary first, the legs are allocated in the specification's port order — which is
             // rotation order — and one branch is queued behind each of them.
-            void Split(StageNode node, LocalStageKind kind, LocalFanOut junction)
+            void Split(StageNode node, IReadOnlyList<OutputPortSpecification> ports, LocalFanOut junction)
             {
                 Open(pending ?? LocalBoundary.Handoff);
 
                 int segment = segments.Count;
-                IReadOnlyList<OutputPortSpecification> ports = LocalVocabulary.OutputPortsOf(kind);
                 List<int> legs = [];
                 List<(NodeId Start, int Input, PortId Entry)> queued = [];
 
@@ -968,8 +978,13 @@ internal static class LocalRunPlanner
                         $"the junction '{node.Id}' is fed by nothing at the port '{entry}', and a junction joins at least {LocalVocabulary.MinFanIn} inputs");
                 }
 
-                LocalStageDescriptor joining = bindings[node.Id];
-                IReadOnlyList<InputPortSpecification> ports = LocalVocabulary.InputPortsOf(joining.Kind);
+                // The ports of a junction come from whichever plane declares its behavior: the local
+                // vocabulary's fixed 'in-n' for a bound one, and the specification's own input ports, in the
+                // catalog's canonical order, for a registered one.
+                bool bound = bindings.TryGetValue(node.Id, out LocalStageDescriptor? joining);
+                IReadOnlyList<InputPortSpecification> ports = bound
+                    ? LocalVocabulary.InputPortsOf(joining!.Kind)
+                    : Provided(node).Specification.InputPorts;
                 int arrival = -1;
 
                 for (int input = 0; input < ports.Count && arrival < 0; input++)
@@ -1081,7 +1096,7 @@ internal static class LocalRunPlanner
                     async: null,
                     mergeMap: null,
                     fanOut: null,
-                    Joining(node, joining),
+                    bound ? Joining(node, joining!) : Provided(node).Runtime.Joining!,
                     [],
                     terminal: null,
                     streams,
@@ -1131,8 +1146,65 @@ internal static class LocalRunPlanner
         // Reports whether a node is a joining junction, which is the one shape a branch ends at without
         // being walked: it is walked by whichever branch arrives at it last.
         bool Joins(NodeId node) =>
-            bindings.TryGetValue(node, out LocalStageDescriptor? descriptor) &&
-            LocalVocabulary.PlaceOf(descriptor.Kind) is LocalStagePlace.FanIn;
+            bindings.TryGetValue(node, out LocalStageDescriptor? descriptor)
+                ? LocalVocabulary.PlaceOf(descriptor.Kind) is LocalStagePlace.FanIn
+                : Resolved(node)?.Runtime.Shape is StageRuntimeShape.FanIn;
+
+        // Resolves a node through the seam without refusing anything, for the questions asked before the
+        // walk begins. A node that does not resolve is not "not a junction" — it is a node the walk will
+        // refuse by name, with the binder's own account of which of the two lookups failed — so answering
+        // here would replace that diagnostic with a vaguer one.
+        ProvidedStage? Resolved(NodeId node)
+        {
+            if (provided.TryGetValue(node, out ProvidedStage? cached))
+            {
+                return cached;
+            }
+
+            if (bindings.ContainsKey(node) ||
+                !binder.TryCreate(
+                    declarations[node],
+                    out StageRuntime? runtime,
+                    out StageSpecification? specification,
+                    out _))
+            {
+                return null;
+            }
+
+            ProvidedStage built = new(runtime, specification);
+
+            provided.Add(node, built);
+
+            return built;
+        }
+
+        // Resolves a node through the seam, refusing the plan when it does not resolve. Memoized on the
+        // node, because the seam's contract is that a factory is asked once per node per materialization:
+        // a junction is asked about before the walk and again while it is planned, and two calls would be
+        // two stage runtimes with two lots of per-run state.
+        ProvidedStage Provided(StageNode node)
+        {
+            if (provided.TryGetValue(node.Id, out ProvidedStage? cached))
+            {
+                return cached;
+            }
+
+            if (!binder.TryCreate(
+                node,
+                out StageRuntime? runtime,
+                out StageSpecification? specification,
+                out string? refusal))
+            {
+                throw Foreign(
+                    $"the node '{node.Id}' is an occurrence of the stage '{node.Stage}', and no local behavior is bound to it; {refusal}");
+            }
+
+            ProvidedStage built = new(runtime, specification);
+
+            provided.Add(node.Id, built);
+
+            return built;
+        }
 
         // Builds the strategy of one joining junction. The rotation's segment size is read from the
         // document rather than from the binding, for the reason every number is: what the catalog validates
@@ -1516,27 +1588,6 @@ internal static class LocalRunPlanner
 
         return null;
     }
-
-    /// <summary>Resolves a node no local behavior is bound to through the runtime-factory seam.</summary>
-    /// <param name="binder">The resolver this compilation was given.</param>
-    /// <param name="node">The node as the document declares it.</param>
-    /// <returns>The executable form of the node.</returns>
-    /// <exception cref="InvalidOperationException">
-    /// The node's stage does not resolve in the host's catalog, its provider has no registered factory, or
-    /// the factory refused to build it.
-    /// </exception>
-    /// <remarks>
-    /// The message names the stage rather than only the node, because there are two ways to reach it and
-    /// the stage is what tells them apart: a document from somewhere else naming stages this process never
-    /// bound anything to, and a registered occurrence whose behavior is deliberately not in the binding
-    /// table at all. The second is what the seam exists for, and a host without the matching factory says
-    /// exactly that rather than half-executing the graph.
-    /// </remarks>
-    private static StageRuntime Provided(StageRuntimeBinder binder, StageNode node) =>
-        binder.TryCreate(node, out StageRuntime? runtime, out string? refusal)
-            ? runtime
-            : throw Foreign(
-                $"the node '{node.Id}' is an occurrence of the stage '{node.Stage}', and no local behavior is bound to it; {refusal}");
 
     /// <summary>Indexes a document's nodes by identifier.</summary>
     /// <param name="document">The document being compiled.</param>
@@ -2191,6 +2242,18 @@ internal static class LocalRunPlanner
         Func<object?>? SeedFactory,
         NodeId Node,
         bool Produces);
+
+    /// <summary>One node resolved through the runtime-factory seam, as this compilation remembers it.</summary>
+    /// <param name="Runtime">The executable form the provider's factory built.</param>
+    /// <param name="Specification">The specification the node's stage resolved to in the host's catalog.</param>
+    /// <remarks>
+    /// The specification travels beside the runtime because a junction needs both and they come from
+    /// different places: what the junction <em>does</em> is the factory's answer, and which ports it is
+    /// wired at is the catalog's. Keeping the catalog's answer is what stops a provider's factory from
+    /// deciding its own stage's shape, and it is why a registered fan-out's leg order is the specification's
+    /// canonical port order rather than anything a factory chose.
+    /// </remarks>
+    private sealed record class ProvidedStage(StageRuntime Runtime, StageSpecification Specification);
 
     /// <summary>What one joining junction under construction has been told about its inputs so far.</summary>
     /// <remarks>

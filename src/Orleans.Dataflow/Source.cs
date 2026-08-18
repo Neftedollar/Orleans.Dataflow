@@ -2,6 +2,7 @@ using System.Diagnostics.CodeAnalysis;
 using System.Globalization;
 using System.Threading.Channels;
 using Orleans.Dataflow.Authoring;
+using Orleans.Dataflow.Definition;
 using Orleans.Dataflow.Identity;
 using Orleans.Dataflow.Runtime;
 using Orleans.Dataflow.Serialization;
@@ -1670,6 +1671,170 @@ public sealed class Source<T>
         return FanOut(LocalStageDescriptor.Partition(router), branches, nameof(branches));
     }
 
+    /// <summary>Closes this source through one named occurrence of a registered junction and its branches.</summary>
+    /// <typeparam name="TOut">The element type every leg of the junction carries.</typeparam>
+    /// <param name="junction">The typed handle of the registered junction.</param>
+    /// <param name="occurrenceName">The author-stable name of this occurrence.</param>
+    /// <param name="parameters">The configuration this occurrence carries, in canonical form.</param>
+    /// <param name="branches">One branch per declared leg, in the specification's own port order.</param>
+    /// <returns>The closed graph.</returns>
+    /// <exception cref="ArgumentNullException">
+    /// <paramref name="junction"/>, <paramref name="occurrenceName"/>, <paramref name="branches"/>, or one
+    /// of its elements, is <see langword="null"/>.
+    /// </exception>
+    /// <exception cref="ArgumentException">
+    /// There is not exactly one branch per declared leg, <paramref name="occurrenceName"/> is not a valid
+    /// single-segment node identifier, or <paramref name="parameters"/> is the default value or the JSON
+    /// null value.
+    /// </exception>
+    /// <remarks>
+    /// <para>
+    /// A terminal call, exactly as <see cref="BroadcastTo"/> is and for the same reason: the branches end in
+    /// sinks, so nothing is left open and the graph is closed here. What differs is that every part of it is
+    /// registered — the junction is named, its ports carry real contracts, and its behavior is resolved from
+    /// a catalog — so this is the call that makes a branching pipeline deployable. A graph closed this way
+    /// declares neither <c>nondeployable</c> nor <c>ephemeral-identity</c> when its other stages are
+    /// registered too, and <see cref="RunnableGraph.AsPipeline"/> accepts it.
+    /// </para>
+    /// <para>
+    /// Which leg is which is the specification's canonical port order, ordinal by port name, and not
+    /// anything this call decides. Branch order is argument order and is identity-bearing exactly as it is
+    /// for a local fan-out: the first branch's occurrences are numbered before the second's.
+    /// </para>
+    /// <para>
+    /// What the junction does with an element — every leg, one leg with room, the leg a function names — is
+    /// the provider's and is stated by the runtime its factory builds. A document says which stage stands
+    /// here; behavior is resolved by identity.
+    /// </para>
+    /// </remarks>
+    public RunnableGraph FanOutTo<TOut>(
+        RegisteredFanOut<T, TOut> junction,
+        string occurrenceName,
+        CanonicalJsonValue parameters,
+        params Branch<TOut>[] branches)
+    {
+        ArgumentNullException.ThrowIfNull(junction);
+        LocalJunctionGuard.Legs(branches, junction.Legs, junction.Stage, nameof(branches));
+
+        return SplitTo(junction.Specification, occurrenceName, parameters, LocalJunctionGuard.Legs(branches));
+    }
+
+    /// <summary>Closes this source through one named occurrence of a registered junction with unlike legs.</summary>
+    /// <typeparam name="TLeft">The element type the first leg carries.</typeparam>
+    /// <typeparam name="TRight">The element type the second leg carries.</typeparam>
+    /// <param name="junction">The typed handle of the registered junction.</param>
+    /// <param name="occurrenceName">The author-stable name of this occurrence.</param>
+    /// <param name="parameters">The configuration this occurrence carries, in canonical form.</param>
+    /// <param name="left">The branch wired to the junction's first output port.</param>
+    /// <param name="right">The branch wired to the junction's second output port.</param>
+    /// <returns>The closed graph.</returns>
+    /// <exception cref="ArgumentNullException">
+    /// <paramref name="junction"/>, <paramref name="occurrenceName"/>, <paramref name="left"/>, or
+    /// <paramref name="right"/> is <see langword="null"/>.
+    /// </exception>
+    /// <exception cref="ArgumentException">
+    /// <paramref name="occurrenceName"/> is not a valid single-segment node identifier, or
+    /// <paramref name="parameters"/> is the default value or the JSON null value.
+    /// </exception>
+    /// <remarks>
+    /// The unzip-shaped close: one row in, two unlike things out, and the two branches are two arguments
+    /// rather than an array because their element types differ and an array of them has no element type.
+    /// First and second are the specification's own port order.
+    /// </remarks>
+    public RunnableGraph FanOutTo<TLeft, TRight>(
+        RegisteredFanOut<T, TLeft, TRight> junction,
+        string occurrenceName,
+        CanonicalJsonValue parameters,
+        Branch<TLeft> left,
+        Branch<TRight> right)
+    {
+        ArgumentNullException.ThrowIfNull(junction);
+        ArgumentNullException.ThrowIfNull(left);
+        ArgumentNullException.ThrowIfNull(right);
+
+        return SplitTo(
+            junction.Specification,
+            occurrenceName,
+            parameters,
+            [LocalJunctionGuard.Leg(left), LocalJunctionGuard.Leg(right)]);
+    }
+
+    /// <summary>Joins this source and others through one named occurrence of a registered junction.</summary>
+    /// <typeparam name="TOut">The element type the junction produces.</typeparam>
+    /// <param name="junction">The typed handle of the registered junction.</param>
+    /// <param name="occurrenceName">The author-stable name of this occurrence.</param>
+    /// <param name="parameters">The configuration this occurrence carries, in canonical form.</param>
+    /// <param name="others">
+    /// The sources joined with this one; this source reaches the junction's first input port and the
+    /// arguments reach the rest, in the specification's own port order.
+    /// </param>
+    /// <returns>The joined source; no argument is changed.</returns>
+    /// <exception cref="ArgumentNullException">
+    /// <paramref name="junction"/>, <paramref name="occurrenceName"/>, <paramref name="others"/>, or one of
+    /// its elements, is <see langword="null"/>.
+    /// </exception>
+    /// <exception cref="ArgumentException">
+    /// The receiver plus the arguments are not exactly the junction's declared inputs,
+    /// <paramref name="occurrenceName"/> is not a valid single-segment node identifier, or
+    /// <paramref name="parameters"/> is the default value or the JSON null value.
+    /// </exception>
+    /// <remarks>
+    /// A combinator on sources, exactly as <see cref="Merge(Source{T})"/> is: the chain continues from the
+    /// junction's one output. The receiver's occurrences come first and the arguments' follow in order, so
+    /// the numbering of a join is the order it was written in.
+    /// </remarks>
+    public Source<TOut> FanIn<TOut>(
+        RegisteredFanIn<T, TOut> junction,
+        string occurrenceName,
+        CanonicalJsonValue parameters,
+        params Source<T>[] others)
+    {
+        ArgumentNullException.ThrowIfNull(junction);
+        LocalJunctionGuard.Joined(others, junction.Inputs, junction.Stage, nameof(others));
+
+        LocalGraphShape[] shapes = new LocalGraphShape[others.Length];
+
+        for (int index = 0; index < others.Length; index++)
+        {
+            shapes[index] = others[index].Shape;
+        }
+
+        return CombineInto<TOut>(junction.Specification, occurrenceName, parameters, shapes);
+    }
+
+    /// <summary>Joins this source and one unlike other through a named occurrence of a registered junction.</summary>
+    /// <typeparam name="TSecond">The element type the second input consumes.</typeparam>
+    /// <typeparam name="TOut">The element type the junction produces.</typeparam>
+    /// <param name="junction">The typed handle of the registered junction.</param>
+    /// <param name="occurrenceName">The author-stable name of this occurrence.</param>
+    /// <param name="parameters">The configuration this occurrence carries, in canonical form.</param>
+    /// <param name="other">The source wired to the junction's second input port.</param>
+    /// <returns>The joined source; the argument is not changed.</returns>
+    /// <exception cref="ArgumentNullException">
+    /// <paramref name="junction"/>, <paramref name="occurrenceName"/>, or <paramref name="other"/> is
+    /// <see langword="null"/>.
+    /// </exception>
+    /// <exception cref="ArgumentException">
+    /// <paramref name="occurrenceName"/> is not a valid single-segment node identifier, or
+    /// <paramref name="parameters"/> is the default value or the JSON null value.
+    /// </exception>
+    /// <remarks>
+    /// The zip-shaped join: two unlike streams in, one row out. What the row is is the provider's, built by
+    /// the runtime its factory registered, so nothing here takes a combiner — that is the difference between
+    /// a registered junction and a local one, and it is the same difference every registered stage has.
+    /// </remarks>
+    public Source<TOut> FanIn<TSecond, TOut>(
+        RegisteredFanIn<T, TSecond, TOut> junction,
+        string occurrenceName,
+        CanonicalJsonValue parameters,
+        Source<TSecond> other)
+    {
+        ArgumentNullException.ThrowIfNull(junction);
+        ArgumentNullException.ThrowIfNull(other);
+
+        return CombineInto<TOut>(junction.Specification, occurrenceName, parameters, [other.Shape]);
+    }
+
     /// <summary>Returns a one-line diagnostic summary of this source.</summary>
     /// <returns>Text of the form <c>source (3 stages)</c>, singular for one (<c>source (1 stage)</c>).</returns>
     /// <remarks>The count is formatted with the invariant culture, and the method never throws.</remarks>
@@ -1746,6 +1911,66 @@ public sealed class Source<T>
             LocalJunctionGuard.Chains(branches));
 
         return LocalGraphBuilder.Close(shape, LocalJunctionGuard.Slots(position, branches));
+    }
+
+    /// <summary>Closes this source into a graph through a registered fan-out and its legs.</summary>
+    /// <param name="specification">The junction's resolved specification.</param>
+    /// <param name="occurrenceName">The author-stable name of this occurrence.</param>
+    /// <param name="parameters">The occurrence's payload.</param>
+    /// <param name="legs">The legs, in argument order, which is the specification's port order.</param>
+    /// <returns>The closed graph.</returns>
+    /// <remarks>
+    /// Both registered fan-out spellings funnel through here, which is what makes the like-legged and the
+    /// unlike-legged forms produce byte-identical documents from the same arguments. The ports are read from
+    /// the specification rather than from the local vocabulary's numbered names, which is the whole of what
+    /// a registered junction changes about composition: a provider names its own ports and the document
+    /// names those.
+    /// </remarks>
+    private RunnableGraph SplitTo(
+        StageSpecification specification,
+        string occurrenceName,
+        CanonicalJsonValue parameters,
+        IReadOnlyList<BranchLeg> legs)
+    {
+        RegisteredStageOccurrence occurrence =
+            RegisteredAttachment.Occurrence(specification, occurrenceName, parameters);
+        int position = Shape.Stages.Count;
+        LocalGraphShape shape = Shape.Split(
+            occurrence,
+            LocalJunctionGuard.PortsOf(specification.OutputPorts),
+            LocalJunctionGuard.Chains(legs));
+
+        return LocalGraphBuilder.Close(shape, LocalJunctionGuard.Slots(position, legs));
+    }
+
+    /// <summary>Joins this source and others into one through a registered fan-in.</summary>
+    /// <typeparam name="TOut">The element type the junction emits.</typeparam>
+    /// <param name="specification">The junction's resolved specification.</param>
+    /// <param name="occurrenceName">The author-stable name of this occurrence.</param>
+    /// <param name="parameters">The occurrence's payload.</param>
+    /// <param name="others">The shapes of the sources to join with, in argument order.</param>
+    /// <returns>The joined source.</returns>
+    /// <remarks>
+    /// The registered sibling of <see cref="Joined{TOut}"/>, and the same composition: this source reaches
+    /// the junction's first declared input port, the first argument the second, and so on.
+    /// </remarks>
+    private Source<TOut> CombineInto<TOut>(
+        StageSpecification specification,
+        string occurrenceName,
+        CanonicalJsonValue parameters,
+        params LocalGraphShape[] others)
+    {
+        RegisteredStageOccurrence occurrence =
+            RegisteredAttachment.Occurrence(specification, occurrenceName, parameters);
+        LocalGraphShape joined = Shape;
+
+        for (int index = 0; index < others.Length; index++)
+        {
+            joined = joined.Union(others[index]);
+        }
+
+        return new Source<TOut>(
+            joined.Combine(occurrence, LocalJunctionGuard.PortsOf(specification.InputPorts)));
     }
 
     /// <summary>Closes a shape that declares no result.</summary>

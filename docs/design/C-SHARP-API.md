@@ -183,23 +183,82 @@ occurrences are numbered before the second's, so swapping two arguments produces
 different document with a different fingerprint — the same rule reordering a chain
 follows. Two builds of one program produce byte-identical documents.
 
-Every junction is a stage of the `local` vocabulary — `broadcast`, `balance`,
-`partition`, `unzip`, `merge`, `concat`, `interleave`, `zip`, `combine-latest` —
-and that has two consequences worth stating plainly:
+Every junction *this* surface spells is a stage of the `local` vocabulary —
+`broadcast`, `balance`, `partition`, `unzip`, `merge`, `concat`, `interleave`,
+`zip`, `combine-latest` — and that has two consequences worth stating plainly:
 
-- A graph with a junction in it declares `nondeployable`, because every local stage
-  requires it, **and** `ephemeral-identity`, because this surface has no spelling
-  for naming a junction occurrence. Both hold even when the source, the flows, and
-  every branch sink are registered stages under names the author chose.
+- A graph with a local junction in it declares `nondeployable`, because every local
+  stage requires it, **and** `ephemeral-identity`, because these spellings have no
+  place to write a name. Both hold even when the source, the flows, and every
+  branch sink are registered stages under names the author chose.
 - Local ports declare the opaque contract `local-opaque@v1`, so wiring a registered
   stage to a junction is a seam and the graph compiler reports one
   `element-contract-mismatch` per seam — the same rule a mixed chain has broken
   since ADR 0004, at the same place, for the same reason.
 
-**A fan-out pipeline built entirely from registered stages therefore cannot exist
-today.** The junction between the registered stages cannot itself be registered,
-and that waits for the provider SDK to open junction registration. Until then a
-junction graph is a local graph whatever its branches are made of.
+Both are costs of a *local* junction, and M4.5 removed the reason they were
+unavoidable: a provider can register a junction of its own.
+
+### Registered junctions
+
+`RegisteredStage.FanOut` and `RegisteredStage.FanIn` produce typed handles over a
+registered multi-port stage, checked port by port against the catalog at the line
+that declares the handle — every port, not just the two a linear handle has:
+
+```csharp
+RegisteredFanOut<OrderDocument, OrderDocument> split =
+    RegisteredStage.FanOut(catalog, splitRef, orderDocument, orderDocument);
+```
+
+They attach through ADR 0006's own shapes, with the occurrence name and payload
+every registered attachment carries — a fan-out is a terminal call taking
+branches, a fan-in is a combinator on sources:
+
+```csharp
+RunnableGraph graph = Source.FromRegistered(orderSource, "orders-in", sourceParameters)
+    .Via(normalize, "normalize", normalizeParameters)
+    .FanOutTo(
+        split,
+        "split",
+        splitParameters,
+        Flow.For<OrderDocument>().To(countSink, "count-left", sinkParameters, "left", out ResultSlot<long> left),
+        Flow.For<OrderDocument>().To(countSink, "count-right", sinkParameters, "right", out ResultSlot<long> right));
+
+Source<OrderDocument> joined = first.FanIn(join, "join", joinParameters, second);
+```
+
+**That graph declares no capability token at all**, so `AsPipeline` accepts it and
+a branching pipeline is deployable for the first time. What each rule above costs
+is unchanged; what changed is that a fully registered graph is no longer subject
+to either.
+
+Four factories, because two shapes have legs or inputs of unlike element types
+and a type argument cannot be a parameter: `FanOut<TIn, TOut>` (*n* legs of one
+contract) and `FanOut<TIn, TLeft, TRight>` (the unzip shape),
+`FanIn<TIn, TOut>` (*n* inputs of one contract) and
+`FanIn<TFirst, TSecond, TOut>` (the zip shape).
+
+Two rules are worth stating because they are the specification's rather than the
+author's:
+
+- **Arity is read, not asked for.** How many legs a junction has is a fact about
+  the registered stage; a call supplies exactly `junction.Legs` branches, or
+  exactly `junction.Inputs` streams counting the receiver, and a call with the
+  wrong number is refused naming both numbers.
+- **Position is the specification's canonical port order**, ordinal by port name.
+  The first branch is wired to the first output port that sorts, not to the one
+  the provider happened to write first — and the same order is what a provider's
+  own router or combiner answers in.
+
+What the junction *does* with an element is the provider's, stated by the runtime
+its factory builds and configured by the occurrence's payload; nothing on these
+calls takes a router or a combiner, which is the same difference every registered
+stage has from a lambda one.
+
+**Mixing is unchanged.** A lambda branch under a registered junction is still one
+`element-contract-mismatch`, because a local port still declares
+`local-opaque@v1`. What M4.5 changed is that a fully registered graph no longer
+has such an edge.
 
 ### What is deliberately not here
 
@@ -511,6 +570,32 @@ identities; the registration API and its ergonomics are an M1 concern, and
 the graph compiler is the enforcement point either way. The default authoring
 experience stays lambda-first, because local execution and tests are the
 common case.
+
+## Running registered stages in process
+
+A registered graph is deployable, and since M4.5 it is also runnable without a
+cluster. `LocalDataflowHost` takes the same two registrations a silo takes, and
+the same `IDataflowStageFactory` value:
+
+```csharp
+LocalDataflowHost host = new(builder => builder
+    .AddCatalog(providerCatalog)
+    .AddFactory(providerId, new MyStageFactory()));
+
+await using RunHandle run = await host.MaterializeAsync(graph);
+```
+
+`ILocalDataflowBuilder` mirrors `IOrleansDataflowBuilder` member for member where
+the two hosts have the same question to answer, and both take the seam that lives
+in the core package — so a provider writes its vocabulary once and it runs in
+either runtime. A host given the catalog and no factory validates a document and
+refuses it at materialization, naming the provider that has nothing to build it;
+a host given neither refuses it at validation, naming every unresolvable node.
+The registered catalog is added to the local vocabulary rather than replacing it,
+because a lambda stage and a registered stage compose in one chain.
+
+The details of what a factory may build, and of what it is told, are in
+[REGISTERED-STAGES.md](REGISTERED-STAGES.md).
 
 ## Run control
 

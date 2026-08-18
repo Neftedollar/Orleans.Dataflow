@@ -119,6 +119,17 @@ Orleans.Dataflow.Grains.ResultEnvelope.Phase.set -> void
 Orleans.Dataflow.Grains.ResultEnvelope.ResultEnvelope() -> void
 Orleans.Dataflow.Grains.ResultEnvelope.Value.get -> object?
 Orleans.Dataflow.Grains.ResultEnvelope.Value.set -> void
+Orleans.Dataflow.Grains.ResultTooLargeException
+Orleans.Dataflow.Grains.ResultTooLargeException.Bytes.get -> long
+Orleans.Dataflow.Grains.ResultTooLargeException.Bytes.init -> void
+Orleans.Dataflow.Grains.ResultTooLargeException.MaximumBytes.get -> int
+Orleans.Dataflow.Grains.ResultTooLargeException.MaximumBytes.init -> void
+Orleans.Dataflow.Grains.ResultTooLargeException.ResultTooLargeException() -> void
+Orleans.Dataflow.Grains.ResultTooLargeException.ResultTooLargeException(string? message) -> void
+Orleans.Dataflow.Grains.ResultTooLargeException.ResultTooLargeException(string? message, System.Exception? innerException) -> void
+Orleans.Dataflow.Grains.ResultTooLargeException.ResultTooLargeException(string? slotName, long bytes, int maximumBytes) -> void
+Orleans.Dataflow.Grains.ResultTooLargeException.SlotName.get -> string?
+Orleans.Dataflow.Grains.ResultTooLargeException.SlotName.init -> void
 Orleans.Dataflow.Grains.RunPhase
 Orleans.Dataflow.Grains.RunPhase.Canceled = 4 -> Orleans.Dataflow.Grains.RunPhase
 Orleans.Dataflow.Grains.RunPhase.Completed = 2 -> Orleans.Dataflow.Grains.RunPhase
@@ -140,29 +151,6 @@ Orleans.Dataflow.Hosting.DataflowPlacement.ClusterDefault = 0 -> Orleans.Dataflo
 Orleans.Dataflow.Hosting.DataflowPlacement.HashBased = 3 -> Orleans.Dataflow.Hosting.DataflowPlacement
 Orleans.Dataflow.Hosting.DataflowPlacement.PreferLocal = 2 -> Orleans.Dataflow.Hosting.DataflowPlacement
 Orleans.Dataflow.Hosting.DataflowPlacement.Random = 1 -> Orleans.Dataflow.Hosting.DataflowPlacement
-Orleans.Dataflow.Hosting.DataflowRunTokens
-Orleans.Dataflow.Hosting.DataflowRunTokens.DataflowRunTokens() -> void
-Orleans.Dataflow.Hosting.DataflowRunTokens.DataflowRunTokens(string! RunIdentity, System.Threading.CancellationToken RunToken, System.Threading.CancellationToken StopToken) -> void
-Orleans.Dataflow.Hosting.DataflowRunTokens.Deconstruct(out string! RunIdentity, out System.Threading.CancellationToken RunToken, out System.Threading.CancellationToken StopToken) -> void
-Orleans.Dataflow.Hosting.DataflowRunTokens.Equals(Orleans.Dataflow.Hosting.DataflowRunTokens other) -> bool
-Orleans.Dataflow.Hosting.DataflowRunTokens.RunIdentity.get -> string!
-Orleans.Dataflow.Hosting.DataflowRunTokens.RunIdentity.init -> void
-Orleans.Dataflow.Hosting.DataflowRunTokens.RunToken.get -> System.Threading.CancellationToken
-Orleans.Dataflow.Hosting.DataflowRunTokens.RunToken.init -> void
-Orleans.Dataflow.Hosting.DataflowRunTokens.StopToken.get -> System.Threading.CancellationToken
-Orleans.Dataflow.Hosting.DataflowRunTokens.StopToken.init -> void
-Orleans.Dataflow.Hosting.DataflowStageRequest
-Orleans.Dataflow.Hosting.DataflowStageRequest.DataflowStageRequest() -> void
-Orleans.Dataflow.Hosting.DataflowStageRequest.DataflowStageRequest(Orleans.Dataflow.Definition.StageNode! Node, Orleans.Dataflow.Definition.StageSpecification! Specification) -> void
-Orleans.Dataflow.Hosting.DataflowStageRequest.Deconstruct(out Orleans.Dataflow.Definition.StageNode! Node, out Orleans.Dataflow.Definition.StageSpecification! Specification) -> void
-Orleans.Dataflow.Hosting.DataflowStageRequest.Equals(Orleans.Dataflow.Hosting.DataflowStageRequest other) -> bool
-Orleans.Dataflow.Hosting.DataflowStageRequest.Node.get -> Orleans.Dataflow.Definition.StageNode!
-Orleans.Dataflow.Hosting.DataflowStageRequest.Node.init -> void
-Orleans.Dataflow.Hosting.DataflowStageRequest.Specification.get -> Orleans.Dataflow.Definition.StageSpecification!
-Orleans.Dataflow.Hosting.DataflowStageRequest.Specification.init -> void
-Orleans.Dataflow.Hosting.DataflowStageRuntime
-Orleans.Dataflow.Hosting.IDataflowStageFactory
-Orleans.Dataflow.Hosting.IDataflowStageFactory.Create(Orleans.Dataflow.Hosting.DataflowStageRequest request) -> Orleans.Dataflow.Hosting.DataflowStageRuntime!
 Orleans.Dataflow.Hosting.IOrleansDataflowBuilder
 Orleans.Dataflow.Hosting.IOrleansDataflowBuilder.AddBroadcastElement<T>(Orleans.Dataflow.Adapters.BroadcastElementBinding<T>! element) -> Orleans.Dataflow.Hosting.IOrleansDataflowBuilder!
 Orleans.Dataflow.Hosting.IOrleansDataflowBuilder.AddCatalog(Orleans.Dataflow.Definition.IStageCatalog! catalog) -> Orleans.Dataflow.Hosting.IOrleansDataflowBuilder!
@@ -175,6 +163,7 @@ Orleans.Dataflow.Hosting.IOrleansDataflowBuilder.AddKeyedGrainCall<TIn, TOut>(Or
 Orleans.Dataflow.Hosting.IOrleansDataflowBuilder.AddObservable<T>(Orleans.Dataflow.Adapters.ObservableBinding<T>! source) -> Orleans.Dataflow.Hosting.IOrleansDataflowBuilder!
 Orleans.Dataflow.Hosting.IOrleansDataflowBuilder.AddObserverBridge<T>(Orleans.Dataflow.Adapters.ObserverBridgeBinding<T>! bridge) -> Orleans.Dataflow.Hosting.IOrleansDataflowBuilder!
 Orleans.Dataflow.Hosting.IOrleansDataflowBuilder.AddStreamElement<T>(Orleans.Dataflow.Adapters.StreamElementBinding<T>! element) -> Orleans.Dataflow.Hosting.IOrleansDataflowBuilder!
+Orleans.Dataflow.Hosting.IOrleansDataflowBuilder.LimitResultSize(int maximumBytes) -> Orleans.Dataflow.Hosting.IOrleansDataflowBuilder!
 Orleans.Dataflow.Hosting.IOrleansDataflowBuilder.UsePlacement(Orleans.Dataflow.Hosting.DataflowPlacement runGrains, Orleans.Dataflow.Hosting.DataflowPlacement keyedExecutors) -> Orleans.Dataflow.Hosting.IOrleansDataflowBuilder!
 Orleans.Dataflow.Hosting.OrleansDataflowClientExtensions
 Orleans.Dataflow.Hosting.OrleansDataflowClientOptions
@@ -185,6 +174,7 @@ Orleans.Dataflow.Hosting.OrleansDataflowHost
 Orleans.Dataflow.Hosting.OrleansDataflowHost.MaterializeAsync(Orleans.Dataflow.PipelineDefinition! pipeline, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task<Orleans.Dataflow.Hosting.OrleansRunHandle!>!
 Orleans.Dataflow.Hosting.OrleansDataflowHost.OrleansDataflowHost(Orleans.IGrainFactory! grains) -> void
 Orleans.Dataflow.Hosting.OrleansDataflowHost.OrleansDataflowHost(Orleans.IGrainFactory! grains, Orleans.Dataflow.Hosting.OrleansDataflowClientOptions! options) -> void
+Orleans.Dataflow.Hosting.OrleansDataflowResults
 Orleans.Dataflow.Hosting.OrleansDataflowSiloBuilderExtensions
 Orleans.Dataflow.Hosting.OrleansRunHandle
 Orleans.Dataflow.Hosting.OrleansRunHandle.Completion.get -> System.Threading.Tasks.Task!
@@ -195,6 +185,7 @@ Orleans.Dataflow.Hosting.OrleansRunHandle.RunId.get -> string!
 Orleans.Dataflow.Hosting.OrleansRunHandle.ShutdownAsync() -> System.Threading.Tasks.Task!
 Orleans.Dataflow.Hosting.OrleansRunHandle.Ticket.get -> Orleans.Dataflow.Grains.PipelineRunTicket!
 const Orleans.Dataflow.Grains.OrleansDataflowStorage.CoordinatorProviderName = "orleans-dataflow-coordinator" -> string!
+const Orleans.Dataflow.Hosting.OrleansDataflowResults.DefaultMaximumResultBytes = 1048576 -> int
 override Orleans.Dataflow.Adapters.BroadcastElementBinding<T>.ToString() -> string!
 override Orleans.Dataflow.Adapters.GrainCallBinding<TIn, TOut>.ToString() -> string!
 override Orleans.Dataflow.Adapters.GrainCallSinkBinding<TIn>.ToString() -> string!
@@ -204,8 +195,6 @@ override Orleans.Dataflow.Adapters.ObserverBridgeBinding<T>.ToString() -> string
 override Orleans.Dataflow.Adapters.OrleansStreamAddress.GetHashCode() -> int
 override Orleans.Dataflow.Adapters.OrleansStreamAddress.ToString() -> string!
 override Orleans.Dataflow.Adapters.StreamElementBinding<T>.ToString() -> string!
-override Orleans.Dataflow.Hosting.DataflowRunTokens.GetHashCode() -> int
-override Orleans.Dataflow.Hosting.DataflowStageRequest.GetHashCode() -> int
 override Orleans.Dataflow.Hosting.OrleansRunHandle.ToString() -> string!
 static Orleans.Dataflow.Adapters.BroadcastElementBinding.Create<T>(Orleans.Dataflow.ElementContract<T> element) -> Orleans.Dataflow.Adapters.BroadcastElementBinding<T>!
 static Orleans.Dataflow.Adapters.GrainCallBinding.Create<TIn, TOut>(string! name, Orleans.Dataflow.ElementContract<TIn> input, Orleans.Dataflow.ElementContract<TOut> output, System.Func<Orleans.IGrainFactory!, TIn, System.Threading.CancellationToken, System.Threading.Tasks.Task<TOut>!>! call) -> Orleans.Dataflow.Adapters.GrainCallBinding<TIn, TOut>!
@@ -267,19 +256,7 @@ static Orleans.Dataflow.Adapters.OrleansStreamAddress.Create(string! provider, s
 static Orleans.Dataflow.Adapters.OrleansStreamAddress.operator !=(Orleans.Dataflow.Adapters.OrleansStreamAddress left, Orleans.Dataflow.Adapters.OrleansStreamAddress right) -> bool
 static Orleans.Dataflow.Adapters.OrleansStreamAddress.operator ==(Orleans.Dataflow.Adapters.OrleansStreamAddress left, Orleans.Dataflow.Adapters.OrleansStreamAddress right) -> bool
 static Orleans.Dataflow.Adapters.StreamElementBinding.Create<T>(Orleans.Dataflow.ElementContract<T> element) -> Orleans.Dataflow.Adapters.StreamElementBinding<T>!
-static Orleans.Dataflow.Hosting.DataflowRunTokens.operator !=(Orleans.Dataflow.Hosting.DataflowRunTokens left, Orleans.Dataflow.Hosting.DataflowRunTokens right) -> bool
-static Orleans.Dataflow.Hosting.DataflowRunTokens.operator ==(Orleans.Dataflow.Hosting.DataflowRunTokens left, Orleans.Dataflow.Hosting.DataflowRunTokens right) -> bool
-static Orleans.Dataflow.Hosting.DataflowStageRequest.operator !=(Orleans.Dataflow.Hosting.DataflowStageRequest left, Orleans.Dataflow.Hosting.DataflowStageRequest right) -> bool
-static Orleans.Dataflow.Hosting.DataflowStageRequest.operator ==(Orleans.Dataflow.Hosting.DataflowStageRequest left, Orleans.Dataflow.Hosting.DataflowStageRequest right) -> bool
-static Orleans.Dataflow.Hosting.DataflowStageRuntime.Element(System.Func<object?, object?>! map) -> Orleans.Dataflow.Hosting.DataflowStageRuntime!
-static Orleans.Dataflow.Hosting.DataflowStageRuntime.ElementAsync(System.Func<object?, System.Threading.CancellationToken, System.Threading.Tasks.ValueTask<object?>>! map, int maxConcurrency, bool ordered) -> Orleans.Dataflow.Hosting.DataflowStageRuntime!
-static Orleans.Dataflow.Hosting.DataflowStageRuntime.Source(System.Func<Orleans.Dataflow.Hosting.DataflowRunTokens, System.Collections.Generic.IAsyncEnumerable<object?>!>! open) -> Orleans.Dataflow.Hosting.DataflowStageRuntime!
-static Orleans.Dataflow.Hosting.DataflowStageRuntime.Terminal(System.Func<object?>! seed, System.Func<object?, object?, object?>! fold, System.Func<object?, object?>? finish, bool producesResult) -> Orleans.Dataflow.Hosting.DataflowStageRuntime!
 static Orleans.Dataflow.Hosting.OrleansDataflowClientExtensions.AddOrleansDataflowClient(this Microsoft.Extensions.DependencyInjection.IServiceCollection! services, System.Action<Orleans.Dataflow.Hosting.OrleansDataflowClientOptions!>? configure = null) -> Microsoft.Extensions.DependencyInjection.IServiceCollection!
 static Orleans.Dataflow.Hosting.OrleansDataflowSiloBuilderExtensions.AddOrleansDataflow(this Orleans.Hosting.ISiloBuilder! builder, System.Action<Orleans.Dataflow.Hosting.IOrleansDataflowBuilder!>! configure) -> Orleans.Hosting.ISiloBuilder!
 static readonly Orleans.Dataflow.Hosting.OrleansDataflowClientOptions.DefaultPollInterval -> System.TimeSpan
 ~override Orleans.Dataflow.Adapters.OrleansStreamAddress.Equals(object obj) -> bool
-~override Orleans.Dataflow.Hosting.DataflowRunTokens.Equals(object obj) -> bool
-~override Orleans.Dataflow.Hosting.DataflowRunTokens.ToString() -> string
-~override Orleans.Dataflow.Hosting.DataflowStageRequest.Equals(object obj) -> bool
-~override Orleans.Dataflow.Hosting.DataflowStageRequest.ToString() -> string

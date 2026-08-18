@@ -60,11 +60,31 @@ internal static class TestVocabulary
     /// <summary>The flow whose factory refuses to build it.</summary>
     internal static StageRef Explode { get; } = StageRef.Create(Provider, StageId.Create("explode"), 1);
 
+    /// <summary>The junction that delivers every element to both of its legs.</summary>
+    /// <remarks>
+    /// A registered junction, which is what M4.5 made possible: its ports carry this vocabulary's own
+    /// element contract, so a branching pipeline built out of these stages declares no capability token and
+    /// deploys. Its legs are named for what they are rather than <c>out-0</c> and <c>out-1</c>, because a
+    /// provider names its own ports.
+    /// </remarks>
+    internal static StageRef Split { get; } = StageRef.Create(Provider, StageId.Create("split"), 1);
+
+    /// <summary>The sink whose result is a block of bytes of a declared size.</summary>
+    /// <remarks>
+    /// The stage the result-size cap is measured against. Its result is a <c>byte[]</c> rather than a
+    /// number because the cap is about what crosses the wire, and a block of bytes is the one result whose
+    /// serialized size a test can state exactly.
+    /// </remarks>
+    internal static StageRef Bulk { get; } = StageRef.Create(Provider, StageId.Create("bulk"), 1);
+
     /// <summary>The contract of the numbers this vocabulary's stages carry.</summary>
     internal static ElementContract<long> Number { get; } = ElementContract.For<long>("test-number", 1);
 
     /// <summary>The contract of the total a summing sink yields.</summary>
     internal static ResultContract<long> Total { get; } = ResultContract.For<long>("test-total", 1);
+
+    /// <summary>The contract of the block of bytes the bulk sink yields.</summary>
+    internal static ResultContract<byte[]> Block { get; } = ResultContract.For<byte[]>("test-block", 1);
 
     /// <summary>The contract of a payload with no members.</summary>
     internal static ContractReference NoParameters { get; } =
@@ -77,6 +97,10 @@ internal static class TestVocabulary
     /// <summary>The contract of the failing flow's payload.</summary>
     internal static ContractReference FailParameters { get; } =
         ContractReference.Create(ContractId.Create("test-fail-parameters"), 1);
+
+    /// <summary>The contract of the bulk sink's payload.</summary>
+    internal static ContractReference BulkParameters { get; } =
+        ContractReference.Create(ContractId.Create("test-bulk-parameters"), 1);
 
     /// <summary>The empty parameter payload every unparameterized stage of this vocabulary carries.</summary>
     internal static CanonicalJsonValue Empty { get; } = CanonicalJsonValue.Parse("{}");
@@ -146,6 +170,23 @@ internal static class TestVocabulary
                 [OutputPortSpecification.Create(PortId.Create("out"), Number.Reference)],
                 [],
                 NoParameters,
+                []),
+            StageSpecification.Create(
+                Split,
+                [InputPortSpecification.Create(PortId.Create("in"), Number.Reference)],
+                [
+                    OutputPortSpecification.Create(PortId.Create("left"), Number.Reference),
+                    OutputPortSpecification.Create(PortId.Create("right"), Number.Reference),
+                ],
+                [],
+                NoParameters,
+                []),
+            StageSpecification.Create(
+                Bulk,
+                [InputPortSpecification.Create(PortId.Create("in"), Number.Reference)],
+                [],
+                [ResultPortSpecification.Create(PortId.Create("payload"), Block.Reference)],
+                BulkParameters,
                 []),
         ]);
 }

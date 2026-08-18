@@ -7,7 +7,7 @@ namespace Orleans.Dataflow.Authoring;
 
 /// <summary>
 /// The check a typed registered-stage handle passes before it exists: the stage is registered, it has the
-/// linear shape the handle claims, and its ports carry the contracts the handle declares.
+/// shape the handle claims, and its ports carry the contracts the handle declares.
 /// </summary>
 /// <remarks>
 /// <para>
@@ -28,6 +28,11 @@ namespace Orleans.Dataflow.Authoring;
 /// because nothing else can be said about a stage nobody registered; a contract is compared only against a
 /// port that exists, because a port count that is already wrong would otherwise contribute a second
 /// complaint that disappears on its own once the first is fixed.
+/// </para>
+/// <para>
+/// The linear entry point takes one contract per side and the junction ones take a list or read the arity
+/// from the specification, but the rules are the same rules said about more ports: exactly the shape the
+/// handle claims, and the declared contract on every port of it.
 /// </para>
 /// </remarks>
 internal static class RegisteredShape
@@ -139,6 +144,189 @@ internal static class RegisteredShape
         return violations.Count == 0 ? specification : throw new ArgumentException(Format(kind, stage, violations));
     }
 
+    /// <summary>Resolves a stage and checks it against the junction shape and contracts a handle claims.</summary>
+    /// <param name="catalog">The catalog the reference is resolved through.</param>
+    /// <param name="stage">The reference to resolve.</param>
+    /// <param name="kind">The handle kind in prose, such as <c>fan-out</c>, for the diagnostic.</param>
+    /// <param name="inputs">
+    /// The element contract the handle declares for each input port, in the specification's own port order;
+    /// its length is the arity the handle claims.
+    /// </param>
+    /// <param name="outputs">
+    /// The element contract the handle declares for each output port, in the specification's own port
+    /// order; its length is the arity the handle claims.
+    /// </param>
+    /// <returns>The resolved specification.</returns>
+    /// <exception cref="ArgumentNullException"><paramref name="catalog"/> is <see langword="null"/>.</exception>
+    /// <exception cref="ArgumentException">
+    /// <paramref name="stage"/> is the default value, or the resolved stage breaks at least one of the
+    /// handle's invariants.
+    /// </exception>
+    /// <exception cref="InvalidOperationException">
+    /// The catalog resolved the reference and then supplied no specification.
+    /// </exception>
+    /// <remarks>
+    /// <para>
+    /// The multi-port sibling of <see cref="Resolve"/>, for the shapes whose ports carry unlike contracts,
+    /// and the same rules said about several ports at once: the counts have to be exactly what the handle
+    /// claims, and every port has to carry the contract the handle declared for its position.
+    /// </para>
+    /// <para>
+    /// Position is the specification's own canonical port order, which is ordinal by port name. A
+    /// specification sorts its ports at construction, so that order is the same in every process that
+    /// resolves it, and it is the order the runtime wires the legs and the inputs in — one statement, read
+    /// by the authoring side and by the planner alike.
+    /// </para>
+    /// </remarks>
+    internal static StageSpecification ResolveJunction(
+        IStageCatalog catalog,
+        StageRef stage,
+        string kind,
+        IReadOnlyList<ContractReference> inputs,
+        IReadOnlyList<ContractReference> outputs)
+    {
+        StageSpecification specification = Stage(catalog, stage, kind);
+        List<string> violations = [];
+
+        Count(violations, kind, specification.InputPorts.Count, inputs.Count, "input");
+        Count(violations, kind, specification.OutputPorts.Count, outputs.Count, "output");
+        Results(violations, kind, specification);
+
+        if (specification.InputPorts.Count == inputs.Count)
+        {
+            for (int index = 0; index < inputs.Count; index++)
+            {
+                Contract(
+                    violations,
+                    specification.InputPorts[index].Id,
+                    specification.InputPorts[index].ElementContract,
+                    inputs[index],
+                    "accepts elements of");
+            }
+        }
+
+        if (specification.OutputPorts.Count == outputs.Count)
+        {
+            for (int index = 0; index < outputs.Count; index++)
+            {
+                Contract(
+                    violations,
+                    specification.OutputPorts[index].Id,
+                    specification.OutputPorts[index].ElementContract,
+                    outputs[index],
+                    "produces elements of");
+            }
+        }
+
+        return violations.Count == 0 ? specification : throw new ArgumentException(Format(kind, stage, violations));
+    }
+
+    /// <summary>Resolves a stage and checks it as a junction whose legs all carry one contract.</summary>
+    /// <param name="catalog">The catalog the reference is resolved through.</param>
+    /// <param name="stage">The reference to resolve.</param>
+    /// <param name="input">The element contract the handle declares for the one input port.</param>
+    /// <param name="output">The element contract the handle declares for every output port.</param>
+    /// <returns>The resolved specification.</returns>
+    /// <exception cref="ArgumentNullException"><paramref name="catalog"/> is <see langword="null"/>.</exception>
+    /// <exception cref="ArgumentException">
+    /// <paramref name="stage"/> is the default value, or the resolved stage breaks at least one of the
+    /// handle's invariants.
+    /// </exception>
+    /// <remarks>
+    /// The arity is read from the specification rather than claimed by the handle, which is the one thing
+    /// that differs from <see cref="ResolveJunction"/>: how many legs a junction has is a fact about the
+    /// stage a provider registered, and a handle that let an author restate it would let the two disagree.
+    /// What is checked is that there are at least two of them — a fan-out with one leg is a flow — and that
+    /// every one carries the declared contract.
+    /// </remarks>
+    internal static StageSpecification ResolveFanOut(
+        IStageCatalog catalog,
+        StageRef stage,
+        ContractReference input,
+        ContractReference output)
+    {
+        const string Kind = "fan-out";
+
+        StageSpecification specification = Stage(catalog, stage, Kind);
+        List<string> violations = [];
+
+        Count(violations, Kind, specification.InputPorts.Count, 1, "input");
+        Arity(violations, Kind, specification.OutputPorts.Count, LocalVocabulary.MinFanOut, "output", "routes to");
+        Results(violations, Kind, specification);
+
+        if (specification.InputPorts.Count == 1)
+        {
+            Contract(
+                violations,
+                specification.InputPorts[0].Id,
+                specification.InputPorts[0].ElementContract,
+                input,
+                "accepts elements of");
+        }
+
+        for (int index = 0; index < specification.OutputPorts.Count; index++)
+        {
+            Contract(
+                violations,
+                specification.OutputPorts[index].Id,
+                specification.OutputPorts[index].ElementContract,
+                output,
+                "produces elements of");
+        }
+
+        return violations.Count == 0 ? specification : throw new ArgumentException(Format(Kind, stage, violations));
+    }
+
+    /// <summary>Resolves a stage and checks it as a junction whose inputs all carry one contract.</summary>
+    /// <param name="catalog">The catalog the reference is resolved through.</param>
+    /// <param name="stage">The reference to resolve.</param>
+    /// <param name="input">The element contract the handle declares for every input port.</param>
+    /// <param name="output">The element contract the handle declares for the one output port.</param>
+    /// <returns>The resolved specification.</returns>
+    /// <exception cref="ArgumentNullException"><paramref name="catalog"/> is <see langword="null"/>.</exception>
+    /// <exception cref="ArgumentException">
+    /// <paramref name="stage"/> is the default value, or the resolved stage breaks at least one of the
+    /// handle's invariants.
+    /// </exception>
+    /// <remarks>The mirror of <see cref="ResolveFanOut"/>, and the arity is read for the same reason.</remarks>
+    internal static StageSpecification ResolveFanIn(
+        IStageCatalog catalog,
+        StageRef stage,
+        ContractReference input,
+        ContractReference output)
+    {
+        const string Kind = "fan-in";
+
+        StageSpecification specification = Stage(catalog, stage, Kind);
+        List<string> violations = [];
+
+        Arity(violations, Kind, specification.InputPorts.Count, LocalVocabulary.MinFanIn, "input", "joins");
+        Count(violations, Kind, specification.OutputPorts.Count, 1, "output");
+        Results(violations, Kind, specification);
+
+        for (int index = 0; index < specification.InputPorts.Count; index++)
+        {
+            Contract(
+                violations,
+                specification.InputPorts[index].Id,
+                specification.InputPorts[index].ElementContract,
+                input,
+                "accepts elements of");
+        }
+
+        if (specification.OutputPorts.Count == 1)
+        {
+            Contract(
+                violations,
+                specification.OutputPorts[0].Id,
+                specification.OutputPorts[0].ElementContract,
+                output,
+                "produces elements of");
+        }
+
+        return violations.Count == 0 ? specification : throw new ArgumentException(Format(Kind, stage, violations));
+    }
+
     /// <summary>Rejects a contract declaration supplied as its default value.</summary>
     /// <param name="isDefault">Whether the declaration is the default value.</param>
     /// <param name="typeName">The declaration type name, for the message.</param>
@@ -158,6 +346,98 @@ internal static class RegisteredShape
                 $"A registered stage handle requires a created {typeName} for its {role}; the default {typeName} names no contract.",
                 parameterName);
         }
+    }
+
+    /// <summary>Resolves a reference against a catalog, refusing anything a handle cannot be built on.</summary>
+    /// <param name="catalog">The catalog the reference is resolved through.</param>
+    /// <param name="stage">The reference to resolve.</param>
+    /// <param name="kind">The handle kind in prose, for the diagnostic.</param>
+    /// <returns>The registered specification.</returns>
+    /// <exception cref="ArgumentNullException"><paramref name="catalog"/> is <see langword="null"/>.</exception>
+    /// <exception cref="ArgumentException">
+    /// <paramref name="stage"/> is the default value, or the catalog does not register it.
+    /// </exception>
+    /// <exception cref="InvalidOperationException">
+    /// The catalog resolved the reference and then supplied no specification, which is a defect in the
+    /// registered catalog rather than a statement about these arguments.
+    /// </exception>
+    /// <remarks>
+    /// An unresolvable stage is reported alone, because nothing else can be said about a stage nobody
+    /// registered.
+    /// </remarks>
+    private static StageSpecification Stage(IStageCatalog catalog, StageRef stage, string kind)
+    {
+        ArgumentNullException.ThrowIfNull(catalog);
+
+        if (stage.IsDefault)
+        {
+            throw new ArgumentException(
+                $"A registered {kind} handle requires a created {nameof(StageRef)}; the default {nameof(StageRef)} names no stage.",
+                nameof(stage));
+        }
+
+        if (!catalog.TryGetSpecification(stage, out StageSpecification? specification))
+        {
+            throw new ArgumentException(
+                Format(kind, stage, [$"the catalog does not register the stage '{stage}'"]));
+        }
+
+        // The same restatement Resolve makes and for the same reason: the catalog is a public seam a later
+        // federated implementation fills, and a broken seam should name itself.
+        return specification ??
+            throw new InvalidOperationException(
+                $"The catalog resolved the stage '{stage}' and then supplied no specification for it. A catalog that answers that a reference is registered must hand back the specification that registers it.");
+    }
+
+    /// <summary>Records a result-port violation, when there is one.</summary>
+    /// <param name="violations">The violations collected so far.</param>
+    /// <param name="kind">The handle kind in prose.</param>
+    /// <param name="specification">The resolved specification.</param>
+    /// <remarks>
+    /// A junction declares no result port. A result is read from a terminal and a junction is not one, so
+    /// requiring none rather than ignoring them is what keeps a stage from quietly declaring a result
+    /// nothing in a graph could ever expose.
+    /// </remarks>
+    private static void Results(List<string> violations, string kind, StageSpecification specification)
+    {
+        if (specification.ResultPorts.Count == 0)
+        {
+            return;
+        }
+
+        violations.Add(string.Create(
+            CultureInfo.InvariantCulture,
+            $"the stage declares {specification.ResultPorts.Count} result port{(specification.ResultPorts.Count == 1 ? string.Empty : "s")}, and a registered {kind} declares none: a result is read from a terminal, and a junction is not one"));
+    }
+
+    /// <summary>Records a junction-arity violation, when there is one.</summary>
+    /// <param name="violations">The violations collected so far.</param>
+    /// <param name="kind">The handle kind in prose.</param>
+    /// <param name="declared">The number of ports the specification declares on that side.</param>
+    /// <param name="least">The fewest a junction of this direction may have.</param>
+    /// <param name="direction">The port direction in prose.</param>
+    /// <param name="verb">What the junction does with those ports, in prose.</param>
+    /// <remarks>
+    /// There is a lower bound and deliberately no upper one. Two is what makes a junction a junction — one
+    /// leg is a chain written the long way — while the local vocabulary's ceiling of eight is a fact about
+    /// the ports its own specifications declare, and a registered stage declares its own.
+    /// </remarks>
+    private static void Arity(
+        List<string> violations,
+        string kind,
+        int declared,
+        int least,
+        string direction,
+        string verb)
+    {
+        if (declared >= least)
+        {
+            return;
+        }
+
+        violations.Add(string.Create(
+            CultureInfo.InvariantCulture,
+            $"the stage declares {declared} {direction} port{(declared == 1 ? string.Empty : "s")}, and a registered {kind} {verb} at least {least}"));
     }
 
     /// <summary>Records a port-count violation, when there is one.</summary>

@@ -103,11 +103,12 @@ public static class OrleansDataflowSiloBuilderExtensions
         private readonly List<StageSpecification> _specifications = [];
         private readonly List<KeyValuePair<ProviderId, IStageRuntimeFactory>> _factories = [];
         private readonly OrleansAdapterRegistry.Builder _adapters = new();
-        private readonly DotnetRegistrations _dotnet = new();
+        private readonly LocalRegistrations _dotnet = new();
         private readonly OrleansDataflowPlacementOptions _placement = new();
         private OrleansAdapterRegistry? _registry;
         private StageCatalog? _catalog;
         private bool _anyCatalog;
+        private int _maximumResultBytes = OrleansDataflowResults.DefaultMaximumResultBytes;
 
         /// <inheritdoc/>
         public IOrleansDataflowBuilder AddCatalog(IStageCatalog catalog)
@@ -132,7 +133,9 @@ public static class OrleansDataflowSiloBuilderExtensions
                     nameof(provider));
             }
 
-            _factories.Add(new KeyValuePair<ProviderId, IStageRuntimeFactory>(provider, new Adapter(factory)));
+            _factories.Add(new KeyValuePair<ProviderId, IStageRuntimeFactory>(
+                provider,
+                new DataflowStageFactoryAdapter(factory)));
 
             return this;
         }
@@ -234,6 +237,16 @@ public static class OrleansDataflowSiloBuilderExtensions
             return this;
         }
 
+        /// <inheritdoc/>
+        public IOrleansDataflowBuilder LimitResultSize(int maximumBytes)
+        {
+            ArgumentOutOfRangeException.ThrowIfLessThan(maximumBytes, 1);
+
+            _maximumResultBytes = maximumBytes;
+
+            return this;
+        }
+
         /// <summary>Checks everything registered, and remembers what the check produced.</summary>
         /// <exception cref="ArgumentException">
         /// No catalog was registered, one stage reference was registered twice, one provider was, or one
@@ -297,7 +310,7 @@ public static class OrleansDataflowSiloBuilderExtensions
             {
                 factories.Add(new KeyValuePair<ProviderId, IStageRuntimeFactory>(
                     OrleansStages.Provider,
-                    new Adapter(new OrleansStageFactory(
+                    new DataflowStageFactoryAdapter(new OrleansStageFactory(
                         services,
                         services.GetRequiredService<IGrainFactory>(),
                         _registry!))));
@@ -308,28 +321,7 @@ public static class OrleansDataflowSiloBuilderExtensions
                 factories.Add(_dotnet.Factory);
             }
 
-            return new DataflowSiloRegistry(_catalog!, factories);
-        }
-
-        /// <summary>The bridge from a silo's public factory to the engine's internal seam.</summary>
-        /// <param name="factory">The registered factory.</param>
-        /// <remarks>
-        /// The whole of what the public shape costs: the engine's executor vocabulary is internal, so a
-        /// provider states its stage in the public mirror of it and this unwraps the mirror. Nothing is
-        /// translated, because the two shapes are the same four cases by construction.
-        /// </remarks>
-        private sealed class Adapter(IDataflowStageFactory factory) : IStageRuntimeFactory
-        {
-            /// <inheritdoc/>
-            public StageRuntime Create(StageRuntimeRequest request)
-            {
-                DataflowStageRuntime built = factory.Create(
-                    new DataflowStageRequest(request.Node, request.Specification)) ??
-                    throw new InvalidOperationException(
-                        $"The {nameof(IDataflowStageFactory)} registered for the provider '{request.Node.Stage.Provider}' returned nothing for the node '{request.Node.Id}', an occurrence of '{request.Node.Stage}'. A factory either builds the stage or says why it cannot by throwing; a null runtime says neither.");
-
-                return built.Runtime;
-            }
+            return new DataflowSiloRegistry(_catalog!, factories, _maximumResultBytes);
         }
 
         /// <summary>The stand-in a provider-key check is made against.</summary>

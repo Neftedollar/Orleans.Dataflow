@@ -85,6 +85,76 @@ internal static class TestPipelines
         return (graph, graphSlot, pipeline, pipeline.ResultSlot(TotalSlot, TestVocabulary.Total));
     }
 
+    /// <summary>The name the branching pipeline exposes its block of bytes under.</summary>
+    internal const string PayloadSlot = "payload";
+
+    /// <summary>Builds a branching pipeline whose two legs declare two results.</summary>
+    /// <param name="id">The pipeline's identity.</param>
+    /// <param name="count">How many numbers the source emits.</param>
+    /// <param name="payloadBytes">How many bytes the second leg's result carries.</param>
+    /// <returns>The pipeline, the slot its total resolves under, and the slot its block resolves under.</returns>
+    /// <remarks>
+    /// <para>
+    /// The first deployable branching pipeline this suite has had, and it is deployable for one reason: the
+    /// junction is a registered stage of the test vocabulary rather than a local one, so the closed document
+    /// declares neither <c>nondeployable</c> nor <c>ephemeral-identity</c> and <c>AsPipeline</c> accepts it.
+    /// Before M4.5 this method could not have been written.
+    /// </para>
+    /// <para>
+    /// Two results, resolved independently from one run over a cluster, is what it exists to prove — and the
+    /// unequal sizes are what makes it the shape the result-size cap is measured on: one leg's result is a
+    /// number, the other's is a block a deployment may or may not be willing to send.
+    /// </para>
+    /// </remarks>
+    internal static (PipelineDefinition Pipeline, ResultSlot<long> Total, ResultSlot<byte[]> Payload) Branching(
+        string id,
+        int count,
+        int payloadBytes)
+    {
+        StageCatalog catalog = TestVocabulary.Catalog();
+
+        RunnableGraph graph = Source
+            .FromRegistered(
+                RegisteredStage.Source(catalog, TestVocabulary.Range, TestVocabulary.Number),
+                "numbers",
+                TestRangeParameters.Write(count))
+            .FanOutTo(
+                RegisteredStage.FanOut(
+                    catalog,
+                    TestVocabulary.Split,
+                    TestVocabulary.Number,
+                    TestVocabulary.Number),
+                "split",
+                TestVocabulary.Empty,
+                Flow.For<long>().To(
+                    RegisteredStage.SinkWithResult(
+                        catalog,
+                        TestVocabulary.Sum,
+                        TestVocabulary.Number,
+                        TestVocabulary.Total),
+                    "total",
+                    TestVocabulary.Empty,
+                    TotalSlot,
+                    out ResultSlot<long> _),
+                Flow.For<long>().To(
+                    RegisteredStage.SinkWithResult(
+                        catalog,
+                        TestVocabulary.Bulk,
+                        TestVocabulary.Number,
+                        TestVocabulary.Block),
+                    "block",
+                    TestBulkParameters.Write(payloadBytes),
+                    PayloadSlot,
+                    out ResultSlot<byte[]> _));
+
+        PipelineDefinition pipeline = graph.AsPipeline(GraphId.Create(id), GraphRevision.Create(1));
+
+        return (
+            pipeline,
+            pipeline.ResultSlot(TotalSlot, TestVocabulary.Total),
+            pipeline.ResultSlot(PayloadSlot, TestVocabulary.Block));
+    }
+
     /// <summary>Builds a pipeline whose middle stage throws at one element.</summary>
     /// <param name="id">The pipeline's identity.</param>
     /// <param name="count">How many numbers the source emits.</param>

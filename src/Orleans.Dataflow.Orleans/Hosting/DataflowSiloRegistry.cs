@@ -27,17 +27,24 @@ internal sealed class DataflowSiloRegistry
     /// <summary>Initializes a new instance of the <see cref="DataflowSiloRegistry"/> class.</summary>
     /// <param name="catalog">The stages this silo registers.</param>
     /// <param name="factories">The factories that build them, keyed by provider.</param>
-    /// <exception cref="ArgumentNullException">Either argument is <see langword="null"/>.</exception>
+    /// <param name="maximumResultBytes">The largest result this silo sends across a grain boundary.</param>
+    /// <exception cref="ArgumentNullException">
+    /// <paramref name="catalog"/> or <paramref name="factories"/> is <see langword="null"/>.
+    /// </exception>
+    /// <exception cref="ArgumentOutOfRangeException"><paramref name="maximumResultBytes"/> is below one.</exception>
     internal DataflowSiloRegistry(
         StageCatalog catalog,
-        IEnumerable<KeyValuePair<ProviderId, IStageRuntimeFactory>> factories)
+        IEnumerable<KeyValuePair<ProviderId, IStageRuntimeFactory>> factories,
+        int maximumResultBytes = OrleansDataflowResults.DefaultMaximumResultBytes)
     {
         ArgumentNullException.ThrowIfNull(catalog);
         ArgumentNullException.ThrowIfNull(factories);
+        ArgumentOutOfRangeException.ThrowIfLessThan(maximumResultBytes, 1);
 
         Catalog = catalog;
         Factories = new StageRuntimeRegistry(factories);
         CatalogFingerprint = StageCatalogSerializer.Fingerprint(catalog);
+        MaximumResultBytes = maximumResultBytes;
     }
 
     /// <summary>Gets the stages this silo registers.</summary>
@@ -54,4 +61,12 @@ internal sealed class DataflowSiloRegistry
     /// validators differ also share it, which is a stated limit of the fingerprint rather than a gap here.
     /// </remarks>
     internal CatalogFingerprint CatalogFingerprint { get; }
+
+    /// <summary>Gets the largest result this silo sends across a grain boundary.</summary>
+    /// <value>The bound in bytes, measured on the value's Orleans-serialized form.</value>
+    /// <remarks>
+    /// Read by the run grain when it builds a result envelope, which is where the cap is enforced: the run
+    /// has already ended, and what a bound refuses is sending one of its results rather than the run itself.
+    /// </remarks>
+    internal int MaximumResultBytes { get; }
 }

@@ -6,11 +6,19 @@ namespace Orleans.Dataflow.Runtime;
 /// </summary>
 /// <remarks>
 /// <para>
-/// This is the runtime-factory seam's return type, and it is deliberately the same four shapes the local
-/// engine already executes: a source it pulls from, a synchronous element stage it fuses, an asynchronous
-/// element stage that heads its own segment, and a terminal that folds the stream into one value. A
-/// provider that wants a fifth shape is asking for a new engine primitive rather than a new stage, and
-/// this type refusing to grow is what keeps that distinction visible.
+/// This is the runtime-factory seam's return type, and it is deliberately the same shapes the local engine
+/// already executes: a source it pulls from, a synchronous element stage it fuses, an asynchronous element
+/// stage that heads its own segment, a terminal that folds the stream into one value, and — since M4.5 —
+/// the two junction pumps, a fan-out that splits one stream into legs and a fan-in that joins several into
+/// one. A provider that wants a shape this type does not have is asking for a new engine primitive rather
+/// than a new stage, and this type refusing to grow past what the engine runs is what keeps that
+/// distinction visible.
+/// </para>
+/// <para>
+/// The junction shapes carry a <see cref="LocalFanOut"/> or a <see cref="LocalFanIn"/> — the very strategy
+/// values the local vocabulary's own junctions are planned from, so a registered junction and a local one
+/// are the same pump with the same bounds, the same pause discipline, and the same completion rules. What
+/// the seam adds is where the strategy comes from, not what it is.
 /// </para>
 /// <para>
 /// A stage runtime is built once per node per materialization, exactly as a local binding is wrapped once
@@ -27,7 +35,7 @@ namespace Orleans.Dataflow.Runtime;
 internal sealed class StageRuntime
 {
     /// <summary>Initializes a new instance of the <see cref="StageRuntime"/> class.</summary>
-    /// <param name="shape">Which of the four executable shapes this is.</param>
+    /// <param name="shape">Which of the executable shapes this is.</param>
     /// <param name="opener">The source opener, for a source.</param>
     /// <param name="map">The synchronous mapping, for an element stage.</param>
     /// <param name="callback">The asynchronous mapping, for an asynchronous element stage.</param>
@@ -37,6 +45,8 @@ internal sealed class StageRuntime
     /// <param name="fold">A terminal's fold over its state and one element.</param>
     /// <param name="finish">A terminal's projection of its final state into the value a slot resolves.</param>
     /// <param name="producesResult">Whether a terminal's final state is offered to a result slot.</param>
+    /// <param name="splitting">The splitting strategy, for a fan-out.</param>
+    /// <param name="joining">The joining strategy, for a fan-in.</param>
     private StageRuntime(
         StageRuntimeShape shape,
         StageSourceOpener? opener,
@@ -47,7 +57,9 @@ internal sealed class StageRuntime
         Func<object?>? seed,
         Func<object?, object?, object?>? fold,
         Func<object?, object?>? finish,
-        bool producesResult)
+        bool producesResult,
+        LocalFanOut? splitting = null,
+        LocalFanIn? joining = null)
     {
         Shape = shape;
         Opener = opener;
@@ -59,9 +71,11 @@ internal sealed class StageRuntime
         Fold = fold;
         Finish = finish;
         ProducesResult = producesResult;
+        Splitting = splitting;
+        Joining = joining;
     }
 
-    /// <summary>Gets which of the four executable shapes this runtime is.</summary>
+    /// <summary>Gets which of the executable shapes this runtime is.</summary>
     internal StageRuntimeShape Shape { get; }
 
     /// <summary>Gets the opener of a source's sequence.</summary>
@@ -109,6 +123,14 @@ internal sealed class StageRuntime
     /// <see langword="false"/> for one whose work is its side effect.
     /// </value>
     internal bool ProducesResult { get; }
+
+    /// <summary>Gets the strategy a fan-out splits its stream by.</summary>
+    /// <value>The strategy for <see cref="StageRuntimeShape.FanOut"/>; otherwise <see langword="null"/>.</value>
+    internal LocalFanOut? Splitting { get; }
+
+    /// <summary>Gets the strategy a fan-in joins its streams by.</summary>
+    /// <value>The strategy for <see cref="StageRuntimeShape.FanIn"/>; otherwise <see langword="null"/>.</value>
+    internal LocalFanIn? Joining { get; }
 
     /// <summary>Creates the runtime of a source stage.</summary>
     /// <param name="opener">The opener of one enumeration, invoked once per run at the first pull.</param>
@@ -219,6 +241,56 @@ internal sealed class StageRuntime
             producesResult);
     }
 
+    /// <summary>Creates the runtime of a splitting junction.</summary>
+    /// <param name="splitting">The strategy that decides which legs must have room and which receive what.</param>
+    /// <returns>The runtime.</returns>
+    /// <exception cref="ArgumentNullException"><paramref name="splitting"/> is <see langword="null"/>.</exception>
+    /// <remarks>
+    /// The legs are not here and cannot be: how many legs an occurrence has is stated by the edges of the
+    /// document it stands in, and the ports they are wired at are its specification's. The planner reads
+    /// both and hands the pump the channels; this value is only what the pump does with them.
+    /// </remarks>
+    internal static StageRuntime FanOut(LocalFanOut splitting)
+    {
+        ArgumentNullException.ThrowIfNull(splitting);
+
+        return new StageRuntime(
+            StageRuntimeShape.FanOut,
+            opener: null,
+            map: null,
+            callback: null,
+            maxConcurrency: 0,
+            ordered: false,
+            seed: null,
+            fold: null,
+            finish: null,
+            producesResult: false,
+            splitting);
+    }
+
+    /// <summary>Creates the runtime of a joining junction.</summary>
+    /// <param name="joining">The strategy that decides which input is read next and what is emitted.</param>
+    /// <returns>The runtime.</returns>
+    /// <exception cref="ArgumentNullException"><paramref name="joining"/> is <see langword="null"/>.</exception>
+    internal static StageRuntime FanIn(LocalFanIn joining)
+    {
+        ArgumentNullException.ThrowIfNull(joining);
+
+        return new StageRuntime(
+            StageRuntimeShape.FanIn,
+            opener: null,
+            map: null,
+            callback: null,
+            maxConcurrency: 0,
+            ordered: false,
+            seed: null,
+            fold: null,
+            finish: null,
+            producesResult: false,
+            splitting: null,
+            joining);
+    }
+
     /// <summary>Wraps this runtime's callback into the shape the asynchronous driver executes.</summary>
     /// <returns>A callback over boxed elements that never throws synchronously.</returns>
     /// <remarks>
@@ -246,12 +318,13 @@ internal sealed class StageRuntime
 }
 
 /// <summary>
-/// Which of the engine's four executable shapes a resolved registered stage takes.
+/// Which of the engine's executable shapes a resolved registered stage takes.
 /// </summary>
 /// <remarks>
 /// The shape decides where in a plan the stage may stand: a source opens the chain, an element stage
-/// stands between the source and the terminal, and a terminal closes it. A stage whose shape does not fit
-/// its position is a planning failure that names both, rather than a run that misbehaves.
+/// stands between the source and the terminal, a terminal closes it, and a junction stands where several
+/// edges meet. A stage whose shape does not fit its position is a planning failure that names both, rather
+/// than a run that misbehaves.
 /// </remarks>
 internal enum StageRuntimeShape
 {
@@ -266,6 +339,12 @@ internal enum StageRuntimeShape
 
     /// <summary>The end of a chain, which consumes elements and produces none.</summary>
     Terminal,
+
+    /// <summary>A junction that consumes one stream and produces the legs its specification declares.</summary>
+    FanOut,
+
+    /// <summary>A junction that consumes the streams its specification declares and produces one.</summary>
+    FanIn,
 }
 
 /// <summary>

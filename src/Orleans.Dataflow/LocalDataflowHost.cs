@@ -73,14 +73,17 @@ public sealed class LocalDataflowHost
     }
 
     /// <summary>Initializes a new instance of the <see cref="LocalDataflowHost"/> class with providers.</summary>
-    /// <param name="configure">The registration of this host's .NET push adapters.</param>
+    /// <param name="configure">The registration of this host's catalogs, factories, and .NET push adapters.</param>
     /// <exception cref="ArgumentNullException"><paramref name="configure"/> is <see langword="null"/>.</exception>
-    /// <exception cref="ArgumentException"><paramref name="configure"/> registered one name twice.</exception>
+    /// <exception cref="ArgumentException">
+    /// <paramref name="configure"/> registered one binding name, one stage reference, or one provider twice.
+    /// </exception>
     /// <remarks>
     /// <para>
-    /// The local half of "declare once, use twice". The very bindings a silo is given are given to this
-    /// host, so one declaration serves both runtimes and a graph written against them runs in either — the
-    /// runtime-factory seam's own claim, made checkable in a process with no cluster in it.
+    /// The local half of "declare once, use twice". The very catalog, the very factory, and the very
+    /// bindings a silo is given are given to this host, so one declaration serves both runtimes and a graph
+    /// written against them runs in either — the runtime-factory seam's own claim, made checkable in a
+    /// process with no cluster in it.
     /// </para>
     /// <para>
     /// The registrations are checked here, so a broken one stops the host from being constructed rather
@@ -88,36 +91,41 @@ public sealed class LocalDataflowHost
     /// factory registry, shared by every graph this host materializes.
     /// </para>
     /// </remarks>
-    public LocalDataflowHost(Action<IDotnetDataflowBuilder> configure)
+    public LocalDataflowHost(Action<ILocalDataflowBuilder> configure)
         : this(TimeProvider.System, configure)
     {
     }
 
     /// <summary>Initializes a new instance of the <see cref="LocalDataflowHost"/> class with a clock and providers.</summary>
     /// <param name="timeProvider">The clock every run this host starts measures time by.</param>
-    /// <param name="configure">The registration of this host's .NET push adapters.</param>
+    /// <param name="configure">The registration of this host's catalogs, factories, and .NET push adapters.</param>
     /// <exception cref="ArgumentNullException">
     /// <paramref name="timeProvider"/> or <paramref name="configure"/> is <see langword="null"/>.
     /// </exception>
-    /// <exception cref="ArgumentException"><paramref name="configure"/> registered one name twice.</exception>
+    /// <exception cref="ArgumentException">
+    /// <paramref name="configure"/> registered one binding name, one stage reference, or one provider twice.
+    /// </exception>
     /// <remarks>
     /// The two options a host has, together. They are independent of each other: the clock reaches the local
     /// vocabulary's timing stages, and a registered stage receives the run's tokens and whatever its own
     /// provider gave it.
     /// </remarks>
-    public LocalDataflowHost(TimeProvider timeProvider, Action<IDotnetDataflowBuilder> configure)
+    public LocalDataflowHost(TimeProvider timeProvider, Action<ILocalDataflowBuilder> configure)
     {
         ArgumentNullException.ThrowIfNull(timeProvider);
         ArgumentNullException.ThrowIfNull(configure);
 
         _clock = timeProvider;
 
-        DotnetRegistrations registrations = new();
+        LocalRegistrations registrations = new();
 
         configure(registrations);
         registrations.Validate();
 
-        if (!registrations.Any)
+        // A configuration call that registered nothing leaves exactly the lambda-only host, down to the
+        // catalog instance: merging the local vocabulary with nothing is the local vocabulary, and building
+        // a copy of it would give this host a catalog of its own for no reason.
+        if (!registrations.AnyRegistration)
         {
             _catalog = LocalStageCatalog.Instance;
             _binder = StageRuntimeBinder.None;
@@ -125,9 +133,8 @@ public sealed class LocalDataflowHost
             return;
         }
 
-        _catalog = StageCatalog.Create(
-            [.. LocalStageCatalog.Instance.Specifications, .. registrations.Specifications]);
-        _binder = new StageRuntimeBinder(_catalog, new StageRuntimeRegistry([registrations.Factory]));
+        _catalog = registrations.Catalog;
+        _binder = new StageRuntimeBinder(_catalog, new StageRuntimeRegistry(registrations.Factories));
     }
 
     /// <summary>Materializes a graph into a running run.</summary>

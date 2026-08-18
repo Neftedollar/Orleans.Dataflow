@@ -217,10 +217,11 @@ public sealed class JunctionAuthoringTests
         // therefore a seam, and a seam is an element-contract-mismatch — the same rule a mixed chain has
         // broken since ADR 0004, at the same place, for the same reason.
         //
-        // The consequence in one sentence: a fan-out pipeline built entirely from registered stages cannot
-        // exist today, because the junction between them cannot be registered. That waits for the provider
-        // SDK to open junction registration; until then a junction graph is a local graph whatever its
-        // branches are made of.
+        // The consequence in one sentence: a graph whose junction is local is a local graph whatever its
+        // branches are made of. Since M4.5 that is a statement about local junctions rather than about
+        // branching graphs — a provider can register a junction of its own, and RegisteredJunctionTests
+        // asserts that the same shape built out of one validates with no seam at all. This test is what
+        // keeps the mixing rule from being quietly weakened on the way there.
         RunnableGraph graph = RegisteredFanOut(out ResultSlot<long> _);
 
         GraphValidationReport report = GraphCompiler.Validate(graph.Document, RegisteredFixtures.MixedCatalog);
@@ -244,8 +245,10 @@ public sealed class JunctionAuthoringTests
         // tokens that occurrence brings are the whole difference.
         //
         // 'nondeployable' because every local stage requires it, and 'ephemeral-identity' because this
-        // surface has no spelling for naming a junction occurrence — there would be nothing durable for the
-        // name to identify until a provider can register a junction of its own.
+        // surface has no spelling for naming a local junction occurrence — there is nothing durable for the
+        // name to identify. Its sibling is
+        // RegisteredJunctionTests.AFullyRegisteredFanOutDeclaresNeitherToken, which asserts the absence of
+        // both on the same shape once the junction itself is a registered stage.
         RunnableGraph chain = Source.FromRegistered(
                 RegisteredFixtures.OrderSource,
                 "orders-in",

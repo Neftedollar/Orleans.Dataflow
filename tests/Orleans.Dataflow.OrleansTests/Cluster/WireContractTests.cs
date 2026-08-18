@@ -124,6 +124,12 @@ public sealed class WireContractTests(DataflowCluster cluster)
         Assert.Equal("T", keyed.FailureType);
         Assert.Equal("m", keyed.FailureMessage);
 
+        ResultTooLargeException oversized = RoundTrip(new ResultTooLargeException("total", 4096L, 512));
+
+        Assert.Equal("total", oversized.SlotName);
+        Assert.Equal(4096L, oversized.Bytes);
+        Assert.Equal(512, oversized.MaximumBytes);
+
         Assert.Contains("refused", RoundTrip(new PipelineRejectedException("refused")).Message, StringComparison.Ordinal);
         Assert.Contains("lost", RoundTrip(new PipelineRunLostException("lost")).Message, StringComparison.Ordinal);
     }

@@ -7,11 +7,17 @@ namespace Orleans.Dataflow.Hosting;
 /// </summary>
 /// <remarks>
 /// <para>
-/// A silo registers one factory per provider, and the factory is asked for every node whose stage
+/// A host registers one factory per provider, and the factory is asked for every node whose stage
 /// reference names that provider. That is one registration per vocabulary rather than one per stage, which
 /// is how a provider ships something coherent: its stages share a payload format, a connection, and a set
 /// of options, and a deployment that registered half of them would discover the other half missing at the
 /// first element rather than when the run is planned.
+/// </para>
+/// <para>
+/// One interface, two hosts. A silo registers a factory through
+/// <c>IOrleansDataflowBuilder.AddFactory</c> and an in-process host registers the same value through
+/// <see cref="ILocalDataflowBuilder.AddFactory"/>, so a provider writes its vocabulary once and it runs in
+/// either runtime.
 /// </para>
 /// <para>
 /// The catalog and the factory are separate on purpose (ADR 0001). A catalog says which stages exist and
@@ -42,6 +48,12 @@ public interface IDataflowStageFactory
     /// built has not started, and reporting that as a start failure is what lets a caller tell "this
     /// deployment cannot run this graph" from "this graph ran and went wrong".
     /// </para>
+    /// <para>
+    /// A junction is built from this same request, and the ports it is wired at come from
+    /// <see cref="DataflowStageRequest.Specification"/> rather than from anything the factory says: a
+    /// fan-out's legs and a fan-in's inputs are the specification's own output and input ports, in its own
+    /// canonical order, so a factory cannot disagree with the catalog entry that published it.
+    /// </para>
     /// </remarks>
     DataflowStageRuntime Create(DataflowStageRequest request);
 }
@@ -54,8 +66,8 @@ public interface IDataflowStageFactory
 /// payload.
 /// </param>
 /// <param name="Specification">
-/// The specification the node's stage reference resolved to in the silo's catalog, which is where the port
-/// names and the result contract are.
+/// The specification the node's stage reference resolved to in the host's catalog, which is where the port
+/// names, the port order, and the result contract are.
 /// </param>
 /// <remarks>
 /// Two values and no more. A factory receives no document, no sibling node, no run identity, and no

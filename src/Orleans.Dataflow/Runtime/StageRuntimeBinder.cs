@@ -59,6 +59,11 @@ internal sealed class StageRuntimeBinder
     /// When this method returns <see langword="true"/>, the executable form; otherwise
     /// <see langword="null"/>.
     /// </param>
+    /// <param name="specification">
+    /// When this method returns <see langword="true"/>, the specification the node's stage resolved to;
+    /// otherwise <see langword="null"/>. A junction's ports are read from it, so that what a junction is
+    /// wired at comes from the catalog that published the stage rather than from the factory that built it.
+    /// </param>
     /// <param name="refusal">
     /// When this method returns <see langword="false"/>, a lower-case sentence fragment saying which of
     /// the two lookups failed; otherwise <see langword="null"/>.
@@ -72,9 +77,11 @@ internal sealed class StageRuntimeBinder
     internal bool TryCreate(
         StageNode node,
         [MaybeNullWhen(false)] out StageRuntime runtime,
+        [MaybeNullWhen(false)] out StageSpecification specification,
         [MaybeNullWhen(true)] out string refusal)
     {
         runtime = null;
+        specification = null;
 
         if (_catalog is null)
         {
@@ -83,7 +90,7 @@ internal sealed class StageRuntimeBinder
             return false;
         }
 
-        if (!_catalog.TryGetSpecification(node.Stage, out StageSpecification? specification))
+        if (!_catalog.TryGetSpecification(node.Stage, out StageSpecification? resolved))
         {
             refusal = "that stage is not registered in this host's catalog, so nothing here could say what it does";
 
@@ -99,10 +106,11 @@ internal sealed class StageRuntimeBinder
             return false;
         }
 
-        runtime = factory.Create(new StageRuntimeRequest(node, specification)) ??
+        runtime = factory.Create(new StageRuntimeRequest(node, resolved!)) ??
             throw new InvalidOperationException(
                 $"The runtime factory registered for the provider '{node.Stage.Provider}' returned nothing for the node '{node.Id}', an occurrence of '{node.Stage}'. A factory either builds the stage or says why it cannot by throwing; a null runtime says neither.");
 
+        specification = resolved!;
         refusal = null;
 
         return true;

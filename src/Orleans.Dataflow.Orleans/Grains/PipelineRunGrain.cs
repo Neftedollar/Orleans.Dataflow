@@ -4,6 +4,7 @@ using Orleans.Dataflow.Hosting;
 using Orleans.Dataflow.Identity;
 using Orleans.Dataflow.Runtime;
 using Orleans.Dataflow.Serialization;
+using Orleans.Serialization;
 
 namespace Orleans.Dataflow.Grains;
 
@@ -23,7 +24,8 @@ namespace Orleans.Dataflow.Grains;
 /// during a long run and what keeps a graceful stop from parking a turn on a drain of unbounded length.
 /// </para>
 /// </remarks>
-internal sealed class PipelineRunGrain(DataflowSiloRegistry registry) : Grain, IPipelineRunGrain
+internal sealed class PipelineRunGrain(DataflowSiloRegistry registry, Serializer serializer)
+    : Grain, IPipelineRunGrain
 {
     private LocalRun? _run;
     private long _epoch;
@@ -122,6 +124,18 @@ internal sealed class PipelineRunGrain(DataflowSiloRegistry registry) : Grain, I
         // not the place to discover that an invariant moved.
         if (status.Phase is RunPhase.Completed && resolved.IsCompletedSuccessfully)
         {
+            // The cap is enforced here, at envelope creation, and it refuses the slot rather than the run.
+            // The run has already ended successfully; reading one of its results is not an event in its
+            // life, so an oversized result leaves the run completed, leaves its other results resolvable,
+            // and fails this read by name. Measuring before the value is put on the envelope is what keeps
+            // the bytes from crossing the wire at all, which is the whole point of having a bound.
+            long bytes = ResultSizeMeter.Measure(serializer, resolved.Result);
+
+            if (bytes > registry.MaximumResultBytes)
+            {
+                throw new ResultTooLargeException(slotName, bytes, registry.MaximumResultBytes);
+            }
+
             envelope.HasValue = true;
             envelope.Value = resolved.Result;
         }

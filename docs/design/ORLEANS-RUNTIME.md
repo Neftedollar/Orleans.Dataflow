@@ -2,7 +2,8 @@
 
 - Status: M3 architecture; phases 1-3 and 4a are implemented, and 4b's
   delivery-registry half — the broadcast source — is implemented and documented
-  below; 4b's failover half is tracked separately
+  below; 4b's failover half is tracked separately. M4.5 added the result-size
+  cap and moved the provider seam into the core package, both recorded below
 - Depends on: [ORLEANS-NOTES.md](ORLEANS-NOTES.md) (verified Orleans 10
   facts), [REGISTERED-STAGES.md](REGISTERED-STAGES.md),
   [LOCAL-RUNTIME.md](LOCAL-RUNTIME.md), ADRs 0001-0004
@@ -57,6 +58,15 @@ binding-table-backed factory (local-only); Orleans stages are the first
 REAL registered providers — which is why the seam lands here and the M4
 provider SDK formalizes what M3 proves.
 
+**Formalized in M4.5**: the public mirror this package shipped for silos —
+`IDataflowStageFactory`, `DataflowStageRequest`, `DataflowStageRuntime`,
+`DataflowRunTokens` — moved into the core package under the same names in the
+same namespace, so one seam now serves a silo and a `LocalDataflowHost` alike
+and a provider that never references Orleans can still write a factory. The
+shapes grew by two, both of them engine primitives that already existed: a
+fan-out and a fan-in, so a provider can register a junction. See
+[REGISTERED-STAGES.md](REGISTERED-STAGES.md).
+
 Elements crossing grain or stream boundaries are the author's types and
 must satisfy Orleans serialization (`[GenerateSerializer]`/`[Id]` or
 registered serializers) — a documented requirement checked at first use,
@@ -97,8 +107,10 @@ uses a mailbox as an unbounded buffer.
   epoch against a live run; `PipelineRunLostException` for an attempt that
   no longer exists — absence is not staleness.
 - **Registered sources receive both tokens** (run and stop), so drain and
-  abandon stay distinguishable across the seam; the factory mirror in the
-  Orleans package is public while the engine seam stays internal.
+  abandon stay distinguishable across the seam; the public factory mirror is
+  public while the engine seam stays internal. (The mirror shipped here in
+  phase 1 and moved to the core package in M4.5, unchanged in name and
+  namespace, so that one seam serves both hosts.)
 - **Grain turns never park**: status and result calls answer "not yet"
   rather than await; shutdown and cancel request rather than drain; the
   engine's dedicated threads do the waiting.
@@ -367,6 +379,40 @@ uses a mailbox as an unbounded buffer.
   activated on one silo reaches a run executing on another, only that the addresses
   agree and that a lost receiver is forgotten.
 
+## M4.5 — as implemented (the result-size cap, and what made it testable)
+
+- **The cap is a silo's option with a default that is not "unbounded".**
+  `LimitResultSize(bytes)` on the silo builder, defaulting to one mebibyte. The
+  reasoning and the enforcement point are in open question 2 above, which this
+  closed; what belongs here is the shape: the run grain measures the value where
+  it builds the envelope, and `ResultTooLargeException` carries the slot, the
+  measured size, and the bound.
+- **Measured, not estimated, and not materialized.** The value is serialized
+  through a counting buffer writer, so the exact wire size is known and the bytes
+  of an oversized result are never collected — a cap that had to build the array
+  before refusing it would allocate the very thing it exists to prevent. The
+  measurement is one serialization of a value about to be serialized again,
+  which is a stated cost paid per read of one slot.
+- **The run is not an event's worth different for having been read.** An
+  oversized result leaves the run `Completed`, leaves its completion successful,
+  leaves its other slots resolvable, and refuses the same way on every later
+  read. Faulting the run instead would rewrite history on a read; refusing at the
+  client would mean the bytes had already crossed.
+- **A branching pipeline is what made the second claim provable.** Two results
+  from one run — one inside the bound, one past it — needs a multi-result
+  deployable document, and until a junction could be registered no such document
+  existed. So the same milestone that opened junction registration is the one
+  that could test the cap properly, and the capability matrix's "the distributed
+  half is not proven and cannot be yet" note on named multiple results is lifted
+  by the same tests.
+- **M4.5 limits, stated**: the cap is checked where a result is read and nowhere
+  else, so a run may accumulate a result far larger than the bound and only learn
+  of it at the read — the bound is on what crosses the wire and not on what a
+  terminal may hold. It is a silo's, so two silos may disagree about one document
+  and nothing reconciles them. And these remain single-silo tests: nothing here
+  proves anything about the cap under placement or failover, only that the number
+  a deployment wrote is the number the grain applied.
+
 ## Phasing
 
 1. **Hosting + coordinator + run grain** — DI registration, the
@@ -399,11 +445,34 @@ uses a mailbox as an unbounded buffer.
    an undelivered poll is retried rather than surfaced, because silence is
    not a fact about the run — while an observer push channel remains
    unbuilt and moves to M4+ with the rest of this question.
-2. Whether the run grain streams large results or caps result-slot payload
-   sizes (Collect over a cluster is a foot-gun; a cap with a named error is
-   the likely answer). **Carried past M3 deliberately**: no cap exists yet
-   and the foot-gun stands; M4's operator breadth (Collect-like terminals)
-   is where the answer becomes unavoidable.
+2. ~~Whether the run grain streams large results or caps result-slot payload
+   sizes~~ **Answered in M4.5, and the likely answer was the answer: a cap with
+   a named error.** Not streaming — a result is one value a slot resolves, and
+   chunking it would make every caller reassemble something the definition plane
+   never described as a sequence. `LimitResultSize(bytes)` on the silo builder,
+   defaulting to **one mebibyte**, which is comfortably above every result this
+   library's own vocabulary produces (a fold's state, a first or last element, a
+   count) and comfortably below the size at which one Orleans message is a
+   problem for the cluster rather than for the caller. It is a bound rather than
+   an absence because the failure it prevents has no good spelling, and it is a
+   *silo's* rather than a pipeline's because how much a host will put on one
+   message is a property of the deployment and its network — two silos with
+   different limits accept the same document and disagree about what it may
+   return, which is the same deployment-scoped honesty the binding registry has
+   carried since phase 2.
+   **Enforced at envelope creation, on the grain side, and only the slot fails.**
+   The size is exact rather than estimated: the value is serialized through a
+   writer that counts and discards, so an oversized result is refused without
+   ever being materialized as bytes, let alone sent. What it costs is one
+   serialization of a value that is about to be serialized again, paid once per
+   read of one slot and never per element. The run itself is untouched — it has
+   already ended successfully, reading a result is not an event in its life, and
+   its other slots resolve normally — so `ResultTooLargeException` carries the
+   slot, the measured size, and the bound, and is not a codec error, not a
+   faulted run, and not a poll that never answers. Proved on a branching
+   pipeline whose two legs declare two results, one inside the bound and one
+   past it, which is a document a cluster could not have been handed before the
+   same milestone made a junction registrable.
 3. ~~The exact credit protocol wire shape for phase 4 (grant-on-reply versus
    explicit credit messages)~~ **Resolved by probe (phase 4a)**: grant-on-reply,
    in its strongest form — the reply *is* the grant and there is no credit
@@ -419,9 +488,27 @@ uses a mailbox as an unbounded buffer.
    phase 3 before any contract claims it (memory-stream rewindability
    resolved: true; rewind stays unexposed until a checkpoint/cursor story
    exists to consume it).
-5. Per-occurrence port contracts in the definition model — escalated by
-   phase 2: fixed stage ids mean one element contract per adapter port, so
-   typed seams need the explicit opaque-contract escape hatch today; lifting
-   that means the definition model letting an occurrence override its
-   specification's port contracts, a change owned by the definition plane
-   (considered with M4's provider SDK), not by adapters.
+5. ~~Per-occurrence port contracts in the definition model~~ **Closed in M4.5,
+   and closed by not doing it.** The escalation was that fixed stage ids mean
+   one element contract per adapter port, so a typed seam needs the explicit
+   opaque-contract escape hatch; the proposed lift was to let an occurrence
+   override its specification's port contracts. M4.5's multi-port registered
+   stages answer the question the escalation was really asking — *can a provider
+   express a branching pipeline with real contracts on every port?* — and the
+   answer is yes with the definition model exactly as it is: a registered
+   junction's every port carries the provider's own contract, checked port by
+   port at handle creation and edge by edge by the graph compiler, and a
+   deployable branching pipeline needs no override anywhere.
+   **A provider that wants a junction over other contracts registers another
+   specification**, which is cheap, and that is the whole of the replacement.
+   The alternative was expensive in a way worth stating: an occurrence that
+   overrode its stage's port contracts would make a specification a default
+   rather than a contract, would make two documents naming one stage describe
+   two different stages, and would put the burden of noticing on whoever reads
+   the document rather than on whoever registered the stage. What remains true
+   and is unchanged is the adapters' own case: an `orleans/*` adapter port
+   declares `orleans-element@v1` because a fixed stage id has one contract, so a
+   typed seam to one still needs `OrleansStages.Element<T>()`. That is a
+   property of those particular stage ids, not of the definition model, and the
+   fix for it — if it is ever wanted — is more stage ids rather than fewer
+   contracts.

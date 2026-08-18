@@ -183,4 +183,57 @@ public interface IOrleansDataflowBuilder
     /// it twice to run one document in two runtimes.
     /// </remarks>
     IOrleansDataflowBuilder AddObservable<T>(ObservableBinding<T> source);
+
+    /// <summary>States the largest result this silo will send across a grain boundary.</summary>
+    /// <param name="maximumBytes">
+    /// The bound, in bytes, measured on the value's Orleans-serialized form; at least one.
+    /// </param>
+    /// <returns>This builder, so registrations chain.</returns>
+    /// <exception cref="ArgumentOutOfRangeException"><paramref name="maximumBytes"/> is below one.</exception>
+    /// <remarks>
+    /// <para>
+    /// The default is <see cref="OrleansDataflowResults.DefaultMaximumResultBytes"/> — one mebibyte — and it
+    /// is a cap rather than an absence because the failure it prevents has no good spelling: a
+    /// <c>Collect</c> over a cluster produces a result whose size nothing in the document bounds, and what a
+    /// caller meets without a cap is a codec error, a transport failure, or a poll that never answers. A
+    /// deployment that genuinely moves larger results raises the bound here and does so on purpose.
+    /// </para>
+    /// <para>
+    /// The bound is a silo's, not a pipeline's, and that is deliberate: how much a host is willing to put on
+    /// one message is a property of the deployment and its network, and putting it in a document would make
+    /// two silos with different limits accept the same graph and disagree about what it may return. That
+    /// disagreement is the same deployment-scoped honesty the binding registry has carried since phase 2.
+    /// </para>
+    /// <para>
+    /// Calling this replaces whatever a previous call said rather than adding to it, because a silo has one
+    /// bound.
+    /// </para>
+    /// </remarks>
+    IOrleansDataflowBuilder LimitResultSize(int maximumBytes);
+}
+
+/// <summary>
+/// What a silo does with a result that is too large to send.
+/// </summary>
+/// <remarks>
+/// The constants of the result-size cap, in one place so that a deployment reading the default and the code
+/// applying it are reading the same number.
+/// </remarks>
+public static class OrleansDataflowResults
+{
+    /// <summary>The largest result a silo sends unless a deployment says otherwise.</summary>
+    /// <value>One mebibyte, in bytes.</value>
+    /// <remarks>
+    /// <para>
+    /// Chosen to be comfortably larger than every result this library's own vocabulary produces — a fold's
+    /// state, a first or last element, a count — and comfortably smaller than the sizes at which a single
+    /// Orleans message becomes a problem for the cluster rather than for the caller. A result at this size
+    /// is already a design smell; a result an order of magnitude past it is the foot-gun.
+    /// </para>
+    /// <para>
+    /// It is a number rather than "unbounded" because the failure a missing cap produces is unnamed, and
+    /// because a default nobody chose is the one every deployment inherits.
+    /// </para>
+    /// </remarks>
+    public const int DefaultMaximumResultBytes = 1024 * 1024;
 }

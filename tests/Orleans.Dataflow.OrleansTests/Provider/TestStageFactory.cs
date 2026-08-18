@@ -95,6 +95,27 @@ internal sealed class TestStageFactory : IDataflowStageFactory
                 $"the test provider refuses to build '{node.Id}', which is what a provider does when a stage of its own vocabulary is one this build does not implement");
         }
 
+        if (node.Stage == TestVocabulary.Split)
+        {
+            // A registered junction, built from the same seam every other stage of this provider is built
+            // from. What it does is this provider's; where its legs go is the document's; what its ports are
+            // called is the catalog's.
+            return DataflowStageRuntime.Broadcast();
+        }
+
+        if (node.Stage == TestVocabulary.Bulk)
+        {
+            int bytes = BulkBytes(node);
+
+            // A seed factory, so the block is this run's own: a result handed over as a shared array would
+            // be one buffer two runs both claimed to have produced.
+            return DataflowStageRuntime.Terminal(
+                () => new byte[bytes],
+                static (state, _) => state,
+                finish: null,
+                producesResult: true);
+        }
+
         if (node.Stage == TestVocabulary.Sum)
         {
             return DataflowStageRuntime.Terminal(
@@ -151,6 +172,25 @@ internal sealed class TestStageFactory : IDataflowStageFactory
         {
             yield break;
         }
+    }
+
+    /// <summary>Reads how many bytes the bulk sink was asked to produce.</summary>
+    /// <param name="node">The node as the document declares it.</param>
+    /// <returns>The size of the result, in bytes.</returns>
+    private static int BulkBytes(StageNode node)
+    {
+        CanonicalJsonValue parameters = node.Parameters;
+
+        if (parameters.IsDefault ||
+            parameters.ToElement().ValueKind is not JsonValueKind.Object ||
+            !parameters.ToElement().TryGetProperty(TestBulkParameters.BytesMember, out JsonElement bytes) ||
+            !bytes.TryGetInt32(out int size))
+        {
+            throw new InvalidOperationException(
+                $"The bulk sink '{node.Id}' carries parameters this provider cannot read.");
+        }
+
+        return size;
     }
 
     /// <summary>Reads which element the failing flow was asked to fail at.</summary>
