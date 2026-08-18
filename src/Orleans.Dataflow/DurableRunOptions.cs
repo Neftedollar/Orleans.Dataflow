@@ -42,9 +42,12 @@ public sealed class DurableRunOptions
     /// <remarks>
     /// A resume presents the same identity, because resume is the same run continuing rather than a second
     /// run reading the first one's notes. Two concurrent runs under one identity are two writers of one
-    /// document, and the store's ETag is what refuses the second of them.
+    /// document, and the store's ETag is what refuses the second of them. The Orleans host's
+    /// <c>DurablePipelineOptions.RunId</c> is this member at the deployment edge: the same name and the
+    /// same concept, spelled as text there because the client surface takes strings and validates, and as
+    /// the typed identity here because the engine deals in identities.
     /// </remarks>
-    public required RunId Run { get; init; }
+    public required RunId RunId { get; init; }
 
     /// <summary>Gets how long the run goes between checkpoints.</summary>
     /// <value>

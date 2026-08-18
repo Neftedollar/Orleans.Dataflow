@@ -27,8 +27,11 @@ cannot honor it on another; the refusal a run then gets names exactly this.
 that shirks any of them turns at-least-once into silent loss:
 
 - **`WriteAsync` is atomic per document.** A reader never observes a torn
-  checkpoint: it sees the previous document or the new one, whole. The crash
-  suite kills writers mid-write to hold this.
+  checkpoint: it sees the previous document or the new one, whole. This is
+  the one duty no test can hold for you — the suite's store lives in the
+  test process and cannot be torn by a silo dying (the recorded M5.3
+  limit) — so the contract states it and your store implementation carries
+  it.
 - **`WriteAsync` is a compare-and-swap on the ETag.** A write presenting a
   stale ETag throws `CheckpointConflictException`, and that refusal is load
   bearing: it is how a superseded attempt — a zombie writer on a silo the

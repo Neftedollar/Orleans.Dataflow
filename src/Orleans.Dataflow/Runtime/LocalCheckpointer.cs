@@ -97,7 +97,7 @@ internal sealed class LocalCheckpointer
         _clock = clock;
         _store = options.Store;
         _graph = graph;
-        _run = options.Run;
+        _run = options.RunId;
         _fingerprint = fingerprint;
         _revision = revision;
         _interval = options.Interval;

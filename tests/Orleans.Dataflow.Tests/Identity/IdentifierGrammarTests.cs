@@ -56,7 +56,6 @@ public sealed class IdentifierGrammarTests
         Assert.Equal(Segment, ResultSlotId.Create(Segment).Value);
         Assert.Equal(Segment, ContractId.Create(Segment).Value);
         Assert.Equal(Segment, RunId.Create(Segment).Value);
-        Assert.Equal(Segment, AttemptId.Create(Segment).Value);
         Assert.Equal(Segment, NodeId.Create(Segment).Value);
     }
 
@@ -72,7 +71,6 @@ public sealed class IdentifierGrammarTests
         Assert.False(ResultSlotId.TryCreate(Segment, out _));
         Assert.False(ContractId.TryCreate(Segment, out _));
         Assert.False(RunId.TryCreate(Segment, out _));
-        Assert.False(AttemptId.TryCreate(Segment, out _));
         Assert.False(NodeId.TryParse(Segment, out _));
     }
 

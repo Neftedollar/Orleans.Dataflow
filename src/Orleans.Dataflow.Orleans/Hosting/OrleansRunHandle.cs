@@ -21,6 +21,14 @@ namespace Orleans.Dataflow.Hosting;
 /// identities and two epochs, both alive at once, and each handle answers only for its own.
 /// </para>
 /// <para>
+/// <b>There is no pause on this handle, and that is a recorded decision rather than a hole.</b> The engine
+/// a grain hosts pauses — checkpoint capture uses that very machinery — so the gap is not network-imposed;
+/// what is missing is the design a remote pause owes: an epoch-fenced pause/resume protocol, a decided
+/// answer to what a pause means across an activation death (is a resumed durable run born paused?), and a
+/// poll-honest <c>IsPaused</c> reading. Deferring it whole was chosen over shipping a lossy version, and
+/// ORLEANS-RUNTIME.md records the deferral.
+/// </para>
+/// <para>
 /// <b>Threading.</b> Every member is safe to call from any thread at any point in the run's life.
 /// <see cref="Completion"/> is one task shared by every caller, so two callers awaiting it observe one
 /// outcome and the run is polled once however many are watching.
@@ -337,7 +345,10 @@ public sealed class OrleansRunHandle : IAsyncDisposable
     /// aggregate resolves its slot with the state accumulated so far and <see cref="Completion"/> reports
     /// success. The returned task reports only that the request was delivered; that the drain has finished
     /// is what <see cref="Completion"/> reports, and awaiting the drain inside a grain call would park an
-    /// activation for as long as the graph takes.
+    /// activation for as long as the graph takes. It returns <see cref="Task"/> where the local handle's
+    /// returns <see cref="ValueTask"/>, and the asymmetry is deliberate: this method is a grain call and a
+    /// grain call is a <see cref="Task"/>, while the local one completes synchronously often enough for the
+    /// cheaper shape to be worth having.
     /// </remarks>
     public async Task ShutdownAsync()
     {

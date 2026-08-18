@@ -42,7 +42,7 @@ public interface IDataflowPushReceiver : IGrainObserver
 /// </summary>
 /// <remarks>
 /// The wire form of the engine's own offer outcome, and deliberately a separate type: the engine's is an
-/// internal runtime value and this one is part of a grain contract that has to stay stable across a hop.
+/// engine's own public value and this one is part of a grain contract that has to stay stable across a hop.
 /// The four cases are the four states an ingress can be in, and none of them is an exception — a producer
 /// that had to tell them apart from <c>catch</c> blocks would be writing its control flow in the wrong
 /// construct.

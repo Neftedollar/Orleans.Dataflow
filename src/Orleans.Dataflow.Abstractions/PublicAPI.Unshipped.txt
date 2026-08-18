@@ -115,12 +115,6 @@ Orleans.Dataflow.Definition.StageSpecification.ParameterValidator.get -> Orleans
 Orleans.Dataflow.Definition.StageSpecification.RequiredCapabilities.get -> System.Collections.Generic.IReadOnlyList<Orleans.Dataflow.Definition.CapabilityToken>!
 Orleans.Dataflow.Definition.StageSpecification.ResultPorts.get -> System.Collections.Generic.IReadOnlyList<Orleans.Dataflow.Definition.ResultPortSpecification>!
 Orleans.Dataflow.Definition.StageSpecification.Stage.get -> Orleans.Dataflow.Identity.StageRef
-Orleans.Dataflow.Identity.AttemptId
-Orleans.Dataflow.Identity.AttemptId.AttemptId() -> void
-Orleans.Dataflow.Identity.AttemptId.CompareTo(Orleans.Dataflow.Identity.AttemptId other) -> int
-Orleans.Dataflow.Identity.AttemptId.Equals(Orleans.Dataflow.Identity.AttemptId other) -> bool
-Orleans.Dataflow.Identity.AttemptId.IsDefault.get -> bool
-Orleans.Dataflow.Identity.AttemptId.Value.get -> string!
 Orleans.Dataflow.Identity.ContractId
 Orleans.Dataflow.Identity.ContractId.CompareTo(Orleans.Dataflow.Identity.ContractId other) -> int
 Orleans.Dataflow.Identity.ContractId.ContractId() -> void
@@ -239,8 +233,6 @@ override Orleans.Dataflow.Definition.StageNode.ToString() -> string!
 override Orleans.Dataflow.Definition.StageSpecification.Equals(object? obj) -> bool
 override Orleans.Dataflow.Definition.StageSpecification.GetHashCode() -> int
 override Orleans.Dataflow.Definition.StageSpecification.ToString() -> string!
-override Orleans.Dataflow.Identity.AttemptId.GetHashCode() -> int
-override Orleans.Dataflow.Identity.AttemptId.ToString() -> string!
 override Orleans.Dataflow.Identity.ContractId.GetHashCode() -> int
 override Orleans.Dataflow.Identity.ContractId.ToString() -> string!
 override Orleans.Dataflow.Identity.ContractReference.GetHashCode() -> int
@@ -338,14 +330,6 @@ static Orleans.Dataflow.Definition.StageSpecification.Create(Orleans.Dataflow.Id
 static Orleans.Dataflow.Definition.StageSpecification.Create(Orleans.Dataflow.Identity.StageRef stage, System.Collections.Generic.IEnumerable<Orleans.Dataflow.Definition.InputPortSpecification>! inputPorts, System.Collections.Generic.IEnumerable<Orleans.Dataflow.Definition.OutputPortSpecification>! outputPorts, System.Collections.Generic.IEnumerable<Orleans.Dataflow.Definition.ResultPortSpecification>! resultPorts, Orleans.Dataflow.Identity.ContractReference parameterContract, System.Collections.Generic.IEnumerable<Orleans.Dataflow.Definition.CapabilityToken>! requiredCapabilities, Orleans.Dataflow.Definition.IStageParameterValidator! parameterValidator) -> Orleans.Dataflow.Definition.StageSpecification!
 static Orleans.Dataflow.Definition.StageSpecification.operator !=(Orleans.Dataflow.Definition.StageSpecification? left, Orleans.Dataflow.Definition.StageSpecification? right) -> bool
 static Orleans.Dataflow.Definition.StageSpecification.operator ==(Orleans.Dataflow.Definition.StageSpecification? left, Orleans.Dataflow.Definition.StageSpecification? right) -> bool
-static Orleans.Dataflow.Identity.AttemptId.Create(string! value) -> Orleans.Dataflow.Identity.AttemptId
-static Orleans.Dataflow.Identity.AttemptId.operator !=(Orleans.Dataflow.Identity.AttemptId left, Orleans.Dataflow.Identity.AttemptId right) -> bool
-static Orleans.Dataflow.Identity.AttemptId.operator <(Orleans.Dataflow.Identity.AttemptId left, Orleans.Dataflow.Identity.AttemptId right) -> bool
-static Orleans.Dataflow.Identity.AttemptId.operator <=(Orleans.Dataflow.Identity.AttemptId left, Orleans.Dataflow.Identity.AttemptId right) -> bool
-static Orleans.Dataflow.Identity.AttemptId.operator ==(Orleans.Dataflow.Identity.AttemptId left, Orleans.Dataflow.Identity.AttemptId right) -> bool
-static Orleans.Dataflow.Identity.AttemptId.operator >(Orleans.Dataflow.Identity.AttemptId left, Orleans.Dataflow.Identity.AttemptId right) -> bool
-static Orleans.Dataflow.Identity.AttemptId.operator >=(Orleans.Dataflow.Identity.AttemptId left, Orleans.Dataflow.Identity.AttemptId right) -> bool
-static Orleans.Dataflow.Identity.AttemptId.TryCreate(string? value, out Orleans.Dataflow.Identity.AttemptId identifier) -> bool
 static Orleans.Dataflow.Identity.ContractId.Create(string! value) -> Orleans.Dataflow.Identity.ContractId
 static Orleans.Dataflow.Identity.ContractId.operator !=(Orleans.Dataflow.Identity.ContractId left, Orleans.Dataflow.Identity.ContractId right) -> bool
 static Orleans.Dataflow.Identity.ContractId.operator <(Orleans.Dataflow.Identity.ContractId left, Orleans.Dataflow.Identity.ContractId right) -> bool
@@ -455,7 +439,6 @@ static Orleans.Dataflow.Serialization.StageCatalogSerializer.Serialize(Orleans.D
 ~override Orleans.Dataflow.Definition.OutputPortSpecification.Equals(object obj) -> bool
 ~override Orleans.Dataflow.Definition.PortAddress.Equals(object obj) -> bool
 ~override Orleans.Dataflow.Definition.ResultPortSpecification.Equals(object obj) -> bool
-~override Orleans.Dataflow.Identity.AttemptId.Equals(object obj) -> bool
 ~override Orleans.Dataflow.Identity.ContractId.Equals(object obj) -> bool
 ~override Orleans.Dataflow.Identity.ContractReference.Equals(object obj) -> bool
 ~override Orleans.Dataflow.Identity.GraphId.Equals(object obj) -> bool

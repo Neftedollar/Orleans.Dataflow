@@ -338,10 +338,10 @@ internal static class LocalOptionGuard
                 parameterName);
         }
 
-        if (options.Run.IsDefault)
+        if (options.RunId.IsDefault)
         {
             throw new ArgumentException(
-                $"A durable run is named by whoever will resume it, and {nameof(DurableRunOptions.Run)} is the default value. Give the run an identity a resume can present back.",
+                $"A durable run is named by whoever will resume it, and {nameof(DurableRunOptions.RunId)} is the default value. Give the run an identity a resume can present back.",
                 parameterName);
         }
 

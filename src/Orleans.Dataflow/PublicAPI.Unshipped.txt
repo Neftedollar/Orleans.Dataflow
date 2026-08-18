@@ -53,8 +53,8 @@ Orleans.Dataflow.DurableRunOptions.EveryElements.get -> int?
 Orleans.Dataflow.DurableRunOptions.EveryElements.init -> void
 Orleans.Dataflow.DurableRunOptions.Interval.get -> System.TimeSpan?
 Orleans.Dataflow.DurableRunOptions.Interval.init -> void
-Orleans.Dataflow.DurableRunOptions.Run.get -> Orleans.Dataflow.Identity.RunId
-Orleans.Dataflow.DurableRunOptions.Run.init -> void
+Orleans.Dataflow.DurableRunOptions.RunId.get -> Orleans.Dataflow.Identity.RunId
+Orleans.Dataflow.DurableRunOptions.RunId.init -> void
 Orleans.Dataflow.DurableRunOptions.Store.get -> Orleans.Dataflow.Hosting.ICheckpointStore!
 Orleans.Dataflow.DurableRunOptions.Store.init -> void
 Orleans.Dataflow.ElementContract

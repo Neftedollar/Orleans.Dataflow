@@ -942,7 +942,7 @@ the local section states.
   `DroppedElements` under-reports for the adapters that keep a private
   ingress (stream, broadcast, observer, reminder): their queues count drops
   inside the adapter, and no seam folds those into the run's counter yet
-  (verified by measurement — two dropped pushes, a reading of zero). Both are
+  (measured once during M5.5 — two dropped pushes, a reading of zero — and deliberately not pinned by a test, because a passing test would enshrine the under-report as the correct number). Both are
   recorded deferrals, stated on the snapshot type itself.
 - **The ended counter counts attempts a client or silo process observed
   ending.** A run whose ending happened and whose process died before Settle
@@ -952,6 +952,16 @@ the local section states.
   and the wire adds one hop of staleness the local reading does not have.
 - **No per-scope counters travel**, because none exist: the M5.1 deferral is
   visible in the wire type on purpose.
+- **The remote handle has no pause, and the M6 review made this a recorded
+  decision** (it had been an undocumented asymmetry). The engine a grain
+  hosts pauses — checkpoint capture is that machinery — so nothing about the
+  network forbids it; what a remote pause owes before it ships is design: an
+  epoch-fenced pause/resume protocol with the same adopt-and-retry
+  discipline every other control call has, a decided answer to a pause
+  meeting an activation death (a resumed durable run born paused, or
+  released by the resume?), and an `IsPaused` that is honest about being one
+  poll stale. Deferring the affordance whole was chosen over shipping a
+  lossy version of it.
 
 ## Phasing
 

@@ -35,7 +35,9 @@ public sealed class DurablePipelineOptions
     /// The grammar is the runtime's ordinary identifier grammar, and a value outside it is refused by the
     /// silo rather than accepted and then unaddressable. A name that means something to the deployment —
     /// the tenant, the day, the shard — is exactly the point: whoever resumes the run has to be able to
-    /// write the name down.
+    /// write the name down. This is the local <c>DurableRunOptions.RunId</c> at the deployment edge: the
+    /// same name and the same concept, spelled as text here because the client surface takes strings and
+    /// validates, and as the typed identity there because the engine deals in identities.
     /// </remarks>
     public required string RunId { get; init; }
 

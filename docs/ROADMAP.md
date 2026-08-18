@@ -201,7 +201,30 @@ Exit criteria:
 - no global exactly-once claim exists; stronger guarantees are adapter-specific and evidenced;
 - state reset and durable-state survival are explicit for every restart form.
 
-## M6 — C# completion gate
+## M6 — C# completion gate (passed 2026-08-18)
+
+The review was independent in the strong sense: a fresh-context reviewer
+with no authorship of any line, briefed on the criteria and the recorded
+deferrals, with instructions to verify claims by code rather than by
+reading. Verdict: **GATE PASSES** — all seven criteria confirmed, zero
+blocking or major findings, five minor findings and three nits, every one
+doc-sized or one-type-sized and every one fixed in the gate-closure
+commit: OPERATIONS.md no longer implies the crash suite exercises a real
+store's write atomicity (it cannot — the recorded M5.3 limit); the remote
+handle's missing pause is now a recorded decision with the design it owes
+named, instead of an undocumented asymmetry; the dead public identity type
+`AttemptId` (spelled `long Epoch` everywhere real) is deleted;
+three matrix rows that lagged shipped code (ignore/completion, fold,
+deterministic inspection) advanced with evidence; the "verified by
+measurement" wording on the adapter-ingress deferral now says what is and
+is not regression-guarded and why; `DurableRunOptions.Run` is renamed
+`RunId` to mirror the Orleans option, with the typed-core/string-edge
+correspondence stated on both members; and the `ValueTask`/`Task` shutdown
+asymmetry is documented as deliberate. The reviewer's own not-proven list
+is part of the record: two suite passes are not a soak (M5's closure soak
+is the soak), the checkpoint store contract is held by contract not by a
+real backend, in-process silo kills self-announce, and F# consumability is
+reviewed by reading until M7's compile tests consume it.
 
 An independent review must confirm:
 

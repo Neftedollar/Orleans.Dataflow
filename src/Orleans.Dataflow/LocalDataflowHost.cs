@@ -204,7 +204,7 @@ public sealed class LocalDataflowHost
     /// <paramref name="graph"/> or <paramref name="durable"/> is <see langword="null"/>.
     /// </exception>
     /// <exception cref="ArgumentException">
-    /// <see cref="DurableRunOptions.Run"/> is the default value, <see cref="DurableRunOptions.Interval"/> is
+    /// <see cref="DurableRunOptions.RunId"/> is the default value, <see cref="DurableRunOptions.Interval"/> is
     /// not positive, or <see cref="DurableRunOptions.EveryElements"/> is not at least one.
     /// </exception>
     /// <exception cref="InvalidOperationException">The graph does not validate, or is not one this runtime executes.</exception>
@@ -297,10 +297,10 @@ public sealed class LocalDataflowHost
         LocalOptionGuard.Durable(durable, nameof(durable));
 
         StoredCheckpoint stored = await durable.Store
-            .ReadAsync(graph.Document.Id, durable.Run, cancellationToken)
+            .ReadAsync(graph.Document.Id, durable.RunId, cancellationToken)
             .ConfigureAwait(false) ??
             throw new InvalidOperationException(
-                $"The checkpoint store holds nothing for the run '{durable.Run}' of the graph '{graph.Document.Id}', so there is no run to continue. A run reaches its first checkpoint only once its declared timing has made one due; a run that crashed before that resumes by being started fresh.");
+                $"The checkpoint store holds nothing for the run '{durable.RunId}' of the graph '{graph.Document.Id}', so there is no run to continue. A run reaches its first checkpoint only once its declared timing has made one due; a run that crashed before that resumes by being started fresh.");
 
         if (!LocalCheckpointDocument.TryRead(
             stored.Document,
@@ -308,19 +308,19 @@ public sealed class LocalDataflowHost
             out IReadOnlyList<string> violations))
         {
             throw new InvalidOperationException(
-                $"The checkpoint stored for the run '{durable.Run}' of the graph '{graph.Document.Id}' is not one this runtime can read: {string.Join("; ", violations)}.");
+                $"The checkpoint stored for the run '{durable.RunId}' of the graph '{graph.Document.Id}' is not one this runtime can read: {string.Join("; ", violations)}.");
         }
 
         if (checkpoint!.Graph != graph.Fingerprint)
         {
             throw new InvalidOperationException(
-                $"The checkpoint stored for the run '{durable.Run}' was taken of the graph {checkpoint.Graph} and this is a run of {graph.Fingerprint}. A resume continues the very graph the checkpoint describes: v1 resumes at the same revision only, and migrating a checkpoint across a changed document is a recorded deferral rather than something this host will guess at.");
+                $"The checkpoint stored for the run '{durable.RunId}' was taken of the graph {checkpoint.Graph} and this is a run of {graph.Fingerprint}. A resume continues the very graph the checkpoint describes: v1 resumes at the same revision only, and migrating a checkpoint across a changed document is a recorded deferral rather than something this host will guess at.");
         }
 
         if (checkpoint.Revision != graph.Document.Revision)
         {
             throw new InvalidOperationException(
-                $"The checkpoint stored for the run '{durable.Run}' was taken at revision {checkpoint.Revision} and this graph is revision {graph.Document.Revision}. A resume continues the same revision; cross-revision migration is a recorded deferral.");
+                $"The checkpoint stored for the run '{durable.RunId}' was taken at revision {checkpoint.Revision} and this graph is revision {graph.Document.Revision}. A resume continues the same revision; cross-revision migration is a recorded deferral.");
         }
 
         return Start(graph, durable, checkpoint, stored.ETag, cancellationToken);
@@ -354,7 +354,7 @@ public sealed class LocalDataflowHost
             throw new InvalidOperationException(Describe(report));
         }
 
-        LocalRunPlan plan = LocalRunPlanner.Compile(graph, _binder, durable.Run.Value, _clock);
+        LocalRunPlan plan = LocalRunPlanner.Compile(graph, _binder, durable.RunId.Value, _clock);
 
         if (checkpoint is not null)
         {

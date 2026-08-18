@@ -334,10 +334,10 @@ public sealed class DurableRunTests
         ArgumentException refused = await Assert.ThrowsAsync<ArgumentException>(
             async () => await Host.MaterializeDurableAsync(
                 graph,
-                new DurableRunOptions { Store = store, Run = default, EveryElements = 1 },
+                new DurableRunOptions { Store = store, RunId = default, EveryElements = 1 },
                 TestToken));
 
-        Assert.Contains(nameof(DurableRunOptions.Run), refused.Message, StringComparison.Ordinal);
+        Assert.Contains(nameof(DurableRunOptions.RunId), refused.Message, StringComparison.Ordinal);
     }
 
     [Fact]

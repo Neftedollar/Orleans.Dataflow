@@ -60,7 +60,7 @@ internal static class DurableFixtures
         new()
         {
             Store = store,
-            Run = RunId.Create(run),
+            RunId = RunId.Create(run),
             EveryElements = everyElements,
             Interval = interval,
         };

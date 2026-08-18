@@ -554,7 +554,7 @@ internal sealed class PipelineRunGrain(DataflowSiloRegistry registry, Serializer
                 new DurableRunOptions
                 {
                     Store = store,
-                    Run = _identity,
+                    RunId = _identity,
                     Interval = claim.Interval,
                     EveryElements = claim.EveryElements,
                 },
