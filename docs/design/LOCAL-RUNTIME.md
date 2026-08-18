@@ -2683,11 +2683,19 @@ durable scope, or puts the marking sink where the elements actually land.
 injection seam. The "crash" here is an injected failure that kills the attempt,
 and what survives it is an in-memory store in the same process. The row for
 durable resume after process or silo failure therefore advances to *this half
-implemented*, and its other half is M5.3's.
+implemented*, and its other half is M5.3's. **M5.3 shipped it** — a store behind
+a silo, activation-driven resume, and a crash suite over real silo kills — and it
+needed no change to anything in this section, which is the strongest thing that
+can be said about a model: see the M5.3 section of
+[ORLEANS-RUNTIME.md](ORLEANS-RUNTIME.md).
 
 **No cursor but one.** `from-enumerable` declares an index cursor and every
 other local source declares nothing. An Orleans stream sequence token is the
-cursor the model was designed for and it arrives with the Orleans half.
+cursor the model was designed for; **it arrived in M5.3**, through one public
+overload of the provider seam — `DataflowStageRuntime.Source(open, cursor)` over
+a `DataflowSourceCursor` the adapter's opener closes over — which is the only
+touch that phase made to this package, because a cursor declared by a registered
+source has nowhere else to be declared.
 
 **No checkpoint on a clean end.** A run that completes has an outcome and does
 not write one, which is deliberate and is what makes "the last stored capture is

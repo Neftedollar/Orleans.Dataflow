@@ -44,6 +44,24 @@ Orleans.Dataflow.Grains.DataflowPushOutcome.Accepted = 0 -> Orleans.Dataflow.Gra
 Orleans.Dataflow.Grains.DataflowPushOutcome.Closed = 2 -> Orleans.Dataflow.Grains.DataflowPushOutcome
 Orleans.Dataflow.Grains.DataflowPushOutcome.Dropped = 1 -> Orleans.Dataflow.Grains.DataflowPushOutcome
 Orleans.Dataflow.Grains.DataflowPushOutcome.Failed = 3 -> Orleans.Dataflow.Grains.DataflowPushOutcome
+Orleans.Dataflow.Grains.DurableRunClaim
+Orleans.Dataflow.Grains.DurableRunClaim.CanonicalDocument.get -> byte[]!
+Orleans.Dataflow.Grains.DurableRunClaim.CanonicalDocument.set -> void
+Orleans.Dataflow.Grains.DurableRunClaim.DurableRunClaim() -> void
+Orleans.Dataflow.Grains.DurableRunClaim.Epoch.get -> long
+Orleans.Dataflow.Grains.DurableRunClaim.Epoch.set -> void
+Orleans.Dataflow.Grains.DurableRunClaim.EveryElements.get -> int?
+Orleans.Dataflow.Grains.DurableRunClaim.EveryElements.set -> void
+Orleans.Dataflow.Grains.DurableRunClaim.Interval.get -> System.TimeSpan?
+Orleans.Dataflow.Grains.DurableRunClaim.Interval.set -> void
+Orleans.Dataflow.Grains.DurableRunDeclaration
+Orleans.Dataflow.Grains.DurableRunDeclaration.DurableRunDeclaration() -> void
+Orleans.Dataflow.Grains.DurableRunDeclaration.EveryElements.get -> int?
+Orleans.Dataflow.Grains.DurableRunDeclaration.EveryElements.set -> void
+Orleans.Dataflow.Grains.DurableRunDeclaration.Interval.get -> System.TimeSpan?
+Orleans.Dataflow.Grains.DurableRunDeclaration.Interval.set -> void
+Orleans.Dataflow.Grains.DurableRunDeclaration.RunId.get -> string!
+Orleans.Dataflow.Grains.DurableRunDeclaration.RunId.set -> void
 Orleans.Dataflow.Grains.IDataflowPushReceiver
 Orleans.Dataflow.Grains.IDataflowPushReceiver.PushAsync(object? element) -> System.Threading.Tasks.Task<Orleans.Dataflow.Grains.DataflowPushOutcome>!
 Orleans.Dataflow.Grains.IObserverBridgeGrain
@@ -53,11 +71,14 @@ Orleans.Dataflow.Grains.IObserverBridgeGrain.IsListeningAsync() -> System.Thread
 Orleans.Dataflow.Grains.IObserverBridgeGrain.PushAsync(object? element) -> System.Threading.Tasks.Task<Orleans.Dataflow.Grains.DataflowPushOutcome>!
 Orleans.Dataflow.Grains.IPipelineCoordinatorGrain
 Orleans.Dataflow.Grains.IPipelineCoordinatorGrain.CancelRunAsync(string! runId, long epoch) -> System.Threading.Tasks.Task!
+Orleans.Dataflow.Grains.IPipelineCoordinatorGrain.ClaimDurableRunAsync(string! runId) -> System.Threading.Tasks.Task<Orleans.Dataflow.Grains.DurableRunClaim?>!
+Orleans.Dataflow.Grains.IPipelineCoordinatorGrain.DeclareDurableRunAsync(byte[]! canonicalDocument, Orleans.Dataflow.Grains.DurableRunDeclaration! declaration) -> System.Threading.Tasks.Task<Orleans.Dataflow.Grains.PipelineRunTicket!>!
 Orleans.Dataflow.Grains.IPipelineCoordinatorGrain.GetStatusAsync(string! runId, long epoch) -> System.Threading.Tasks.Task<Orleans.Dataflow.Grains.RunStatusSnapshot!>!
 Orleans.Dataflow.Grains.IPipelineCoordinatorGrain.ShutdownRunAsync(string! runId, long epoch) -> System.Threading.Tasks.Task!
 Orleans.Dataflow.Grains.IPipelineCoordinatorGrain.StartRunAsync(byte[]! canonicalDocument) -> System.Threading.Tasks.Task<Orleans.Dataflow.Grains.PipelineRunTicket!>!
 Orleans.Dataflow.Grains.IPipelineRunGrain
 Orleans.Dataflow.Grains.IPipelineRunGrain.CancelAsync(long epoch) -> System.Threading.Tasks.Task!
+Orleans.Dataflow.Grains.IPipelineRunGrain.EnsureStartedAsync() -> System.Threading.Tasks.Task<long>!
 Orleans.Dataflow.Grains.IPipelineRunGrain.GetResultAsync(long epoch, string! slotName, string! graphFingerprint) -> System.Threading.Tasks.Task<Orleans.Dataflow.Grains.ResultEnvelope!>!
 Orleans.Dataflow.Grains.IPipelineRunGrain.GetStatusAsync(long epoch) -> System.Threading.Tasks.Task<Orleans.Dataflow.Grains.RunStatusSnapshot!>!
 Orleans.Dataflow.Grains.IPipelineRunGrain.ShutdownAsync(long epoch) -> System.Threading.Tasks.Task!
@@ -80,6 +101,14 @@ Orleans.Dataflow.Grains.PipelineRejectedException
 Orleans.Dataflow.Grains.PipelineRejectedException.PipelineRejectedException() -> void
 Orleans.Dataflow.Grains.PipelineRejectedException.PipelineRejectedException(string? message) -> void
 Orleans.Dataflow.Grains.PipelineRejectedException.PipelineRejectedException(string? message, System.Exception? innerException) -> void
+Orleans.Dataflow.Grains.PipelineResumeRefusedException
+Orleans.Dataflow.Grains.PipelineResumeRefusedException.DeclaredFingerprint.get -> string?
+Orleans.Dataflow.Grains.PipelineResumeRefusedException.DeclaredFingerprint.init -> void
+Orleans.Dataflow.Grains.PipelineResumeRefusedException.PipelineResumeRefusedException() -> void
+Orleans.Dataflow.Grains.PipelineResumeRefusedException.PipelineResumeRefusedException(string? message) -> void
+Orleans.Dataflow.Grains.PipelineResumeRefusedException.PipelineResumeRefusedException(string? message, System.Exception? innerException) -> void
+Orleans.Dataflow.Grains.PipelineResumeRefusedException.StoredFingerprint.get -> string?
+Orleans.Dataflow.Grains.PipelineResumeRefusedException.StoredFingerprint.init -> void
 Orleans.Dataflow.Grains.PipelineRunFailedException
 Orleans.Dataflow.Grains.PipelineRunFailedException.FailureMessage.get -> string?
 Orleans.Dataflow.Grains.PipelineRunFailedException.FailureMessage.init -> void
@@ -151,6 +180,14 @@ Orleans.Dataflow.Hosting.DataflowPlacement.ClusterDefault = 0 -> Orleans.Dataflo
 Orleans.Dataflow.Hosting.DataflowPlacement.HashBased = 3 -> Orleans.Dataflow.Hosting.DataflowPlacement
 Orleans.Dataflow.Hosting.DataflowPlacement.PreferLocal = 2 -> Orleans.Dataflow.Hosting.DataflowPlacement
 Orleans.Dataflow.Hosting.DataflowPlacement.Random = 1 -> Orleans.Dataflow.Hosting.DataflowPlacement
+Orleans.Dataflow.Hosting.DurablePipelineOptions
+Orleans.Dataflow.Hosting.DurablePipelineOptions.DurablePipelineOptions() -> void
+Orleans.Dataflow.Hosting.DurablePipelineOptions.EveryElements.get -> int?
+Orleans.Dataflow.Hosting.DurablePipelineOptions.EveryElements.init -> void
+Orleans.Dataflow.Hosting.DurablePipelineOptions.Interval.get -> System.TimeSpan?
+Orleans.Dataflow.Hosting.DurablePipelineOptions.Interval.init -> void
+Orleans.Dataflow.Hosting.DurablePipelineOptions.RunId.get -> string!
+Orleans.Dataflow.Hosting.DurablePipelineOptions.RunId.init -> void
 Orleans.Dataflow.Hosting.IOrleansDataflowBuilder
 Orleans.Dataflow.Hosting.IOrleansDataflowBuilder.AddBroadcastElement<T>(Orleans.Dataflow.Adapters.BroadcastElementBinding<T>! element) -> Orleans.Dataflow.Hosting.IOrleansDataflowBuilder!
 Orleans.Dataflow.Hosting.IOrleansDataflowBuilder.AddCatalog(Orleans.Dataflow.Definition.IStageCatalog! catalog) -> Orleans.Dataflow.Hosting.IOrleansDataflowBuilder!
@@ -164,6 +201,7 @@ Orleans.Dataflow.Hosting.IOrleansDataflowBuilder.AddObservable<T>(Orleans.Datafl
 Orleans.Dataflow.Hosting.IOrleansDataflowBuilder.AddObserverBridge<T>(Orleans.Dataflow.Adapters.ObserverBridgeBinding<T>! bridge) -> Orleans.Dataflow.Hosting.IOrleansDataflowBuilder!
 Orleans.Dataflow.Hosting.IOrleansDataflowBuilder.AddStreamElement<T>(Orleans.Dataflow.Adapters.StreamElementBinding<T>! element) -> Orleans.Dataflow.Hosting.IOrleansDataflowBuilder!
 Orleans.Dataflow.Hosting.IOrleansDataflowBuilder.LimitResultSize(int maximumBytes) -> Orleans.Dataflow.Hosting.IOrleansDataflowBuilder!
+Orleans.Dataflow.Hosting.IOrleansDataflowBuilder.UseCheckpointStore(System.Func<System.IServiceProvider!, Orleans.Dataflow.Hosting.ICheckpointStore!>! store) -> Orleans.Dataflow.Hosting.IOrleansDataflowBuilder!
 Orleans.Dataflow.Hosting.IOrleansDataflowBuilder.UsePlacement(Orleans.Dataflow.Hosting.DataflowPlacement runGrains, Orleans.Dataflow.Hosting.DataflowPlacement keyedExecutors) -> Orleans.Dataflow.Hosting.IOrleansDataflowBuilder!
 Orleans.Dataflow.Hosting.OrleansDataflowClientExtensions
 Orleans.Dataflow.Hosting.OrleansDataflowClientOptions
@@ -172,6 +210,7 @@ Orleans.Dataflow.Hosting.OrleansDataflowClientOptions.PollInterval.get -> System
 Orleans.Dataflow.Hosting.OrleansDataflowClientOptions.PollInterval.set -> void
 Orleans.Dataflow.Hosting.OrleansDataflowHost
 Orleans.Dataflow.Hosting.OrleansDataflowHost.MaterializeAsync(Orleans.Dataflow.PipelineDefinition! pipeline, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task<Orleans.Dataflow.Hosting.OrleansRunHandle!>!
+Orleans.Dataflow.Hosting.OrleansDataflowHost.MaterializeDurableAsync(Orleans.Dataflow.PipelineDefinition! pipeline, Orleans.Dataflow.Hosting.DurablePipelineOptions! durable, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task<Orleans.Dataflow.Hosting.OrleansRunHandle!>!
 Orleans.Dataflow.Hosting.OrleansDataflowHost.OrleansDataflowHost(Orleans.IGrainFactory! grains) -> void
 Orleans.Dataflow.Hosting.OrleansDataflowHost.OrleansDataflowHost(Orleans.IGrainFactory! grains, Orleans.Dataflow.Hosting.OrleansDataflowClientOptions! options) -> void
 Orleans.Dataflow.Hosting.OrleansDataflowResults
@@ -256,6 +295,7 @@ static Orleans.Dataflow.Adapters.OrleansStreamAddress.Create(string! provider, s
 static Orleans.Dataflow.Adapters.OrleansStreamAddress.operator !=(Orleans.Dataflow.Adapters.OrleansStreamAddress left, Orleans.Dataflow.Adapters.OrleansStreamAddress right) -> bool
 static Orleans.Dataflow.Adapters.OrleansStreamAddress.operator ==(Orleans.Dataflow.Adapters.OrleansStreamAddress left, Orleans.Dataflow.Adapters.OrleansStreamAddress right) -> bool
 static Orleans.Dataflow.Adapters.StreamElementBinding.Create<T>(Orleans.Dataflow.ElementContract<T> element) -> Orleans.Dataflow.Adapters.StreamElementBinding<T>!
+static Orleans.Dataflow.Grains.PipelineResumeRefusedException.Mismatched(string! run, string! stored, string! declared) -> Orleans.Dataflow.Grains.PipelineResumeRefusedException!
 static Orleans.Dataflow.Hosting.OrleansDataflowClientExtensions.AddOrleansDataflowClient(this Microsoft.Extensions.DependencyInjection.IServiceCollection! services, System.Action<Orleans.Dataflow.Hosting.OrleansDataflowClientOptions!>? configure = null) -> Microsoft.Extensions.DependencyInjection.IServiceCollection!
 static Orleans.Dataflow.Hosting.OrleansDataflowSiloBuilderExtensions.AddOrleansDataflow(this Orleans.Hosting.ISiloBuilder! builder, System.Action<Orleans.Dataflow.Hosting.IOrleansDataflowBuilder!>! configure) -> Orleans.Hosting.ISiloBuilder!
 static readonly Orleans.Dataflow.Hosting.OrleansDataflowClientOptions.DefaultPollInterval -> System.TimeSpan

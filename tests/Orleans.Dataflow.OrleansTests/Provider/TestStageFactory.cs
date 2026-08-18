@@ -27,13 +27,47 @@ internal sealed class TestStageFactory : IDataflowStageFactory
                 node.Parameters,
                 out int count,
                 out string? halt,
+                out string? gate,
+                out int gateAt,
                 out IReadOnlyList<string> violations))
             {
                 throw new InvalidOperationException(
                     $"The range source '{node.Id}' carries parameters this provider cannot read: {string.Join("; ", violations)}.");
             }
 
-            return DataflowStageRuntime.Source(tokens => Numbers(count, halt, tokens));
+            // The cluster twin of the local vocabulary's index cursor, and the crash suite's whole reason
+            // for having one: a source that resumes from the top would make every element after a kill a
+            // duplicate, so a window measured against it would be a statement about the source rather than
+            // about the checkpoint. One cursor per occurrence per materialization, closed over by the
+            // opener, which is the shape the seam asks for.
+            CountingCursor counted = new();
+
+            return DataflowStageRuntime.Source(
+                tokens => Numbers(count, halt, gate, gateAt, counted, tokens),
+                counted);
+        }
+
+        if (node.Stage == TestVocabulary.Record)
+        {
+            if (!TestRecordParameters.TryRead(
+                node.Parameters,
+                out string log,
+                out IReadOnlyList<string> unreadable))
+            {
+                throw new InvalidOperationException(
+                    $"The recording sink '{node.Id}' carries parameters this provider cannot read: {string.Join("; ", unreadable)}.");
+            }
+
+            return DataflowStageRuntime.Terminal(
+                static () => null,
+                (state, element) =>
+                {
+                    TestDeliveries.Record(log, (long)element!);
+
+                    return state;
+                },
+                finish: null,
+                producesResult: false);
         }
 
         if (node.Stage == TestVocabulary.Double)
@@ -86,7 +120,8 @@ internal sealed class TestStageFactory : IDataflowStageFactory
             // A source where the document puts a flow. The catalog cannot catch this — a specification
             // describes ports and says nothing about what a factory will build — so the planner is what
             // has to, and this is the stage that proves it does.
-            return DataflowStageRuntime.Source(static _ => Numbers(0, null, default));
+            return DataflowStageRuntime.Source(
+                static _ => Numbers(0, null, null, 0, new CountingCursor(), default));
         }
 
         if (node.Stage == TestVocabulary.Explode)
@@ -132,25 +167,46 @@ internal sealed class TestStageFactory : IDataflowStageFactory
     /// <summary>Emits a run of consecutive numbers, and optionally waits instead of ending.</summary>
     /// <param name="count">How many numbers to emit, starting at one.</param>
     /// <param name="halt">The signal to raise after the last one, or <see langword="null"/> to end.</param>
+    /// <param name="gate">The signal to wait for partway, or <see langword="null"/> never to wait.</param>
+    /// <param name="gateAt">Which element to wait before emitting, counting from one.</param>
+    /// <param name="cursor">Where this source resumes from, and where it reports it has reached.</param>
     /// <param name="tokens">The tokens of the run this enumeration belongs to.</param>
     /// <returns>The sequence.</returns>
     /// <remarks>
+    /// <para>
     /// The halting form is what makes a drain provable. It emits exactly what it was asked for, says so,
     /// and then waits on the run's stop token: a graceful shutdown releases the wait and ends the sequence,
     /// so the sink has seen precisely those elements and the partial result is a number a test can name.
     /// A cancellation releases the same wait and raises instead, which is the other half of the same
     /// contract.
+    /// </para>
+    /// <para>
+    /// A resumed run starts at the element after the one the cursor was restored to, which is this
+    /// adapter's own promise and not the engine's: the numbers are generated rather than read from
+    /// anywhere, so reopening at a position is arithmetic and the sequence is stable by construction. A real
+    /// adapter earns the same promise from its own provider or declares no cursor.
+    /// </para>
     /// </remarks>
     private static async IAsyncEnumerable<object?> Numbers(
         int count,
         string? halt,
+        string? gate,
+        int gateAt,
+        CountingCursor cursor,
         DataflowRunTokens tokens,
         [EnumeratorCancellation] CancellationToken cancellationToken = default)
     {
         _ = cancellationToken;
 
-        for (long element = 1; element <= count; element++)
+        for (long element = cursor.Reached + 1; element <= count; element++)
         {
+            if (gate is not null && element == gateAt)
+            {
+                TestSignals.Raise($"{gate}-reached");
+
+                await TestSignals.Reached(gate).ConfigureAwait(false);
+            }
+
             yield return element;
         }
 
@@ -210,5 +266,53 @@ internal sealed class TestStageFactory : IDataflowStageFactory
         }
 
         return element;
+    }
+
+    /// <summary>The cursor of the test range source: how many of its numbers the run has delivered.</summary>
+    /// <remarks>
+    /// <para>
+    /// The simplest position a source can have, and deliberately the same one the local vocabulary's
+    /// <c>from-enumerable</c> declares, so that the cluster half of the cursor model is proved against a
+    /// position whose arithmetic nobody has to argue about. What it is <em>not</em> is a stand-in for the
+    /// real one: an Orleans stream's sequence token is the position ADR 0007 was designed around, and it
+    /// lives in the adapter package with its own tests.
+    /// </para>
+    /// <para>
+    /// <see cref="Delivered"/> is called by the run once an element has travelled through the segment it
+    /// entered, so the number is what was delivered rather than what was produced — which is exactly the
+    /// distinction that makes a stored position safe to resume after rather than one element optimistic.
+    /// </para>
+    /// </remarks>
+    private sealed class CountingCursor : DataflowSourceCursor
+    {
+        private long _delivered;
+
+        /// <summary>Gets how many elements this source has delivered.</summary>
+        internal long Reached => Interlocked.Read(ref _delivered);
+
+        /// <inheritdoc/>
+        public override CanonicalJsonValue Position =>
+            CanonicalJsonValue.Parse(string.Create(
+                CultureInfo.InvariantCulture,
+                $"{{\"index\":{Interlocked.Read(ref _delivered)}}}"));
+
+        /// <inheritdoc/>
+        public override void Delivered() => _ = Interlocked.Increment(ref _delivered);
+
+        /// <inheritdoc/>
+        public override void RestoreTo(CanonicalJsonValue position)
+        {
+            if (position.IsDefault ||
+                position.ToElement().ValueKind is not JsonValueKind.Object ||
+                !position.ToElement().TryGetProperty("index", out JsonElement index) ||
+                !index.TryGetInt64(out long from) ||
+                from < 0)
+            {
+                throw new InvalidOperationException(
+                    $"The checkpoint carries the position {position} for the test range source, whose position is an object with an 'index' member holding a count of zero or more delivered elements.");
+            }
+
+            _delivered = from;
+        }
     }
 }

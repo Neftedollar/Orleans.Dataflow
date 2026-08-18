@@ -40,6 +40,33 @@ public sealed class RollingUpgradeTests(RollingUpgradeCluster cluster)
     private static CancellationToken Token => TestContext.Current.CancellationToken;
 
     [Fact]
+    public async Task ASiloWithNoCheckpointStoreRefusesADurableDeclarationRatherThanRunningWithoutOne()
+    {
+        // This cluster registers no checkpoint store, which is what every deployment before M5.3 was and
+        // remains a legal configuration — so it is the one place the refusal can be observed. It belongs
+        // beside the rolling-upgrade tests for the reason those exist: both are about a deployment that can
+        // validate a document and cannot honor it, and both are answered before anything runs rather than
+        // at the first element.
+        PipelineDefinition pipeline = TestPipelines.Recording("no-store-durable", count: 2, "no-store");
+
+        // An ordinary run of the same pipeline is unaffected, which is the half that makes the refusal a
+        // statement about durability rather than about this silo's ability to run anything.
+        await using (OrleansRunHandle ordinary = await cluster.Host.MaterializeAsync(pipeline, Token))
+        {
+            await ordinary.Completion;
+        }
+
+        PipelineRejectedException refused = await Assert.ThrowsAsync<PipelineRejectedException>(
+            () => cluster.Host.MaterializeDurableAsync(
+                pipeline,
+                new DurablePipelineOptions { RunId = "nowhere-to-write", EveryElements = 1 },
+                Token));
+
+        Assert.Contains("UseCheckpointStore", refused.Message, StringComparison.Ordinal);
+        Assert.Contains("nowhere-to-write", refused.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public async Task AMaterializationValidatedByTheStaleSiloIsRefusedAndNamesWhatItDoesNotKnow()
     {
         (PipelineDefinition pipeline, ResultSlot<long> _) = TestPipelines.Doubling("upgrade-refused", 2);

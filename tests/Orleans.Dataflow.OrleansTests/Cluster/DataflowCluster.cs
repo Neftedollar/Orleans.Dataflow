@@ -2,6 +2,7 @@ using Microsoft.Extensions.DependencyInjection;
 using Orleans.Dataflow.Grains;
 using Orleans.Dataflow.Hosting;
 using Orleans.Dataflow.OrleansTests.Provider;
+using Orleans.Dataflow.Testing;
 using Orleans.Hosting;
 using Orleans.TestingHost;
 using Xunit;
@@ -56,6 +57,17 @@ public sealed class DataflowCluster : IAsyncLifetime
     /// <summary>Gets the client host every test materializes pipelines through.</summary>
     internal OrleansDataflowHost Host { get; private set; } = null!;
 
+    /// <summary>Gets the store the durable runs of this cluster keep their checkpoints in.</summary>
+    /// <value>The store this silo is registered over, which outlives every activation on it.</value>
+    /// <remarks>
+    /// Registered here because the stream adapter's cursor is the one this milestone was designed around
+    /// and a cursor is only observable through a durable run: what a test asserts is what the store holds
+    /// and what a resumed subscription then receives. One silo is enough for that — a sequence token is a
+    /// position in a stream rather than a fact about a cluster — so the crash half of durability stays with
+    /// the multi-silo fixture and the cursor half stays here, where the stream provider is.
+    /// </remarks>
+    internal InMemoryCheckpointStore Checkpoints { get; } = new();
+
     /// <inheritdoc/>
     public async ValueTask InitializeAsync()
     {
@@ -109,7 +121,8 @@ public sealed class DataflowCluster : IAsyncLifetime
                 .AddObserverBridge(AdapterVocabulary.OrderBridge)
                 .AddObserverBridge(AdapterVocabulary.NarrowBridge)
                 .AddBroadcastElement(AdapterVocabulary.BroadcastOrder)
-                .AddObservable(AdapterVocabulary.SharedOrders));
+                .AddObservable(AdapterVocabulary.SharedOrders)
+                .UseCheckpointStore(_ => Checkpoints));
         });
 
         // The client-side registration, exercised the way a deployment writes it rather than by newing the

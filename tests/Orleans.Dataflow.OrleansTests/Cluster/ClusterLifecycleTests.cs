@@ -93,7 +93,8 @@ public sealed class ClusterLifecycleTests(DataflowCluster cluster)
             Run(handle),
             handle.Ticket,
             pipeline.Fingerprint,
-            OrleansDataflowClientOptions.DefaultPollInterval);
+            OrleansDataflowClientOptions.DefaultPollInterval,
+            durable: false);
 
         _ = await Assert.ThrowsAsync<PipelineRunLostException>(() => watching.Completion);
         _ = await Assert.ThrowsAsync<PipelineRunLostException>(() => watching.GetValueAsync(slot, Token));

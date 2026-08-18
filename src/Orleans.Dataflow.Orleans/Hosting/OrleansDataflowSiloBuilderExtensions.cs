@@ -54,7 +54,10 @@ public static class OrleansDataflowSiloBuilderExtensions
     /// <see cref="Grains.OrleansDataflowStorage.CoordinatorProviderName"/>, and which store stands behind
     /// that name is a deployment decision — memory in tests, a real store in production — that this call
     /// has no business making on a deployment's behalf. Neither is a stream provider: an adapter names one
-    /// and a deployment registers it, such as with <c>AddMemoryStreams</c> beside a <c>PubSubStore</c>.
+    /// and a deployment registers it, such as with <c>AddMemoryStreams</c> beside a <c>PubSubStore</c>. The
+    /// checkpoint store follows the same rule and is registered through
+    /// <see cref="IOrleansDataflowBuilder.UseCheckpointStore"/>: a silo that declares none runs no durable
+    /// pipeline and says so at the declaration rather than at the first capture.
     /// </para>
     /// </remarks>
     public static ISiloBuilder AddOrleansDataflow(
@@ -109,6 +112,7 @@ public static class OrleansDataflowSiloBuilderExtensions
         private StageCatalog? _catalog;
         private bool _anyCatalog;
         private int _maximumResultBytes = OrleansDataflowResults.DefaultMaximumResultBytes;
+        private Func<IServiceProvider, ICheckpointStore>? _checkpointStore;
 
         /// <inheritdoc/>
         public IOrleansDataflowBuilder AddCatalog(IStageCatalog catalog)
@@ -247,6 +251,16 @@ public static class OrleansDataflowSiloBuilderExtensions
             return this;
         }
 
+        /// <inheritdoc/>
+        public IOrleansDataflowBuilder UseCheckpointStore(Func<IServiceProvider, ICheckpointStore> store)
+        {
+            ArgumentNullException.ThrowIfNull(store);
+
+            _checkpointStore = store;
+
+            return this;
+        }
+
         /// <summary>Checks everything registered, and remembers what the check produced.</summary>
         /// <exception cref="ArgumentException">
         /// No catalog was registered, one stage reference was registered twice, one provider was, or one
@@ -321,7 +335,11 @@ public static class OrleansDataflowSiloBuilderExtensions
                 factories.Add(_dotnet.Factory);
             }
 
-            return new DataflowSiloRegistry(_catalog!, factories, _maximumResultBytes);
+            return new DataflowSiloRegistry(
+                _catalog!,
+                factories,
+                _maximumResultBytes,
+                _checkpointStore?.Invoke(services));
         }
 
         /// <summary>The stand-in a provider-key check is made against.</summary>

@@ -5,6 +5,7 @@ using Orleans.Dataflow.Definition;
 using Orleans.Dataflow.Grains;
 using Orleans.Dataflow.Hosting;
 using Orleans.Dataflow.OrleansTests.Provider;
+using Orleans.Dataflow.Testing;
 using Orleans.Hosting;
 using Orleans.Runtime;
 using Orleans.Runtime.Hosting;
@@ -128,6 +129,26 @@ public sealed class MultiSiloCluster : IAsyncLifetime
     /// <value>The store, which outlives every silo in the cluster.</value>
     internal SurvivingCoordinatorStore Store { get; } = new();
 
+    /// <summary>Gets the store the durable runs of this cluster keep their checkpoints in.</summary>
+    /// <value>The store every silo of this cluster is registered over, which outlives all of them.</value>
+    /// <remarks>
+    /// <para>
+    /// The shipped in-memory implementation rather than a second test double, and the reuse is the point:
+    /// <c>InMemoryCheckpointStore</c> is already a store and not a mock — it enforces the ETag the whole
+    /// checkpoint model rests on and it carries the <c>Supersede</c> that stages a real conflict — and it
+    /// already has the property <see cref="SurvivingCoordinatorStore"/> exists to provide, because it is an
+    /// ordinary object in the test process rather than a grain living on a silo. A silo dying therefore
+    /// takes its runs and leaves their positions, which is exactly what a deployment buys by putting a real
+    /// store behind the registration.
+    /// </para>
+    /// <para>
+    /// One instance shared by all three silos. That is what "external store" means here: the silos are in
+    /// one process, so an object they all hold a reference to is as external to any one of them as a
+    /// database would be.
+    /// </para>
+    /// </remarks>
+    internal InMemoryCheckpointStore Checkpoints { get; } = new();
+
     /// <summary>Gets the management grain the tests ask where grains are.</summary>
     internal IManagementGrain Management => Cluster.Client.GetGrain<IManagementGrain>(0);
 
@@ -149,6 +170,7 @@ public sealed class MultiSiloCluster : IAsyncLifetime
             _ = silo.AddOrleansDataflow(dataflow => dataflow
                 .AddCatalog(TestVocabulary.Catalog())
                 .AddFactory(TestVocabulary.Provider, new TestStageFactory())
+                .UseCheckpointStore(_ => Checkpoints)
                 .UsePlacement(DataflowPlacement.Random, DataflowPlacement.Random));
         });
 
@@ -306,6 +328,20 @@ public sealed class MultiSiloCluster : IAsyncLifetime
     /// <returns>The handle of the started run.</returns>
     internal Task<OrleansRunHandle> MaterializeAsync(PipelineDefinition pipeline) =>
         Host.MaterializeAsync(pipeline, TestContext.Current.CancellationToken);
+
+    /// <summary>Materializes a durable pipeline in this cluster.</summary>
+    /// <param name="pipeline">The pipeline to run.</param>
+    /// <param name="run">What the run is called, which is the author's to choose and a resume's to present.</param>
+    /// <param name="everyElements">How many elements the run admits between checkpoints.</param>
+    /// <returns>The handle of the started run.</returns>
+    internal Task<OrleansRunHandle> MaterializeDurableAsync(
+        PipelineDefinition pipeline,
+        string run,
+        int everyElements) =>
+        Host.MaterializeDurableAsync(
+            pipeline,
+            new DurablePipelineOptions { RunId = run, EveryElements = everyElements },
+            TestContext.Current.CancellationToken);
 
     /// <summary>Addresses the coordinator of one pipeline.</summary>
     /// <param name="pipeline">The pipeline.</param>

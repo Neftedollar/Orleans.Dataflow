@@ -794,6 +794,73 @@ A capture holds the run at the pause machinery's own safe points for its whole
 duration, the store write included. That cost is stated rather than hidden, and a
 shorter interval buys a smaller replay window with throughput.
 
+## Durability in a cluster
+
+The same three questions, answered by a deployment instead of by a call. **Where
+checkpoints go is the silo's**, registered beside the catalog and the factories:
+
+```csharp
+silo.AddOrleansDataflow(dataflow => dataflow
+    .AddCatalog(providerCatalog)
+    .AddFactory(providerId, new MyStageFactory())
+    .UseCheckpointStore(services => services.GetRequiredService<ICheckpointStore>()));
+```
+
+There is no default, for the reason the coordinator's grain storage has none: an
+in-memory default would let a deployment believe its runs were durable while
+their positions died with the process. A silo that registers none runs no durable
+pipeline and says so at the declaration — by name, before anything has run —
+rather than at the first capture.
+
+**What the run is called and when it checkpoints are the author's**, and they
+travel on the materialization:
+
+```csharp
+await using OrleansRunHandle run = await host.MaterializeDurableAsync(
+    pipeline,
+    new DurablePipelineOptions
+    {
+        RunId = "nightly-2026-08-18",
+        Interval = TimeSpan.FromSeconds(30),
+        EveryElements = 1000,
+    });
+```
+
+**The run identity is the one API semantic durability changes, and it is worth
+reading twice.** `MaterializeAsync` names each run afresh, so calling it twice
+gives two runs that both live. `MaterializeDurableAsync` is named by the caller,
+so **calling it twice under one name addresses one run**: the second call hands
+back a handle to the run already executing, or continues it from its checkpoint
+if the silo that was hosting it has died. Two independent durable runs of one
+pipeline are two names, exactly as two files are two names. A name allocated per
+attempt would contradict resume outright — nothing would be able to find the
+previous attempt's position.
+
+Three consequences follow, and all three are surface rather than folklore:
+
+- **One name, one document.** Declaring a name that already exists with a
+  *different* document is refused with `PipelineResumeRefusedException`, carrying
+  both fingerprints. V1 continues one document per durable run identity; an
+  edited pipeline runs under a name of its own, and cross-revision migration
+  stays a recorded deferral.
+- **A crash is not reported as a loss.** `PipelineRunLostException` is
+  unreachable for a durable run whose checkpoint exists: the poll that would have
+  reported the loss is what brings the run back. A durable run that died *before*
+  its first capture reports the loss like any other, because there is no position
+  to continue from.
+- **The handle follows the run rather than the attempt.** A resumed attempt
+  claims a fresh ownership epoch, so `OrleansRunHandle.Epoch` moves while
+  `Ticket.Epoch` records what was issued at the start. The handle adopts the new
+  epoch from the fencing refusal that names it and carries on; an ordinary handle
+  never does, because an ordinary run has no later attempt to follow.
+
+**What a resume replays is the adapter's own answer**, per adapter, in
+[ADAPTERS.md](../ADAPTERS.md). An Orleans stream source stores the sequence token
+of the element the run delivered and reopens the subscription there, so a durable
+run over a rewindable provider replays from its position instead of from now;
+every other Orleans source declares no cursor and resumes from now, which is
+stated in its row rather than generalized.
+
 ## Delegates and deployability
 
 Lambda-based operators (`Select(x => ...)`) construct graphs that carry the

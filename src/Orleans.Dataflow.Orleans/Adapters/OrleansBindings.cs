@@ -30,8 +30,21 @@ internal interface IStreamElementEntry
     /// <param name="provider">The stream provider.</param>
     /// <param name="stream">The stream identity.</param>
     /// <param name="ingress">The ingress every delivery is offered to.</param>
+    /// <param name="token">
+    /// Where in the stream to begin, or <see langword="null"/> to read only what arrives after subscribing.
+    /// </param>
     /// <returns>The subscription handle, to be handed back to <see cref="UnsubscribeAsync"/>.</returns>
-    Task<object> SubscribeAsync(IStreamProvider provider, StreamId stream, IStreamIngress ingress);
+    /// <remarks>
+    /// A token is only ever supplied by a resumed run whose previous attempt recorded one, and what happens
+    /// then is the provider's: a rewindable provider redelivers from just after that point, and one that is
+    /// not refuses. Which of the two a deployment has is a property of the provider it registered and is
+    /// reported per provider rather than promised here.
+    /// </remarks>
+    Task<object> SubscribeAsync(
+        IStreamProvider provider,
+        StreamId stream,
+        IStreamIngress ingress,
+        StreamSequenceToken? token);
 
     /// <summary>Cancels one subscription.</summary>
     /// <param name="handle">The handle <see cref="SubscribeAsync"/> returned.</param>
@@ -58,8 +71,18 @@ internal interface IStreamIngress
 {
     /// <summary>Offers one delivered element.</summary>
     /// <param name="element">The element.</param>
+    /// <param name="token">
+    /// Where in the stream the element sat, as the provider reported it, or <see langword="null"/> when it
+    /// reported none.
+    /// </param>
     /// <returns>A task that completes when the element has been admitted, dropped, or refused.</returns>
-    ValueTask OfferAsync(object? element);
+    /// <remarks>
+    /// The token travels with the element rather than beside it, and that is what makes a stored position
+    /// exact: an ingress holds more than one element at a time, so "the token the subscription saw last" and
+    /// "the token of the element the run has just delivered" are different numbers whenever the queue is not
+    /// empty. Only the second one may be written into a checkpoint.
+    /// </remarks>
+    ValueTask OfferAsync(object? element, StreamSequenceToken? token);
 
     /// <summary>Records that the stream said it had ended.</summary>
     void Complete();
@@ -267,8 +290,9 @@ public sealed class StreamElementBinding<T> : IStreamElementEntry
     async Task<object> IStreamElementEntry.SubscribeAsync(
         IStreamProvider provider,
         StreamId stream,
-        IStreamIngress ingress) =>
-        await provider.GetStream<T>(stream).SubscribeAsync(new Observer(ingress)).ConfigureAwait(false);
+        IStreamIngress ingress,
+        StreamSequenceToken? token) =>
+        await provider.GetStream<T>(stream).SubscribeAsync(new Observer(ingress), token).ConfigureAwait(false);
 
     /// <inheritdoc/>
     Task IStreamElementEntry.UnsubscribeAsync(object handle) =>
@@ -290,7 +314,7 @@ public sealed class StreamElementBinding<T> : IStreamElementEntry
     {
         /// <inheritdoc/>
         public async Task OnNextAsync(T item, StreamSequenceToken? token = null) =>
-            await ingress.OfferAsync(item).ConfigureAwait(false);
+            await ingress.OfferAsync(item, token).ConfigureAwait(false);
 
         /// <inheritdoc/>
         public Task OnCompletedAsync()

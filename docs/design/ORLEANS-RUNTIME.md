@@ -3,7 +3,10 @@
 - Status: M3 architecture; phases 1-3 and 4a are implemented, and 4b's
   delivery-registry half — the broadcast source — is implemented and documented
   below; 4b's failover half is tracked separately. M4.5 added the result-size
-  cap and moved the provider seam into the core package, both recorded below
+  cap and moved the provider seam into the core package, both recorded below.
+  M5.3 added durable runs — a checkpoint store behind a silo, activation-driven
+  resume, author-named run identities, the stream sequence-token cursor, and the
+  crash suite — recorded in its own section below
 - Depends on: [ORLEANS-NOTES.md](ORLEANS-NOTES.md) (verified Orleans 10
   facts), [REGISTERED-STAGES.md](REGISTERED-STAGES.md),
   [LOCAL-RUNTIME.md](LOCAL-RUNTIME.md), ADRs 0001-0004
@@ -37,8 +40,10 @@ per-arbitrary-stage.
   validates the document against the silo's catalog (fingerprint check),
   materializes through the runtime-factory seam, drives the local engine,
   reports terminal state to the coordinator. Deactivation while running is
-  a failure of that attempt (phase 1: the run faults; durable resume is
-  M5's checkpoint work, not silently promised here). `[Reentrant]` is NOT
+  a failure of that attempt — **unless the run was declared durable and has
+  written a checkpoint, in which case the next activation continues it**
+  (M5.3, below; phase 1 promised nothing here and this is the promise it
+  waited for). `[Reentrant]` is NOT
   used; control calls (`ShutdownAsync`, status) interleave via `[ReadOnly]`
   or one-way signal patterns decided at implementation with the
   non-reentrancy default preserved for the execution path.
@@ -116,12 +121,14 @@ uses a mailbox as an unbounded buffer.
   engine's dedicated threads do the waiting.
 - **Phase-1 limits, stated**: results live only as long as the run grain's
   activation (proven absent, not promised); a deactivation mid-run faults
-  that attempt; a remote failure arrives as type name plus message — the
+  that attempt (**lifted in M5.3 under a declared durable option, and only
+  there**); a remote failure arrives as type name plus message — the
   author's exception type does not survive the hop; the coordinator
   persists `LastEpoch` and nothing else (a `Runs` register written "for
   phase-4 reconciliation" was removed after phase 4 shipped without
   reading it: it grew per accepted start with nothing pruning it, and M5's
-  durable resume will persist what reconciliation actually reads); ETag
+  durable resume will persist what reconciliation actually reads — **M5.3
+  did, as one record per declared durable run**); ETag
   fencing of competing coordinator activations is designed but
   demonstrated only across deliberate deactivation until phase 4's kill
   tests.
@@ -412,6 +419,226 @@ uses a mailbox as an unbounded buffer.
   and nothing reconciles them. And these remain single-silo tests: nothing here
   proves anything about the cap under placement or failover, only that the number
   a deployment wrote is the number the grain applied.
+
+## M5.3 — as implemented (durable runs in the host: the store, the resume, the crash suite)
+
+The phase that lifts phase 1's sharpest limit — "a deactivation mid-run faults
+that attempt" — and lifts it **only under a declared option**. M5.2 built the
+checkpoint model in one process; nothing about it changes here. What this phase
+adds is a store behind a silo, a trigger that continues a run, a wire for the
+declaration, and the crash evidence the matrix row was waiting for.
+
+### Resume is activation-driven, and there is no second protocol
+
+A run grain now reads its checkpoint key when it activates. **A checkpoint
+present means the run is resumed**: the activation claims a fresh epoch from the
+coordinator, materializes the plan with the stored cursors, scope states and
+marks restored, and reports `Running` — so the client's own status poll, which
+is what brought the activation into being, sees a running run.
+`PipelineRunLostException` is therefore *unreachable* for a durable run whose
+checkpoint exists. **A durable run with no checkpoint yet is a lost attempt
+exactly as an ordinary run is**, and that is asserted rather than footnoted:
+durability is not a promise that an attempt survives, it is a promise that a
+*stored position* is continued.
+
+The gate is the checkpoint and deliberately not the coordinator's register, so
+the cost of the lift is one store read per activation on a silo that registers a
+store and nothing at all on a silo that does not.
+
+### The store is the deployment's, registered like the coordinator's
+
+`UseCheckpointStore(services => store)` on the silo builder, beside
+`AddCatalog` and `AddFactory`. Nothing supplies a default, for the reason the
+coordinator's grain storage has none: an in-memory default would let a
+deployment believe its runs were durable while their positions died with the
+process. **A silo with no store is a legal configuration** — every deployment
+before this phase had one — and what it refuses is a *durable declaration*, by
+name, at the declaration rather than at the first capture.
+
+The document travels as canonical bytes into the store and out of it, unchanged,
+because that is what makes one process' checkpoint another's.
+
+### The coordinator persists what reconciliation actually reads
+
+Phase 1 removed a run register that grew per accepted start and recorded that
+"M5's durable resume will persist what reconciliation actually reads". This is
+that: `PipelineCoordinatorState.DurableRuns`, one record per **declared durable
+run**, carrying the canonical document, its fingerprint, the declared timing, the
+epoch, and whether anything has claimed it yet. It differs from what was removed
+in the way that matters — a durable run is named by its author, so the register
+grows with the names a deployment chose rather than with how often it pressed
+start. Serializer id 2, because id 1 stays retired.
+
+`DeclareDurableRunAsync` **declares and does not start**; `EnsureStartedAsync` on
+the run grain starts or continues. The split is what makes the resume need no
+protocol of its own: an attempt after a crash takes the second half of the very
+path the first attempt took.
+
+**Deadlock is closed by shape rather than by timing.** A run grain calls its
+coordinator (to claim an epoch) and the coordinator's three status/control
+members call run grains; a cycle would be two grains each waiting on the other.
+So: nothing that touches the register ever awaits a run grain — the declaration
+returns before anything is started — and the three passthroughs, which touch no
+state at all, are `[AlwaysInterleave]`. The epoch sequence is still produced one
+turn at a time.
+
+### The run identity is the author's, and that is the phase's one API change
+
+`OrleansDataflowHost.MaterializeDurableAsync(pipeline, options)` takes a
+`DurablePipelineOptions` naming the run and its checkpoint cadence.
+`MaterializeAsync` names each run afresh, so two calls are two runs; **two
+durable calls under one name are one run** — the second hands back a handle to
+the run already executing, or continues it from its checkpoint if the silo
+hosting it has died. A name allocated per attempt would contradict resume
+outright: nothing would be able to find the previous attempt's position.
+
+Two ripples fall out of that and both are surface:
+
+- **Declaring one name with two documents is refused by name**
+  (`PipelineResumeRefusedException`, carrying both fingerprints). V1 continues
+  one document per durable run identity; a changed pipeline runs under a name of
+  its own. The same refusal is raised by an activation whose stored checkpoint
+  names another fingerprint or another revision, which is the half that catches
+  a store somebody else wrote into.
+- **A durable handle follows the run rather than the attempt.** A resumed
+  attempt claims a fresh epoch, so a handle from before it is out of date rather
+  than wrong: it adopts the epoch the fencing refusal names and carries on. Only
+  a durable handle does this, and only forward — an ordinary run has no later
+  attempt, so a refusal there is somebody else's claim and adopting it would be
+  taking over work the handle never started.
+
+### The stream cursor: the position the model was designed for
+
+`orleans/stream-source` declares a cursor. It stores the **sequence token of the
+element the run delivered** — promoted when the run reports the delivery and not
+when the subscription received it, because a bounded ingress holds elements the
+run has not taken and a cursor counting arrivals would skip them — and a resumed
+run subscribes at that token. Two probed facts shape it and both are in
+[ORLEANS-NOTES.md](ORLEANS-NOTES.md): rewind is **inclusive** of the element the
+token names, so the window is one element wider than an index cursor's and no
+"token plus one" exists to narrow it; and the memory provider **purges its cache
+when its last consumer unsubscribes**, so `IsRewindable` is a statement about
+ability rather than about what a provider still holds.
+
+The position is `{"index":n,"sequence":n,"token":"…"}`: the provider's own two
+numbers, readable by anybody, beside the token as the silo serializer's bytes in
+base64. That base64 member is **the one value in a checkpoint document that is
+not portable outside the deployment that wrote it**, and the trade is stated —
+the numbers make the position auditable, the blob makes the resume exact, and a
+process holding the same stream provider is what another silo of the same
+deployment is.
+
+The seam it needed is one public overload in the core package,
+`DataflowStageRuntime.Source(open, cursor)` plus the `DataflowSourceCursor` the
+opener closes over. That is the only touch this phase made to
+`Orleans.Dataflow`, and it was unavoidable: a cursor declared by a *registered*
+source has nowhere else to be declared.
+
+### The crash suite, and the numbers it produced
+
+On the three-silo fixture, over the plain test vocabulary extended with a
+cursored source and a recording sink:
+
+- **Resume across a kill, with the window measured as a sequence.** Five
+  elements, a capture every three, the silo killed after the source parked: the
+  store holds cursor three, the sink's log is `[1,2,3,4,5]`, and after the kill
+  the client's own poll brings the run back on a surviving silo and the log
+  becomes `[1,2,3,4,5,4,5]`. The duplicate window is exactly the two elements
+  between the stored cursor and the crash, by value.
+- **Repeated kills leave a document that still reads.** Two thousand elements at
+  a capture per element, killed three times, restored between: after every kill
+  the stored document parses, names this graph, and carries a position inside
+  the stream; the union of the attempts covers the whole stream with no gap; and
+  the total delivered is between 2000 and 2003 — **at most one replayed element
+  per kill**, which is an arithmetic consequence of the bound rather than an
+  observation. Over nine kills every one of them landed mid-stream, and the test
+  asserts that at least one did so that it cannot pass having proved nothing.
+- **A superseded writer's capture is refused and kills that attempt.** Staged
+  with the store's `Supersede` — Orleans will not let two activations of one run
+  exist, so what can be staged is the state the race leaves — the run fails with
+  `CheckpointConflictException` on its next capture, unwrapped, naming both
+  ETags. The gate that makes it deterministic is worth a sentence of its own:
+  the source stops between the capture at five and the one at ten, at the
+  *seventh* element rather than the sixth, because a capture due at element `n`
+  does not complete until element `n+1` has been produced.
+- **Both fingerprint refusals**, by name, with both fingerprints on the
+  exception: a second declaration under one name, and an activation whose stored
+  checkpoint names another graph.
+- **The contrast, twice.** The same pipeline through the same kill, not declared
+  durable, still reports `PipelineRunLostException`, its log holds exactly one
+  attempt's worth of elements, and the store holds nothing for it — and so does a
+  run that *was* declared durable under a bound it never reached, which is the
+  sharper of the two: durability is not a promise that an attempt survives.
+- **A resume driven through the coordinator's own status call answers.** The one
+  test in the suite that would hang rather than fail if the shape were wrong, and
+  it was checked by breaking it: with the passthrough's `[AlwaysInterleave]`
+  removed it fails against the response timeout, and with it the call returns a
+  fencing refusal naming the epoch the resume had just claimed.
+- **A silo with no checkpoint store refuses a durable declaration by name**,
+  observed on the rolling-upgrade fixture, which registers none — while an
+  ordinary run of the same pipeline on the same silo is unaffected.
+
+The stream cursor's own evidence is on the single-silo adapter fixture, where the
+stream provider lives: a token is stored with its two readable numbers, and a
+resumed run subscribes at it and receives the tail of the first batch followed by
+everything published while nothing was listening.
+
+### M5.3 limits, stated
+
+- **A capture cannot be taken while a source is inside its own step.** The run
+  reaches a safe point *between* steps, and a source segment takes its next step
+  before it parks — so a capture due at element `n` waits for element `n+1`, and
+  a stream source with nothing to deliver holds a timed capture open for as long
+  as the stream is quiet. It is a delay and not a loss: the next delivery
+  completes the step and the capture that was due is taken. Asserted, both
+  halves, on a quiet stream. A cadence that must fire on an idle source is
+  unbuilt.
+- **A durable run is continued by the next activation whatever ended the
+  previous attempt.** A run grain persists nothing, so once its activation is
+  gone nothing distinguishes "died mid-run" from "failed" or from "completed" —
+  the checkpoint is all there is, and a checkpoint says where, never whether. So
+  a durable run that faulted and then lost its activation is resumed and will
+  fault again, and one that *completed* and then lost its activation is resumed
+  and re-runs its tail. Asserted by value rather than left as a caveat: five
+  elements, a capture every two, the run completed and its grain deactivated,
+  and the continued run's log ends `…, 4, 5, 5`. That is at-least-once taken to
+  its conclusion rather than a defect, and it is why a durable run is declared
+  by an author who means it. Reporting the end to the coordinator so that a
+  finished run stops being resumable is the obvious next step and is recorded
+  rather than built.
+- **The stored position of a run that ended is not a number a test may name.** A
+  capture the last element made due asks the run to hold; the source's next step
+  ends the stream instead of producing one; and whether the hold is reached
+  before the run settles — in which case the position is written — or after it,
+  where the loop's own "the run is over" guard skips it, is a race. Measured
+  rather than reasoned: a four-element run capturing every two stored cursor
+  four, which the arithmetic alone would not have predicted. Nothing a resume
+  can observe changes, because a resume replays from wherever the store stopped;
+  what it means is that a test wanting an exact stored cursor puts its last
+  capture somewhere other than on the final element.
+- **The suite's store cannot be torn, so nothing here tests a torn write.** The
+  checkpoint store lives in the test process and the silos live inside it, so a
+  silo dying cannot interrupt a write the store is performing. What the repeated
+  kills prove is that no arrangement of them produced a document a resume could
+  not read; atomicity of a *real* store's write is that store's contract, which
+  `ICheckpointStore` states and this suite does not exercise.
+- **The stale-attempt conflict is staged and not raced.** Orleans guarantees one
+  activation per run grain, so two attempts writing at once is a state a test
+  cannot reach; `Supersede` puts the store into exactly the state it would
+  leave. That is the coordinator store's own precedent, and the residual gap is
+  the same one: nothing here proves that a real superseded activation writes
+  late, only that a writer holding a stale ETag is refused and dies.
+- **No cross-revision migration**, unchanged from M5.2: a resume against a
+  different fingerprint or revision is refused by name.
+- **No commit mark on the registered side.** The seam that lets a *provider*
+  declare one does not exist, so the crash suite measures its window against the
+  cursor rather than against a mark. For the graph it measures on — a source
+  straight into a sink with no buffer between them — the two coincide exactly;
+  for a graph that batches they do not, and that gap is the local suite's to
+  measure until a marking seam is public.
+- **One silo hosts one run, still.** Nothing here distributes a run; what
+  survives a silo is the run's *position*, and the resumed attempt is a whole run
+  on one host exactly as the first was.
 
 ## Phasing
 

@@ -25,6 +25,14 @@ namespace Orleans.Dataflow.Grains;
 /// the write hits the ETag conflict, is killed by the runtime, and the caller retries against the fresh
 /// activation that read the truth. Nothing here implements that; it is what the state write already means.
 /// </para>
+/// <para>
+/// <b>A durable run is declared here and started somewhere else</b>, and the split is what makes resume
+/// need no protocol of its own. A declaration records the document, the timing, and an epoch; the
+/// activation that hosts the run claims that epoch when it comes up, and every later activation claims a
+/// fresh one. So the first attempt and the attempt after a silo died take exactly the same path, and this
+/// grain never has to know which of the two it is answering — which is also why nothing here ever awaits a
+/// run grain while holding the register, and why the three passthroughs that do await one interleave.
+/// </para>
 /// </remarks>
 internal sealed class PipelineCoordinatorGrain(
     [PersistentState("pipeline", OrleansDataflowStorage.CoordinatorProviderName)]
@@ -62,13 +70,123 @@ internal sealed class PipelineCoordinatorGrain(
             .GetGrain<IPipelineRunGrain>(RunKey(document.Id, run))
             .StartAsync(canonicalDocument, epoch);
 
-        return new PipelineRunTicket
+        return Ticket(document.Id, run, epoch, fingerprint);
+    }
+
+    /// <inheritdoc/>
+    public async Task<PipelineRunTicket> DeclareDurableRunAsync(
+        byte[] canonicalDocument,
+        DurableRunDeclaration declaration)
+    {
+        ArgumentNullException.ThrowIfNull(canonicalDocument);
+        ArgumentNullException.ThrowIfNull(declaration);
+
+        GraphDocument document = Read(canonicalDocument);
+        string pipeline = this.GetPrimaryKeyString();
+
+        if (!GraphId.TryCreate(pipeline, out GraphId addressed) || document.Id != addressed)
         {
-            GraphId = document.Id.Value,
-            RunId = run.Value,
-            Epoch = epoch,
-            GraphFingerprint = fingerprint.ToString(),
-            CatalogFingerprint = registry.CatalogFingerprint.ToString(),
+            throw new PipelineRejectedException(
+                $"The document declares the pipeline '{document.Id}' and this coordinator owns the pipeline '{pipeline}'. A coordinator starts runs of its own pipeline only, because the epochs it issues order claims to that pipeline and nothing else.");
+        }
+
+        if (!RunId.TryCreate(declaration.RunId, out RunId run))
+        {
+            throw new PipelineRejectedException(
+                $"'{declaration.RunId}' is not a valid run identifier, so it names no run a checkpoint could be keyed by. A durable run is named by whoever will resume it, and the name has to be one this runtime can address.");
+        }
+
+        // Refused here rather than at the first capture, because a deployment that forgot the store would
+        // otherwise learn of it from a run that had already performed side effects: the whole point of
+        // declaring a run durable is that its position survives, and a silo with nowhere to put a position
+        // cannot honor that however well the graph runs.
+        if (registry.CheckpointStore is null)
+        {
+            throw new PipelineRejectedException(
+                $"The run '{run}' of the pipeline '{document.Id}' was declared durable and this silo registers no checkpoint store, so there is nowhere for its position to be written. A deployment that runs durable pipelines calls UseCheckpointStore when it adds Orleans.Dataflow; which store stands behind it is the deployment's decision, exactly as the coordinator's own is.");
+        }
+
+        Refuse(document);
+
+        GraphFingerprint fingerprint = GraphFingerprint.OfSerialized(canonicalDocument);
+        string declared = fingerprint.ToString();
+
+        if (state.State.DurableRuns.TryGetValue(run.Value, out DurableRunRecord? existing))
+        {
+            // Same document, so this is the same run being addressed again rather than a second one: a
+            // durable run is named by its author and a name addresses one run. The timing is taken from the
+            // fresh declaration because it is a runtime cadence rather than part of the run's identity, and
+            // the epoch is left exactly where it is — bumping it here would fence out the very attempt that
+            // may be executing this pipeline right now.
+            if (!string.Equals(existing.GraphFingerprint, declared, StringComparison.Ordinal))
+            {
+                throw PipelineResumeRefusedException.Mismatched(run.Value, existing.GraphFingerprint, declared);
+            }
+
+            existing.Interval = declaration.Interval;
+            existing.EveryElements = declaration.EveryElements;
+
+            await state.WriteStateAsync();
+
+            return Ticket(document.Id, run, existing.Epoch, fingerprint);
+        }
+
+        // Written before the ticket is handed back, for the reason a start's epoch is: a claim handed out
+        // before it was recorded would survive a lost activation as a number nobody can reproduce.
+        state.State.LastEpoch++;
+        state.State.DurableRuns[run.Value] = new DurableRunRecord
+        {
+            CanonicalDocument = canonicalDocument,
+            GraphFingerprint = declared,
+            Interval = declaration.Interval,
+            EveryElements = declaration.EveryElements,
+            Epoch = state.State.LastEpoch,
+            Claimed = false,
+        };
+
+        await state.WriteStateAsync();
+
+        return Ticket(document.Id, run, state.State.LastEpoch, fingerprint);
+    }
+
+    /// <inheritdoc/>
+    public async Task<DurableRunClaim?> ClaimDurableRunAsync(string runId)
+    {
+        ArgumentNullException.ThrowIfNull(runId);
+
+        if (!RunId.TryCreate(runId, out RunId run))
+        {
+            throw new ArgumentException(
+                $"'{runId}' is not a valid run identifier, so it names no run this coordinator could have declared.",
+                nameof(runId));
+        }
+
+        if (!state.State.DurableRuns.TryGetValue(run.Value, out DurableRunRecord? record))
+        {
+            return null;
+        }
+
+        // The first claim takes the epoch the declaration recorded and every later one takes a fresh
+        // number. That is not an optimization: the declaring client is holding a ticket carrying the
+        // recorded epoch, so minting a second one for the very first attempt would make that ticket stale
+        // before the run had produced an element. A later claim is a resume, which is a new claim to the
+        // same run, and the attempt it replaces has to stop being current.
+        if (record.Claimed)
+        {
+            state.State.LastEpoch++;
+            record.Epoch = state.State.LastEpoch;
+        }
+
+        record.Claimed = true;
+
+        await state.WriteStateAsync();
+
+        return new DurableRunClaim
+        {
+            Epoch = record.Epoch,
+            CanonicalDocument = record.CanonicalDocument,
+            Interval = record.Interval,
+            EveryElements = record.EveryElements,
         };
     }
 
@@ -91,6 +209,22 @@ internal sealed class PipelineCoordinatorGrain(
     /// and the key can never be ambiguous.
     /// </remarks>
     internal static string RunKey(GraphId graph, RunId run) => $"{graph.Value}/{run.Value}";
+
+    /// <summary>Composes the ticket a caller addresses a run by.</summary>
+    /// <param name="graph">The pipeline.</param>
+    /// <param name="run">The run's identity.</param>
+    /// <param name="epoch">The ownership epoch the run is claimed under.</param>
+    /// <param name="fingerprint">The identity of the document this silo read.</param>
+    /// <returns>The ticket.</returns>
+    private PipelineRunTicket Ticket(GraphId graph, RunId run, long epoch, GraphFingerprint fingerprint) =>
+        new()
+        {
+            GraphId = graph.Value,
+            RunId = run.Value,
+            Epoch = epoch,
+            GraphFingerprint = fingerprint.ToString(),
+            CatalogFingerprint = registry.CatalogFingerprint.ToString(),
+        };
 
     /// <summary>Decodes the document a caller sent.</summary>
     /// <param name="canonicalDocument">The bytes.</param>

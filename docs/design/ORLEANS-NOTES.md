@@ -59,6 +59,23 @@ time.
   grain-call stage does exactly that, and the probe lives in the suite as
   `KeyedOrderingProbeTests` so a future Orleans that changes this answers
   the question again.
+- **A subscription opened at a sequence token receives the element that token
+  names** (probed 2026-08-18, Orleans 10.2.2, memory provider): three
+  publications recorded with their tokens, then a second subscription opened at
+  the *second* element's token, which received `[order-2, order-3]`. Rewind is
+  therefore **inclusive**, so a cursor that stores the token of the last element
+  it delivered replays that element on resume — the stream source's window is
+  one element wider than an index cursor's, and no "token plus one" operation
+  exists to narrow it. `StreamCursorTests` keeps the probe so a future Orleans
+  answers it again.
+- **The memory provider's queue cache is purged when its last consumer
+  unsubscribes** (probed by the same test, after the first shape of it read
+  nothing): with the only subscriber gone, a subscription opened afterwards at a
+  token that was in the cache a moment earlier receives *nothing at all*.
+  `IsRewindable` is therefore a statement about the provider's ability, not
+  about what it still holds; how far back a resume can reach is the provider's
+  cache configuration, which is a deployment decision this package does not
+  make. The probe keeps the first subscription alive for exactly this reason.
 - **Observers are weakly referenced** (learned from a flake, 2026-08-17): the
   client-side table behind `CreateObjectReference` does not root the observer
   object. An implementation nothing else references is garbage-collected, the
@@ -91,9 +108,12 @@ time.
 
 1. ~~Memory stream provider rewindability~~ **Resolved by probe
    (phase 2)**: `IsRewindable = true` for `AddMemoryStreams` (Orleans
-   10.2.2, `PersistentStreamProvider`), on both silo and client. No rewind
-   API is exposed yet; the source subscribes without a sequence token and
-   reads only what arrives after subscription.
+   10.2.2, `PersistentStreamProvider`), on both silo and client. Phase 2
+   exposed no rewind API, because a cursor with no checkpoint owner is a
+   foot-gun; **M5.3 gave it one** and the stream source now subscribes with the
+   token a resume restored. The two follow-up facts that decision needed —
+   rewind is inclusive of the named element, and the memory provider's cache is
+   purged when its last consumer leaves — are probed above.
 2. ~~`ReminderOptions.MinimumReminderPeriod`~~ **Resolved by probe
    (phase 3)**: the type lives in `Orleans.Hosting` (not
    `Orleans.Configuration`); default is one minute; enforcement is a THROW

@@ -8,6 +8,7 @@ using Orleans.Dataflow.Runtime;
 using Orleans.Dataflow.Serialization;
 using Orleans.Hosting;
 using Orleans.Runtime;
+using Orleans.Serialization;
 using Orleans.Streams;
 
 namespace Orleans.Dataflow.Adapters;
@@ -110,6 +111,7 @@ internal sealed class OrleansStageFactory(
     /// <param name="provider">The stream provider.</param>
     /// <param name="stream">The stream identity.</param>
     /// <param name="ingress">The bound and policy of the ingress.</param>
+    /// <param name="cursor">Where this subscription opens, and where it records that it has reached.</param>
     /// <param name="tokens">The run's tokens.</param>
     /// <returns>The sequence the run pulls.</returns>
     /// <remarks>
@@ -132,19 +134,35 @@ internal sealed class OrleansStageFactory(
         IStreamProvider provider,
         StreamId stream,
         BufferOptions ingress,
+        StreamSourceCursor cursor,
         DataflowRunTokens tokens)
     {
         LocalIngressQueue queue = new(ingress.Capacity, ingress.OverflowPolicy);
-        object handle = await element.SubscribeAsync(provider, stream, new StreamIngress(queue))
+
+        // The one line that makes a resume a resume: a fresh run has restored nothing and subscribes with
+        // no token, which is what every run did before M5.3; a resumed one presents the token its previous
+        // attempt delivered through, and the provider redelivers from just after it — or refuses, if it is
+        // not rewindable, which is a fact about the provider stated in its own table row.
+        object handle = await element
+            .SubscribeAsync(provider, stream, new StreamIngress(queue), cursor.Restored)
             .ConfigureAwait(false);
 
         try
         {
-            await foreach (object? delivered in queue
+            await foreach (object? admitted in queue
                 .ElementsAsync(tokens.RunToken, tokens.StopToken)
                 .ConfigureAwait(false))
             {
-                yield return delivered;
+                // The cast is total by construction: one ingress serves one subscription and the only thing
+                // that ever offers into it is the bridge below, which wraps every delivery.
+                Delivery delivered = (Delivery)admitted!;
+
+                // Recorded as the element leaves the queue and confirmed by the run once it has travelled
+                // the segment, which is why the two are separate calls: the queue holds several elements at
+                // once, so what the subscription last saw is not what the run last delivered.
+                cursor.Took(delivered.Token);
+
+                yield return delivered.Element;
             }
         }
         finally
@@ -188,8 +206,14 @@ internal sealed class OrleansStageFactory(
         IStreamProvider provider = Provider(node, declaration.Address.Provider);
         StreamId stream = StreamId.Create(declaration.Address.Namespace, declaration.Address.Key);
 
-        return DataflowStageRuntime.Source(tokens =>
-            Deliveries(element, provider, stream, declaration.Ingress, tokens));
+        // One cursor per occurrence per materialization, exactly as everything else a factory builds is:
+        // two runs of one pipeline subscribe to one stream from two positions, and a cursor shared between
+        // them would be one of them telling the other where it had got to.
+        StreamSourceCursor cursor = new(services.GetRequiredService<Serializer>());
+
+        return DataflowStageRuntime.Source(
+            tokens => Deliveries(element, provider, stream, declaration.Ingress, cursor, tokens),
+            cursor);
     }
 
     /// <summary>Builds the stream publication sink.</summary>
@@ -853,19 +877,42 @@ internal sealed class OrleansStageFactory(
         out IReadOnlyList<string> violations)
         where TDeclaration : class;
 
+    /// <summary>One element as a stream delivered it, with the position it sat at.</summary>
+    /// <param name="Element">The element the provider delivered.</param>
+    /// <param name="Token">
+    /// Where in the stream it sat, or <see langword="null"/> when the provider reported no position.
+    /// </param>
+    /// <remarks>
+    /// The pair travels through the ingress together, and separating them is what the cursor cannot do: a
+    /// bounded ingress holds several elements at once, so a token kept beside the queue rather than inside
+    /// it would say where the <em>subscription</em> had reached and a checkpoint would then skip everything
+    /// the queue was still holding. It never leaves this adapter — the run receives the element alone.
+    /// </remarks>
+    private readonly record struct Delivery(object? Element, StreamSequenceToken? Token);
+
     /// <summary>The bridge from one stream subscription to one run's bounded ingress.</summary>
     /// <param name="queue">The run's ingress.</param>
     /// <remarks>
-    /// The offer carries no token on purpose. Every way the queue stops accepting — completed, failed, or
-    /// its run ended — releases a parked offer with a refusal, so a delivery is never left waiting for a run
-    /// that has gone; and raising an <see cref="OperationCanceledException"/> into Orleans' delivery path
-    /// instead would turn the ordinary end of a run into a stream-provider error.
+    /// <para>
+    /// The offer carries the provider's token so that the run can say where it has reached, and carries no
+    /// cancellation token on purpose. Every way the queue stops accepting — completed, failed, or its run
+    /// ended — releases a parked offer with a refusal, so a delivery is never left waiting for a run that
+    /// has gone; and raising an <see cref="OperationCanceledException"/> into Orleans' delivery path instead
+    /// would turn the ordinary end of a run into a stream-provider error.
+    /// </para>
+    /// <para>
+    /// <b>An element the ingress drops moves no position</b>, and it follows from where the position is
+    /// written rather than from a check here: a dropped element never leaves the queue, so the run never
+    /// takes it and never reports it delivered. A dropping policy therefore keeps its own honesty across a
+    /// resume — the drop is counted, the cursor stays where the last delivered element was, and the resume
+    /// replays from there rather than from past the hole.
+    /// </para>
     /// </remarks>
     private sealed class StreamIngress(LocalIngressQueue queue) : IStreamIngress
     {
         /// <inheritdoc/>
-        public async ValueTask OfferAsync(object? element) =>
-            _ = await queue.OfferAsync(element, CancellationToken.None).ConfigureAwait(false);
+        public async ValueTask OfferAsync(object? element, StreamSequenceToken? token) =>
+            _ = await queue.OfferAsync(new Delivery(element, token), CancellationToken.None).ConfigureAwait(false);
 
         /// <inheritdoc/>
         public void Complete() => queue.Complete();

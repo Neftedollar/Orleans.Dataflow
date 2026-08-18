@@ -1,6 +1,7 @@
 using Orleans.Dataflow.Definition;
 using Orleans.Dataflow.Identity;
 using Orleans.Dataflow.OrleansTests.Cluster;
+using Orleans.Dataflow.Serialization;
 using Xunit;
 
 namespace Orleans.Dataflow.OrleansTests.Provider;
@@ -153,6 +154,59 @@ internal static class TestPipelines
             pipeline,
             pipeline.ResultSlot(TotalSlot, TestVocabulary.Total),
             pipeline.ResultSlot(PayloadSlot, TestVocabulary.Block));
+    }
+
+    /// <summary>Builds a pipeline that writes every element it produces into a named log.</summary>
+    /// <param name="id">The pipeline's identity, which is also its coordinator's key.</param>
+    /// <param name="count">How many numbers the source emits.</param>
+    /// <param name="log">The log the sink writes to.</param>
+    /// <param name="halt">
+    /// The signal the source raises after its last element instead of ending, or <see langword="null"/> when
+    /// it should end on its own.
+    /// </param>
+    /// <returns>The pipeline.</returns>
+    /// <remarks>
+    /// <para>
+    /// The shape the crash suite measures on, and its two stages are chosen for what they make provable
+    /// rather than for what they do. The source declares a cursor, so a resume reopens where the checkpoint
+    /// said instead of at the top; the sink writes down what it was handed, so the duplicate window is a
+    /// list of elements rather than a difference of totals.
+    /// </para>
+    /// <para>
+    /// <b>Source straight to sink and nothing between them</b>, which is what makes the arithmetic exact:
+    /// the two are one fused segment with no buffer anywhere, so an element is recorded before the run
+    /// advances the cursor past it, and at every quiescent moment the log holds precisely the cursor's worth
+    /// of elements. A graph with a batch or a declared buffer in the middle has a loss window of its own —
+    /// measured in the local suite — and mixing that into a crash test would confuse two claims.
+    /// </para>
+    /// </remarks>
+    internal static PipelineDefinition Recording(
+        string id,
+        int count,
+        string log,
+        string? halt = null,
+        string? gate = null,
+        int gateAt = 0)
+    {
+        StageCatalog catalog = TestVocabulary.Catalog();
+        CanonicalJsonValue source = (halt, gate) switch
+        {
+            (null, _) => TestRangeParameters.Write(count),
+            ({ } stopping, null) => TestRangeParameters.Write(count, stopping),
+            ({ } stopping, { } waiting) => TestRangeParameters.Write(count, stopping, waiting, gateAt),
+        };
+
+        RunnableGraph graph = Source
+            .FromRegistered(
+                RegisteredStage.Source(catalog, TestVocabulary.Range, TestVocabulary.Number),
+                "numbers",
+                source)
+            .To(
+                RegisteredStage.Sink(catalog, TestVocabulary.Record, TestVocabulary.Number),
+                "recorded",
+                TestRecordParameters.Write(log));
+
+        return graph.AsPipeline(GraphId.Create(id), GraphRevision.Create(1));
     }
 
     /// <summary>Builds a pipeline whose middle stage throws at one element.</summary>

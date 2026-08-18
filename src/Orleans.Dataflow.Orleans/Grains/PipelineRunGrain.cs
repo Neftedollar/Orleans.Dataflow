@@ -13,15 +13,26 @@ namespace Orleans.Dataflow.Grains;
 /// </summary>
 /// <remarks>
 /// <para>
-/// Everything this grain owns lives for the length of one run and is held in fields rather than in
-/// storage. That is the phase-1 durability contract stated as code: the run is in memory, so losing the
-/// activation loses the attempt, and nothing here pretends otherwise by writing a progress record it could
-/// not honor.
+/// Everything this grain owns lives for the length of one attempt and is held in fields rather than in
+/// storage. For an ordinary run that is the whole durability contract stated as code: the run is in memory,
+/// so losing the activation loses the attempt, and nothing here pretends otherwise by writing a progress
+/// record it could not honor.
+/// </para>
+/// <para>
+/// <b>A durable run lifts exactly that limit and nothing else.</b> Since M5.3 an activation whose
+/// checkpoint store holds a position for this run does not report an absent run: it claims a fresh epoch
+/// from the coordinator, materializes from the checkpoint, and reports itself running. The lift is
+/// activation-driven and there is no second protocol — nothing is pushed at this grain, nothing polls on
+/// its behalf, and the client's own status poll is what brings the activation into being. A durable run
+/// that has not yet written a checkpoint is unchanged: the attempt is lost, and saying so is still the only
+/// honest answer, because there is no position to continue from.
 /// </para>
 /// <para>
 /// No method waits for the run. The engine executes on dedicated threads of its own, so the activation's
 /// turn is free the moment a call has done its bookkeeping — which is what makes a status poll answer
-/// during a long run and what keeps a graceful stop from parking a turn on a drain of unbounded length.
+/// during a long run and what keeps a graceful stop from parking a turn on a drain of unbounded length. The
+/// one wait a call may now perform is the resume itself: reading a store and claiming an epoch, both
+/// bounded, both once per activation.
 /// </para>
 /// </remarks>
 internal sealed class PipelineRunGrain(DataflowSiloRegistry registry, Serializer serializer)
@@ -31,6 +42,30 @@ internal sealed class PipelineRunGrain(DataflowSiloRegistry registry, Serializer
     private long _epoch;
     private GraphFingerprint _fingerprint;
     private IReadOnlyList<ResultSlotId> _slots = [];
+    private StoredCheckpoint? _stored;
+    private PipelineResumeRefusedException? _refused;
+    private GraphId _graph;
+    private RunId _identity;
+
+    /// <inheritdoc/>
+    /// <remarks>
+    /// The store is read here and the coordinator is not called here, which is the difference between a
+    /// resume that works and a deadlock. A store is a service of this silo, so reading it is an ordinary
+    /// await; a coordinator is a grain, and a grain call issued from an activation's first turn waits behind
+    /// whatever message caused the activation. Reading the position at activation and claiming the epoch on
+    /// the first call keeps every grain-to-grain edge on a turn that something else is already driving.
+    /// </remarks>
+    public override async Task OnActivateAsync(CancellationToken cancellationToken)
+    {
+        (_graph, _identity) = Address();
+
+        if (registry.CheckpointStore is { } store && !_graph.IsDefault && !_identity.IsDefault)
+        {
+            _stored = await store.ReadAsync(_graph, _identity, cancellationToken);
+        }
+
+        await base.OnActivateAsync(cancellationToken);
+    }
 
     /// <inheritdoc/>
     public Task StartAsync(byte[] canonicalDocument, long epoch)
@@ -73,23 +108,58 @@ internal sealed class PipelineRunGrain(DataflowSiloRegistry registry, Serializer
     }
 
     /// <inheritdoc/>
-    public Task<RunStatusSnapshot> GetStatusAsync(long epoch)
+    public async Task<long> EnsureStartedAsync()
     {
+        Refused();
+
+        if (_run is not null)
+        {
+            return _epoch;
+        }
+
+        // Named separately from "no declaration", because the two are different deployment mistakes and a
+        // caller fixes them differently. A cluster whose silos do not all register the same store accepts a
+        // declaration on one of them and cannot host the run on another — the same deployment-scoped honesty
+        // the binding registry has carried since phase 2, reachable one grain further away.
+        if (registry.CheckpointStore is null)
+        {
+            throw new PipelineRejectedException(
+                $"The run '{this.GetPrimaryKeyString()}' was declared durable and the silo hosting it registers no checkpoint store, so it has nowhere to write a position. Every silo that may host a durable run calls UseCheckpointStore, and over the same store: a cluster whose silos disagree about that accepts a declaration on one host and cannot honor it on another.");
+        }
+
+        if (await StartOrResumeAsync() is not { } epoch)
+        {
+            throw new PipelineRunLostException(
+                $"The grain '{this.GetPrimaryKeyString()}' was asked to start a durable run and its coordinator has no durable declaration under that identity. A durable run is declared before it is started, and a declaration that is gone is a run nothing can continue.");
+        }
+
+        Refused();
+
+        return epoch;
+    }
+
+    /// <inheritdoc/>
+    public async Task<RunStatusSnapshot> GetStatusAsync(long epoch)
+    {
+        await AdoptAsync();
+
         if (_run is not { } run)
         {
-            return Task.FromResult(new RunStatusSnapshot { Phase = RunPhase.NotStarted });
+            return new RunStatusSnapshot { Phase = RunPhase.NotStarted };
         }
 
         Fence(epoch);
 
-        return Task.FromResult(Describe(run, _epoch));
+        return Describe(run, _epoch);
     }
 
     /// <inheritdoc/>
-    public Task<ResultEnvelope> GetResultAsync(long epoch, string slotName, string graphFingerprint)
+    public async Task<ResultEnvelope> GetResultAsync(long epoch, string slotName, string graphFingerprint)
     {
         ArgumentNullException.ThrowIfNull(slotName);
         ArgumentNullException.ThrowIfNull(graphFingerprint);
+
+        await AdoptAsync();
 
         LocalRun run = Active(epoch);
 
@@ -140,12 +210,14 @@ internal sealed class PipelineRunGrain(DataflowSiloRegistry registry, Serializer
             envelope.Value = resolved.Result;
         }
 
-        return Task.FromResult(envelope);
+        return envelope;
     }
 
     /// <inheritdoc/>
-    public Task ShutdownAsync(long epoch)
+    public async Task ShutdownAsync(long epoch)
     {
+        await AdoptAsync();
+
         LocalRun run = Active(epoch);
 
         // Requested and not awaited. The returned task reports only that the run has stopped, never how it
@@ -153,18 +225,16 @@ internal sealed class PipelineRunGrain(DataflowSiloRegistry registry, Serializer
         // what a caller polls. Awaiting a drain here would park this activation for as long as the
         // downstream of the graph takes.
         _ = Stopping(run.ShutdownAsync());
-
-        return Task.CompletedTask;
     }
 
     /// <inheritdoc/>
-    public Task CancelAsync(long epoch)
+    public async Task CancelAsync(long epoch)
     {
+        await AdoptAsync();
+
         LocalRun run = Active(epoch);
 
         _ = Stopping(run.DisposeAsync());
-
-        return Task.CompletedTask;
     }
 
     /// <inheritdoc/>
@@ -277,6 +347,181 @@ internal sealed class PipelineRunGrain(DataflowSiloRegistry registry, Serializer
             throw new PipelineRejectedException(
                 $"The bytes are not the canonical serialization of a graph document: {malformed.Message}");
         }
+    }
+
+    /// <summary>Continues a durable run this activation found a checkpoint for, if there is one.</summary>
+    /// <returns>A task that completes once this activation is hosting whatever it can host.</returns>
+    /// <remarks>
+    /// <para>
+    /// Called at the top of every call that answers for a run, and it is the whole of activation-driven
+    /// resume. The gate is deliberately the <em>checkpoint</em> and not the coordinator's register: a run
+    /// with a stored position is a run there is something to continue, and a run without one — durable or
+    /// not — is a lost attempt exactly as it was before this existed. That keeps the cost of the lift at one
+    /// store read per activation on a silo that registers a store, and at nothing at all on a silo that does
+    /// not.
+    /// </para>
+    /// <para>
+    /// It does nothing at all once the run is here, which is what makes it safe to call from five places:
+    /// the second call finds <c>_run</c> and returns without touching a store or a coordinator.
+    /// </para>
+    /// </remarks>
+    private async Task AdoptAsync()
+    {
+        Refused();
+
+        if (_run is not null || _stored is null)
+        {
+            return;
+        }
+
+        _ = await StartOrResumeAsync();
+
+        Refused();
+    }
+
+    /// <summary>Claims this run from its coordinator and starts it, from a checkpoint when there is one.</summary>
+    /// <returns>
+    /// The epoch this activation now owns the run under, or <see langword="null"/> when the coordinator has
+    /// no durable declaration for it.
+    /// </returns>
+    /// <remarks>
+    /// <para>
+    /// <b>One path for a first start and for a resume</b>, which is what "no new protocol" means in code.
+    /// The claim is the same call, the document comes from the same record, and the only difference is
+    /// whether a checkpoint was found — in which case its values reach the plan's seams before the first
+    /// element and its ETag is what the first capture presents, so a stale attempt still writing loses to
+    /// this one exactly as a superseded coordinator does.
+    /// </para>
+    /// <para>
+    /// A refusal is remembered rather than thrown from here, because the callers that reach this are
+    /// answering an ordinary poll and a run whose document no longer matches its checkpoint is a fact about
+    /// the run rather than about the poll. Every later call reports the same refusal, so a caller that
+    /// retries reads the same sentence rather than a different one.
+    /// </para>
+    /// </remarks>
+    private async Task<long?> StartOrResumeAsync()
+    {
+        if (registry.CheckpointStore is not { } store || _graph.IsDefault || _identity.IsDefault)
+        {
+            return null;
+        }
+
+        if (await GrainFactory
+            .GetGrain<IPipelineCoordinatorGrain>(_graph.Value)
+            .ClaimDurableRunAsync(_identity.Value) is not { } claim)
+        {
+            return null;
+        }
+
+        GraphDocument document = Read(claim.CanonicalDocument);
+        GraphFingerprint fingerprint = GraphFingerprint.OfSerialized(claim.CanonicalDocument);
+        LocalCheckpoint? checkpoint = null;
+
+        if (_stored is { } stored)
+        {
+            if (!LocalCheckpointDocument.TryRead(
+                stored.Document,
+                out checkpoint,
+                out IReadOnlyList<string> violations))
+            {
+                _refused = new PipelineResumeRefusedException(
+                    $"The checkpoint stored for the run '{_identity}' of the graph '{_graph}' is not one this runtime can read, so there is nothing it can continue: {string.Join("; ", violations)}.");
+
+                return claim.Epoch;
+            }
+
+            if (checkpoint!.Graph != fingerprint)
+            {
+                _refused = PipelineResumeRefusedException.Mismatched(
+                    _identity.Value,
+                    checkpoint.Graph.ToString(),
+                    fingerprint.ToString());
+
+                return claim.Epoch;
+            }
+
+            if (checkpoint.Revision != document.Revision)
+            {
+                _refused = new PipelineResumeRefusedException(
+                    string.Create(
+                        CultureInfo.InvariantCulture,
+                        $"The checkpoint stored for the run '{_identity}' was taken at revision {checkpoint.Revision} and the document this cluster holds for it is revision {document.Revision}. A resume continues the same revision; cross-revision migration is a recorded deferral rather than a silent best effort."))
+                {
+                    StoredFingerprint = checkpoint.Graph.ToString(),
+                    DeclaredFingerprint = fingerprint.ToString(),
+                };
+
+                return claim.Epoch;
+            }
+        }
+
+        try
+        {
+            _run = PipelineMaterializer.StartDurable(
+                document,
+                fingerprint,
+                registry.Catalog,
+                registry.Factories,
+                this.GetPrimaryKeyString(),
+                new DurableRunOptions
+                {
+                    Store = store,
+                    Run = _identity,
+                    Interval = claim.Interval,
+                    EveryElements = claim.EveryElements,
+                },
+                checkpoint,
+                _stored?.ETag,
+                CancellationToken.None);
+        }
+        catch (InvalidOperationException refusal)
+        {
+            // The inner exception is dropped for the reason every refusal here drops one: a refusal has to
+            // survive the hop, and an exception chain is only as serializable as its least prepared link.
+            throw new PipelineRejectedException(refusal.Message);
+        }
+
+        _epoch = claim.Epoch;
+        _fingerprint = fingerprint;
+        _slots = [.. document.ResultSlots.Select(static slot => slot.Id)];
+
+        return claim.Epoch;
+    }
+
+    /// <summary>Reports the refusal this activation is holding, if it is holding one.</summary>
+    /// <exception cref="PipelineResumeRefusedException">A resume was refused on this activation.</exception>
+    private void Refused()
+    {
+        if (_refused is { } refusal)
+        {
+            throw refusal;
+        }
+    }
+
+    /// <summary>Reads this grain's own key back into the two identities a checkpoint is addressed by.</summary>
+    /// <returns>
+    /// The graph and the run, or the default values when the key is not one this package composed.
+    /// </returns>
+    /// <remarks>
+    /// The inverse of <c>PipelineCoordinatorGrain.RunKey</c>, and it is total rather than throwing: a key a
+    /// hand-written caller composed is not a reason for an activation to fail, it is a reason for that
+    /// activation to have no durable run — and the calls it then answers refuse for their own reasons. The
+    /// separator is a slash, which the identifier grammar does not contain, so the split is unambiguous.
+    /// </remarks>
+    private (GraphId Graph, RunId Run) Address()
+    {
+        string key = this.GetPrimaryKeyString();
+        int separator = key.IndexOf('/', StringComparison.Ordinal);
+
+        if (separator <= 0 || separator == key.Length - 1)
+        {
+            return (default, default);
+        }
+
+        return GraphId.TryCreate(key[..separator], out GraphId graph) &&
+            RunId.TryCreate(key[(separator + 1)..], out RunId run)
+            ? (graph, run)
+            : (default, default);
     }
 
     /// <summary>Returns the active run, refusing a call that does not own it.</summary>

@@ -210,6 +210,41 @@ public interface IOrleansDataflowBuilder
     /// </para>
     /// </remarks>
     IOrleansDataflowBuilder LimitResultSize(int maximumBytes);
+
+    /// <summary>States where this silo's durable runs keep their checkpoints.</summary>
+    /// <param name="store">
+    /// The resolver of the store, given the silo's own container. It is called once, when the silo builds
+    /// its dataflow registry, and the value it answers with serves every run on this silo.
+    /// </param>
+    /// <returns>This builder, so registrations chain.</returns>
+    /// <exception cref="ArgumentNullException"><paramref name="store"/> is <see langword="null"/>.</exception>
+    /// <remarks>
+    /// <para>
+    /// The checkpoint store is a deployment decision and this call is where a deployment makes it, exactly
+    /// as <c>AddGrainStorage</c> under
+    /// <see cref="Grains.OrleansDataflowStorage.CoordinatorProviderName"/> is where it decides where the
+    /// coordinator's register lives. Nothing here supplies a default, and the reason is the same one the
+    /// coordinator's storage has none: an in-memory default would let a deployment believe its runs were
+    /// durable while their positions died with the process that wrote them.
+    /// </para>
+    /// <para>
+    /// <b>A silo without one is a silo that runs no durable pipeline</b>, which is a legal configuration
+    /// and the one every deployment before M5.3 had. Its ordinary runs are unaffected; what it refuses — at
+    /// the declaration, by name, before anything has run — is a request for a run whose position must
+    /// survive.
+    /// </para>
+    /// <para>
+    /// What the store has to be is stated by <see cref="ICheckpointStore"/> and is one property: an
+    /// ETag-guarded write that refuses a writer the store has moved on from. That is the same optimistic
+    /// concurrency the coordinator's fencing already rests on, and a store that accepted every write would
+    /// let two attempts of one run interleave their snapshots into a document that describes neither.
+    /// </para>
+    /// <para>
+    /// Calling this replaces whatever a previous call said rather than adding to it, because a silo has one
+    /// checkpoint store.
+    /// </para>
+    /// </remarks>
+    IOrleansDataflowBuilder UseCheckpointStore(Func<IServiceProvider, ICheckpointStore> store);
 }
 
 /// <summary>

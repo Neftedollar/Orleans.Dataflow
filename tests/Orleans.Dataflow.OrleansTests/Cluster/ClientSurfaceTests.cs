@@ -37,6 +37,52 @@ public sealed class ClientSurfaceTests(DataflowCluster cluster)
     }
 
     [Fact]
+    public async Task DurableOptionsAreCheckedBeforeAnythingReachesTheCluster()
+    {
+        PipelineDefinition pipeline = TestPipelines.Recording("client-durable-guard", count: 1, "client-guard");
+
+        // Checked here as well as by the silo, and both are worth having: this one makes a mistake a fast,
+        // well-worded exception on the caller's own thread, and the silo's makes it impossible for a
+        // hand-built call to get past. What each refusal names is the member that is wrong.
+        ArgumentException named = await Assert.ThrowsAsync<ArgumentException>(
+            () => cluster.Host.MaterializeDurableAsync(
+                pipeline,
+                new DurablePipelineOptions { RunId = "Not A Run Id" },
+                Token));
+
+        Assert.Contains("run identifier", named.Message, StringComparison.Ordinal);
+
+        ArgumentException interval = await Assert.ThrowsAsync<ArgumentException>(
+            () => cluster.Host.MaterializeDurableAsync(
+                pipeline,
+                new DurablePipelineOptions { RunId = "guarded", Interval = TimeSpan.Zero },
+                Token));
+
+        Assert.Contains("due forever", interval.Message, StringComparison.Ordinal);
+
+        ArgumentException elements = await Assert.ThrowsAsync<ArgumentException>(
+            () => cluster.Host.MaterializeDurableAsync(
+                pipeline,
+                new DurablePipelineOptions { RunId = "guarded", EveryElements = 0 },
+                Token));
+
+        Assert.Contains("before an element exists", elements.Message, StringComparison.Ordinal);
+
+        // Declaring neither bound is legal and means the run never touches the store, which is the honest
+        // reading of the words rather than a mistake this type guesses at.
+        await using OrleansRunHandle handle = await cluster.Host.MaterializeDurableAsync(
+            pipeline,
+            new DurablePipelineOptions { RunId = "untimed" },
+            Token);
+
+        await handle.Completion;
+
+        Assert.False(cluster.Checkpoints.Holds(
+            Identity.GraphId.Create("client-durable-guard"),
+            Identity.RunId.Create("untimed")));
+    }
+
+    [Fact]
     public void ThePollIntervalDefaultsToSomethingShortAndRefusesSomethingImpossible()
     {
         OrleansDataflowClientOptions options = new();

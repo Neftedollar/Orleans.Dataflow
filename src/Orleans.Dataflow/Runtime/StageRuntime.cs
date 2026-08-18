@@ -47,6 +47,7 @@ internal sealed class StageRuntime
     /// <param name="producesResult">Whether a terminal's final state is offered to a result slot.</param>
     /// <param name="splitting">The splitting strategy, for a fan-out.</param>
     /// <param name="joining">The joining strategy, for a fan-in.</param>
+    /// <param name="cursor">The cursor a source declares, or <see langword="null"/> for one that declares none.</param>
     private StageRuntime(
         StageRuntimeShape shape,
         StageSourceOpener? opener,
@@ -59,8 +60,10 @@ internal sealed class StageRuntime
         Func<object?, object?>? finish,
         bool producesResult,
         LocalFanOut? splitting = null,
-        LocalFanIn? joining = null)
+        LocalFanIn? joining = null,
+        Hosting.DataflowSourceCursor? cursor = null)
     {
+        Cursor = cursor;
         Shape = shape;
         Opener = opener;
         Map = map;
@@ -132,11 +135,25 @@ internal sealed class StageRuntime
     /// <value>The strategy for <see cref="StageRuntimeShape.FanIn"/>; otherwise <see langword="null"/>.</value>
     internal LocalFanIn? Joining { get; }
 
+    /// <summary>Gets the cursor a source declares.</summary>
+    /// <value>
+    /// The provider's cursor for a source that declares one; <see langword="null"/> for every other shape
+    /// and for a source that contributes nothing to a checkpoint.
+    /// </value>
+    /// <remarks>
+    /// The presence of one is what "this adapter declares a cursor" means, and its absence is the answer
+    /// every other adapter gives: it resumes from now, stated in its own table row rather than generalized.
+    /// </remarks>
+    internal Hosting.DataflowSourceCursor? Cursor { get; }
+
     /// <summary>Creates the runtime of a source stage.</summary>
     /// <param name="opener">The opener of one enumeration, invoked once per run at the first pull.</param>
+    /// <param name="cursor">
+    /// The cursor this source declares, or <see langword="null"/> for a source that resumes from now.
+    /// </param>
     /// <returns>The runtime.</returns>
     /// <exception cref="ArgumentNullException"><paramref name="opener"/> is <see langword="null"/>.</exception>
-    internal static StageRuntime Source(StageSourceOpener opener)
+    internal static StageRuntime Source(StageSourceOpener opener, Hosting.DataflowSourceCursor? cursor = null)
     {
         ArgumentNullException.ThrowIfNull(opener);
 
@@ -150,7 +167,8 @@ internal sealed class StageRuntime
             seed: null,
             fold: null,
             finish: null,
-            producesResult: false);
+            producesResult: false,
+            cursor: cursor);
     }
 
     /// <summary>Creates the runtime of a synchronous element stage.</summary>

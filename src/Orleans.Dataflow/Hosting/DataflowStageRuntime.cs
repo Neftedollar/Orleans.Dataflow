@@ -85,6 +85,49 @@ public sealed class DataflowStageRuntime
                 open(new DataflowRunTokens(tokens.RunIdentity, tokens.RunToken, tokens.StopToken))));
     }
 
+    /// <summary>Creates the runtime of a source stage that knows where it is.</summary>
+    /// <param name="open">
+    /// The opener of one enumeration, invoked once per run at the run's first pull, under that run's
+    /// tokens. It reads <paramref name="cursor"/> to learn where to open.
+    /// </param>
+    /// <param name="cursor">The cursor this source declares, built fresh for this node and this run.</param>
+    /// <returns>The runtime.</returns>
+    /// <exception cref="ArgumentNullException">
+    /// <paramref name="open"/> or <paramref name="cursor"/> is <see langword="null"/>.
+    /// </exception>
+    /// <remarks>
+    /// <para>
+    /// The overload a durable run needs, and the only difference from the plain one: this source's position
+    /// enters a checkpoint and a resume hands it back before the run's first element. Everything else — one
+    /// enumeration per run, disposal on every terminal path, the two tokens — is unchanged, because a cursor
+    /// is a thing a source <em>says</em> rather than a different way of running one.
+    /// </para>
+    /// <para>
+    /// <b>The opener and the cursor are the provider's two halves of one object</b> and this seam does not
+    /// join them for it: nothing here reads a position, so an adapter closes its opener over the very cursor
+    /// instance it hands over and decides for itself whether a restored position is an index to skip, a
+    /// token to subscribe at, or an offset to seek to.
+    /// </para>
+    /// <para>
+    /// A source that declares one takes on a requirement the engine cannot check and the adapter must state:
+    /// reopening at a stored position has to land on the elements after it. Where a provider cannot promise
+    /// that, it declares no cursor and resumes from now — which is a row in its table rather than a silent
+    /// approximation.
+    /// </para>
+    /// </remarks>
+    public static DataflowStageRuntime Source(
+        Func<DataflowRunTokens, IAsyncEnumerable<object?>> open,
+        DataflowSourceCursor cursor)
+    {
+        ArgumentNullException.ThrowIfNull(open);
+        ArgumentNullException.ThrowIfNull(cursor);
+
+        return new DataflowStageRuntime(
+            StageRuntime.Source(
+                tokens => open(new DataflowRunTokens(tokens.RunIdentity, tokens.RunToken, tokens.StopToken)),
+                cursor));
+    }
+
     /// <summary>Creates the runtime of a synchronous element stage.</summary>
     /// <param name="map">The mapping, applied on the thread that pulled the element.</param>
     /// <returns>The runtime.</returns>

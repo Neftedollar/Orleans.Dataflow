@@ -49,4 +49,30 @@ internal static class Deadline
                 $"Waited {Budget} and {expectation} never happened. This wait is reporting that, not causing it.");
         }
     }
+
+    /// <summary>Awaits a task under the budget and hands back what it produced.</summary>
+    /// <typeparam name="T">What the task answers with.</typeparam>
+    /// <param name="work">The task to wait for.</param>
+    /// <param name="expectation">What the caller is waiting for, for the message if it never arrives.</param>
+    /// <returns>The task's own value.</returns>
+    /// <exception cref="TimeoutException"><paramref name="work"/> did not settle within the budget.</exception>
+    /// <remarks>
+    /// The same wait with an answer, for the calls that have one. It exists because a grain call that
+    /// deadlocks is indistinguishable from a slow one until something puts a bound on it, and a test about
+    /// two grains not waiting for each other is exactly the kind that must fail rather than hang.
+    /// </remarks>
+    internal static async Task<T> Within<T>(Task<T> work, string expectation)
+    {
+        ArgumentNullException.ThrowIfNull(work);
+
+        try
+        {
+            return await work.WaitAsync(Budget, TestContext.Current.CancellationToken);
+        }
+        catch (TimeoutException)
+        {
+            throw new TimeoutException(
+                $"Waited {Budget} and {expectation} never happened. This wait is reporting that, not causing it.");
+        }
+    }
 }

@@ -99,6 +99,100 @@ internal static class PipelineMaterializer
         return LocalRun.Start(plan, fingerprint, PipelineNonce, durable: null, cancellationToken);
     }
 
+    /// <summary>Validates a document against a host and starts a run of it that writes checkpoints.</summary>
+    /// <param name="document">The deployable document.</param>
+    /// <param name="fingerprint">The fingerprint of that document's canonical bytes.</param>
+    /// <param name="catalog">The host's stage catalog.</param>
+    /// <param name="factories">The host's runtime factories, keyed by provider.</param>
+    /// <param name="runIdentity">What this run is called in the deployment.</param>
+    /// <param name="durable">Where this run's checkpoints go, what it is called, and when one is taken.</param>
+    /// <param name="checkpoint">
+    /// What a resume read back, or <see langword="null"/> for a durable run starting from the beginning.
+    /// </param>
+    /// <param name="etag">
+    /// The ETag the resumed attempt presents at its first capture, or <see langword="null"/> when this run
+    /// believes the store holds nothing for its identity.
+    /// </param>
+    /// <param name="cancellationToken">A token that cancels the run this call starts.</param>
+    /// <returns>The started run.</returns>
+    /// <exception cref="ArgumentNullException">Any required reference argument is <see langword="null"/>.</exception>
+    /// <exception cref="InvalidOperationException">
+    /// The document does not validate, it is not one this runtime executes, or the checkpoint names a node
+    /// this graph has no such seam for.
+    /// </exception>
+    /// <remarks>
+    /// <para>
+    /// <see cref="Start"/> with the two things a durable run adds, and deliberately nothing else: whatever a
+    /// checkpoint carried is handed back to the plan's seams before the first element, and a capture loop
+    /// runs beside the run on its declared timing. A fresh durable run and a resumed one differ in exactly
+    /// those two inputs — what the seams were handed, and which ETag the first capture presents — which is
+    /// the same statement <see cref="LocalDataflowHost"/> makes about its own two spellings.
+    /// </para>
+    /// <para>
+    /// <b>Whether the checkpoint describes this graph is the caller's question and not this one's.</b> A
+    /// host that reads a store has to be able to refuse a mismatch in its own vocabulary — by name, and
+    /// across a wire where an exception chain does not survive — so the fingerprint and revision comparison
+    /// stays where the store was read rather than being buried in a materialization failure.
+    /// </para>
+    /// </remarks>
+    internal static LocalRun StartDurable(
+        GraphDocument document,
+        GraphFingerprint fingerprint,
+        IStageCatalog catalog,
+        StageRuntimeRegistry factories,
+        string runIdentity,
+        DurableRunOptions durable,
+        LocalCheckpoint? checkpoint,
+        string? etag,
+        CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(document);
+        ArgumentNullException.ThrowIfNull(catalog);
+        ArgumentNullException.ThrowIfNull(factories);
+        ArgumentNullException.ThrowIfNull(runIdentity);
+        ArgumentNullException.ThrowIfNull(durable);
+
+        GraphValidationReport report = GraphCompiler.Validate(document, catalog);
+
+        if (!report.IsValid)
+        {
+            throw new InvalidOperationException(Describe(report));
+        }
+
+        LocalRunPlan plan = LocalRunPlanner.Compile(
+            document,
+            new Dictionary<Identity.NodeId, Authoring.LocalStageDescriptor>(),
+            new StageRuntimeBinder(catalog, factories),
+            runIdentity,
+            TimeProvider.System);
+
+        if (checkpoint is not null)
+        {
+            LocalResume.Restore(plan, checkpoint);
+        }
+
+        bool declared = durable.Interval is not null || durable.EveryElements is not null;
+
+        return LocalRun.Start(
+            plan,
+            fingerprint,
+            PipelineNonce,
+            declared
+                ? started => new LocalCheckpointer(
+                    plan,
+                    started.Pause,
+                    plan.Clock,
+                    durable,
+                    fingerprint,
+                    document.Revision,
+                    document.Id,
+                    etag,
+                    started.Faulted,
+                    started.StopToken)
+                : null,
+            cancellationToken);
+    }
+
     /// <summary>Renders a failed validation report as the message of the exception that refuses a document.</summary>
     /// <param name="report">The report, which is known to carry at least one diagnostic.</param>
     /// <returns>The message.</returns>

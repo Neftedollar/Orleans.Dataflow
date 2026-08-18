@@ -103,6 +103,60 @@ public sealed class WireContractTests(DataflowCluster cluster)
     }
 
     [Fact]
+    public void TheCoordinatorStateRoundTripsTheDurableRunsItHasDeclared()
+    {
+        PipelineCoordinatorState state = new() { LastEpoch = 9L };
+
+        state.DurableRuns["nightly"] = new DurableRunRecord
+        {
+            CanonicalDocument = [1, 2, 3],
+            GraphFingerprint = "sha256:9f86d081",
+            Interval = TimeSpan.FromSeconds(30),
+            EveryElements = 250,
+            Epoch = 9L,
+            Claimed = true,
+        };
+
+        PipelineCoordinatorState round = RoundTrip(state);
+        DurableRunRecord record = round.DurableRuns["nightly"];
+
+        Assert.Equal([1, 2, 3], record.CanonicalDocument);
+        Assert.Equal("sha256:9f86d081", record.GraphFingerprint);
+        Assert.Equal(TimeSpan.FromSeconds(30), record.Interval);
+        Assert.Equal(250, record.EveryElements);
+        Assert.Equal(9L, record.Epoch);
+        Assert.True(record.Claimed);
+    }
+
+    [Fact]
+    public void ADurableDeclarationAndTheClaimItProducesBothRoundTrip()
+    {
+        DurableRunDeclaration declaration = RoundTrip(new DurableRunDeclaration
+        {
+            RunId = "nightly",
+            Interval = TimeSpan.FromMinutes(1),
+            EveryElements = 100,
+        });
+
+        Assert.Equal("nightly", declaration.RunId);
+        Assert.Equal(TimeSpan.FromMinutes(1), declaration.Interval);
+        Assert.Equal(100, declaration.EveryElements);
+
+        DurableRunClaim claim = RoundTrip(new DurableRunClaim
+        {
+            Epoch = 4L,
+            CanonicalDocument = [7, 8, 9],
+            Interval = null,
+            EveryElements = 3,
+        });
+
+        Assert.Equal(4L, claim.Epoch);
+        Assert.Equal([7, 8, 9], claim.CanonicalDocument);
+        Assert.Null(claim.Interval);
+        Assert.Equal(3, claim.EveryElements);
+    }
+
+    [Fact]
     public void EveryExceptionThatCrossesAGrainBoundaryRoundTripsWithItsOwnMembers()
     {
         PipelineFencingException fencing = RoundTrip(new PipelineFencingException(4L, 2L));
@@ -129,6 +183,13 @@ public sealed class WireContractTests(DataflowCluster cluster)
         Assert.Equal("total", oversized.SlotName);
         Assert.Equal(4096L, oversized.Bytes);
         Assert.Equal(512, oversized.MaximumBytes);
+
+        PipelineResumeRefusedException mismatched = RoundTrip(
+            PipelineResumeRefusedException.Mismatched("nightly", "sha256:aa", "sha256:bb"));
+
+        Assert.Equal("sha256:aa", mismatched.StoredFingerprint);
+        Assert.Equal("sha256:bb", mismatched.DeclaredFingerprint);
+        Assert.Contains("nightly", mismatched.Message, StringComparison.Ordinal);
 
         Assert.Contains("refused", RoundTrip(new PipelineRejectedException("refused")).Message, StringComparison.Ordinal);
         Assert.Contains("lost", RoundTrip(new PipelineRunLostException("lost")).Message, StringComparison.Ordinal);
@@ -177,6 +238,9 @@ public sealed class WireContractTests(DataflowCluster cluster)
             typeof(RunStatusSnapshot),
             typeof(ResultEnvelope),
             typeof(PipelineCoordinatorState),
+            typeof(DurableRunDeclaration),
+            typeof(DurableRunClaim),
+            typeof(DurableRunRecord),
         ];
 
         foreach (Type contract in wire)

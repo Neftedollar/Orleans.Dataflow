@@ -28,6 +28,10 @@ internal sealed class DataflowSiloRegistry
     /// <param name="catalog">The stages this silo registers.</param>
     /// <param name="factories">The factories that build them, keyed by provider.</param>
     /// <param name="maximumResultBytes">The largest result this silo sends across a grain boundary.</param>
+    /// <param name="checkpointStore">
+    /// Where this silo's durable runs keep their checkpoints, or <see langword="null"/> for a deployment
+    /// that runs none.
+    /// </param>
     /// <exception cref="ArgumentNullException">
     /// <paramref name="catalog"/> or <paramref name="factories"/> is <see langword="null"/>.
     /// </exception>
@@ -35,7 +39,8 @@ internal sealed class DataflowSiloRegistry
     internal DataflowSiloRegistry(
         StageCatalog catalog,
         IEnumerable<KeyValuePair<ProviderId, IStageRuntimeFactory>> factories,
-        int maximumResultBytes = OrleansDataflowResults.DefaultMaximumResultBytes)
+        int maximumResultBytes = OrleansDataflowResults.DefaultMaximumResultBytes,
+        ICheckpointStore? checkpointStore = null)
     {
         ArgumentNullException.ThrowIfNull(catalog);
         ArgumentNullException.ThrowIfNull(factories);
@@ -45,6 +50,7 @@ internal sealed class DataflowSiloRegistry
         Factories = new StageRuntimeRegistry(factories);
         CatalogFingerprint = StageCatalogSerializer.Fingerprint(catalog);
         MaximumResultBytes = maximumResultBytes;
+        CheckpointStore = checkpointStore;
     }
 
     /// <summary>Gets the stages this silo registers.</summary>
@@ -69,4 +75,24 @@ internal sealed class DataflowSiloRegistry
     /// has already ended, and what a bound refuses is sending one of its results rather than the run itself.
     /// </remarks>
     internal int MaximumResultBytes { get; }
+
+    /// <summary>Gets where this silo's durable runs keep their checkpoints.</summary>
+    /// <value>
+    /// The store a deployment registered, or <see langword="null"/> when it registered none.
+    /// </value>
+    /// <remarks>
+    /// <para>
+    /// Its absence is a legal configuration and not an oversight: a deployment that runs no durable
+    /// pipeline needs no store, and its run grains behave exactly as they did before durability existed —
+    /// an activation that goes away takes its attempt with it. What is refused, loudly and at the
+    /// declaration rather than at the first capture, is declaring a run durable on a silo with nowhere to
+    /// put a position.
+    /// </para>
+    /// <para>
+    /// Which store stands behind it is the deployment's decision, exactly as the coordinator's grain
+    /// storage is. What this library requires of it is the one property the model rests on: an ETag-guarded
+    /// write that refuses a superseded writer rather than accepting it.
+    /// </para>
+    /// </remarks>
+    internal ICheckpointStore? CheckpointStore { get; }
 }

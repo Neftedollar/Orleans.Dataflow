@@ -1,5 +1,7 @@
+using System.Globalization;
 using Orleans.Dataflow.Definition;
 using Orleans.Dataflow.Grains;
+using Orleans.Dataflow.Identity;
 using Orleans.Dataflow.Serialization;
 
 namespace Orleans.Dataflow.Hosting;
@@ -89,6 +91,131 @@ public sealed class OrleansDataflowHost
 
         IPipelineRunGrain run = _grains.GetGrain<IPipelineRunGrain>($"{ticket.GraphId}/{ticket.RunId}");
 
-        return new OrleansRunHandle(run, ticket, pipeline.Fingerprint, _options.PollInterval);
+        return new OrleansRunHandle(run, ticket, pipeline.Fingerprint, _options.PollInterval, durable: false);
+    }
+
+    /// <summary>Materializes a pipeline into a running run that can outlive the silo hosting it.</summary>
+    /// <param name="pipeline">The pipeline to run.</param>
+    /// <param name="durable">What the run is called and when it takes a checkpoint.</param>
+    /// <param name="cancellationToken">A token that stops this call; it does not stop a started run.</param>
+    /// <returns>The handle of the started run.</returns>
+    /// <exception cref="ArgumentNullException">
+    /// <paramref name="pipeline"/> or <paramref name="durable"/> is <see langword="null"/>.
+    /// </exception>
+    /// <exception cref="ArgumentException">
+    /// <see cref="DurablePipelineOptions.RunId"/> is not a valid run identifier,
+    /// <see cref="DurablePipelineOptions.Interval"/> is not positive, or
+    /// <see cref="DurablePipelineOptions.EveryElements"/> is below one.
+    /// </exception>
+    /// <exception cref="PipelineRejectedException">
+    /// The silo refused the document, or it registers no checkpoint store for a durable run to write to.
+    /// </exception>
+    /// <exception cref="PipelineResumeRefusedException">
+    /// The run identity is already declared for a different document. V1 continues one document per durable
+    /// run identity.
+    /// </exception>
+    /// <remarks>
+    /// <para>
+    /// <b>Two hops and both of them matter.</b> The coordinator is asked to <em>declare</em> the run — it
+    /// records the document, the timing, and an epoch, and returns without starting anything — and then the
+    /// run's own grain is asked to start it, which is the moment it claims that epoch and begins executing.
+    /// Splitting the two is what makes resume need no protocol of its own: an activation that comes up after
+    /// a silo died takes the second half of this very path on its own, so a crashed run continues by the
+    /// same route it started by.
+    /// </para>
+    /// <para>
+    /// <b>The run identity is the author's, and it is the one API-semantic change durability brings.</b>
+    /// <see cref="MaterializeAsync"/> names each run afresh, so two calls are two runs; this call is named
+    /// by <paramref name="durable"/>, so two calls under one name are one run — the second hands back a
+    /// handle to the run that already exists, or continues it from its checkpoint when the silo hosting it
+    /// has gone. A resume is the same run continuing, and a name allocated per attempt would leave nothing
+    /// able to find the previous attempt's position.
+    /// </para>
+    /// <para>
+    /// <b>The handle follows the run rather than the attempt.</b> A resumed attempt claims a fresh epoch, so
+    /// a handle from before it holds a number that is out of date rather than wrong; it adopts the current
+    /// epoch from the fencing refusal that names it and carries on. That is a durable handle's behavior
+    /// alone — an ordinary run has no later attempt to follow.
+    /// </para>
+    /// </remarks>
+    public async Task<OrleansRunHandle> MaterializeDurableAsync(
+        PipelineDefinition pipeline,
+        DurablePipelineOptions durable,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(pipeline);
+        ArgumentNullException.ThrowIfNull(durable);
+
+        Guard(durable);
+
+        byte[] canonical = GraphDocumentSerializer.Serialize(pipeline.Document);
+
+        PipelineRunTicket declared = await _grains
+            .GetGrain<IPipelineCoordinatorGrain>(pipeline.Id.Value)
+            .DeclareDurableRunAsync(
+                canonical,
+                new DurableRunDeclaration
+                {
+                    RunId = durable.RunId,
+                    Interval = durable.Interval,
+                    EveryElements = durable.EveryElements,
+                })
+            .WaitAsync(cancellationToken)
+            .ConfigureAwait(false);
+
+        IPipelineRunGrain run = _grains.GetGrain<IPipelineRunGrain>($"{declared.GraphId}/{declared.RunId}");
+
+        // Composed from both answers rather than taken from the declaration, because the two can differ by
+        // one attempt: declaring a run whose previous host died records nothing new, and the activation that
+        // then picks it up claims a fresh epoch. Taking the live number here is what keeps the returned
+        // handle's first call from being fenced by a run it just started.
+        long epoch = await run.EnsureStartedAsync().WaitAsync(cancellationToken).ConfigureAwait(false);
+
+        PipelineRunTicket ticket = new()
+        {
+            GraphId = declared.GraphId,
+            RunId = declared.RunId,
+            Epoch = epoch,
+            GraphFingerprint = declared.GraphFingerprint,
+            CatalogFingerprint = declared.CatalogFingerprint,
+        };
+
+        return new OrleansRunHandle(run, ticket, pipeline.Fingerprint, _options.PollInterval, durable: true);
+    }
+
+    /// <summary>Refuses declared durability this host could not honor.</summary>
+    /// <param name="durable">The declaration.</param>
+    /// <exception cref="ArgumentException">The identity or one of the two bounds is not usable.</exception>
+    /// <remarks>
+    /// Checked here as well as by the silo, and both are worth having: this one makes a mistake a fast,
+    /// well-worded exception on the caller's own thread, and the silo's makes it impossible for a
+    /// hand-built call to get past.
+    /// </remarks>
+    private static void Guard(DurablePipelineOptions durable)
+    {
+        if (!RunId.TryCreate(durable.RunId, out _))
+        {
+            throw new ArgumentException(
+                $"'{durable.RunId}' is not a valid run identifier, so nothing could address the run or key its checkpoints by it. A durable run is named by whoever will resume it, and the name has to be one this runtime can address.",
+                nameof(durable));
+        }
+
+        if (durable.Interval is { } interval && interval <= TimeSpan.Zero)
+        {
+            throw new ArgumentException(
+                string.Create(
+                    CultureInfo.InvariantCulture,
+                    $"A checkpoint interval of {interval} describes a capture that is due forever. Declare a positive interval, or leave {nameof(DurablePipelineOptions.Interval)} unset and checkpoint on elements alone."),
+                nameof(durable));
+        }
+
+        if (durable.EveryElements is { } elements && elements < 1)
+        {
+            throw new ArgumentException(
+                string.Create(
+                    CultureInfo.InvariantCulture,
+                    $"A checkpoint bound of {elements} elements describes a capture that is due before an element exists. Declare a bound of at least one, or leave {nameof(DurablePipelineOptions.EveryElements)} unset and checkpoint on time alone."),
+                nameof(durable));
+        }
     }
 }

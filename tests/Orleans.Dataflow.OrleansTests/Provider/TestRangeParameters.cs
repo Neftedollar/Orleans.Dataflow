@@ -29,6 +29,12 @@ internal static class TestRangeParameters
     /// <summary>The payload member naming the signal raised after the last element.</summary>
     internal const string HaltMember = "halt";
 
+    /// <summary>The payload member naming the signal the source waits for partway through.</summary>
+    internal const string GateMember = "gate";
+
+    /// <summary>The payload member holding which element the source waits before emitting.</summary>
+    internal const string GateAtMember = "gateAt";
+
     /// <summary>Gets the check the range stage applies to a node's parameter payload.</summary>
     internal static IStageParameterValidator Validator { get; } = new PayloadValidator();
 
@@ -47,12 +53,46 @@ internal static class TestRangeParameters
             CultureInfo.InvariantCulture,
             $"{{\"{CountMember}\":{count},\"{HaltMember}\":{JsonSerializer.Serialize(halt)}}}"));
 
+    /// <summary>Writes a source that stops partway until a signal releases it.</summary>
+    /// <param name="count">How many numbers to emit.</param>
+    /// <param name="halt">The name of the signal to raise after the last one.</param>
+    /// <param name="gate">The name of the signal that releases the source partway.</param>
+    /// <param name="gateAt">Which element the source waits before emitting, counting from one.</param>
+    /// <returns>The canonical payload.</returns>
+    /// <remarks>
+    /// <para>
+    /// The rendezvous a test needs when it has to act <em>while a run is still producing</em> — which is
+    /// what staging a checkpoint conflict against a live run requires, since a run whose source has run out
+    /// or parked at its halt takes no further checkpoint. The source announces that it has reached the gate
+    /// by raising <c>gate</c> with <c>-reached</c> appended, so a test waits for a fact rather than for a
+    /// length of time.
+    /// </para>
+    /// <para>
+    /// <b>Where a gate may be put is not free, and the reason is the engine's own park discipline.</b> A
+    /// segment that has just delivered an element and asked for a checkpoint takes its next step before it
+    /// parks, so a capture due at element <c>n</c> does not complete until element <c>n+1</c> has been
+    /// produced. A gate at <c>n+1</c> would therefore hold the capture open rather than merely holding the
+    /// stream; a gate at <c>n+2</c> lets the capture finish and then stops the run where the test wants it.
+    /// </para>
+    /// </remarks>
+    internal static CanonicalJsonValue Write(int count, string halt, string gate, int gateAt) =>
+        CanonicalJsonValue.Parse(string.Create(
+            CultureInfo.InvariantCulture,
+            $"{{\"{CountMember}\":{count},\"{GateMember}\":{JsonSerializer.Serialize(gate)},\"{GateAtMember}\":{gateAt},\"{HaltMember}\":{JsonSerializer.Serialize(halt)}}}"));
+
     /// <summary>Reads a payload back into what it declares.</summary>
     /// <param name="parameters">The node's payload, in canonical form.</param>
     /// <param name="count">When this method returns <see langword="true"/>, the number of elements.</param>
     /// <param name="halt">
     /// When this method returns <see langword="true"/>, the signal name, or <see langword="null"/> when the
     /// source ends on its own.
+    /// </param>
+    /// <param name="gate">
+    /// When this method returns <see langword="true"/>, the gate's signal name, or <see langword="null"/>
+    /// when the source never waits partway.
+    /// </param>
+    /// <param name="gateAt">
+    /// When this method returns <see langword="true"/>, which element the source waits before emitting.
     /// </param>
     /// <param name="violations">
     /// When this method returns <see langword="false"/>, one lower-case sentence fragment per violation.
@@ -62,10 +102,14 @@ internal static class TestRangeParameters
         CanonicalJsonValue parameters,
         out int count,
         out string? halt,
+        out string? gate,
+        out int gateAt,
         out IReadOnlyList<string> violations)
     {
         count = 0;
         halt = null;
+        gate = null;
+        gateAt = 0;
 
         if (parameters.IsDefault || parameters.ToElement().ValueKind is not JsonValueKind.Object)
         {
@@ -78,6 +122,8 @@ internal static class TestRangeParameters
         List<string> found = [];
         int declaredCount = 0;
         string? declaredHalt = null;
+        string? declaredGate = null;
+        int declaredGateAt = 0;
 
         if (!payload.TryGetProperty(CountMember, out JsonElement counted))
         {
@@ -106,9 +152,29 @@ internal static class TestRangeParameters
             }
         }
 
+        if (payload.TryGetProperty(GateMember, out JsonElement gated))
+        {
+            if (gated.ValueKind is not JsonValueKind.String)
+            {
+                found.Add($"the member '{GateMember}' is not a string");
+            }
+            else
+            {
+                declaredGate = gated.GetString();
+            }
+        }
+
+        if (payload.TryGetProperty(GateAtMember, out JsonElement gatedAt))
+        {
+            if (gatedAt.ValueKind is not JsonValueKind.Number || !gatedAt.TryGetInt32(out declaredGateAt))
+            {
+                found.Add($"the member '{GateAtMember}' is not a 32-bit integer");
+            }
+        }
+
         foreach (JsonProperty member in payload.EnumerateObject())
         {
-            if (member.Name is not (CountMember or HaltMember))
+            if (member.Name is not (CountMember or HaltMember or GateMember or GateAtMember))
             {
                 found.Add($"the member '{member.Name}' is not a member of this contract");
             }
@@ -124,6 +190,8 @@ internal static class TestRangeParameters
         violations = [];
         count = declaredCount;
         halt = declaredHalt;
+        gate = declaredGate;
+        gateAt = declaredGateAt;
 
         return true;
     }
@@ -133,6 +201,14 @@ internal static class TestRangeParameters
     {
         /// <inheritdoc/>
         public IReadOnlyList<string> Validate(CanonicalJsonValue parameters) =>
-            TryRead(parameters, out int _, out string? _, out IReadOnlyList<string> violations) ? [] : violations;
+            TryRead(
+                parameters,
+                out int _,
+                out string? _,
+                out string? _,
+                out int _,
+                out IReadOnlyList<string> violations)
+                ? []
+                : violations;
     }
 }

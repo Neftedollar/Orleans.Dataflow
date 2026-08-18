@@ -31,13 +31,16 @@ public sealed class OrleansRunHandle : IAsyncDisposable
     private readonly IPipelineRunGrain _run;
     private readonly GraphFingerprint _fingerprint;
     private readonly TimeSpan _pollInterval;
+    private readonly bool _durable;
     private readonly Lazy<Task> _completion;
+    private long _epoch;
 
     /// <summary>Initializes a new instance of the <see cref="OrleansRunHandle"/> class.</summary>
     /// <param name="run">The grain hosting the run.</param>
     /// <param name="ticket">The ticket the coordinator issued for it.</param>
     /// <param name="fingerprint">The fingerprint of the pipeline's document, as the client computed it.</param>
     /// <param name="pollInterval">How often to poll while waiting for the run to end.</param>
+    /// <param name="durable">Whether this run may be continued by a later attempt.</param>
     /// <remarks>
     /// Internal because a handle is only ever produced by materializing a pipeline. A handle over a run
     /// nothing started would be a control surface for nothing, exactly as the local one would.
@@ -46,11 +49,14 @@ public sealed class OrleansRunHandle : IAsyncDisposable
         IPipelineRunGrain run,
         PipelineRunTicket ticket,
         GraphFingerprint fingerprint,
-        TimeSpan pollInterval)
+        TimeSpan pollInterval,
+        bool durable)
     {
         _run = run;
         _fingerprint = fingerprint;
         _pollInterval = pollInterval;
+        _durable = durable;
+        _epoch = ticket.Epoch;
         _completion = new Lazy<Task>(WatchAsync, LazyThreadSafetyMode.ExecutionAndPublication);
 
         Ticket = ticket;
@@ -58,13 +64,37 @@ public sealed class OrleansRunHandle : IAsyncDisposable
 
     /// <summary>Gets the ticket the coordinator issued for this run.</summary>
     /// <value>The run's identity, its ownership epoch, and the fingerprints the silo recorded.</value>
+    /// <remarks>
+    /// A record of what was issued when the run was started, and it does not move. For a durable run whose
+    /// hosting silo has since died, the epoch on it is the one that attempt held; what the handle is
+    /// actually carrying on its calls is <see cref="Epoch"/>.
+    /// </remarks>
     public PipelineRunTicket Ticket { get; }
 
     /// <summary>Gets the identity of this run.</summary>
     public string RunId => Ticket.RunId;
 
     /// <summary>Gets the ownership epoch every control call for this run carries.</summary>
-    public long Epoch => Ticket.Epoch;
+    /// <value>
+    /// The epoch this handle is currently claiming under, which is the ticket's for an ordinary run and for
+    /// a durable run that has never been continued, and the resumed attempt's afterwards.
+    /// </value>
+    /// <remarks>
+    /// <para>
+    /// <b>A durable handle follows the run rather than the attempt.</b> A resume is the same run continuing
+    /// and it claims a fresh epoch, so a handle that had been holding the previous number is out of date
+    /// rather than wrong: it learns the current one from the fencing refusal that names it and carries on.
+    /// That is safe precisely because a durable run is <em>named</em> — the identity a handle addresses is
+    /// the author's own, one run answers to it, and following its ownership forward cannot reach anybody
+    /// else's work.
+    /// </para>
+    /// <para>
+    /// An ordinary handle never does this and must not: its run has no later attempt, so a fencing refusal
+    /// there means somebody else's claim and adopting it would be taking over a run this handle never
+    /// started.
+    /// </para>
+    /// </remarks>
+    public long Epoch => Interlocked.Read(ref _epoch);
 
     /// <summary>Gets the task that reports how this run ended.</summary>
     /// <value>
@@ -80,11 +110,18 @@ public sealed class OrleansRunHandle : IAsyncDisposable
     /// </para>
     /// <para>
     /// It also faults with <see cref="PipelineRunLostException"/> when the activation hosting the run was
-    /// recycled while it was executing. Phase 1 does not resume a run across a deactivation, so the
-    /// attempt is gone and saying so is the only honest answer; waiting for a terminal state that will
-    /// never arrive would be the alternative. The same applies after the fact: a run's results live only
-    /// as long as its activation, so a result read after the activation is recycled reports the loss
-    /// rather than a value nothing is keeping.
+    /// recycled while it was executing and there was nothing to continue it from. An ordinary run is never
+    /// continued, so the attempt is gone and saying so is the only honest answer; waiting for a terminal
+    /// state that will never arrive would be the alternative. The same applies after the fact: an ordinary
+    /// run's results live only as long as its activation, so a result read after the activation is recycled
+    /// reports the loss rather than a value nothing is keeping.
+    /// </para>
+    /// <para>
+    /// <b>A durable run that has written a checkpoint never reports that loss</b>, and the reason is that
+    /// the poll itself is what continues it: addressing the run activates its grain, the activation finds
+    /// the stored position, claims a fresh epoch, and is executing by the time this poll is answered — so
+    /// what the loop sees is a running run. A durable run that died before its first capture is a different
+    /// case and reports the loss like any other, because there is no position to continue from.
     /// </para>
     /// </remarks>
     public Task Completion => _completion.Value;
@@ -162,10 +199,27 @@ public sealed class OrleansRunHandle : IAsyncDisposable
             // Observed through the envelope below.
         }
 
-        ResultEnvelope envelope = await _run
-            .GetResultAsync(Epoch, slot.Id.Value, _fingerprint.ToString())
-            .WaitAsync(cancellationToken)
-            .ConfigureAwait(false);
+        ResultEnvelope envelope;
+
+        try
+        {
+            envelope = await _run
+                .GetResultAsync(Epoch, slot.Id.Value, _fingerprint.ToString())
+                .WaitAsync(cancellationToken)
+                .ConfigureAwait(false);
+        }
+        catch (PipelineFencingException refused)
+        {
+            if (!Adopt(refused))
+            {
+                throw;
+            }
+
+            envelope = await _run
+                .GetResultAsync(Epoch, slot.Id.Value, _fingerprint.ToString())
+                .WaitAsync(cancellationToken)
+                .ConfigureAwait(false);
+        }
 
         return envelope.Phase switch
         {
@@ -192,7 +246,24 @@ public sealed class OrleansRunHandle : IAsyncDisposable
     /// is what <see cref="Completion"/> reports, and awaiting the drain inside a grain call would park an
     /// activation for as long as the graph takes.
     /// </remarks>
-    public Task ShutdownAsync() => _run.ShutdownAsync(Epoch);
+    public async Task ShutdownAsync()
+    {
+        try
+        {
+            await _run.ShutdownAsync(Epoch).ConfigureAwait(false);
+
+            return;
+        }
+        catch (PipelineFencingException refused)
+        {
+            if (!Adopt(refused))
+            {
+                throw;
+            }
+        }
+
+        await _run.ShutdownAsync(Epoch).ConfigureAwait(false);
+    }
 
     /// <summary>Cancels this run and stops watching it.</summary>
     /// <returns>A task that completes when the cancellation has been requested.</returns>
@@ -213,15 +284,65 @@ public sealed class OrleansRunHandle : IAsyncDisposable
         try
         {
             await _run.CancelAsync(Epoch).ConfigureAwait(false);
+
+            return;
         }
         catch (PipelineRunLostException)
         {
             // The activation hosting the run is gone, so there is nothing left to cancel.
+            return;
+        }
+        catch (PipelineFencingException refused)
+        {
+            // Some other claim owns the run this handle addresses; cancelling it is not this handle's to
+            // do — unless the claim is this very run's own later attempt, which a durable handle follows.
+            if (!Adopt(refused))
+            {
+                return;
+            }
+        }
+
+        try
+        {
+            await _run.CancelAsync(Epoch).ConfigureAwait(false);
+        }
+        catch (PipelineRunLostException)
+        {
         }
         catch (PipelineFencingException)
         {
-            // Some other claim owns the run this handle addresses; cancelling it is not this handle's to do.
         }
+    }
+
+    /// <summary>Takes over the epoch a fencing refusal named, when this handle is entitled to.</summary>
+    /// <param name="refused">The refusal, which carries the epoch the run is currently claimed under.</param>
+    /// <returns><see langword="true"/> when this handle adopted a newer epoch and the call is worth retrying.</returns>
+    /// <remarks>
+    /// <para>
+    /// Only a durable handle adopts, and only forward. A durable run is named by its author and a resume is
+    /// that same run continuing under a fresh claim, so a refusal naming a higher epoch is this run's own
+    /// later attempt and following it is the whole point of a handle that outlives a silo. An ordinary run
+    /// has no later attempt, so a refusal there names somebody else and adopting it would be taking over
+    /// work this handle never started.
+    /// </para>
+    /// <para>
+    /// A refusal naming the epoch this handle already carries is not adopted, because retrying would then
+    /// be a loop; a refusal naming zero is not adopted either, since zero is what a grain with no run at all
+    /// reports and there is nothing there to claim.
+    /// </para>
+    /// </remarks>
+    private bool Adopt(PipelineFencingException refused)
+    {
+        long held = Interlocked.Read(ref _epoch);
+
+        if (!_durable || refused.CurrentEpoch <= held)
+        {
+            return false;
+        }
+
+        _ = Interlocked.Exchange(ref _epoch, refused.CurrentEpoch);
+
+        return true;
     }
 
     /// <summary>Returns a one-line diagnostic summary of this run.</summary>
@@ -268,6 +389,19 @@ public sealed class OrleansRunHandle : IAsyncDisposable
                 undelivered is TimeoutException or SiloUnavailableException or OrleansMessageRejectionException)
             {
                 _ = await timer.WaitForNextTickAsync().ConfigureAwait(false);
+
+                continue;
+            }
+            catch (PipelineFencingException refused)
+            {
+                // A durable run this poll itself brought back has claimed a fresh epoch, so the number this
+                // loop was carrying names the attempt that died. Adopting it and asking again is following
+                // the run rather than the attempt; for every other handle the refusal is somebody else's
+                // claim and stands.
+                if (!Adopt(refused))
+                {
+                    throw;
+                }
 
                 continue;
             }

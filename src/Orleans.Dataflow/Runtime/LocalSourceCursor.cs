@@ -44,11 +44,6 @@ internal abstract class LocalSourceCursor
     /// <value>The position, as a canonical value only this adapter's opener has to understand.</value>
     internal abstract CanonicalJsonValue Position { get; }
 
-    /// <summary>Opens this source's sequence at the position this cursor was restored to.</summary>
-    /// <param name="context">The tokens of the run being opened.</param>
-    /// <returns>The sequence, which the run enumerates exactly once.</returns>
-    internal abstract IEnumerable Open(LocalRunContext context);
-
     /// <summary>Records that the element just pulled has been delivered through its segment.</summary>
     internal abstract void Delivered();
 
@@ -60,6 +55,36 @@ internal abstract class LocalSourceCursor
     /// a source told to be somewhere else while it was reading.
     /// </remarks>
     internal abstract void RestoreTo(CanonicalJsonValue position);
+}
+
+/// <summary>
+/// The cursor of a source a provider built, seen by the engine.
+/// </summary>
+/// <param name="declared">The cursor the provider's stage runtime carries.</param>
+/// <remarks>
+/// <para>
+/// A pass-through and deliberately nothing more: what a position means, where a restored one is read, and
+/// how a reopened sequence uses it are the adapter's, and this type exists only because the engine's cursor
+/// seam is internal and the provider's is public. The three members line up one for one, so a provider's
+/// cursor is the engine's cursor with a different address.
+/// </para>
+/// <para>
+/// <b>It does not open anything</b>, and that is the difference from <see cref="LocalIndexCursor"/>. A
+/// registered source is opened by the opener its factory handed over, which closed over this very cursor
+/// instance; a local one has no opener of its own, so its cursor is also its sequence. Both are cursors and
+/// only one of them is a source.
+/// </para>
+/// </remarks>
+internal sealed class LocalProvidedCursor(Hosting.DataflowSourceCursor declared) : LocalSourceCursor
+{
+    /// <inheritdoc/>
+    internal override CanonicalJsonValue Position => declared.Position;
+
+    /// <inheritdoc/>
+    internal override void Delivered() => declared.Delivered();
+
+    /// <inheritdoc/>
+    internal override void RestoreTo(CanonicalJsonValue position) => declared.RestoreTo(position);
 }
 
 /// <summary>
@@ -96,6 +121,16 @@ internal sealed class LocalIndexCursor(IEnumerable elements) : LocalSourceCursor
     private long _delivered;
     private long _from;
 
+    /// <summary>Opens the author's sequence at the position this cursor was restored to.</summary>
+    /// <param name="context">The tokens of the run being opened.</param>
+    /// <returns>The sequence, which the run enumerates exactly once.</returns>
+    /// <remarks>
+    /// On this cursor and not on the seam, because a local source has no opener of its own: its sequence
+    /// <em>is</em> what the cursor knows how to reopen. A registered source is opened by the opener its
+    /// factory handed over, which is why <see cref="LocalProvidedCursor"/> has no such member.
+    /// </remarks>
+    internal IEnumerable Open(LocalRunContext context) => Enumerate(_from);
+
     /// <inheritdoc/>
     /// <remarks>
     /// Read from the capture loop's thread while the run is quiescent, and written from the segment's own.
@@ -106,9 +141,6 @@ internal sealed class LocalIndexCursor(IEnumerable elements) : LocalSourceCursor
         CanonicalJsonValue.Parse(string.Create(
             CultureInfo.InvariantCulture,
             $"{{\"{IndexMember}\":{Interlocked.Read(ref _delivered)}}}"));
-
-    /// <inheritdoc/>
-    internal override IEnumerable Open(LocalRunContext context) => Enumerate(_from);
 
     /// <inheritdoc/>
     internal override void Delivered() => Interlocked.Increment(ref _delivered);

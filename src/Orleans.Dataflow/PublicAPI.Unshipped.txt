@@ -140,6 +140,8 @@ Orleans.Dataflow.Hosting.DataflowRunTokens.RunToken.get -> System.Threading.Canc
 Orleans.Dataflow.Hosting.DataflowRunTokens.RunToken.init -> void
 Orleans.Dataflow.Hosting.DataflowRunTokens.StopToken.get -> System.Threading.CancellationToken
 Orleans.Dataflow.Hosting.DataflowRunTokens.StopToken.init -> void
+Orleans.Dataflow.Hosting.DataflowSourceCursor
+Orleans.Dataflow.Hosting.DataflowSourceCursor.DataflowSourceCursor() -> void
 Orleans.Dataflow.Hosting.DataflowStageRequest
 Orleans.Dataflow.Hosting.DataflowStageRequest.DataflowStageRequest() -> void
 Orleans.Dataflow.Hosting.DataflowStageRequest.DataflowStageRequest(Orleans.Dataflow.Definition.StageNode! Node, Orleans.Dataflow.Definition.StageSpecification! Specification) -> void
@@ -435,6 +437,9 @@ Orleans.Dataflow.UnfoldStep<TState, T>.Value.init -> void
 Orleans.Dataflow.ValveMode
 Orleans.Dataflow.ValveMode.Closed = 1 -> Orleans.Dataflow.ValveMode
 Orleans.Dataflow.ValveMode.Open = 0 -> Orleans.Dataflow.ValveMode
+abstract Orleans.Dataflow.Hosting.DataflowSourceCursor.Delivered() -> void
+abstract Orleans.Dataflow.Hosting.DataflowSourceCursor.Position.get -> Orleans.Dataflow.Serialization.CanonicalJsonValue
+abstract Orleans.Dataflow.Hosting.DataflowSourceCursor.RestoreTo(Orleans.Dataflow.Serialization.CanonicalJsonValue position) -> void
 override Orleans.Dataflow.Adapters.ObservableBinding<T>.ToString() -> string!
 override Orleans.Dataflow.Authoring.GraphFragment.Equals(object? obj) -> bool
 override Orleans.Dataflow.Authoring.GraphFragment.GetHashCode() -> int
@@ -538,6 +543,7 @@ static Orleans.Dataflow.Hosting.DataflowStageRuntime.Interleave(int segmentSize)
 static Orleans.Dataflow.Hosting.DataflowStageRuntime.Merge() -> Orleans.Dataflow.Hosting.DataflowStageRuntime!
 static Orleans.Dataflow.Hosting.DataflowStageRuntime.Partition(System.Func<object?, int>! route) -> Orleans.Dataflow.Hosting.DataflowStageRuntime!
 static Orleans.Dataflow.Hosting.DataflowStageRuntime.Source(System.Func<Orleans.Dataflow.Hosting.DataflowRunTokens, System.Collections.Generic.IAsyncEnumerable<object?>!>! open) -> Orleans.Dataflow.Hosting.DataflowStageRuntime!
+static Orleans.Dataflow.Hosting.DataflowStageRuntime.Source(System.Func<Orleans.Dataflow.Hosting.DataflowRunTokens, System.Collections.Generic.IAsyncEnumerable<object?>!>! open, Orleans.Dataflow.Hosting.DataflowSourceCursor! cursor) -> Orleans.Dataflow.Hosting.DataflowStageRuntime!
 static Orleans.Dataflow.Hosting.DataflowStageRuntime.Terminal(System.Func<object?>! seed, System.Func<object?, object?, object?>! fold, System.Func<object?, object?>? finish, bool producesResult) -> Orleans.Dataflow.Hosting.DataflowStageRuntime!
 static Orleans.Dataflow.Hosting.DataflowStageRuntime.Unzip(System.Collections.Generic.IReadOnlyList<System.Func<object?, object?>!>! parts) -> Orleans.Dataflow.Hosting.DataflowStageRuntime!
 static Orleans.Dataflow.Hosting.DataflowStageRuntime.Zip(System.Func<object?[]!, object?>! combine) -> Orleans.Dataflow.Hosting.DataflowStageRuntime!

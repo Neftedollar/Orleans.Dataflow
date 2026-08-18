@@ -19,10 +19,15 @@ namespace Orleans.Dataflow.Grains;
 /// there is one.
 /// </para>
 /// <para>
-/// <b>Phase-1 durability, stated honestly.</b> This grain persists nothing about a run's progress. An
-/// activation recycled while a run is executing takes the attempt with it: the fresh activation reports
-/// <see cref="RunPhase.NotStarted"/>, and a caller that had seen the run executing learns the attempt was
-/// lost. Nothing retries and nothing resumes.
+/// <b>Durability, stated honestly, and it now has two cases.</b> This grain persists nothing about a run's
+/// progress itself. For an ordinary run that is the whole story: an activation recycled while it was
+/// executing takes the attempt with it, the fresh activation reports <see cref="RunPhase.NotStarted"/>, and
+/// a caller that had seen the run executing learns the attempt was lost. For a run declared durable, the
+/// progress is in a checkpoint store rather than here, and the fresh activation reads it: if there is a
+/// position to continue from it claims a fresh epoch, materializes from that position, and reports
+/// <see cref="RunPhase.Running"/>, so <see cref="PipelineRunLostException"/> is unreachable for such a run.
+/// If there is not — a durable run that died before its first capture — the attempt is lost exactly as an
+/// ordinary one is, because there is nothing to continue.
 /// </para>
 /// <para>
 /// The same sentence has a consequence worth stating on its own: <b>a completed run's results live only as
@@ -48,6 +53,42 @@ public interface IPipelineRunGrain : IGrainWithStringKey
     /// than the coordinator that accepted it, and a silo materializes only what its own catalog resolves.
     /// </remarks>
     Task StartAsync(byte[] canonicalDocument, long epoch);
+
+    /// <summary>Starts, or continues, the durable run this grain is.</summary>
+    /// <returns>The ownership epoch this run is now executing under.</returns>
+    /// <exception cref="PipelineRunLostException">
+    /// The coordinator holds no durable declaration under this run's identity, so there is nothing to
+    /// start.
+    /// </exception>
+    /// <exception cref="PipelineResumeRefusedException">
+    /// A checkpoint exists for this run and it was taken of a different document or a different revision.
+    /// </exception>
+    /// <exception cref="PipelineRejectedException">
+    /// The declared document does not validate against this silo's catalog, or the checkpoint names a node
+    /// this graph has no such seam for.
+    /// </exception>
+    /// <remarks>
+    /// <para>
+    /// Called by the client that declared the run and not by the coordinator, which is the opposite of
+    /// <see cref="StartAsync"/> and is deliberate: a coordinator that started run grains itself would be
+    /// awaiting a grain that may be calling it back to claim its epoch. Here the client drives both hops in
+    /// turn, so the only edge between the two grains runs one way at a time.
+    /// </para>
+    /// <para>
+    /// <b>It is the same call for a first start and for a resume</b>, and idempotent for both. A run already
+    /// executing in this activation answers with the epoch it holds and is not disturbed; an activation that
+    /// found a checkpoint has already continued the run by the time this is answered; an activation that
+    /// found none starts the run from the beginning. Which of the three happened is visible in what the run
+    /// does, never in which method the caller had to choose.
+    /// </para>
+    /// <para>
+    /// The epoch it returns is the one this attempt owns, which is <em>not</em> necessarily the one the
+    /// declaration recorded: an attempt after a crash claims a fresh number. A caller holding an older
+    /// ticket is not wrong, it is out of date, and the fencing refusal it receives names the current epoch
+    /// so it can catch up.
+    /// </para>
+    /// </remarks>
+    Task<long> EnsureStartedAsync();
 
     /// <summary>Reports where this run is.</summary>
     /// <param name="epoch">The ownership epoch from the run's ticket.</param>

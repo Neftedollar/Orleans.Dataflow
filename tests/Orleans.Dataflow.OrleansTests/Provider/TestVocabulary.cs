@@ -77,6 +77,15 @@ internal static class TestVocabulary
     /// </remarks>
     internal static StageRef Bulk { get; } = StageRef.Create(Provider, StageId.Create("bulk"), 1);
 
+    /// <summary>The sink that writes down every element it is handed, in order.</summary>
+    /// <remarks>
+    /// The crash suite's measuring instrument. A duplicate window is a claim about which elements were
+    /// delivered twice, so the sink that proves it has to record a sequence rather than accumulate a number;
+    /// the log it writes to is named by the document and lives in the test process, which is what lets it
+    /// outlive the silo whose death the window is measured across.
+    /// </remarks>
+    internal static StageRef Record { get; } = StageRef.Create(Provider, StageId.Create("record"), 1);
+
     /// <summary>The contract of the numbers this vocabulary's stages carry.</summary>
     internal static ElementContract<long> Number { get; } = ElementContract.For<long>("test-number", 1);
 
@@ -101,6 +110,10 @@ internal static class TestVocabulary
     /// <summary>The contract of the bulk sink's payload.</summary>
     internal static ContractReference BulkParameters { get; } =
         ContractReference.Create(ContractId.Create("test-bulk-parameters"), 1);
+
+    /// <summary>The contract of the recording sink's payload.</summary>
+    internal static ContractReference RecordParameters { get; } =
+        ContractReference.Create(ContractId.Create("test-record-parameters"), 1);
 
     /// <summary>The empty parameter payload every unparameterized stage of this vocabulary carries.</summary>
     internal static CanonicalJsonValue Empty { get; } = CanonicalJsonValue.Parse("{}");
@@ -188,5 +201,13 @@ internal static class TestVocabulary
                 [ResultPortSpecification.Create(PortId.Create("payload"), Block.Reference)],
                 BulkParameters,
                 []),
+            StageSpecification.Create(
+                Record,
+                [InputPortSpecification.Create(PortId.Create("in"), Number.Reference)],
+                [],
+                [],
+                RecordParameters,
+                [],
+                TestRecordParameters.Validator),
         ]);
 }

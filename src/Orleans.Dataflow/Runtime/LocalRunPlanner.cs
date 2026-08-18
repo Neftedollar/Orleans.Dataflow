@@ -393,6 +393,20 @@ internal static class LocalRunPlanner
                                         .GetAsyncEnumerator(context.RunToken)),
                                 context);
 
+                            // A registered source declares a cursor by carrying one, which is the same
+                            // statement from-enumerable makes below and the same table it lands in. What
+                            // differs is only that the sequence is the provider's opener rather than the
+                            // cursor itself: the adapter closed that opener over this very instance, so
+                            // restoring the cursor here is what a resumed subscription reads.
+                            if (runtime.Cursor is { } declared)
+                            {
+                                LocalProvidedCursor provided = new(declared);
+
+                                cursors.Add(current, provided);
+
+                                cursor = provided;
+                            }
+
                             break;
                         }
 

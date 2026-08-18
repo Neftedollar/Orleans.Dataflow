@@ -325,11 +325,16 @@ public sealed class RegisteredJunctionRunTests
 
         // Every executable shape a provider may build, including the two junctions, is a public factory on
         // the public runtime type. A seam that published four of them and kept the junctions internal would
-        // pass every other test in this file, because this assembly is a friend.
+        // pass every other test in this file, because this assembly is a friend. The names are looked up
+        // across every public static method rather than by a single-match lookup, because a shape may be
+        // spelled by more than one overload — a source that declares a cursor is still a source — and a
+        // check that broke when one gained an overload would be a check on arity rather than on the seam.
+        MethodInfo[] published = typeof(DataflowStageRuntime)
+            .GetMethods(BindingFlags.Public | BindingFlags.Static);
+
         Assert.All(
             Shapes,
-            name => Assert.NotNull(
-                typeof(DataflowStageRuntime).GetMethod(name, BindingFlags.Public | BindingFlags.Static)));
+            name => Assert.Contains(published, shape => shape.Name == name));
     }
 
     [Fact]
