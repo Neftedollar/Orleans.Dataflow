@@ -11,11 +11,12 @@ namespace Orleans.Dataflow.Authoring;
 /// </summary>
 /// <remarks>
 /// <para>
-/// Two shapes of this vocabulary carry a chain rather than only numbers: a keyed stage carries the group
-/// flow it instantiates per key, and a supervision scope carries the chain whose failures it answers for.
-/// Both carry it the same way and for the same reason — leaving the chain out would make two graphs that
-/// observably differ look identical, and this vocabulary's rule is that what changes a graph observably
-/// belongs in the payload — so the encoding is written once here and read by both.
+/// Three shapes of this vocabulary carry a chain rather than only numbers: a keyed stage carries the group
+/// flow it instantiates per key, a supervision scope carries the chain whose failures it answers for, and a
+/// durable scope carries the chain whose state it writes into a checkpoint. All three carry it the same way
+/// and for the same reason — leaving the chain out would make two graphs that observably differ look
+/// identical, and this vocabulary's rule is that what changes a graph observably belongs in the payload — so
+/// the encoding is written once here and read by all three.
 /// </para>
 /// <para>
 /// What the encoding is <em>not</em> is a nested document. There are no identities, no ports, and no edges:
@@ -252,5 +253,18 @@ internal static class LocalInnerChain
             "a scope stage",
             "a scope owns the execution of its chain element by element, so it holds element stages only",
             LocalVocabulary.RunsInsideAScope);
+
+        /// <summary>Gets the words a durable scope uses for the chain whose state it carries.</summary>
+        /// <remarks>
+        /// The third owner, and its refusal is about a different property from the other two: what a durable
+        /// scope needs of a stage is not that it can be instantiated per key or that its failure can be
+        /// caught, but that its state can be written down as a canonical value at all.
+        /// </remarks>
+        internal static Words Durable { get; } = new(
+            "scope",
+            "an array of the stages whose state the scope carries across a resume",
+            "a durable stage",
+            "a durable scope writes its stages' state into a checkpoint, so it holds stages whose state is a canonical value",
+            LocalVocabulary.RunsInsideADurableScope);
     }
 }

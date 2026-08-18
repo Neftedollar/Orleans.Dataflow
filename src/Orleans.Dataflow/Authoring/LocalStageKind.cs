@@ -457,4 +457,37 @@ internal enum LocalStageKind
     /// why it is an attached stage rather than a plain element one.
     /// </remarks>
     Supervised,
+
+    /// <summary>
+    /// Owns the execution of a declared chain whose state survives a resume; one input port and one output
+    /// port.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// The durable scope of ADR 0007, and the third shape whose payload carries other stages. It is the one
+    /// shape of this vocabulary that requires a capability token of its own — <c>durable-state</c> — because
+    /// a host that does not know what durable state is must refuse the document rather than run it without
+    /// durability.
+    /// </para>
+    /// <para>
+    /// It is deliberately not a form of <see cref="Supervised"/>. The two answer different questions — what
+    /// a failing element costs, and what a dead process costs — and the one place they would overlap is a
+    /// contradiction: a restarting supervision form resets every state in its scope and this one keeps every
+    /// state across a resume.
+    /// </para>
+    /// </remarks>
+    Durable,
+
+    /// <summary>
+    /// Hands every element to a callback and advances a commit mark after it; one input port and one
+    /// control result port.
+    /// </summary>
+    /// <remarks>
+    /// The sink half of ADR 0007's checkpoint model. It lives in this vocabulary for the reason
+    /// <see cref="SinkProbe"/> and <see cref="FaultPoint"/> do — the vocabulary is one closed set and a
+    /// document has to be able to name what it is running — and the only spelling an author can reach it
+    /// through lives in the testing package, because a real committing sink is an adapter's and the local
+    /// one exists to prove the seam.
+    /// </remarks>
+    MarkingSink,
 }

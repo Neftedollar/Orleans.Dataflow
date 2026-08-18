@@ -13,6 +13,8 @@ Orleans.Dataflow.Testing.IFaultPoint.Arm(Orleans.Dataflow.Testing.FaultPointMode
 Orleans.Dataflow.Testing.IFaultPoint.Disarm() -> void
 Orleans.Dataflow.Testing.IFaultPoint.ElementsSeen.get -> long
 Orleans.Dataflow.Testing.IFaultPoint.FaultsThrown.get -> long
+Orleans.Dataflow.Testing.IMarkingSink
+Orleans.Dataflow.Testing.IMarkingSink.Mark.get -> long
 Orleans.Dataflow.Testing.ISinkProbe<T>
 Orleans.Dataflow.Testing.ISinkProbe<T>.ExpectCompletedAsync(System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.ValueTask
 Orleans.Dataflow.Testing.ISinkProbe<T>.ExpectFailedAsync(System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.ValueTask<System.Exception!>
@@ -22,6 +24,14 @@ Orleans.Dataflow.Testing.ISourceProbe<T>.Complete() -> void
 Orleans.Dataflow.Testing.ISourceProbe<T>.EmitAsync(T element, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.ValueTask
 Orleans.Dataflow.Testing.ISourceProbe<T>.Fail(System.Exception! exception) -> void
 Orleans.Dataflow.Testing.ISourceProbe<T>.PullsObserved.get -> long
+Orleans.Dataflow.Testing.InMemoryCheckpointStore
+Orleans.Dataflow.Testing.InMemoryCheckpointStore.ClearAsync(Orleans.Dataflow.Identity.GraphId graph, Orleans.Dataflow.Identity.RunId run, string? expectedETag, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.ValueTask
+Orleans.Dataflow.Testing.InMemoryCheckpointStore.Count.get -> int
+Orleans.Dataflow.Testing.InMemoryCheckpointStore.Holds(Orleans.Dataflow.Identity.GraphId graph, Orleans.Dataflow.Identity.RunId run) -> bool
+Orleans.Dataflow.Testing.InMemoryCheckpointStore.InMemoryCheckpointStore() -> void
+Orleans.Dataflow.Testing.InMemoryCheckpointStore.ReadAsync(Orleans.Dataflow.Identity.GraphId graph, Orleans.Dataflow.Identity.RunId run, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.ValueTask<Orleans.Dataflow.Hosting.StoredCheckpoint?>
+Orleans.Dataflow.Testing.InMemoryCheckpointStore.Supersede(Orleans.Dataflow.Identity.GraphId graph, Orleans.Dataflow.Identity.RunId run) -> void
+Orleans.Dataflow.Testing.InMemoryCheckpointStore.WriteAsync(Orleans.Dataflow.Identity.GraphId graph, Orleans.Dataflow.Identity.RunId run, Orleans.Dataflow.Serialization.CanonicalJsonValue checkpoint, string? expectedETag, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.ValueTask<string!>
 Orleans.Dataflow.Testing.ProbeTerminatedException
 Orleans.Dataflow.Testing.ProbeTerminatedException.ProbeTerminatedException() -> void
 Orleans.Dataflow.Testing.ProbeTerminatedException.ProbeTerminatedException(string! message) -> void
@@ -62,5 +72,6 @@ static Orleans.Dataflow.Testing.TestFlow.FaultPoint<T>(Orleans.Dataflow.Testing.
 static Orleans.Dataflow.Testing.TestFlow.FaultPoint<T>(Orleans.Dataflow.Testing.FaultPointMode mode, int firstFailure, System.Func<long, System.Exception!>! fault) -> Orleans.Dataflow.Flow<T, T>!
 static Orleans.Dataflow.Testing.TestFlow.FaultPoint<T>(string! controlName, Orleans.Dataflow.Testing.FaultPointMode mode, int firstFailure) -> Orleans.Dataflow.Flow<T, T>!
 static Orleans.Dataflow.Testing.TestFlow.FaultPoint<T>(string! controlName, Orleans.Dataflow.Testing.FaultPointMode mode, int firstFailure, System.Func<long, System.Exception!>! fault) -> Orleans.Dataflow.Flow<T, T>!
+static Orleans.Dataflow.Testing.TestSink.Marking<T>(string! controlName, System.Action<T>! commit) -> Orleans.Dataflow.Sink<T>!
 static Orleans.Dataflow.Testing.TestSink.Probe<T>(string! controlName) -> Orleans.Dataflow.Sink<T>!
 static Orleans.Dataflow.Testing.TestSource.Probe<T>(string! controlName) -> Orleans.Dataflow.Source<T>!

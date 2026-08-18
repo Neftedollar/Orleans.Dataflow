@@ -103,6 +103,51 @@ public sealed class Source<T>
         return new Source<TState>(Shape.Append(LocalStageDescriptor.Scan(seed, folder)));
     }
 
+    /// <summary>Extends this source with a running fold whose state a durable scope can checkpoint.</summary>
+    /// <typeparam name="TState">The type of the state, which becomes the element type.</typeparam>
+    /// <param name="seed">The initial state, which is not emitted.</param>
+    /// <param name="folder">The function combining the running state with the next element.</param>
+    /// <param name="export">The projection of the running state into a canonical value.</param>
+    /// <param name="restore">The projection of such a value back into a state.</param>
+    /// <returns>A new source; this one is unchanged.</returns>
+    /// <exception cref="ArgumentNullException">Any argument is <see langword="null"/>.</exception>
+    /// <remarks>
+    /// <para>
+    /// Everything <see cref="Scan{TState}(TState, Func{TState, T, TState})"/> promises holds unchanged; what
+    /// this spelling adds is the pair of projections that lets the state be written into a checkpoint and
+    /// read back out of one. <b>The pair is the author's and not the engine's</b>, and it has to be: a state
+    /// is a value of a type no document names, so only the author can say what it looks like written down.
+    /// </para>
+    /// <para>
+    /// The pair changes nothing about the document — a codec is a delegate, and no delegate enters a
+    /// document — so two graphs whose scans differ only in carrying one have the same fingerprint. What it
+    /// changes is what a durable scope will accept: a scan bound without it is refused inside one, by name,
+    /// when the graph is materialized.
+    /// </para>
+    /// <para>
+    /// The two projections must round-trip: <paramref name="restore"/> applied to
+    /// <paramref name="export"/>'s answer has to be a state the fold would have produced. Nothing checks
+    /// that, because nothing could; what a resume does with a codec that does not round-trip is restore a
+    /// state the run never had.
+    /// </para>
+    /// </remarks>
+    public Source<TState> Scan<TState>(
+        TState seed,
+        Func<TState, T, TState> folder,
+        Func<TState, CanonicalJsonValue> export,
+        Func<CanonicalJsonValue, TState> restore)
+    {
+        ArgumentNullException.ThrowIfNull(folder);
+        ArgumentNullException.ThrowIfNull(export);
+        ArgumentNullException.ThrowIfNull(restore);
+
+        return new Source<TState>(Shape.Append(LocalStageDescriptor.Scan(
+            seed,
+            folder,
+            state => export((TState)state!),
+            value => restore(value))));
+    }
+
     /// <summary>Extends this source with a running fold whose function is asynchronous.</summary>
     /// <typeparam name="TState">The type of the state, which becomes the element type.</typeparam>
     /// <param name="seed">The initial state, which is not emitted.</param>
@@ -111,7 +156,8 @@ public sealed class Source<T>
     /// <exception cref="ArgumentNullException"><paramref name="folder"/> is <see langword="null"/>.</exception>
     /// <remarks>
     /// <para>
-    /// <see cref="Scan"/> with a fold that awaits, and everything a scan promises holds unchanged: one state
+    /// <see cref="Scan{TState}(TState, System.Func{TState, T, TState})"/> with a fold that awaits, and
+    /// everything a scan promises holds unchanged: one state
     /// out per element in, an empty stream emitting nothing at all, the seed being where the fold starts
     /// rather than something that happened — so it is not emitted — and the state allocated per run.
     /// </para>
@@ -419,6 +465,55 @@ public sealed class Source<T>
             LocalOptionGuard.Supervision(options, nameof(options), recovering: true),
             fallback,
             LocalOptionGuard.Scope(scope.Stages, nameof(scope)))));
+    }
+
+    /// <summary>Extends this source with a scope whose state survives a resume.</summary>
+    /// <typeparam name="TOut">The element type the scope produces.</typeparam>
+    /// <param name="scope">The flow whose stages' state a checkpoint carries.</param>
+    /// <returns>A new source of what the scope emits; this one is unchanged.</returns>
+    /// <exception cref="ArgumentNullException"><paramref name="scope"/> is <see langword="null"/>.</exception>
+    /// <exception cref="ArgumentException">
+    /// <paramref name="scope"/> holds a stage whose state a checkpoint could not carry, a registered
+    /// occurrence, or a stage declaring a runtime control.
+    /// </exception>
+    /// <remarks>
+    /// <para>
+    /// <b>Everything outside a durable scope resets on resume, and that is the contract rather than a
+    /// caveat.</b> A resumed run rebuilds every stage of the graph from the very factories a fresh run
+    /// builds them from — a scan outside a scope returns to its seed, a batch abandons its open group, a
+    /// distinct forgets its keys — and then hands the stages <em>inside</em> a durable scope the state the
+    /// checkpoint carried. An author who wants a running total to survive a process puts it in here; an
+    /// author who does not gets the reset, by name, in the documentation and in a test.
+    /// </para>
+    /// <para>
+    /// <b>The scope holds stages whose state is a canonical value</b>, which is a shorter list than a
+    /// supervision scope's for a reason of its own: a checkpoint is bytes another process reads, so a stage
+    /// holding elements or keys of a type no document names has nothing it could write down. A mapping and
+    /// a filter hold nothing; a take and a skip hold a count; a scan holds whatever the codec of
+    /// <see cref="Scan{TState}(TState, Func{TState, T, TState}, Func{TState, CanonicalJsonValue}, Func{CanonicalJsonValue, TState})"/>
+    /// can write. Everything else is refused by name.
+    /// </para>
+    /// <para>
+    /// <b>It is not a supervision form and deliberately so.</b> Supervision answers what a failing element
+    /// costs and this answers what a dead process costs; the one place they would overlap is a
+    /// contradiction, since a restarting supervision form resets every state in its scope and this one keeps
+    /// every state across a resume. Composing them — a durable scope inside a supervised section — stays a
+    /// composition, which is what a scope being a stage is for.
+    /// </para>
+    /// <para>
+    /// <b>The graph declares <c>durable-state</c>.</b> A document holding one of these carries the
+    /// capability token, so a host that does not know what durable state is refuses the document rather than
+    /// running it without durability. Whether any checkpoint is ever taken is the <em>run's</em> option
+    /// (<see cref="DurableRunOptions"/>) and not the graph's: a durable scope in a run with no declared
+    /// timing simply never has its state written anywhere.
+    /// </para>
+    /// </remarks>
+    public Source<TOut> Durable<TOut>(Flow<T, TOut> scope)
+    {
+        ArgumentNullException.ThrowIfNull(scope);
+
+        return new Source<TOut>(Shape.Append(
+            LocalStageDescriptor.Durable(LocalOptionGuard.DurableScope(scope.Stages, nameof(scope)))));
     }
 
     /// <summary>Extends this source with a stage that drops an element equal to the one before it.</summary>

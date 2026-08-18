@@ -252,6 +252,22 @@ internal sealed class LocalTerminal
             requiresElement: false,
             closing: channel.Close);
 
+    /// <summary>Creates the terminal of a sink that commits and then marks.</summary>
+    /// <param name="sink">The run's marking sink, which owns both the callback and the mark.</param>
+    /// <returns>The terminal.</returns>
+    /// <remarks>
+    /// A per-element callback sink with one thing added, and the order of the two is the whole contract: the
+    /// callback runs, and only then does the mark advance. Written as a fold like every other terminal, so
+    /// that a marking sink is a terminal rather than a second kind of ending.
+    /// </remarks>
+    internal static LocalTerminal Marking(LocalMarkingSink sink) =>
+        Folding((state, element) =>
+        {
+            sink.Commit(element);
+
+            return state;
+        });
+
     /// <summary>Creates the terminal of a probe sink.</summary>
     /// <param name="probe">The rendezvous this run's probe hands its elements through.</param>
     /// <returns>The terminal.</returns>

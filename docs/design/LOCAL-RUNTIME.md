@@ -2408,3 +2408,304 @@ emit-many-and-complete, and the scope asks for the completion through the
 attachment instead — the walk a window's timer already takes. No chain the scope
 admits has been shown to produce that case, and the branch is recorded as
 defensive rather than tested.
+
+## M5.2 (the checkpoint model, the storage contract, and local resume) — as implemented
+
+The second phase of M5, and the one ADR 0007 said would follow the injection
+seam: a **checkpoint** as a value, a **store** with the coordinator's fencing,
+three **seams** that put something in a checkpoint, and a **resume** that reads
+one back. Nothing here is distributed — the local runtime proves the *model*,
+and a run outliving the process that was running it is M5.3's with a cluster
+under it.
+
+### A checkpoint is a canonical value with five parts
+
+`LocalCheckpointDocument` writes and reads one document, and the reader refuses
+what it does not declare, exactly as every stage payload of this vocabulary
+does. Its five members are ADR 0007's five parts and all five are always
+present:
+
+```json
+{"cursors":{…},"fingerprint":"sha256:…","marks":{…},"revision":3,"states":{…}}
+```
+
+Three of them are tables keyed by **node identifier**, because a node identifier
+is the one name a document and a checkpoint of it agree on. A shape that varied
+with what a run happened to have would make an absent `marks` ambiguous between
+"no sink marks" and "written by a version that had none", so a run with nothing
+of a kind writes an empty object rather than leaving the member out. The golden
+test is the load-bearing one: two captures of one run state produce
+byte-identical documents whatever order the plan enumerated its seams in, which
+is what makes "the document changed" mean "the run moved".
+
+**Every value inside it is a canonical value, and that is the seam's requirement
+rather than the document's convenience.** A cursor's position, a scope's state,
+and a sink's mark are produced by an adapter, a scope, and a sink respectively,
+and each hands over a `CanonicalJsonValue` — no object, no CLR type name, no
+serializer's opinion. That is the wire discipline unchanged, and it is what lets
+one process write a checkpoint another reads. A seam that cannot serialize into
+the canonical plane declares nothing and contributes nothing.
+
+### The storage contract is the coordinator store's, generalized
+
+`ICheckpointStore` (in `Orleans.Dataflow.Hosting`, beside the factory seam) is
+`ReadAsync` / `WriteAsync` / `ClearAsync` over one document per `(GraphId,
+RunId)` pair, ETag-guarded. ADR 0007 writes the key as `(GraphId, RunId,
+"checkpoint")`; the third component is the interface here rather than an
+argument, because this interface holds checkpoints and nothing else.
+
+**A locally authored graph has no identity of its own**, so every one of them is
+`anonymous` and the run name is what actually separates two checkpoints in a
+store. That is the same statement `LocalVocabulary.AnonymousGraph` has always
+made about result slots, read over durability: a checkpoint of a *different*
+local graph under the same run name is caught by the fingerprint rather than by
+the key, and a deployment that wants keys to separate graphs names its graphs —
+which is what a `PipelineDefinition` is for.
+
+**`ClearAsync` exists and the engine never calls it.** Forgetting a finished
+run's checkpoint is an operational decision — how long a completed run's
+position is worth keeping is a deployment's question and not a runtime's — so
+the contract carries the verb and the runtime leaves it alone.
+
+The refusal is the contract and not an implementation detail:
+`CheckpointConflictException` carries both ETags, and **a writer whose write is
+refused stops rather than retries**. Retrying with the fresh ETag would
+overwrite the truth a fresh attempt is building with a snapshot of a run that
+owns nothing — which is the corruption the ETag exists to prevent. The run
+fails with that exception, unwrapped, on `RunHandle.Completion`.
+
+`InMemoryCheckpointStore` ships in the Testing package, which is where ADR 0007
+put it; a durable one is the deployment's, exactly as the coordinator's is. It
+is a **store and not a mock** for the reason `SurvivingCoordinatorStore` is one:
+the property the model rests on is optimistic concurrency, so an implementation
+that accepted every write would let a test prove nothing. Its `Supersede` is the
+coordinator store's own, read over a checkpoint — the only honest way to produce
+a real conflict against a live run.
+
+### Timing is declared, and the element bound holds the run where it says
+
+`DurableRunOptions` carries the store, the run identity, and up to two bounds:
+an `Interval` on the run's own clock and an `EveryElements` count. **A run that
+declares neither never touches the store**, which only the store can say and
+which the suite asserts against it.
+
+The two bounds are asked in different places, and the difference is honest
+rather than incidental.
+
+- An **interval** is the capture loop's own wait, on the run's `TimeProvider`,
+  so a controlled clock moves it. It records whatever position the run had
+  reached, which is the answer a timed capture can give.
+- An **element bound** is reached on a source segment's own thread, and the hold
+  is requested *there*, before that segment takes another step. Between "the
+  bound was reached" and "a loop beside the run woke up" a fast source would
+  deliver an unbounded number of further elements; requesting the hold from
+  inside the segment is what makes the stored cursor **exactly** the element the
+  bound named. A source of six elements at a bound of three stores cursor six,
+  as a number rather than a range.
+
+Elements are counted as **admitted** — every element a source of the run hands
+to the graph, summed across sources. Not committed at a sink, which is what the
+marks say and is a different number for every graph that filters; and not per
+source, which would make a two-source graph's cadence depend on which source was
+faster.
+
+### A capture is hold, snapshot, resume — and the cost is stated
+
+All three are machinery that already existed. The hold is `LocalPause`, reached
+exactly as `RunHandle.PauseAsync` reaches it; the snapshot is three reads over
+seams that are quiescent by construction while the hold lasts; the resume is
+`LocalPause.Release`. ADR 0007 asked for the pause machinery to be reused rather
+than reinvented, and `LocalCheckpointer` is the whole of that reuse.
+
+**The cost is that a capture holds the run for its duration**, the store write
+included, and nothing overlaps. That is deliberately the simple answer:
+something cleverer is only worth building once the simple one has been measured,
+and `RunHandle.CheckpointHold` is the measurement — the sum of every hold on the
+run's own clock, beside `RunHandle.Checkpoints`. Both are internal for the reason
+`DroppedElements` is: what an author will read them through is a monitor.
+
+**The pause gate grew a second holder, and that was a real defect rather than a
+tidy-up.** An author pauses through the handle and a capture holds the run to
+snapshot it, and a durable run that is also paused by hand has both at once. A
+single gate meant the capture's release opened it for both — silently resuming a
+run its author had stopped. `LocalHold` is two flags and not a count: a count
+would have broken the other half of the contract, which is that pausing twice
+and resuming once leaves the run moving. The regression test fails against the
+single-gate behaviour and passes against this one.
+
+### The cursor seam: a source that knows where it is
+
+`LocalSourceCursor` is the runtime seam, and it has three moving parts and no
+more: open at where the checkpoint said, advance when an element has been
+delivered, and answer where you are. `from-enumerable` declares one —
+`LocalIndexCursor`, whose position is `{"index":n}` — and it is the proof
+vehicle rather than a general promise.
+
+**Advancing is the run's call and not the sequence's.** A sequence learns its
+element was wanted only when the next one is asked for, and the moment between
+those two — element delivered, next not yet asked for — is exactly where a pause
+lands; a cursor that counted pulls would be one behind at every capture. The run
+therefore advances the cursor when an element has travelled through the segment
+it entered, which is a fact only the pump knows, and the stored position is
+exact rather than approximately right in a safe direction.
+
+**What this particular cursor requires of the author is stated rather than
+assumed.** Reopening re-enumerates the very sequence the author handed over and
+skips that many elements, so a sequence that enumerates differently the second
+time resumes into different elements, and one shorter than the stored position
+fails the resume by name. A source over a list has every business declaring this
+cursor; one over an iterator that reads a socket has none.
+
+**Every other local source declares nothing and resumes from now.** The
+per-source table is in [ADAPTERS.md](../ADAPTERS.md) rather than generalized
+here.
+
+### The durable-state seam: a scope, and it is not a supervision form
+
+`local/durable@v1` owns a declared chain and can hand that chain's whole state
+to a checkpoint and take it back. It is a **scope** for the reason supervision
+is one — what survives a resume is a decision about a *region*, it has to be
+visible in the document for a cluster to honor it, and a region is a stage in
+this vocabulary — and it is the one shape of the vocabulary that requires a
+capability token of its own, `durable-state`, which has existed as a word since
+M0 and earns its keep here.
+
+**It is deliberately not a form of the supervision scope**, and the decision is
+worth its sentence. The two answer different questions — what a failing element
+costs, and what a dead process costs — and folding them together would force
+every author who wants durable state to declare a failure policy and every
+author who wants a retry to decide about durability. Worse, the one place they
+overlap is a contradiction: `RestartStage` resets every state in its scope and
+`durable-state` keeps every state across a resume, so a scope that was both
+would have a contract with a hole in it. Kept apart, each says one thing
+exactly, and the composition an author actually wants — a durable scope inside a
+supervised section — stays a composition, which is what a scope being a stage is
+for.
+
+**The chain admits the shortest of the three inner-chain lists**, and the reason
+is the one thing this scope promises. A stage inside one has to hand its state
+over *as a canonical value*: a `select` and a `where` hold nothing, a `take` and
+a `skip` hold a count, a fault point's arrival counter belongs to the run rather
+than to the stage (M5.1's own statement about restarts, read over a resume), and
+a `scan` holds a value of a type no document names. Everything else — a
+`distinct`, a `grouped`, a `sliding`, the two prefix operators — is refused **by
+name**, at authoring and by the payload reader in the same words, because
+admitting one would produce a resume that silently reset state the scope had
+promised to keep.
+
+### The exportable-state facet, and the one refusal a document cannot make
+
+`LocalElementStage` grew three optional members: `ExportsState`, `ExportState`,
+and `RestoreState`. It is a property of the **built stage** rather than of its
+shape, because for one shape the answer depends on the binding: a `scan` exports
+only when its author bound a state codec, and a codec is a pair of delegates, so
+no document can state it.
+
+The codec is the author's and it has to be: a state is a value of a type no
+document names, so only the author can say what it looks like written down. The
+spelling is a `Scan` overload taking `export` and `restore`, and the consequence
+is stated where it bites — **two graphs whose scans differ only in carrying one
+have the same fingerprint**, so "this scan exports state" is refused when the
+plan is built rather than when the document is validated. That is the same line
+M5.1 drew for every disagreement between a scope's two planes: a machinery
+failure fails materialization, before the run has an element.
+
+The plan therefore builds the scope's chain and asks each instance, which it
+would have done anyway — a durable scope owns one instance of its chain, not one
+per key.
+
+### The commit-mark seam: after the side effect, never before it
+
+`local/marking-sink@v1` runs a callback and then advances a count, and the order
+is the whole contract. A callback that throws leaves the mark where it was, so
+the number always describes work that finished; a mark that moved first would
+promise a commit that had not happened, and a resume's duplicate window would
+become a loss window. The stage lives in the core vocabulary for the reason
+`local/sink-probe@v1` and `local/fault-point@v1` do — a document has to be able
+to name what it is running — and the only spelling lives in the Testing package
+(`TestSink.Marking<T>`), because a real committing sink is an adapter's and this
+one exists to prove the seam.
+
+**The mark counts committed deliveries and is not a source position.** The two
+agree for a graph that neither drops nor multiplies elements between a source
+and its sink, and part company across a resume, because a replayed element is a
+second delivery of one element. It is **restored** across a resume, so a run
+that has committed eleven elements over two attempts says eleven rather than
+starting over.
+
+### Resume, and the arithmetic that makes at-least-once a number
+
+`LocalDataflowHost.MaterializeDurableAsync` starts a durable run;
+`MaterializeFromCheckpointAsync` continues one. Resume is the **same `RunId`**
+continuing: the checkpoint is read with its ETag, and the resumed attempt
+presents that ETag at its own first capture, so a stale attempt still writing
+loses to it exactly as a superseded coordinator does.
+
+Four refusals, all by name and all before the run's first element: the store
+holds nothing for that run; the stored document is not one this runtime can
+read; it was taken of a **different fingerprint or revision** (v1's
+same-revision rule, with cross-revision migration a recorded deferral); or it
+names a node this graph has no such seam for. A seam the plan has that the
+checkpoint does *not* name is the opposite case and is not a refusal — it is a
+source that had delivered nothing or a scope that had not been reached, and each
+starts from its beginning as a fresh run would.
+
+**What the replay costs is measured rather than bounded.** In the fused proof —
+twelve elements, a capture every three, an injected failure at the ninth — the
+checkpoint stores cursor six and mark six, the crashed attempt had committed
+eight, and the resumed attempt commits `[7…12]`. The duplicate window is exactly
+the two elements between the stored cursor and the mark at the crash, asserted
+by value, and the union of the two attempts is the whole stream with nothing
+missing.
+
+**The durable state does not duplicate, and the reason is that a checkpoint is
+one moment.** The scope's state and the cursor are captured at the same safe
+point, so a replayed element is added to the scope's state exactly once: the
+running total in the resume proof ends at the true sum of the whole stream even
+though the sink saw two elements twice. At-least-once is the sink's window and
+not the scope's.
+
+**And there is a loss window, measured rather than glossed.** A graph that holds
+elements between a cursor and its mark at capture time loses them: a `grouped(5)`
+outside a durable scope, captured at cursor eight with one group committed,
+resumes at eight and the three elements the batch was holding are gone —
+`8 − 5 = 3`, a number the checkpoint itself hands over because it carries both
+cursors and marks rather than one of them. That is v1's honest boundary rather
+than a defect: the batch is not durable, so it reset, and the cursor had counted
+what it was holding. A graph that must not lose them puts the batch inside a
+durable scope, or puts the marking sink where the elements actually land.
+
+**Nothing anywhere claims exactly-once.**
+
+### What this phase does not do
+
+**Nothing distributed.** No silo, no process death, no host-killing half of the
+injection seam. The "crash" here is an injected failure that kills the attempt,
+and what survives it is an in-memory store in the same process. The row for
+durable resume after process or silo failure therefore advances to *this half
+implemented*, and its other half is M5.3's.
+
+**No cursor but one.** `from-enumerable` declares an index cursor and every
+other local source declares nothing. An Orleans stream sequence token is the
+cursor the model was designed for and it arrives with the Orleans half.
+
+**No checkpoint on a clean end.** A run that completes has an outcome and does
+not write one, which is deliberate and is what makes "the last stored capture is
+what a resume replays from" true without a special case for the last one.
+
+**No overlap, no incremental snapshot, no copy-aside.** A capture holds the run,
+including for the store write. The cost is measured so that a cleverer answer
+can be argued for with a number.
+
+**No cross-revision migration** and no compatibility rules: a resume against a
+different fingerprint or revision is refused by name, and migrating a checkpoint
+across a changed document is M5's later phase or a recorded deferral.
+
+**No per-run monitor.** `Checkpoints` and `CheckpointHold` are internal beside
+the other counters, for the reason those are.
+
+**One composition of each kind is proven and the general statement is not.** A
+durable scope beside a supervision scope, a durable scope over a chain of five
+admitted shapes, a marking sink behind a batch, and a capture during an author's
+pause are measured; a durable scope on a junction leg, inside a cycle, or in
+front of a merge-map are unasserted.

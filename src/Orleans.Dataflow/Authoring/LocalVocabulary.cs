@@ -391,6 +391,14 @@ internal static class LocalVocabulary
     internal static readonly StageRef Supervised =
         StageRef.Create(Provider, StageId.Create("supervised"), StageRef.FirstMajorVersion);
 
+    /// <summary>The stage reference of a stage whose chain's state survives a resume.</summary>
+    internal static readonly StageRef Durable =
+        StageRef.Create(Provider, StageId.Create("durable"), StageRef.FirstMajorVersion);
+
+    /// <summary>The stage reference of a sink whose commit mark advances after its side effect.</summary>
+    internal static readonly StageRef MarkingSink =
+        StageRef.Create(Provider, StageId.Create("marking-sink"), StageRef.FirstMajorVersion);
+
     /// <summary>The one element contract every local port declares.</summary>
     /// <remarks>
     /// One opaque contract for every local element type is the honest encoding of a graph whose element
@@ -586,6 +594,17 @@ internal static class LocalVocabulary
             ContractId.Create("local-supervision-parameters"),
             ContractReference.FirstMajorVersion);
 
+    /// <summary>The parameter contract a durable scope declares.</summary>
+    /// <remarks>
+    /// Which stages the scope is made of and what each of them is configured with are what a document
+    /// states; what each of them does, and how a scan's state becomes a canonical value, are behavior and
+    /// are not. <see cref="LocalDurableParameters"/> owns the shape.
+    /// </remarks>
+    internal static readonly ContractReference DurableParameterContract =
+        ContractReference.Create(
+            ContractId.Create("local-durable-parameters"),
+            ContractReference.FirstMajorVersion);
+
     /// <summary>The parameter contract a collecting sink declares.</summary>
     /// <remarks>
     /// The bound on collected elements is configuration and is written down; the element type is not, for
@@ -730,6 +749,28 @@ internal static class LocalVocabulary
     internal static readonly IReadOnlyList<CapabilityToken> RequiredCapabilities =
         Array.AsReadOnly<CapabilityToken>([CapabilityToken.Nondeployable]);
 
+    /// <summary>The token a graph declaring state that survives a resume carries.</summary>
+    /// <remarks>
+    /// ADR 0007's <c>durable-state</c>, which has existed as a word since M0 and earns its keep here: a
+    /// checkpoint carries the state of the stages inside a scope that declares this token and of nothing
+    /// else, so the token is what tells a host that this graph expects state to survive a process. It is
+    /// created here rather than promoted onto <see cref="CapabilityToken"/> beside
+    /// <see cref="CapabilityToken.Nondeployable"/>, because a durable scope is a stage of <em>this</em>
+    /// vocabulary: the Abstractions package has no concept a shared static would serve, and the token
+    /// grammar is open precisely so a feature can name its own.
+    /// </remarks>
+    internal static readonly CapabilityToken DurableState = CapabilityToken.Create("durable-state");
+
+    /// <summary>The capabilities every stage of this vocabulary requires, plus a durable scope's own.</summary>
+    /// <remarks>
+    /// Read by <see cref="Orleans.Dataflow.LocalStageCatalog"/> and by
+    /// <see cref="LocalStageDescriptor"/> alike, so what a specification requires and what an occurrence
+    /// declares agree by construction rather than by two lists that happen to match — the same rule
+    /// <see cref="RequiredCapabilities"/> already carried, read one shape further.
+    /// </remarks>
+    private static readonly IReadOnlyList<CapabilityToken> DurableCapabilities =
+        Array.AsReadOnly<CapabilityToken>([CapabilityToken.Nondeployable, DurableState]);
+
     /// <summary>The graph identity every locally authored, unnamed graph carries.</summary>
     /// <remarks>
     /// A <see cref="GraphDocument"/> always has an identity, and a graph built from lambdas has no author
@@ -745,6 +786,17 @@ internal static class LocalVocabulary
     /// <summary>The revision every locally authored, unnamed graph carries.</summary>
     internal static readonly GraphRevision FirstRevision =
         GraphRevision.Create(GraphRevision.FirstRevisionNumber);
+
+    /// <summary>Returns the capabilities an occurrence of <paramref name="kind"/> requires of its document.</summary>
+    /// <param name="kind">The stage shape.</param>
+    /// <returns>The tokens the containing document has to declare.</returns>
+    /// <remarks>
+    /// <c>nondeployable</c> for every shape without exception, and <c>durable-state</c> for the one shape
+    /// that asks a host to keep state across a process. A document's tokens stay a fact derived from its
+    /// occurrences rather than something an author remembers to write.
+    /// </remarks>
+    internal static IReadOnlyList<CapabilityToken> RequiredCapabilitiesOf(LocalStageKind kind) =>
+        kind is LocalStageKind.Durable ? DurableCapabilities : RequiredCapabilities;
 
     /// <summary>Returns the stage reference an occurrence of <paramref name="kind"/> declares.</summary>
     /// <param name="kind">The stage shape.</param>
@@ -823,6 +875,8 @@ internal static class LocalVocabulary
         LocalStageKind.SinkProbe => SinkProbe,
         LocalStageKind.FaultPoint => FaultPoint,
         LocalStageKind.Supervised => Supervised,
+        LocalStageKind.Durable => Durable,
+        LocalStageKind.MarkingSink => MarkingSink,
         _ => throw new ArgumentOutOfRangeException(nameof(kind)),
     };
 
@@ -864,6 +918,7 @@ internal static class LocalVocabulary
         LocalStageKind.GroupBy => GroupByParameterContract,
         LocalStageKind.FaultPoint => FaultPointParameterContract,
         LocalStageKind.Supervised => SupervisionParameterContract,
+        LocalStageKind.Durable => DurableParameterContract,
         LocalStageKind.Collect => CollectParameterContract,
         LocalStageKind.Interleave => InterleaveParameterContract,
         LocalStageKind.FromEnumerable or
@@ -906,7 +961,8 @@ internal static class LocalVocabulary
             LocalStageKind.Last or
             LocalStageKind.LastOrDefault or
             LocalStageKind.ToChannel or
-            LocalStageKind.SinkProbe => ParameterContract,
+            LocalStageKind.SinkProbe or
+            LocalStageKind.MarkingSink => ParameterContract,
         _ => throw new ArgumentOutOfRangeException(nameof(kind)),
     };
 
@@ -934,6 +990,7 @@ internal static class LocalVocabulary
             _ when contract == GroupByParameterContract => LocalGroupByParameters.Validator,
             _ when contract == FaultPointParameterContract => LocalFaultPointParameters.Validator,
             _ when contract == SupervisionParameterContract => LocalSupervisionParameters.Validator,
+            _ when contract == DurableParameterContract => LocalDurableParameters.Validator,
             _ when contract == WindowParameterContract => LocalWindowParameters.Validator,
             _ when contract == GroupedWithinParameterContract => LocalGroupedWithinParameters.Validator,
             _ when contract == GroupedWeightedParameterContract => LocalGroupedWeightedParameters.Validator,
@@ -1010,6 +1067,7 @@ internal static class LocalVocabulary
             LocalStageKind.Throttle or
             LocalStageKind.FaultPoint or
             LocalStageKind.Supervised or
+            LocalStageKind.Durable or
             LocalStageKind.Valve => LocalStagePlace.Operator,
         LocalStageKind.Broadcast or
             LocalStageKind.Balance or
@@ -1032,7 +1090,8 @@ internal static class LocalVocabulary
             LocalStageKind.LastOrDefault or
             LocalStageKind.Collect or
             LocalStageKind.ToChannel or
-            LocalStageKind.SinkProbe => LocalStagePlace.Terminal,
+            LocalStageKind.SinkProbe or
+            LocalStageKind.MarkingSink => LocalStagePlace.Terminal,
         _ => throw new ArgumentOutOfRangeException(nameof(kind)),
     };
 
@@ -1104,6 +1163,39 @@ internal static class LocalVocabulary
     /// </remarks>
     internal static bool RunsInsideAScope(LocalStageKind kind) =>
         kind is LocalStageKind.FaultPoint || RunsInsideAGroup(kind);
+
+    /// <summary>Reports whether an occurrence of <paramref name="kind"/> may stand inside a durable scope.</summary>
+    /// <param name="kind">The stage shape.</param>
+    /// <returns><see langword="true"/> for the shapes whose state a checkpoint could carry at all.</returns>
+    /// <remarks>
+    /// <para>
+    /// The shortest of the three inner-chain lists, and the reason it is short is the one thing a durable
+    /// scope promises: a stage inside one has to be able to hand its state over <b>as a canonical value</b>.
+    /// A <c>select</c> and a <c>where</c> hold nothing between elements; a <c>take</c> and a <c>skip</c> hold
+    /// a count, which is a number any document plane can carry; a <c>scan</c> holds a value of a type no
+    /// document names and can therefore export only when its author bound a codec, which is a fact of the
+    /// binding and is checked when the plan is built rather than here. A fault point holds no state of the
+    /// author's at all — its arrival counter belongs to the run, exactly as M5.1 said of a restart — so it
+    /// composes with a durable scope and exports nothing.
+    /// </para>
+    /// <para>
+    /// Everything else is refused <b>by name</b>, which is what the facet buys. A <c>distinct</c> remembers
+    /// keys of an unnamed type, a <c>grouped</c> and a <c>sliding</c> hold elements of one, and a
+    /// <c>take-while</c> and a <c>skip-while</c> hold a latch that only means anything beside a predicate
+    /// the document does not carry either. Admitting any of them would produce a resume that silently reset
+    /// state the scope had promised to keep, which is strictly worse than a refusal an author can read.
+    /// </para>
+    /// </remarks>
+    internal static bool RunsInsideADurableScope(LocalStageKind kind) => kind switch
+    {
+        LocalStageKind.Select or
+            LocalStageKind.Where or
+            LocalStageKind.Scan or
+            LocalStageKind.Take or
+            LocalStageKind.Skip or
+            LocalStageKind.FaultPoint => true,
+        _ => false,
+    };
 
     /// <summary>Recovers the shape a stage reference names, when this vocabulary declares one.</summary>
     /// <param name="stage">The reference as a document spells it, such as <c>local/take@v1</c>.</param>
@@ -1261,6 +1353,7 @@ internal static class LocalVocabulary
             LocalStageKind.Queue or
                 LocalStageKind.Valve or
                 LocalStageKind.SinkProbe or
+                LocalStageKind.MarkingSink or
                 LocalStageKind.FaultPoint => ResultPortSpecification.Create(ControlPort, ControlContract),
             _ => null,
         };

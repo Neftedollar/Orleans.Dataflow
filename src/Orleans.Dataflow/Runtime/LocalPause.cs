@@ -39,6 +39,14 @@ namespace Orleans.Dataflow.Runtime;
 /// all.
 /// </para>
 /// <para>
+/// <b>Two holders, and neither can let the other's run go.</b> An author pauses through the handle and a
+/// checkpoint holds the run to snapshot it, and the two happen at the same time as soon as a durable run is
+/// also paused by hand. The gate is therefore closed while <em>either</em> is holding: a capture that
+/// finished while an author's pause was in effect used to open the gate for both, which would have resumed
+/// a run its author had stopped. Two flags rather than a count, because the count would have broken the
+/// other half of the contract — asking twice for a pause and resuming once leaves the run moving.
+/// </para>
+/// <para>
 /// <b>Threading.</b> Every member is safe to call from any thread at any point in the run's life. The
 /// state is small and every transition is taken under one lock, because the interesting question — "is
 /// every segment stopped?" — is a comparison of four counters that has to be answered from a consistent
@@ -57,6 +65,8 @@ internal sealed class LocalPause
     private int _callbacks;
     private volatile bool _requested;
     private bool _stopped;
+    private bool _held;
+    private bool _captured;
 
     /// <summary>Initializes a new instance of the <see cref="LocalPause"/> class.</summary>
     /// <param name="segments">The number of segments the run starts, all of which have to stop for a pause to take effect.</param>
@@ -82,7 +92,7 @@ internal sealed class LocalPause
     /// already-completed task and closes nothing, because a run on its way out has no safe point left to
     /// hold.
     /// </remarks>
-    internal Task Request()
+    internal Task Request(LocalHold hold)
     {
         lock (_gate)
         {
@@ -90,6 +100,8 @@ internal sealed class LocalPause
             {
                 return Task.CompletedTask;
             }
+
+            Hold(hold, held: true);
 
             if (!_requested)
             {
@@ -111,15 +123,47 @@ internal sealed class LocalPause
     /// returned task is what makes resuming observable: it completes when every parked segment has left the
     /// gate, so a caller that awaits it knows the run is moving again rather than merely permitted to.
     /// </remarks>
-    internal Task Release()
+    internal Task Release(LocalHold hold)
     {
         lock (_gate)
         {
+            Hold(hold, held: false);
+
+            if (_held || _captured)
+            {
+                // Somebody else is still holding the run, so the gate stays closed and this caller's task
+                // completes when the last of them lets go. Saying "the run is moving again" here would be a
+                // statement about this caller's own request rather than about the run.
+                return _parked == 0 ? Task.CompletedTask : _unheld.Task;
+            }
+
             _requested = false;
             _released.TrySetResult();
 
             return _parked == 0 ? Task.CompletedTask : _unheld.Task;
         }
+    }
+
+    /// <summary>Records that one holder has taken or let go of the run.</summary>
+    /// <param name="hold">Which holder.</param>
+    /// <param name="held">Whether it is now holding.</param>
+    /// <remarks>
+    /// Two holders and not a count, which is what keeps <see cref="RunHandle.PauseAsync"/> idempotent: two
+    /// pauses and one resume leave the run moving, exactly as the handle has always documented, while a
+    /// checkpoint taken in the middle of an author's pause cannot end it. A count would have made the first
+    /// of those false and a single flag would have made the second false, and both of those are contracts
+    /// somebody reads.
+    /// </remarks>
+    private void Hold(LocalHold hold, bool held)
+    {
+        if (hold is LocalHold.Checkpoint)
+        {
+            _captured = held;
+
+            return;
+        }
+
+        _held = held;
     }
 
     /// <summary>Opens the gate for good, because the run is stopping.</summary>
@@ -135,6 +179,8 @@ internal sealed class LocalPause
         {
             _stopped = true;
             _requested = false;
+            _held = false;
+            _captured = false;
             _released.TrySetResult();
             _quiet.TrySetResult();
         }

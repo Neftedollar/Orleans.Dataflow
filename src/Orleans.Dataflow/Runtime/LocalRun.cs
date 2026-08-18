@@ -102,16 +102,22 @@ internal sealed class LocalRun
     private volatile bool _canceled;
     private bool _cancellationReleased;
     private volatile bool _shutdownRequested;
+    private readonly LocalCheckpointer? _checkpointer;
 
     /// <summary>Initializes a new instance of the <see cref="LocalRun"/> class.</summary>
     /// <param name="plan">The compiled plan this run executes.</param>
     /// <param name="graph">The fingerprint of the graph this is a run of.</param>
     /// <param name="authoringNonce">The per-instance identity of the graph this is a run of.</param>
+    /// <param name="durable">
+    /// The checkpointing this run was started under, or <see langword="null"/> for a run that writes
+    /// nothing.
+    /// </param>
     /// <param name="cancellationToken">The caller's token, which cancels this run.</param>
     private LocalRun(
         LocalRunPlan plan,
         GraphFingerprint graph,
         Guid authoringNonce,
+        Func<LocalRun, LocalCheckpointer>? durable,
         CancellationToken cancellationToken)
     {
         _plan = plan;
@@ -177,6 +183,19 @@ internal sealed class LocalRun
 
         Graph = graph;
         AuthoringNonce = authoringNonce;
+
+        // Built last, because it closes over this run's pause gate and its failure hook, and both of those
+        // have to exist before anything could ask for a capture. A run with no declared timing builds none
+        // at all, which is what "a run that declares neither never touches the store" is made of.
+        _checkpointer = durable?.Invoke(this);
+
+        // Registered after the checkpointer exists, and beside the pause gate's own registration for the
+        // same reason: every way a run stops has to reach the loop that is holding it, and a cancellation
+        // arriving between construction and this line would be a loop nobody had told.
+        if (_checkpointer is { } capturing)
+        {
+            _ = _stopping.Token.Register(static loop => ((LocalCheckpointer)loop!).Stop(), capturing);
+        }
     }
 
     /// <summary>Gets the fingerprint of the graph this is a run of.</summary>
@@ -255,6 +274,10 @@ internal sealed class LocalRun
     /// <param name="plan">The compiled plan.</param>
     /// <param name="graph">The fingerprint of the graph the plan came from.</param>
     /// <param name="authoringNonce">The per-instance identity of the graph the plan came from.</param>
+    /// <param name="durable">
+    /// The checkpointing to start beside the run, over the run itself; <see langword="null"/> for a run that
+    /// writes nothing.
+    /// </param>
     /// <param name="cancellationToken">The caller's token, which cancels the run.</param>
     /// <returns>The started run.</returns>
     /// <remarks>
@@ -267,14 +290,45 @@ internal sealed class LocalRun
         LocalRunPlan plan,
         GraphFingerprint graph,
         Guid authoringNonce,
+        Func<LocalRun, LocalCheckpointer>? durable,
         CancellationToken cancellationToken)
     {
-        LocalRun run = new(plan, graph, authoringNonce, cancellationToken);
+        LocalRun run = new(plan, graph, authoringNonce, durable, cancellationToken);
 
         run.Launch();
 
         return run;
     }
+
+    /// <summary>Gets the pause gate this run's segments stop at.</summary>
+    /// <value>The gate, which a capture holds the run through.</value>
+    /// <remarks>
+    /// Exposed to the checkpointer alone, and it is the same gate <see cref="PauseAsync"/> uses rather than
+    /// a second one: ADR 0007 asked for a capture to be taken at the safe points the pause machinery already
+    /// reaches, and sharing the gate is what makes that true rather than merely similar.
+    /// </remarks>
+    internal LocalPause Pause => _pause;
+
+    /// <summary>Gets the token that is cancelled when this run stops, however it stops.</summary>
+    /// <value>The stop token, which ends the capture loop.</value>
+    internal CancellationToken StopToken => _stopping.Token;
+
+    /// <summary>Records a failure from outside a segment, such as a refused checkpoint write.</summary>
+    /// <param name="error">The failure.</param>
+    /// <remarks>
+    /// The very hook a throwing stage travels through, so a store that fenced this attempt out faults the
+    /// run in exactly the way an author's exception would and arrives unwrapped on
+    /// <see cref="Completion"/>.
+    /// </remarks>
+    internal void Faulted(Exception error) => Fail(error);
+
+    /// <summary>Gets how many checkpoints this run has written.</summary>
+    /// <value>The count, which stays zero for a run with no declared checkpoint timing.</value>
+    internal long Checkpoints => _checkpointer?.Captures ?? 0L;
+
+    /// <summary>Gets how long this run has been held by its captures in total.</summary>
+    /// <value>The sum of every hold, measured on the run's clock.</value>
+    internal TimeSpan CheckpointHold => _checkpointer?.Held ?? TimeSpan.Zero;
 
     /// <summary>Gets the task that resolves one result slot of this run.</summary>
     /// <param name="slot">The slot name to resolve.</param>
@@ -381,7 +435,7 @@ internal sealed class LocalRun
     /// </remarks>
     internal Task PauseAsync(CancellationToken cancellationToken)
     {
-        Task quiet = _pause.Request();
+        Task quiet = _pause.Request(LocalHold.Author);
 
         return cancellationToken.CanBeCanceled ? quiet.WaitAsync(cancellationToken) : quiet;
     }
@@ -394,7 +448,7 @@ internal sealed class LocalRun
     /// element that was in a buffer is still in that buffer, an element a source had pulled is delivered
     /// next, and a callback whose result was waiting for its turn is emitted in that turn.
     /// </remarks>
-    internal Task ResumeAsync() => _pause.Release();
+    internal Task ResumeAsync() => _pause.Release(LocalHold.Author);
 
     /// <summary>Opens the bounded channel of one boundary.</summary>
     /// <param name="boundary">The declared capacity and policy.</param>
@@ -461,6 +515,11 @@ internal sealed class LocalRun
                 TaskCreationOptions.LongRunning | TaskCreationOptions.DenyChildAttach,
                 TaskScheduler.Default);
         }
+
+        // After the segments, so that the first interval of a timed capture is measured from a run that is
+        // already moving; and on the thread pool rather than on a dedicated thread, because this loop awaits
+        // and never calls an author's code.
+        _ = _checkpointer?.RunAsync();
     }
 
     /// <summary>Runs one segment to its end and reports how it ended to the run.</summary>
@@ -678,6 +737,14 @@ internal sealed class LocalRun
             {
                 return false;
             }
+
+            // The element has travelled all the way through this segment, which is the moment a cursor
+            // means something and the moment a checkpoint bound counts. Both are asked here rather than
+            // inside the sequence, because only this loop knows that the element it pulled was delivered
+            // and not merely produced — and a capture requested from here holds the run at exactly this
+            // element, since the next thing this segment does is look at its park point.
+            segment.Cursor?.Delivered();
+            _checkpointer?.Admitted();
         }
     }
 
@@ -2977,6 +3044,13 @@ internal sealed class LocalRun
         // asked the run to stop: a source that simply ran out cancels no token, and a pause requested
         // against the run afterwards would otherwise be a hold on segments that no longer exist.
         _pause.Open();
+
+        // And the capture loop is told for the same reason and by the same fact. A run that ran out of
+        // elements cancels nothing, so a loop watching the stop token alone would outlive the run it
+        // belongs to — waiting forever for a bound nobody will reach, and arming its next interval on a
+        // token source this method is about to release. A checkpoint is what a crash leaves behind, so a
+        // run that reached its end has nothing left to write.
+        _checkpointer?.Stop();
 
         for (int index = 0; index < _plan.Controls.Count; index++)
         {

@@ -47,6 +47,16 @@ Orleans.Dataflow.DistinctOptions.MaxTrackedKeys.get -> int
 Orleans.Dataflow.DistinctOptions.MaxTrackedKeys.init -> void
 Orleans.Dataflow.DistinctOptions.OverflowPolicy.get -> Orleans.Dataflow.KeyOverflowPolicy
 Orleans.Dataflow.DistinctOptions.OverflowPolicy.init -> void
+Orleans.Dataflow.DurableRunOptions
+Orleans.Dataflow.DurableRunOptions.DurableRunOptions() -> void
+Orleans.Dataflow.DurableRunOptions.EveryElements.get -> int?
+Orleans.Dataflow.DurableRunOptions.EveryElements.init -> void
+Orleans.Dataflow.DurableRunOptions.Interval.get -> System.TimeSpan?
+Orleans.Dataflow.DurableRunOptions.Interval.init -> void
+Orleans.Dataflow.DurableRunOptions.Run.get -> Orleans.Dataflow.Identity.RunId
+Orleans.Dataflow.DurableRunOptions.Run.init -> void
+Orleans.Dataflow.DurableRunOptions.Store.get -> Orleans.Dataflow.Hosting.ICheckpointStore!
+Orleans.Dataflow.DurableRunOptions.Store.init -> void
 Orleans.Dataflow.ElementContract
 Orleans.Dataflow.ElementContract<T>
 Orleans.Dataflow.ElementContract<T>.ElementContract() -> void
@@ -60,6 +70,7 @@ Orleans.Dataflow.Flow<TIn, TOut>.Buffer(Orleans.Dataflow.BufferOptions! options)
 Orleans.Dataflow.Flow<TIn, TOut>.DeduplicateConsecutive() -> Orleans.Dataflow.Flow<TIn, TOut>!
 Orleans.Dataflow.Flow<TIn, TOut>.Delay(System.TimeSpan delay, Orleans.Dataflow.BufferOptions! holdback) -> Orleans.Dataflow.Flow<TIn, TOut>!
 Orleans.Dataflow.Flow<TIn, TOut>.Distinct(Orleans.Dataflow.DistinctOptions! options) -> Orleans.Dataflow.Flow<TIn, TOut>!
+Orleans.Dataflow.Flow<TIn, TOut>.Durable<TNext>(Orleans.Dataflow.Flow<TOut, TNext>! scope) -> Orleans.Dataflow.Flow<TIn, TNext>!
 Orleans.Dataflow.Flow<TIn, TOut>.GroupBy<TKey, TNext>(Orleans.Dataflow.GroupByOptions! options, System.Func<TOut, TKey>! keySelector, Orleans.Dataflow.Flow<TOut, TNext>! group) -> Orleans.Dataflow.Flow<TIn, TNext>!
 Orleans.Dataflow.Flow<TIn, TOut>.Grouped(int size) -> Orleans.Dataflow.Flow<TIn, System.Collections.Generic.IReadOnlyList<TOut>!>!
 Orleans.Dataflow.Flow<TIn, TOut>.GroupedWithin(int maxElements, System.TimeSpan window) -> Orleans.Dataflow.Flow<TIn, System.Collections.Generic.IReadOnlyList<TOut>!>!
@@ -68,6 +79,7 @@ Orleans.Dataflow.Flow<TIn, TOut>.InitialDelay(System.TimeSpan delay) -> Orleans.
 Orleans.Dataflow.Flow<TIn, TOut>.MergeMap<TNext>(Orleans.Dataflow.ParallelismOptions! options, System.Func<TOut, System.Collections.Generic.IAsyncEnumerable<TNext>!>! selector) -> Orleans.Dataflow.Flow<TIn, TNext>!
 Orleans.Dataflow.Flow<TIn, TOut>.MergeMap<TNext>(Orleans.Dataflow.ParallelismOptions! options, System.Func<TOut, System.Collections.Generic.IEnumerable<TNext>!>! selector) -> Orleans.Dataflow.Flow<TIn, TNext>!
 Orleans.Dataflow.Flow<TIn, TOut>.Scan<TState>(TState seed, System.Func<TState, TOut, TState>! folder) -> Orleans.Dataflow.Flow<TIn, TState>!
+Orleans.Dataflow.Flow<TIn, TOut>.Scan<TState>(TState seed, System.Func<TState, TOut, TState>! folder, System.Func<TState, Orleans.Dataflow.Serialization.CanonicalJsonValue>! export, System.Func<Orleans.Dataflow.Serialization.CanonicalJsonValue, TState>! restore) -> Orleans.Dataflow.Flow<TIn, TState>!
 Orleans.Dataflow.Flow<TIn, TOut>.ScanAsync<TState>(TState seed, System.Func<TState, TOut, System.Threading.CancellationToken, System.Threading.Tasks.Task<TState>!>! folder) -> Orleans.Dataflow.Flow<TIn, TState>!
 Orleans.Dataflow.Flow<TIn, TOut>.Select<TNext>(System.Func<TOut, TNext>! selector) -> Orleans.Dataflow.Flow<TIn, TNext>!
 Orleans.Dataflow.Flow<TIn, TOut>.SelectAsync<TNext>(Orleans.Dataflow.ParallelismOptions! options, System.Func<TOut, System.Threading.CancellationToken, System.Threading.Tasks.Task<TNext>!>! selector) -> Orleans.Dataflow.Flow<TIn, TNext>!
@@ -111,6 +123,12 @@ Orleans.Dataflow.GroupByOptions.MaxActiveKeys.get -> int
 Orleans.Dataflow.GroupByOptions.MaxActiveKeys.init -> void
 Orleans.Dataflow.GroupByOptions.OverflowPolicy.get -> Orleans.Dataflow.ActiveKeyOverflowPolicy
 Orleans.Dataflow.GroupByOptions.OverflowPolicy.init -> void
+Orleans.Dataflow.Hosting.CheckpointConflictException
+Orleans.Dataflow.Hosting.CheckpointConflictException.CheckpointConflictException() -> void
+Orleans.Dataflow.Hosting.CheckpointConflictException.CheckpointConflictException(string! message) -> void
+Orleans.Dataflow.Hosting.CheckpointConflictException.CheckpointConflictException(string! message, System.Exception! innerException) -> void
+Orleans.Dataflow.Hosting.CheckpointConflictException.Presented.get -> string?
+Orleans.Dataflow.Hosting.CheckpointConflictException.Stored.get -> string?
 Orleans.Dataflow.Hosting.DataflowRunTokens
 Orleans.Dataflow.Hosting.DataflowRunTokens.DataflowRunTokens() -> void
 Orleans.Dataflow.Hosting.DataflowRunTokens.DataflowRunTokens(string! RunIdentity, System.Threading.CancellationToken RunToken, System.Threading.CancellationToken StopToken) -> void
@@ -132,6 +150,10 @@ Orleans.Dataflow.Hosting.DataflowStageRequest.Node.init -> void
 Orleans.Dataflow.Hosting.DataflowStageRequest.Specification.get -> Orleans.Dataflow.Definition.StageSpecification!
 Orleans.Dataflow.Hosting.DataflowStageRequest.Specification.init -> void
 Orleans.Dataflow.Hosting.DataflowStageRuntime
+Orleans.Dataflow.Hosting.ICheckpointStore
+Orleans.Dataflow.Hosting.ICheckpointStore.ClearAsync(Orleans.Dataflow.Identity.GraphId graph, Orleans.Dataflow.Identity.RunId run, string? expectedETag, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.ValueTask
+Orleans.Dataflow.Hosting.ICheckpointStore.ReadAsync(Orleans.Dataflow.Identity.GraphId graph, Orleans.Dataflow.Identity.RunId run, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.ValueTask<Orleans.Dataflow.Hosting.StoredCheckpoint?>
+Orleans.Dataflow.Hosting.ICheckpointStore.WriteAsync(Orleans.Dataflow.Identity.GraphId graph, Orleans.Dataflow.Identity.RunId run, Orleans.Dataflow.Serialization.CanonicalJsonValue checkpoint, string? expectedETag, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.ValueTask<string!>
 Orleans.Dataflow.Hosting.IDataflowStageFactory
 Orleans.Dataflow.Hosting.IDataflowStageFactory.Create(Orleans.Dataflow.Hosting.DataflowStageRequest request) -> Orleans.Dataflow.Hosting.DataflowStageRuntime!
 Orleans.Dataflow.Hosting.ILocalDataflowBuilder
@@ -139,6 +161,15 @@ Orleans.Dataflow.Hosting.ILocalDataflowBuilder.AddCatalog(Orleans.Dataflow.Defin
 Orleans.Dataflow.Hosting.ILocalDataflowBuilder.AddDotnetStages() -> Orleans.Dataflow.Hosting.ILocalDataflowBuilder!
 Orleans.Dataflow.Hosting.ILocalDataflowBuilder.AddFactory(Orleans.Dataflow.Identity.ProviderId provider, Orleans.Dataflow.Hosting.IDataflowStageFactory! factory) -> Orleans.Dataflow.Hosting.ILocalDataflowBuilder!
 Orleans.Dataflow.Hosting.ILocalDataflowBuilder.AddObservable<T>(Orleans.Dataflow.Adapters.ObservableBinding<T>! source) -> Orleans.Dataflow.Hosting.ILocalDataflowBuilder!
+Orleans.Dataflow.Hosting.StoredCheckpoint
+Orleans.Dataflow.Hosting.StoredCheckpoint.Deconstruct(out Orleans.Dataflow.Serialization.CanonicalJsonValue Document, out string! ETag) -> void
+Orleans.Dataflow.Hosting.StoredCheckpoint.Document.get -> Orleans.Dataflow.Serialization.CanonicalJsonValue
+Orleans.Dataflow.Hosting.StoredCheckpoint.Document.init -> void
+Orleans.Dataflow.Hosting.StoredCheckpoint.ETag.get -> string!
+Orleans.Dataflow.Hosting.StoredCheckpoint.ETag.init -> void
+Orleans.Dataflow.Hosting.StoredCheckpoint.Equals(Orleans.Dataflow.Hosting.StoredCheckpoint other) -> bool
+Orleans.Dataflow.Hosting.StoredCheckpoint.StoredCheckpoint() -> void
+Orleans.Dataflow.Hosting.StoredCheckpoint.StoredCheckpoint(Orleans.Dataflow.Serialization.CanonicalJsonValue Document, string! ETag) -> void
 Orleans.Dataflow.IIngressQueue<T>
 Orleans.Dataflow.IIngressQueue<T>.Complete() -> void
 Orleans.Dataflow.IIngressQueue<T>.Fail(System.Exception! exception) -> void
@@ -156,6 +187,8 @@ Orleans.Dataflow.LocalDataflowHost.LocalDataflowHost(System.Action<Orleans.Dataf
 Orleans.Dataflow.LocalDataflowHost.LocalDataflowHost(System.TimeProvider! timeProvider) -> void
 Orleans.Dataflow.LocalDataflowHost.LocalDataflowHost(System.TimeProvider! timeProvider, System.Action<Orleans.Dataflow.Hosting.ILocalDataflowBuilder!>! configure) -> void
 Orleans.Dataflow.LocalDataflowHost.MaterializeAsync(Orleans.Dataflow.RunnableGraph! graph, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.ValueTask<Orleans.Dataflow.RunHandle!>
+Orleans.Dataflow.LocalDataflowHost.MaterializeDurableAsync(Orleans.Dataflow.RunnableGraph! graph, Orleans.Dataflow.DurableRunOptions! durable, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.ValueTask<Orleans.Dataflow.RunHandle!>
+Orleans.Dataflow.LocalDataflowHost.MaterializeFromCheckpointAsync(Orleans.Dataflow.RunnableGraph! graph, Orleans.Dataflow.DurableRunOptions! durable, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.ValueTask<Orleans.Dataflow.RunHandle!>
 Orleans.Dataflow.LocalStageCatalog
 Orleans.Dataflow.OverflowPolicy
 Orleans.Dataflow.OverflowPolicy.Backpressure = 0 -> Orleans.Dataflow.OverflowPolicy
@@ -290,6 +323,7 @@ Orleans.Dataflow.Source<T>.DeduplicateConsecutive() -> Orleans.Dataflow.Source<T
 Orleans.Dataflow.Source<T>.Delay(System.TimeSpan delay, Orleans.Dataflow.BufferOptions! holdback) -> Orleans.Dataflow.Source<T>!
 Orleans.Dataflow.Source<T>.Distinct(Orleans.Dataflow.DistinctOptions! options) -> Orleans.Dataflow.Source<T>!
 Orleans.Dataflow.Source<T>.DivertTo(System.Func<T, bool>! predicate, Orleans.Dataflow.Branch<T>! side) -> Orleans.Dataflow.Source<T>!
+Orleans.Dataflow.Source<T>.Durable<TOut>(Orleans.Dataflow.Flow<T, TOut>! scope) -> Orleans.Dataflow.Source<TOut>!
 Orleans.Dataflow.Source<T>.FanIn<TOut>(Orleans.Dataflow.RegisteredFanIn<T, TOut>! junction, string! occurrenceName, Orleans.Dataflow.Serialization.CanonicalJsonValue parameters, params Orleans.Dataflow.Source<T>![]! others) -> Orleans.Dataflow.Source<TOut>!
 Orleans.Dataflow.Source<T>.FanIn<TSecond, TOut>(Orleans.Dataflow.RegisteredFanIn<T, TSecond, TOut>! junction, string! occurrenceName, Orleans.Dataflow.Serialization.CanonicalJsonValue parameters, Orleans.Dataflow.Source<TSecond>! other) -> Orleans.Dataflow.Source<TOut>!
 Orleans.Dataflow.Source<T>.FanOutTo<TLeft, TRight>(Orleans.Dataflow.RegisteredFanOut<T, TLeft, TRight>! junction, string! occurrenceName, Orleans.Dataflow.Serialization.CanonicalJsonValue parameters, Orleans.Dataflow.Branch<TLeft>! left, Orleans.Dataflow.Branch<TRight>! right) -> Orleans.Dataflow.RunnableGraph!
@@ -310,6 +344,7 @@ Orleans.Dataflow.Source<T>.PartitionTo(System.Func<T, int>! router, params Orlea
 Orleans.Dataflow.Source<T>.Prepend(Orleans.Dataflow.Source<T>! head) -> Orleans.Dataflow.Source<T>!
 Orleans.Dataflow.Source<T>.Prepend(params T[]! elements) -> Orleans.Dataflow.Source<T>!
 Orleans.Dataflow.Source<T>.Scan<TState>(TState seed, System.Func<TState, T, TState>! folder) -> Orleans.Dataflow.Source<TState>!
+Orleans.Dataflow.Source<T>.Scan<TState>(TState seed, System.Func<TState, T, TState>! folder, System.Func<TState, Orleans.Dataflow.Serialization.CanonicalJsonValue>! export, System.Func<Orleans.Dataflow.Serialization.CanonicalJsonValue, TState>! restore) -> Orleans.Dataflow.Source<TState>!
 Orleans.Dataflow.Source<T>.ScanAsync<TState>(TState seed, System.Func<TState, T, System.Threading.CancellationToken, System.Threading.Tasks.Task<TState>!>! folder) -> Orleans.Dataflow.Source<TState>!
 Orleans.Dataflow.Source<T>.Select<TOut>(System.Func<T, TOut>! selector) -> Orleans.Dataflow.Source<TOut>!
 Orleans.Dataflow.Source<T>.SelectAsync<TOut>(Orleans.Dataflow.ParallelismOptions! options, System.Func<T, System.Threading.CancellationToken, System.Threading.Tasks.Task<TOut>!>! selector) -> Orleans.Dataflow.Source<TOut>!
@@ -423,6 +458,7 @@ override Orleans.Dataflow.GroupByOptions.GetHashCode() -> int
 override Orleans.Dataflow.GroupByOptions.ToString() -> string!
 override Orleans.Dataflow.Hosting.DataflowRunTokens.GetHashCode() -> int
 override Orleans.Dataflow.Hosting.DataflowStageRequest.GetHashCode() -> int
+override Orleans.Dataflow.Hosting.StoredCheckpoint.GetHashCode() -> int
 override Orleans.Dataflow.ParallelismOptions.Equals(object? obj) -> bool
 override Orleans.Dataflow.ParallelismOptions.GetHashCode() -> int
 override Orleans.Dataflow.ParallelismOptions.ToString() -> string!
@@ -487,6 +523,7 @@ static Orleans.Dataflow.ElementContract<T>.operator ==(Orleans.Dataflow.ElementC
 static Orleans.Dataflow.Flow.For<T>() -> Orleans.Dataflow.Flow<T, T>!
 static Orleans.Dataflow.GroupByOptions.operator !=(Orleans.Dataflow.GroupByOptions? left, Orleans.Dataflow.GroupByOptions? right) -> bool
 static Orleans.Dataflow.GroupByOptions.operator ==(Orleans.Dataflow.GroupByOptions? left, Orleans.Dataflow.GroupByOptions? right) -> bool
+static Orleans.Dataflow.Hosting.CheckpointConflictException.Superseded(Orleans.Dataflow.Identity.GraphId graph, Orleans.Dataflow.Identity.RunId run, string? presented, string? stored) -> Orleans.Dataflow.Hosting.CheckpointConflictException!
 static Orleans.Dataflow.Hosting.DataflowRunTokens.operator !=(Orleans.Dataflow.Hosting.DataflowRunTokens left, Orleans.Dataflow.Hosting.DataflowRunTokens right) -> bool
 static Orleans.Dataflow.Hosting.DataflowRunTokens.operator ==(Orleans.Dataflow.Hosting.DataflowRunTokens left, Orleans.Dataflow.Hosting.DataflowRunTokens right) -> bool
 static Orleans.Dataflow.Hosting.DataflowStageRequest.operator !=(Orleans.Dataflow.Hosting.DataflowStageRequest left, Orleans.Dataflow.Hosting.DataflowStageRequest right) -> bool
@@ -504,6 +541,8 @@ static Orleans.Dataflow.Hosting.DataflowStageRuntime.Source(System.Func<Orleans.
 static Orleans.Dataflow.Hosting.DataflowStageRuntime.Terminal(System.Func<object?>! seed, System.Func<object?, object?, object?>! fold, System.Func<object?, object?>? finish, bool producesResult) -> Orleans.Dataflow.Hosting.DataflowStageRuntime!
 static Orleans.Dataflow.Hosting.DataflowStageRuntime.Unzip(System.Collections.Generic.IReadOnlyList<System.Func<object?, object?>!>! parts) -> Orleans.Dataflow.Hosting.DataflowStageRuntime!
 static Orleans.Dataflow.Hosting.DataflowStageRuntime.Zip(System.Func<object?[]!, object?>! combine) -> Orleans.Dataflow.Hosting.DataflowStageRuntime!
+static Orleans.Dataflow.Hosting.StoredCheckpoint.operator !=(Orleans.Dataflow.Hosting.StoredCheckpoint left, Orleans.Dataflow.Hosting.StoredCheckpoint right) -> bool
+static Orleans.Dataflow.Hosting.StoredCheckpoint.operator ==(Orleans.Dataflow.Hosting.StoredCheckpoint left, Orleans.Dataflow.Hosting.StoredCheckpoint right) -> bool
 static Orleans.Dataflow.LocalStageCatalog.Instance.get -> Orleans.Dataflow.Definition.IStageCatalog!
 static Orleans.Dataflow.ParallelismOptions.operator !=(Orleans.Dataflow.ParallelismOptions? left, Orleans.Dataflow.ParallelismOptions? right) -> bool
 static Orleans.Dataflow.ParallelismOptions.operator ==(Orleans.Dataflow.ParallelismOptions? left, Orleans.Dataflow.ParallelismOptions? right) -> bool
@@ -566,6 +605,8 @@ virtual Orleans.Dataflow.UnfoldGenerator<TState, T>.Invoke(TState state, out T v
 ~override Orleans.Dataflow.Hosting.DataflowRunTokens.ToString() -> string
 ~override Orleans.Dataflow.Hosting.DataflowStageRequest.Equals(object obj) -> bool
 ~override Orleans.Dataflow.Hosting.DataflowStageRequest.ToString() -> string
+~override Orleans.Dataflow.Hosting.StoredCheckpoint.Equals(object obj) -> bool
+~override Orleans.Dataflow.Hosting.StoredCheckpoint.ToString() -> string
 ~override Orleans.Dataflow.ResultContract<TResult>.Equals(object obj) -> bool
 ~override Orleans.Dataflow.ResultSlot<TResult>.Equals(object obj) -> bool
 ~override Orleans.Dataflow.UnfoldStep<TState, T>.Equals(object obj) -> bool

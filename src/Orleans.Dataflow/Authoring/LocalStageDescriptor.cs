@@ -159,7 +159,7 @@ internal sealed class LocalStageDescriptor : StageOccurrence
     /// author happened to write a lambda for it.
     /// </value>
     internal override IReadOnlyList<CapabilityToken> RequiredCapabilities =>
-        LocalVocabulary.RequiredCapabilities;
+        LocalVocabulary.RequiredCapabilitiesOf(Kind);
 
     /// <summary>Creates a source over an in-memory sequence.</summary>
     /// <param name="elements">The sequence, as the authoring value received it.</param>
@@ -331,6 +331,25 @@ internal sealed class LocalStageDescriptor : StageOccurrence
     /// <returns>The descriptor.</returns>
     internal static LocalStageDescriptor Scan(object? seed, object folder) =>
         new(LocalStageKind.Scan, folder, seed, LocalVocabulary.EmptyParameters);
+
+    /// <summary>Creates a running fold whose state a durable scope can write into a checkpoint.</summary>
+    /// <param name="seed">The initial state, which may be <see langword="null"/>.</param>
+    /// <param name="folder">The folding delegate, as the authoring value received it.</param>
+    /// <param name="export">The projection of the boxed state into a canonical value.</param>
+    /// <param name="restore">The projection back, already closed over the state type.</param>
+    /// <returns>The descriptor.</returns>
+    /// <remarks>
+    /// The same stage and the same payload as <see cref="Scan(object?, object)"/> — a codec is behavior, so
+    /// two graphs whose scans differ only in carrying one have one fingerprint — with a binding of three
+    /// values instead of one. That is the split every stage of this vocabulary makes, applied to the one
+    /// question a document could not answer: what a state of an unnamed type looks like written down.
+    /// </remarks>
+    internal static LocalStageDescriptor Scan(
+        object? seed,
+        object folder,
+        Func<object?, CanonicalJsonValue> export,
+        Func<CanonicalJsonValue, object?> restore) =>
+        new(LocalStageKind.Scan, new object?[] { folder, export, restore }, seed, LocalVocabulary.EmptyParameters);
 
     /// <summary>Creates a stage that passes a declared number of elements.</summary>
     /// <param name="count">The validated number of elements to pass.</param>
@@ -896,6 +915,38 @@ internal sealed class LocalStageDescriptor : StageOccurrence
             new object?[] { fallback, scope },
             seed: null,
             LocalSupervisionParameters.Write(options, scope));
+
+    /// <summary>Creates a stage whose chain's state survives a resume.</summary>
+    /// <param name="scope">The validated stages of the scope's chain, in flow order.</param>
+    /// <returns>The descriptor.</returns>
+    /// <remarks>
+    /// The third descriptor whose payload carries other descriptors' payloads, and the one with nothing else
+    /// in it: a durable scope declares which stages it is made of and nothing more, because when and where a
+    /// checkpoint is taken is the run's option rather than the graph's. The binding holds the descriptors
+    /// themselves for the reason the supervision scope's does — the runtime needs both halves of each of
+    /// them, and reading the payload against the binding is what makes the two planes agree.
+    /// </remarks>
+    internal static LocalStageDescriptor Durable(IReadOnlyList<LocalStageDescriptor> scope) =>
+        new(LocalStageKind.Durable, scope, seed: null, LocalDurableParameters.Write(scope));
+
+    /// <summary>Creates a sink whose commit mark advances after its callback.</summary>
+    /// <param name="callback">The side-effect delegate, as the authoring value received it.</param>
+    /// <param name="controlSlot">The validated name the control is declared under.</param>
+    /// <param name="controlType">The closed type of the control an author receives.</param>
+    /// <param name="facade">The factory of that control over the run's marking sink.</param>
+    /// <returns>The descriptor.</returns>
+    internal static LocalStageDescriptor MarkingSink(
+        object callback,
+        ResultSlotId controlSlot,
+        Type controlType,
+        object facade) =>
+        new(
+            LocalStageKind.MarkingSink,
+            new object?[] { callback, facade },
+            seed: null,
+            LocalVocabulary.EmptyParameters,
+            controlSlot,
+            controlType);
 
     /// <summary>Returns a one-line diagnostic summary of this occurrence.</summary>
     /// <returns>The stage reference text, such as <c>local:select@1</c>.</returns>

@@ -1,4 +1,5 @@
 using System.Collections;
+using Orleans.Dataflow.Serialization;
 
 namespace Orleans.Dataflow.Runtime;
 
@@ -72,9 +73,26 @@ internal abstract class LocalElementStage
     /// <summary>Creates a running fold that emits every intermediate state.</summary>
     /// <param name="seed">The initial state, which is not emitted.</param>
     /// <param name="folder">The fold over boxed state and boxed elements.</param>
+    /// <param name="export">
+    /// The projection of the running state into a canonical value, or <see langword="null"/> when the author
+    /// bound none — which is every scan outside a durable scope.
+    /// </param>
+    /// <param name="restore">The projection back, or <see langword="null"/> beside a null projection.</param>
     /// <returns>The stage.</returns>
-    internal static LocalElementStage Scan(object? seed, Func<object?, object?, object?> folder) =>
-        new Running(seed, folder);
+    /// <remarks>
+    /// The codec is a pair of delegates and therefore binding rather than payload, exactly as the fold
+    /// itself is: a document names no element type, so it can name no state type either, and two graphs that
+    /// differ only in whether their scan can be checkpointed have one fingerprint. What that costs is that
+    /// "this scan exports state" is a fact of the binding, so a durable scope holding a scan with no codec
+    /// is refused at materialization rather than at validation — the same line M5.1 drew for every other
+    /// disagreement between a scope's two planes.
+    /// </remarks>
+    internal static LocalElementStage Scan(
+        object? seed,
+        Func<object?, object?, object?> folder,
+        Func<object?, CanonicalJsonValue>? export = null,
+        Func<CanonicalJsonValue, object?>? restore = null) =>
+        new Running(seed, folder, export, restore);
 
     /// <summary>Creates a stage that passes a declared number of elements.</summary>
     /// <param name="count">How many elements to pass; zero or more.</param>
@@ -177,6 +195,59 @@ internal abstract class LocalElementStage
     /// </remarks>
     internal static LocalElementStage FaultPoint(LocalFaultPoint point) => new Faulting(point);
 
+    /// <summary>Gets a value indicating whether this stage can hand its state over as a canonical value.</summary>
+    /// <value>
+    /// <see langword="false"/> for every stage by default, and <see langword="true"/> for the shapes a
+    /// durable scope can carry across a resume.
+    /// </value>
+    /// <remarks>
+    /// <para>
+    /// The optional facet of the fusible contract that ADR 0007's durable state needs, and it is optional
+    /// because most stages cannot honestly answer it: a batch holds elements of a type no document names, a
+    /// distinct holds keys of one, and neither could be written into a checkpoint without an author saying
+    /// how. A stage that answers <see langword="false"/> is refused inside a durable scope <b>by name</b>,
+    /// which is the whole of what the facet buys — a graph that could not be resumed correctly is refused
+    /// before it runs instead of resuming into a state that was quietly reset.
+    /// </para>
+    /// <para>
+    /// It is a property of the built stage rather than of its shape, because for one shape — a scan — the
+    /// answer depends on whether the author bound a state codec. The plan therefore builds one instance and
+    /// asks it, which is also why this is a virtual member rather than a table beside the vocabulary.
+    /// </para>
+    /// </remarks>
+    internal virtual bool ExportsState => false;
+
+    /// <summary>Hands over everything this stage is holding, as a canonical value.</summary>
+    /// <returns>The state, in a grammar this stage's own <see cref="RestoreState"/> reads.</returns>
+    /// <exception cref="NotSupportedException">
+    /// This stage does not export state, which its <see cref="ExportsState"/> already said.
+    /// </exception>
+    /// <remarks>
+    /// Asked on the capture loop's thread while the run is quiescent, which is what makes reading a stage's
+    /// state safe without a lock: no segment is executing, so nothing is being folded into it.
+    /// </remarks>
+    internal virtual CanonicalJsonValue ExportState() => throw Unexportable();
+
+    /// <summary>Takes back a state this stage exported earlier.</summary>
+    /// <param name="state">The exported value, as a checkpoint carried it.</param>
+    /// <exception cref="NotSupportedException">This stage does not export state.</exception>
+    /// <exception cref="InvalidOperationException">The value is not one this stage wrote.</exception>
+    /// <remarks>
+    /// Asked once, before the resumed run's first element, on the thread that materializes it. A stage
+    /// restored mid-run would have its state changed under an element that was already inside it.
+    /// </remarks>
+    internal virtual void RestoreState(CanonicalJsonValue state) => throw Unexportable();
+
+    /// <summary>Builds the failure a stage with no state facet raises when it is asked for one.</summary>
+    /// <returns>The exception.</returns>
+    /// <remarks>
+    /// Unreachable through the authoring surface and through a validated document alike, because a durable
+    /// scope refuses such a stage before the plan is finished. It is here so that the refusal is a defect
+    /// report rather than a null reference if a future shape is admitted without the facet.
+    /// </remarks>
+    private NotSupportedException Unexportable() =>
+        new($"A '{GetType().Name}' stage exports no state and cannot stand inside a durable scope. This should have been refused when the plan was built.");
+
     /// <summary>Pushes one element through this stage.</summary>
     /// <param name="element">The element arriving from upstream.</param>
     /// <param name="result">
@@ -256,6 +327,18 @@ internal abstract class LocalElementStage
     private sealed class Mapping(Func<object?, object?> selector) : LocalElementStage
     {
         /// <inheritdoc/>
+        /// <remarks>A mapping holds nothing between elements, so there is nothing to keep and nothing to reset.</remarks>
+        internal override bool ExportsState => true;
+
+        /// <inheritdoc/>
+        internal override CanonicalJsonValue ExportState() => LocalStageState.Nothing;
+
+        /// <inheritdoc/>
+        internal override void RestoreState(CanonicalJsonValue state)
+        {
+        }
+
+        /// <inheritdoc/>
         internal override LocalStageOutcome Apply(object? element, out object? result)
         {
             result = selector(element);
@@ -275,6 +358,23 @@ internal abstract class LocalElementStage
     private sealed class Faulting(LocalFaultPoint point) : LocalElementStage
     {
         /// <inheritdoc/>
+        /// <remarks>
+        /// It exports nothing, and that is the same statement M5.1 made about a restart: the arrival counter
+        /// belongs to the <em>run</em> rather than to the stage instance, so it is the test's accounting and
+        /// not the author's state. A resumed run is a new run and counts its own arrivals from one, which is
+        /// what makes "fail the second element" mean the same thing in both.
+        /// </remarks>
+        internal override bool ExportsState => true;
+
+        /// <inheritdoc/>
+        internal override CanonicalJsonValue ExportState() => LocalStageState.Nothing;
+
+        /// <inheritdoc/>
+        internal override void RestoreState(CanonicalJsonValue state)
+        {
+        }
+
+        /// <inheritdoc/>
         internal override LocalStageOutcome Apply(object? element, out object? result)
         {
             point.Pass();
@@ -290,6 +390,18 @@ internal abstract class LocalElementStage
     private sealed class Filter(Func<object?, bool> predicate) : LocalElementStage
     {
         /// <inheritdoc/>
+        /// <remarks>A filter holds nothing between elements, so there is nothing to keep and nothing to reset.</remarks>
+        internal override bool ExportsState => true;
+
+        /// <inheritdoc/>
+        internal override CanonicalJsonValue ExportState() => LocalStageState.Nothing;
+
+        /// <inheritdoc/>
+        internal override void RestoreState(CanonicalJsonValue state)
+        {
+        }
+
+        /// <inheritdoc/>
         internal override LocalStageOutcome Apply(object? element, out object? result)
         {
             result = element;
@@ -301,9 +413,41 @@ internal abstract class LocalElementStage
     /// <summary>A stage that folds every element into a running state and emits each one.</summary>
     /// <param name="seed">The initial state, which is not emitted.</param>
     /// <param name="folder">The fold over boxed state and boxed elements.</param>
-    private sealed class Running(object? seed, Func<object?, object?, object?> folder) : LocalElementStage
+    /// <param name="export">The projection of the running state into a canonical value, when there is one.</param>
+    /// <param name="restore">The projection back, when there is one.</param>
+    private sealed class Running(
+        object? seed,
+        Func<object?, object?, object?> folder,
+        Func<object?, CanonicalJsonValue>? export,
+        Func<CanonicalJsonValue, object?>? restore) : LocalElementStage
     {
         private object? _state = seed;
+
+        /// <inheritdoc/>
+        /// <remarks>
+        /// The one shape of this vocabulary whose answer depends on its binding rather than on its kind. A
+        /// scan's state is a value of a type no document names, so only the author can say how it becomes a
+        /// canonical value; a scan bound without that pair is an ordinary scan and resets on resume like
+        /// everything else outside a durable scope.
+        /// </remarks>
+        internal override bool ExportsState => export is not null && restore is not null;
+
+        /// <inheritdoc/>
+        internal override CanonicalJsonValue ExportState() =>
+            export is null ? base.ExportState() : export(_state);
+
+        /// <inheritdoc/>
+        internal override void RestoreState(CanonicalJsonValue state)
+        {
+            if (restore is null)
+            {
+                base.RestoreState(state);
+
+                return;
+            }
+
+            _state = restore(state);
+        }
 
         /// <inheritdoc/>
         /// <remarks>
@@ -331,6 +475,20 @@ internal abstract class LocalElementStage
 
         /// <inheritdoc/>
         /// <remarks>
+        /// A take's whole state is how many elements it still wants, and a count is a number a document
+        /// plane can carry without knowing anything about the elements it counted.
+        /// </remarks>
+        internal override bool ExportsState => true;
+
+        /// <inheritdoc/>
+        internal override CanonicalJsonValue ExportState() => LocalStageState.Remaining(_remaining);
+
+        /// <inheritdoc/>
+        internal override void RestoreState(CanonicalJsonValue state) =>
+            _remaining = LocalStageState.ReadRemaining(state, "take");
+
+        /// <inheritdoc/>
+        /// <remarks>
         /// The bound is reached on the element that reaches it rather than on the one after it, so a take
         /// of one element completes the run as it emits that element and never asks for a second. That is
         /// what makes an endless source bounded by a take terminate.
@@ -355,6 +513,17 @@ internal abstract class LocalElementStage
     private sealed class Skipping(int count) : LocalElementStage
     {
         private int _remaining = count;
+
+        /// <inheritdoc/>
+        /// <remarks>The take's state read the other way round: how many elements are still to be dropped.</remarks>
+        internal override bool ExportsState => true;
+
+        /// <inheritdoc/>
+        internal override CanonicalJsonValue ExportState() => LocalStageState.Remaining(_remaining);
+
+        /// <inheritdoc/>
+        internal override void RestoreState(CanonicalJsonValue state) =>
+            _remaining = LocalStageState.ReadRemaining(state, "skip");
 
         /// <inheritdoc/>
         internal override LocalStageOutcome Apply(object? element, out object? result)

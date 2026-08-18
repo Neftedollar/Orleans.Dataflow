@@ -204,6 +204,15 @@ internal static class LocalRunPlanner
         List<int> completesAtStart = [];
         List<int> feedbackChannels = [];
         Dictionary<NodeId, (LocalIngressQueue? Queue, object Handle)> controls = [];
+
+        // The three checkpoint seams, collected as the walk meets them rather than searched for afterwards:
+        // a source that declares a cursor, a scope that declares durable state, and a sink that declares a
+        // commit mark are all found exactly once, where the planner already knows the node they belong to.
+        // A graph with no durable option ever set still builds them, which costs one dictionary entry each
+        // and keeps "is this run durable" a question about the run rather than about the plan.
+        Dictionary<NodeId, LocalSourceCursor> cursors = [];
+        Dictionary<NodeId, ILocalDurableState> durableStates = [];
+        Dictionary<NodeId, LocalMarkingSink> marks = [];
         Dictionary<NodeId, Arrivals> joined = [];
         HashSet<NodeId> walked = new(document.Nodes.Count);
         Queue<(NodeId Start, int Input, PortId Entry)> branches = new();
@@ -312,7 +321,10 @@ internal static class LocalRunPlanner
             declared,
             completesAtStart,
             feedbackChannels,
-            clock);
+            clock,
+            cursors,
+            durableStates,
+            marks);
 
         // Compiles one maximal junction-free chain, from the node that begins it to the terminal or the
         // junction that ends it. A head branch begins at a source and reads no channel; every other branch
@@ -320,6 +332,7 @@ internal static class LocalRunPlanner
         void Branch(NodeId start, int input, PortId entry)
         {
             LocalSource? elements = null;
+            LocalSourceCursor? cursor = null;
             LocalAsyncStage? asynchronous = null;
             LocalMergeMapStage? merging = null;
             List<LocalElementStage> stages = [];
@@ -449,7 +462,17 @@ internal static class LocalRunPlanner
                         {
                             IEnumerable sequence = LocalDelegateAdapter.Elements(descriptor.Behavior, descriptor.Kind);
 
-                            elements = _ => sequence;
+                            // The one source of this vocabulary that declares a cursor, and the proof
+                            // vehicle for ADR 0007's cursor model: its position is an index and reopening at
+                            // one re-enumerates the author's sequence. Every other source of this
+                            // vocabulary contributes nothing to a checkpoint and resumes from now, which is
+                            // stated per source in the adapter table rather than generalized here.
+                            LocalIndexCursor counted = new(sequence);
+
+                            cursors.Add(current, counted);
+
+                            cursor = counted;
+                            elements = counted.Open;
 
                             break;
                         }
@@ -598,6 +621,16 @@ internal static class LocalRunPlanner
                         case LocalStageKind.Supervised when !first && !last:
                             Fuse(Scope(declaration, descriptor));
                             break;
+                        case LocalStageKind.Durable when !first && !last:
+                        {
+                            LocalDurableScope scope = DurableScope(declaration, descriptor);
+
+                            durableStates.Add(current, scope);
+                            Fuse(scope);
+
+                            break;
+                        }
+
                         case LocalStageKind.MergeMap when !first && !last:
                             // A boundary of its own, like an asynchronous stage and for a stronger version
                             // of the same reason: this loop sleeps on one outstanding step per open inner
@@ -801,6 +834,22 @@ internal static class LocalRunPlanner
                             break;
                         }
 
+                        case LocalStageKind.MarkingSink when last && !first:
+                        {
+                            Settle();
+
+                            (Action<object?> callback, Func<LocalMarkingSink, object> facade) =
+                                LocalDelegateAdapter.MarkingSink(descriptor.Behavior);
+                            LocalMarkingSink marking = new(callback);
+
+                            marks.Add(current, marking);
+                            controls.Add(current, (Queue: null, facade(marking)));
+
+                            terminal = LocalTerminal.Marking(marking);
+
+                            break;
+                        }
+
                         default:
                             throw Foreign(
                                 $"the node '{current}' is a '{descriptor.Kind}' stage at position {position} of {document.Nodes.Count}, where that shape cannot stand");
@@ -819,7 +868,8 @@ internal static class LocalRunPlanner
                         terminal,
                         inputs,
                         [],
-                        sinks.Count));
+                        sinks.Count,
+                        cursor));
                     sinks.Add(new Sink(segments.Count - 1, seed, seedFactory, current, produces));
 
                     return;
@@ -867,10 +917,12 @@ internal static class LocalRunPlanner
                     terminal: null,
                     inputs,
                     [channel],
-                    -1));
+                    -1,
+                    cursor));
 
                 pending = null;
                 elements = null;
+                cursor = null;
                 asynchronous = null;
                 merging = null;
                 stages.Clear();
@@ -1877,9 +1929,12 @@ internal static class LocalRunPlanner
 
             case LocalStageKind.Scan:
             {
-                Func<object?, object?, object?> folder = LocalDelegateAdapter.Folder(behavior, kind);
+                (object? bound,
+                    Func<object?, CanonicalJsonValue>? export,
+                    Func<CanonicalJsonValue, object?>? restore) = LocalDelegateAdapter.Scan(behavior);
+                Func<object?, object?, object?> folder = LocalDelegateAdapter.Folder(bound, kind);
 
-                return () => LocalElementStage.Scan(seed, folder);
+                return () => LocalElementStage.Scan(seed, folder, export, restore);
             }
 
             case LocalStageKind.Take:
@@ -2130,6 +2185,85 @@ internal static class LocalRunPlanner
                 options.OnExhaustion),
             fallback,
             scope);
+    }
+
+    /// <summary>Builds a durable scope from what the document says it is and what the binding says it does.</summary>
+    /// <param name="node">The node as the document declares it.</param>
+    /// <param name="descriptor">The occurrence, which carries the stages of the chain.</param>
+    /// <returns>The stage.</returns>
+    /// <exception cref="InvalidOperationException">
+    /// The payload is not a durable-scope payload, the binding is not a chain, the two planes disagree about
+    /// what that chain is, or a stage of it exports no state.
+    /// </exception>
+    /// <remarks>
+    /// <para>
+    /// The supervision scope's builder read over a chain with no policy, checking the same two things for
+    /// the same reasons — the document states which stages the chain is made of and what each of them is
+    /// configured with, the binding states what each of them does, and neither is trusted to imply the
+    /// other — plus one more that is this scope's alone.
+    /// </para>
+    /// <para>
+    /// <b>The extra check is the state facet, and it has to be asked of an instance.</b> Whether a stage can
+    /// hand its state over is a property of its shape for four of the five admitted kinds and a property of
+    /// its <em>binding</em> for the fifth: a scan exports only when its author bound a state codec, and a
+    /// codec is a delegate, so no document could state it. The scope therefore builds its chain here — which
+    /// it would have done anyway, since it owns one instance rather than one per key — and refuses by name
+    /// any stage that answers no. That refusal happens before the run has an element, which is the line
+    /// M5.1 drew for every machinery failure and this is one.
+    /// </para>
+    /// </remarks>
+    private static LocalDurableScope DurableScope(StageNode node, LocalStageDescriptor descriptor)
+    {
+        if (!LocalDurableParameters.TryRead(
+            node.Parameters,
+            out IReadOnlyList<LocalInnerStage> declared,
+            out IReadOnlyList<string> violations))
+        {
+            throw Foreign(
+                $"the durable scope '{node.Id}' carries parameters this runtime cannot read: {string.Join("; ", violations)}");
+        }
+
+        IReadOnlyList<LocalStageDescriptor> bound = LocalDelegateAdapter.Durable(descriptor.Behavior);
+
+        if (bound.Count != declared.Count)
+        {
+            throw Foreign(
+                $"the durable scope '{node.Id}' declares a chain of {declared.Count} stages and is bound to one of {bound.Count}");
+        }
+
+        LocalElementStage[] chain = new LocalElementStage[declared.Count];
+
+        for (int stage = 0; stage < chain.Length; stage++)
+        {
+            string what = string.Create(
+                CultureInfo.InvariantCulture,
+                $"stage {stage + 1} of the scope of the durable stage '{node.Id}'");
+
+            if (bound[stage].Kind != declared[stage].Kind)
+            {
+                throw Foreign(
+                    $"{what} is declared as '{LocalVocabulary.StageOf(declared[stage].Kind)}' and bound as '{bound[stage].Stage}'");
+            }
+
+            chain[stage] =
+                (Fusible(
+                    declared[stage].Kind,
+                    declared[stage].Parameters,
+                    bound[stage].Behavior,
+                    bound[stage].Seed,
+                    what,
+                    out LocalFaultPoint? _) ??
+                throw Foreign(
+                    $"{what} is an occurrence of the stage '{bound[stage].Stage}', and a durable scope owns the execution of its chain element by element, so it holds element stages only"))();
+
+            if (!chain[stage].ExportsState)
+            {
+                throw Foreign(
+                    $"{what} is an occurrence of the stage '{bound[stage].Stage}' that exports no state, so a checkpoint could not carry it and a resume would silently reset it. A scan exports state only when its author bound the export and restore projections; bind them, or move the stage outside the scope, where the reset is the documented contract");
+            }
+        }
+
+        return new LocalDurableScope(chain);
     }
 
     /// <summary>Reads a fault point's payload as the arming it declares.</summary>

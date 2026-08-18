@@ -91,6 +91,35 @@ public sealed class Flow<TIn, TOut>
         return new Flow<TIn, TState>(LocalStageChain.Append(Stages, LocalStageDescriptor.Scan(seed, folder)));
     }
 
+    /// <summary>Extends this flow with a running fold whose state a durable scope can checkpoint.</summary>
+    /// <typeparam name="TState">The type of the state, which becomes the element type.</typeparam>
+    /// <param name="seed">The initial state, which is not emitted.</param>
+    /// <param name="folder">The function combining the running state with the next element.</param>
+    /// <param name="export">The projection of the running state into a canonical value.</param>
+    /// <param name="restore">The projection of such a value back into a state.</param>
+    /// <returns>A new flow; this one is unchanged.</returns>
+    /// <exception cref="ArgumentNullException">Any argument is <see langword="null"/>.</exception>
+    /// <remarks>
+    /// <see cref="Source{T}.Scan{TState}(TState, Func{TState, T, TState}, Func{TState, CanonicalJsonValue}, Func{CanonicalJsonValue, TState})"/>
+    /// states all of it in full, and everything there holds here: the codec is the author's because a state
+    /// is a value of a type no document names, it changes no fingerprint because a delegate never enters a
+    /// document, and it is what a durable scope requires of a scan.
+    /// </remarks>
+    public Flow<TIn, TState> Scan<TState>(
+        TState seed,
+        Func<TState, TOut, TState> folder,
+        Func<TState, CanonicalJsonValue> export,
+        Func<CanonicalJsonValue, TState> restore)
+    {
+        ArgumentNullException.ThrowIfNull(folder);
+        ArgumentNullException.ThrowIfNull(export);
+        ArgumentNullException.ThrowIfNull(restore);
+
+        return new Flow<TIn, TState>(LocalStageChain.Append(
+            Stages,
+            LocalStageDescriptor.Scan(seed, folder, state => export((TState)state!), value => restore(value))));
+    }
+
     /// <summary>Extends this flow with a running fold whose function is asynchronous.</summary>
     /// <typeparam name="TState">The type of the state, which becomes the element type.</typeparam>
     /// <param name="seed">The initial state, which is not emitted.</param>
@@ -99,7 +128,8 @@ public sealed class Flow<TIn, TOut>
     /// <exception cref="ArgumentNullException"><paramref name="folder"/> is <see langword="null"/>.</exception>
     /// <remarks>
     /// <para>
-    /// <see cref="Scan"/> with a fold that awaits, and everything a scan promises holds unchanged: one state
+    /// <see cref="Scan{TState}(TState, System.Func{TState, TOut, TState})"/> with a fold that awaits, and
+    /// everything a scan promises holds unchanged: one state
     /// out per element in, an empty stream emitting nothing at all, the seed being where the fold starts
     /// rather than something that happened — so it is not emitted — and the state allocated per run.
     /// </para>
@@ -336,6 +366,30 @@ public sealed class Flow<TIn, TOut>
                 LocalOptionGuard.Supervision(options, nameof(options), recovering: true),
                 fallback,
                 LocalOptionGuard.Scope(scope.Stages, nameof(scope)))));
+    }
+
+    /// <summary>Extends this flow with a scope whose state survives a resume.</summary>
+    /// <typeparam name="TNext">The element type the scope produces.</typeparam>
+    /// <param name="scope">The flow whose stages' state a checkpoint carries.</param>
+    /// <returns>A new flow; this one is unchanged.</returns>
+    /// <exception cref="ArgumentNullException"><paramref name="scope"/> is <see langword="null"/>.</exception>
+    /// <exception cref="ArgumentException">
+    /// <paramref name="scope"/> holds a stage whose state a checkpoint could not carry, a registered
+    /// occurrence, or a stage declaring a runtime control.
+    /// </exception>
+    /// <remarks>
+    /// <see cref="Source{T}.Durable{TOut}(Flow{T, TOut})"/> states all of it in full, and everything there
+    /// holds here: everything outside the scope resets on resume, the scope holds stages whose state is a
+    /// canonical value, it is not a supervision form, and a document holding one declares
+    /// <c>durable-state</c>.
+    /// </remarks>
+    public Flow<TIn, TNext> Durable<TNext>(Flow<TOut, TNext> scope)
+    {
+        ArgumentNullException.ThrowIfNull(scope);
+
+        return new Flow<TIn, TNext>(LocalStageChain.Append(
+            Stages,
+            LocalStageDescriptor.Durable(LocalOptionGuard.DurableScope(scope.Stages, nameof(scope)))));
     }
 
     /// <summary>Extends this flow with a stage that drops an element equal to the one before it.</summary>

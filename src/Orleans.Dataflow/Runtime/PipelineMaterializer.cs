@@ -96,7 +96,7 @@ internal static class PipelineMaterializer
             runIdentity,
             TimeProvider.System);
 
-        return LocalRun.Start(plan, fingerprint, PipelineNonce, cancellationToken);
+        return LocalRun.Start(plan, fingerprint, PipelineNonce, durable: null, cancellationToken);
     }
 
     /// <summary>Renders a failed validation report as the message of the exception that refuses a document.</summary>

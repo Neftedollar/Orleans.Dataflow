@@ -2,6 +2,7 @@ using System.Collections;
 using System.Reflection;
 using System.Threading.Channels;
 using Orleans.Dataflow.Authoring;
+using Orleans.Dataflow.Serialization;
 
 namespace Orleans.Dataflow.Runtime;
 
@@ -810,6 +811,77 @@ internal static class LocalDelegateAdapter
         }
 
         return (pair[0], scope);
+    }
+
+    /// <summary>Reads a durable scope's binding as the occurrences its chain is made of.</summary>
+    /// <param name="behavior">The bound occurrences, in flow order.</param>
+    /// <returns>The occurrences.</returns>
+    /// <exception cref="InvalidOperationException"><paramref name="behavior"/> is not such a list.</exception>
+    /// <remarks>
+    /// The third stage of this vocabulary that binds another stage's binding, and the simplest of the three:
+    /// a durable scope carries no fallback and no key function, so its binding is the chain and nothing
+    /// else. It carries the occurrences whole for the reason the other two do — the planner checks each
+    /// one's kind against what the document says the chain is, and a list of bare delegates could not be
+    /// checked against anything.
+    /// </remarks>
+    internal static IReadOnlyList<LocalStageDescriptor> Durable(object? behavior) =>
+        behavior as IReadOnlyList<LocalStageDescriptor> ??
+        throw Mismatch(behavior, LocalStageKind.Durable, "list of the stages of the scope");
+
+    /// <summary>Reads a scan's binding as the fold and, when the author bound one, the state codec.</summary>
+    /// <param name="behavior">The bound fold, or the triple of the fold and the two projections.</param>
+    /// <returns>
+    /// The fold's own binding and the pair of projections, which are both <see langword="null"/> for a scan
+    /// that cannot be checkpointed.
+    /// </returns>
+    /// <exception cref="InvalidOperationException"><paramref name="behavior"/> is neither shape.</exception>
+    /// <remarks>
+    /// One stage with two binding shapes, because a codec is optional and every other scan in this
+    /// vocabulary predates it. The plain shape is the one the ordinary spelling writes and the triple is the
+    /// checkpointable one's; the fold itself is wrapped by <see cref="Folder"/> either way, so nothing about
+    /// how a scan folds depends on which spelling produced it.
+    /// </remarks>
+    internal static (object? Folder,
+        Func<object?, CanonicalJsonValue>? Export,
+        Func<CanonicalJsonValue, object?>? Restore) Scan(object? behavior)
+    {
+        if (behavior is not object?[] triple)
+        {
+            return (behavior, null, null);
+        }
+
+        if (triple is not { Length: 3 } ||
+            triple[1] is not Func<object?, CanonicalJsonValue> export ||
+            triple[2] is not Func<CanonicalJsonValue, object?> restore)
+        {
+            throw Mismatch(behavior, LocalStageKind.Scan, "fold, or a triple of the fold and its state codec");
+        }
+
+        return (triple[0], export, restore);
+    }
+
+    /// <summary>Reads a marking sink's binding as its callback and the factory of its control.</summary>
+    /// <param name="behavior">The bound pair, in that order.</param>
+    /// <returns>The callback over boxed elements and the factory of the typed control.</returns>
+    /// <exception cref="InvalidOperationException"><paramref name="behavior"/> is not such a pair.</exception>
+    /// <remarks>
+    /// The callback is wrapped into the boxed vocabulary exactly as an ordinary per-element sink's is, and
+    /// the facade is pinned at authoring for the reason a probe's is: the mark the runtime keeps is a plain
+    /// number, and only code holding the element type can hand an author a typed control over the sink that
+    /// keeps it.
+    /// </remarks>
+    internal static (Action<object?> Callback, Func<LocalMarkingSink, object> Facade) MarkingSink(object? behavior)
+    {
+        const LocalStageKind Kind = LocalStageKind.MarkingSink;
+        const string Expected = "pair of the sink's callback and the factory of its typed control";
+
+        if (behavior is not object?[] { Length: 2 } pair ||
+            pair[1] is not Func<LocalMarkingSink, object> facade)
+        {
+            throw Mismatch(behavior, Kind, Expected);
+        }
+
+        return (Action(pair[0]), facade);
     }
 
     /// <summary>Bridges a channel reader into the boxed vocabulary a pull loop speaks.</summary>

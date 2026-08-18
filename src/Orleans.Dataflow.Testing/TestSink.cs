@@ -52,4 +52,46 @@ public static class TestSink
         return new Sink<T>(LocalStageChain.Of(
             LocalStageDescriptor.SinkProbe(control, typeof(ISinkProbe<T>), facade)));
     }
+
+    /// <summary>Creates a sink that runs a side effect and then advances a commit mark.</summary>
+    /// <typeparam name="T">The element type to consume.</typeparam>
+    /// <param name="controlName">The author-stable name to expose the mark under.</param>
+    /// <param name="commit">The side effect, run on the segment's own thread, once per element.</param>
+    /// <returns>The sink.</returns>
+    /// <exception cref="ArgumentNullException">
+    /// <paramref name="controlName"/> or <paramref name="commit"/> is <see langword="null"/>.
+    /// </exception>
+    /// <exception cref="ArgumentException">
+    /// <paramref name="controlName"/> is not a valid result slot identifier.
+    /// </exception>
+    /// <remarks>
+    /// <para>
+    /// ADR 0007's sink half, in the shape a local proof of it needs. A real committing sink belongs to an
+    /// adapter — a queue's acknowledgement, a database's transaction, a stream's checkpoint — and this one
+    /// exists so that the <em>seam</em> can be proven in a process with no adapter in it: the callback is
+    /// the commit, and the mark is what has been committed.
+    /// </para>
+    /// <para>
+    /// <b>The mark advances after the callback and never before it.</b> A callback that throws leaves the
+    /// mark where it was and faults the run like any other sink's would. That order is what makes the
+    /// duplicate window of a resume lean the safe way: elements between the checkpoint's cursor and the
+    /// crash are replayed, and elements whose commit never finished are not counted as committed.
+    /// </para>
+    /// <para>
+    /// It is an ordinary sink of the local vocabulary — it validates against the stage catalog, it
+    /// fingerprints, and it closes any chain of its element type — for the reason a probe is: the vocabulary
+    /// is one closed set and a document has to be able to name what it is running. What lives here rather
+    /// than in the shipping package is the spelling.
+    /// </para>
+    /// </remarks>
+    public static Sink<T> Marking<T>(string controlName, Action<T> commit)
+    {
+        ArgumentNullException.ThrowIfNull(commit);
+
+        ResultSlotId control = LocalOptionGuard.SlotName(controlName, nameof(controlName));
+        Func<LocalMarkingSink, object> facade = static sink => new MarkingSink(sink);
+
+        return new Sink<T>(LocalStageChain.Of(
+            LocalStageDescriptor.MarkingSink(commit, control, typeof(IMarkingSink), facade)));
+    }
 }

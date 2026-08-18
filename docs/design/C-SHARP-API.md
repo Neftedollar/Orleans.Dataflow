@@ -701,6 +701,99 @@ of a scope's chain are not nodes of the document, so a slot declared on one
 would be a slot nothing could resolve. Use the spelling without a control there —
 its declared arming is the whole of what such a fault point does.
 
+## Durability: options, scopes, and resume
+
+A run becomes durable by being started with `DurableRunOptions` — a store, a name
+for the run, and when a checkpoint is due — rather than by anything in the graph:
+
+```csharp
+InMemoryCheckpointStore store = new();   // a deployment brings its own
+
+DurableRunOptions durable = new()
+{
+    Store = store,
+    Run = RunId.Create("nightly-2026-08-18"),
+    Interval = TimeSpan.FromSeconds(30),
+    EveryElements = 1000,
+};
+
+await using RunHandle run = await host.MaterializeDurableAsync(graph, durable);
+```
+
+**Timing is declared and never implicit.** Both bounds are optional and either
+enables checkpointing; a run that declares neither never touches the store at
+all. There is no default interval, because a default would make every durable
+run pay for a cadence nobody chose.
+
+**The run is named by whoever will resume it.** An ordinary run gets a fresh
+identity per materialization, because two runs of one graph are two runs; a
+durable run is named by its author, because a resume is *the same run
+continuing*. A checkpoint is keyed by graph *and* run, and a locally authored
+graph has no identity of its own — every one of them is `anonymous` — so the run
+name is what separates two checkpoints in practice, and a resume against a
+different graph under one name is caught by the fingerprint rather than by the
+key:
+
+```csharp
+await using RunHandle resumed = await host.MaterializeFromCheckpointAsync(graph, durable);
+```
+
+That reads the checkpoint with its ETag and continues it: sources that declare a
+cursor reopen at the stored position, durable scopes take back the state they
+exported, and marking sinks take back their counts. **Everything else resets** —
+a scan outside a durable scope returns to its seed, a batch abandons its group, a
+distinct forgets its keys — because a resumed run builds every stage from the
+very factories a fresh run builds them from. A resume against a different
+fingerprint or revision is refused by name: v1 resumes at the same revision only.
+
+**What survives is declared by a scope.** `Durable` wraps a flow whose stages'
+state a checkpoint carries:
+
+```csharp
+RunnableGraph graph = Source.From(orders)
+    .Durable(Flow.For<Order>().Scan(
+        0L,
+        (total, order) => total + order.Amount,
+        total => CanonicalJsonValue.Parse($"{{\"total\":{total}}}"),
+        state => state.ToElement().GetProperty("total").GetInt64()))
+    .To(sink);
+```
+
+Three things about that are the whole design.
+
+- **It is not a supervision form.** Supervision answers what a failing element
+  costs and this answers what a dead process costs, and the one place they would
+  overlap is a contradiction — `RestartStage` resets every state in its scope and
+  `durable-state` keeps every state across a resume. A durable scope inside a
+  supervised section is a composition and reads as one.
+- **The scope holds stages whose state is a canonical value.** A mapping and a
+  filter hold nothing, a take and a skip hold a count, and a scan holds whatever
+  its codec writes. A `Distinct`, a `Grouped`, a `Sliding`, and the two prefix
+  operators are refused **by name** at authoring, because a checkpoint could not
+  carry what they hold and a resume would silently reset it.
+- **The state codec is the author's**, and it has to be: a state is a value of a
+  type no document names, so only the author can say what it looks like written
+  down. It is a pair of delegates, so it changes no fingerprint — which is why a
+  scan bound without one is refused when the graph is *materialized* rather than
+  when it is validated.
+
+A graph holding a durable scope declares the `durable-state` capability token, so
+a host that does not know what durable state is refuses the document instead of
+running it without durability.
+
+**What a resume promises is at-least-once between commit marks.** Every element a
+source delivered after the last capture is delivered again, so a sink sees the
+elements between the stored cursor and the crash a second time. Nothing anywhere
+says exactly-once. Where a graph *holds* elements between a cursor and its sink
+at capture time — a batch, a window — those elements were counted by the cursor
+and never committed, so a resume loses them; the checkpoint carries both numbers,
+so the gap is a measurement rather than a surprise, and the fix is to put the
+holding stage inside a durable scope.
+
+A capture holds the run at the pause machinery's own safe points for its whole
+duration, the store write included. That cost is stated rather than hidden, and a
+shorter interval buys a smaller replay window with throughput.
+
 ## Delegates and deployability
 
 Lambda-based operators (`Select(x => ...)`) construct graphs that carry the
@@ -746,6 +839,9 @@ intrinsics (ADR 0004 section 5 — they are properties of every run, not
 declared slots), and `IAsyncDisposable` for deterministic teardown.
 `host.MaterializeAsync(graph)` is the only way work starts; materializing
 the same graph twice yields independent runs.
+`MaterializeDurableAsync(graph, durable)` and
+`MaterializeFromCheckpointAsync(graph, durable)` are the same call with a
+checkpoint story attached, and are described under Durability above.
 
 ## Open questions
 

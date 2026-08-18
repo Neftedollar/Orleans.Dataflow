@@ -70,17 +70,25 @@ them beyond what one line says. Their contracts are in the capability matrix's s
 their bounds are the runtime's own. The questionnaire applies to the rows below that name a system outside
 the process, and every one of those answers it.
 
+**One question the local sources do answer, since M5.2, is the checkpoint one**, and it is answered per
+source rather than generalized: a source either declares a cursor — a position a checkpoint stores and a
+resume reopens at — or it declares none, contributes nothing to a checkpoint, and **resumes from now**. The
+"Cursor" note in each row below is that answer. Only one local source declares one today, which is the
+honest state of the model and not a gap in a table: an index over a re-enumerable sequence is what a local
+runtime can prove, and a rewindable stream's sequence token is what the model was designed for and arrives
+with the Orleans half.
+
 | Source | Priority | Notes |
 |---|---:|---|
-| Empty/single/failed/never/repeat/cycle | P0 | Pure lifecycle primitives and deterministic tests. |
-| `IEnumerable<T>` | P0 | Enumerator is created and disposed per materialization. |
-| `IAsyncEnumerable<T>` | P0 | Cancellation and async disposal flow from the run. |
-| Task/deferred factory | P0 | Deferred factory executes once per materialization. |
-| Unfold/async unfold | P1 | Explicit state and completion result. |
-| Bounded queue | P0 | Offers return accepted/dropped/closed/failed; acceptance is not downstream completion. |
-| Bounded `Channel<T>` | P1 | Local bridge only; channel completion is not persistence. |
-| Tick/manual clock | P1 | Missed-tick behavior and slow-consumer policy are explicit. This is `Source.Tick`, the local operator: a tick that comes due while the run is busy is skipped rather than queued, and the tick's number is the contract, so a consumer that fell behind can see that it did. The registered `dotnet/timer@v1` adapter is a different stage with a different bound and is listed under Orleans-native sources, where its row says so. |
-| Resource unfold | P1 | Resource is closed on completion, cancellation, and failure. |
+| Empty/single/failed/never/repeat/cycle | P0 | Pure lifecycle primitives and deterministic tests. Cursor: none. A source with nothing to remember has no position to store, and `cycle` and `never` have one they could not honor — a cycle's lap number is meaningless against a sequence an author may re-enumerate differently, and a source that never emits has nowhere to be. All of them resume from now, which for these is indistinguishable from starting again. |
+| `IEnumerable<T>` | P0 | Enumerator is created and disposed per materialization. **Cursor: an index**, and this is the local proof vehicle of ADR 0007's cursor model. The position is `{"index":n}` — how many elements this source handed the run and that travelled through the segment they entered — and it advances when the *run* has delivered the element rather than when the sequence is asked for the next one, so a capture's position is exact rather than one behind. Reopening re-enumerates the very sequence the author handed over and skips that many elements, which makes the requirement the author's to meet and is stated as such: the sequence has to be re-enumerable and stable, a sequence shorter than the stored position fails the resume by name, and a sequence that enumerates differently the second time resumes into different elements. A source over a list has every business declaring this cursor; one over an iterator that reads a socket has none. |
+| `IAsyncEnumerable<T>` | P0 | Cancellation and async disposal flow from the run. Cursor: none. The same index would be spellable and would be a worse promise than the synchronous one: an asynchronous sequence is usually a live feed rather than a re-readable collection, and giving it a position the engine could not honor is exactly the foot-gun the per-source rule exists to avoid. Resumes from now. |
+| Task/deferred factory | P0 | Deferred factory executes once per materialization. Cursor: none; the factory runs again in the resumed run, so a resume re-produces the element rather than skipping it. |
+| Unfold/async unfold | P1 | Explicit state and completion result. Cursor: none, and the reason is worth naming because this source *has* a state: the generator's state is a value of a type no document names, so storing it needs the codec a durable scope's scan needs, and no spelling asks an author for one here yet. It restarts from its seed on resume. |
+| Bounded queue | P0 | Offers return accepted/dropped/closed/failed; acceptance is not downstream completion. Cursor: none, and none is possible — the elements are the producers' and the queue is per run, so a resumed run has a new empty queue and resumes from now. What was in flight when the run died is the producers' to re-offer. |
+| Bounded `Channel<T>` | P1 | Local bridge only; channel completion is not persistence. Cursor: none. The reader is external state the author handed over — two runs of one graph compete for its elements — so there is no position this runtime owns. Resumes from now, reading whatever the channel holds then. |
+| Tick/manual clock | P1 | Missed-tick behavior and slow-consumer policy are explicit. This is `Source.Tick`, the local operator: a tick that comes due while the run is busy is skipped rather than queued, and the tick's number is the contract, so a consumer that fell behind can see that it did. The registered `dotnet/timer@v1` adapter is a different stage with a different bound and is listed under Orleans-native sources, where its row says so. Cursor: none. Tick zero is due a declared delay after *the run* started, so a resumed run's clock starts again and its tick numbers start at zero; a schedule that must survive a restart is a reminder and not a tick. |
+| Resource unfold | P1 | Resource is closed on completion, cancellation, and failure. Cursor: none. |
 
 ### Orleans-native sources
 
@@ -96,15 +104,22 @@ the process, and every one of those answers it.
 
 ### Core local sinks
 
+**The checkpoint question these answer is the commit mark**, and the answer for every shipping local sink is
+the same one: none of them declares one. A fold, a collect, and a callback have no acknowledgement outside
+the process to point at, so a mark on one would say only "the run reached this element", which is what a
+cursor already says. The one sink that does declare a mark is the testing one below, and it exists so that
+the *seam* can be proven where no adapter is available to prove it.
+
 | Sink | Priority | Notes |
 |---|---:|---|
-| Ignore/completion | P0 | Materializes terminal completion. |
-| First/last | P0 | Early cancellation and empty behavior are explicit. |
-| Fold/reduce | P1 | Final result and overflow behavior are specified. |
-| Bounded collect | P1 | Requires element or byte cap; never silently accumulates an unbounded list. |
-| Sequential callback | P0 | Awaited callback is the processing boundary. |
-| Bounded parallel callback | P0 | Ordering and in-flight limit are explicit. |
-| Bounded `Channel<T>`/queue | P1 | Write acceptance differs from consumer processing. |
+| Ignore/completion | P0 | Materializes terminal completion. Commit mark: none. |
+| First/last | P0 | Early cancellation and empty behavior are explicit. Commit mark: none. |
+| Fold/reduce | P1 | Final result and overflow behavior are specified. Commit mark: none; the result exists only when the run ends, so there is no partial commit to mark. |
+| Bounded collect | P1 | Requires element or byte cap; never silently accumulates an unbounded list. Commit mark: none. |
+| Sequential callback | P0 | Awaited callback is the processing boundary. Commit mark: none — the callback's own effect is where a commit would be, and the engine cannot know when the author's effect became durable. `TestSink.Marking<T>` is the same sink with the author saying so. |
+| Bounded parallel callback | P0 | Ordering and in-flight limit are explicit. Commit mark: none, and one would be harder here than for the sequential form: callbacks complete out of order, so "elements through position P are committed" needs a low-water mark rather than a count. |
+| Bounded `Channel<T>`/queue | P1 | Write acceptance differs from consumer processing. Commit mark: none; a write is acceptance and not processing, which is the row's own first sentence. |
+| Marking sink (Testing package) | P1 | **Implemented (M5.2)**, and it is test-support surface: `local/marking-sink@v1` in the core vocabulary, `TestSink.Marking<T>` as the only spelling, in `Orleans.Dataflow.Testing`. Commit mark: **the number of elements whose callback has returned**, advanced *after* the side effect and never before it — a callback that throws leaves the mark where it was. The mark counts committed deliveries rather than source positions: the two agree only for a graph that neither drops nor multiplies elements between a source and this sink, and they part company across a resume, because a replayed element is a second delivery of one element. It is restored across a resume, so the number is the run's rather than the attempt's. |
 
 ### Orleans-native sinks and flows
 

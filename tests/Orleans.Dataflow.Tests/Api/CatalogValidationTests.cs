@@ -182,6 +182,7 @@ public sealed class CatalogValidationTests
                 LocalStage("deduplicate-consecutive"),
                 LocalStage("delay"),
                 LocalStage("distinct"),
+                LocalStage("durable"),
                 LocalStage("empty"),
                 LocalStage("failed"),
                 LocalStage("fault-point"),
@@ -206,6 +207,7 @@ public sealed class CatalogValidationTests
                 LocalStage("interleave"),
                 LocalStage("last"),
                 LocalStage("last-or-default"),
+                LocalStage("marking-sink"),
                 LocalStage("merge"),
                 LocalStage("merge-map"),
                 LocalStage("never"),
@@ -302,6 +304,7 @@ public sealed class CatalogValidationTests
             "ignore",
             "last",
             "last-or-default",
+            "marking-sink",
             "sink-probe",
             "to-channel",
         ];
@@ -390,11 +393,20 @@ public sealed class CatalogValidationTests
     }
 
     [Fact]
-    public void EveryLocalStageRequiresTheNondeployableCapability()
+    public void EveryLocalStageRequiresTheNondeployableCapabilityAndOnlyTheDurableScopeRequiresMore()
     {
+        // One exception in the whole vocabulary, and it is the one shape that asks a host for a promise
+        // rather than only for an execution: a durable scope expects its stages' state to survive a
+        // process, so a host that does not know the word 'durable-state' must refuse the document instead
+        // of running it without durability. The tokens are in the specification's own canonical order,
+        // which is the identifier sort and not the order the vocabulary happened to list them in.
         foreach (StageSpecification specification in LocalStageCatalog.Instance.Specifications)
         {
-            Assert.Equal([CapabilityToken.Nondeployable], specification.RequiredCapabilities);
+            Assert.Equal(
+                specification.Stage.Stage.Value is "durable"
+                    ? [CapabilityToken.Create("durable-state"), CapabilityToken.Nondeployable]
+                    : [CapabilityToken.Nondeployable],
+                specification.RequiredCapabilities);
         }
     }
 
@@ -423,6 +435,7 @@ public sealed class CatalogValidationTests
                 ["deduplicate-consecutive"] = "local-parameters",
                 ["delay"] = "local-delay-parameters",
                 ["distinct"] = "local-distinct-parameters",
+                ["durable"] = "local-durable-parameters",
                 ["empty"] = "local-parameters",
                 ["failed"] = "local-parameters",
                 ["fault-point"] = "local-fault-point-parameters",
@@ -447,6 +460,7 @@ public sealed class CatalogValidationTests
                 ["interleave"] = "local-interleave-parameters",
                 ["last"] = "local-parameters",
                 ["last-or-default"] = "local-parameters",
+                ["marking-sink"] = "local-parameters",
                 ["merge"] = "local-parameters",
                 ["merge-map"] = "local-parallelism-parameters",
                 ["never"] = "local-parameters",
@@ -555,7 +569,8 @@ public sealed class CatalogValidationTests
                         // fold: the identity says which shape produced the value, and awaiting is not a
                         // different shape. Nothing is renamed and no identity is added.
                         "fold" or "fold-async" => ("result", "local-fold-result"),
-                        "fault-point" or "queue" or "sink-probe" or "valve" => ("control", "local-control"),
+                        "fault-point" or "marking-sink" or "queue" or "sink-probe" or "valve" =>
+                            ("control", "local-control"),
                         _ => ("result", "local-result"),
                     };
 
@@ -587,6 +602,7 @@ public sealed class CatalogValidationTests
                 ["deduplicate-consecutive"] = 0,
                 ["delay"] = 0,
                 ["distinct"] = 0,
+                ["durable"] = 0,
                 ["empty"] = 0,
                 ["failed"] = 0,
                 ["fault-point"] = 1,
@@ -611,6 +627,7 @@ public sealed class CatalogValidationTests
                 ["interleave"] = 0,
                 ["last"] = 1,
                 ["last-or-default"] = 1,
+                ["marking-sink"] = 1,
                 ["merge"] = 0,
                 ["merge-map"] = 0,
                 ["never"] = 0,

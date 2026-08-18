@@ -1,5 +1,6 @@
 using System.Globalization;
 using System.Text;
+using Orleans.Dataflow.Authoring;
 using Orleans.Dataflow.Compilation;
 using Orleans.Dataflow.Definition;
 using Orleans.Dataflow.Hosting;
@@ -183,9 +184,199 @@ public sealed class LocalDataflowHost
             _binder,
             string.Create(CultureInfo.InvariantCulture, $"local/{Guid.NewGuid():n}"),
             _clock);
-        LocalRun run = LocalRun.Start(plan, graph.Fingerprint, graph.AuthoringNonce, cancellationToken);
+        LocalRun run = LocalRun.Start(plan, graph.Fingerprint, graph.AuthoringNonce, durable: null, cancellationToken);
 
         return new ValueTask<RunHandle>(new RunHandle(run));
+    }
+
+    /// <summary>Materializes a graph into a running run that writes checkpoints.</summary>
+    /// <param name="graph">The closed graph to run.</param>
+    /// <param name="durable">Where this run's checkpoints go, what it is called, and when one is taken.</param>
+    /// <param name="cancellationToken">A token that cancels the run this call starts.</param>
+    /// <returns>The handle of the started run.</returns>
+    /// <exception cref="ArgumentNullException">
+    /// <paramref name="graph"/> or <paramref name="durable"/> is <see langword="null"/>.
+    /// </exception>
+    /// <exception cref="ArgumentException">
+    /// <see cref="DurableRunOptions.Run"/> is the default value, <see cref="DurableRunOptions.Interval"/> is
+    /// not positive, or <see cref="DurableRunOptions.EveryElements"/> is not at least one.
+    /// </exception>
+    /// <exception cref="InvalidOperationException">The graph does not validate, or is not one this runtime executes.</exception>
+    /// <remarks>
+    /// <para>
+    /// The ordinary materialization with one thing added: the run takes a checkpoint whenever its declared
+    /// timing says one is due, by holding itself at the pause machinery's safe points, snapshotting its
+    /// cursors, its durable scopes, and its commit marks, and writing all of it as one canonical document.
+    /// <b>A run that declares neither an interval nor an element bound never touches the store</b>, and that
+    /// is asserted rather than assumed.
+    /// </para>
+    /// <para>
+    /// <b>Nothing is read here and the first write presents no ETag.</b> A fresh run believes the store holds
+    /// nothing for its identity, so a run started under a name that already has a checkpoint is refused by
+    /// the store at its first capture, loudly, with a
+    /// <see cref="Hosting.CheckpointConflictException"/> that fails the run. That is the coordinator's
+    /// fencing consequence rather than an extra check of this host's, and it is why starting fresh over a
+    /// live run's identity cannot quietly overwrite it.
+    /// </para>
+    /// <para>
+    /// <b>A clean end writes nothing.</b> A run that completes has an outcome and does not need a
+    /// checkpoint, and a run that dies writes nothing by definition — which is exactly why the last stored
+    /// capture is what a resume replays from, and why the duplicate window is measured from it.
+    /// </para>
+    /// </remarks>
+    public ValueTask<RunHandle> MaterializeDurableAsync(
+        RunnableGraph graph,
+        DurableRunOptions durable,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(graph);
+        ArgumentNullException.ThrowIfNull(durable);
+
+        LocalOptionGuard.Durable(durable, nameof(durable));
+
+        return new ValueTask<RunHandle>(Start(graph, durable, checkpoint: null, etag: null, cancellationToken));
+    }
+
+    /// <summary>Materializes a graph into a run that continues the one a checkpoint describes.</summary>
+    /// <param name="graph">The closed graph to run, which must be the one the checkpoint was taken of.</param>
+    /// <param name="durable">Where the checkpoint is read from, what the run is called, and when the next one is taken.</param>
+    /// <param name="cancellationToken">A token that cancels the run this call starts.</param>
+    /// <returns>The handle of the started run.</returns>
+    /// <exception cref="ArgumentNullException">
+    /// <paramref name="graph"/> or <paramref name="durable"/> is <see langword="null"/>.
+    /// </exception>
+    /// <exception cref="ArgumentException">The declared timing is not one this host can honor.</exception>
+    /// <exception cref="InvalidOperationException">
+    /// The store holds no checkpoint for that run, the stored document is not one this runtime can read, it
+    /// was taken of a different graph or a different revision, or it names a node this graph has no seam
+    /// for.
+    /// </exception>
+    /// <remarks>
+    /// <para>
+    /// <b>Resume is the same run continuing.</b> The identity in <paramref name="durable"/> is the one the
+    /// crashed attempt wrote under, the checkpoint is read with its ETag, and the resumed attempt presents
+    /// that ETag at its own first capture — so a stale attempt still writing loses to this one exactly as a
+    /// superseded coordinator does.
+    /// </para>
+    /// <para>
+    /// <b>A different fingerprint is refused by name.</b> V1's rule is same-revision resume only: a
+    /// checkpoint of another graph describes nodes that are not these nodes, so restoring a cursor into it
+    /// would be restoring a position into a source that never counted it. Cross-revision migration is a
+    /// recorded deferral (ADR 0007) and not a silent best effort.
+    /// </para>
+    /// <para>
+    /// <b>What survives and what resets is exactly stated.</b> A source that declared a cursor reopens at
+    /// the stored position; a durable scope's stages take back the state they exported; a marking sink takes
+    /// back its count. <em>Everything else resets</em> — a scan outside a durable scope returns to its seed,
+    /// a batch abandons its group, a distinct forgets its keys — because a resumed run builds every stage
+    /// from the very factories a fresh run builds them from.
+    /// </para>
+    /// <para>
+    /// <b>What the replay costs is at-least-once between commit marks.</b> Every element a source delivered
+    /// after the last capture is delivered again, so a sink sees the elements between the stored cursor and
+    /// the crash a second time. Nothing anywhere claims exactly-once. And where a graph holds elements
+    /// between a cursor and its sink at capture time — a declared buffer, a junction — those elements are
+    /// counted by the cursor and were not committed, so they are <em>lost</em> rather than replayed; the
+    /// checkpoint carries both numbers so that the gap is a measurement rather than a surprise.
+    /// </para>
+    /// </remarks>
+    public async ValueTask<RunHandle> MaterializeFromCheckpointAsync(
+        RunnableGraph graph,
+        DurableRunOptions durable,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(graph);
+        ArgumentNullException.ThrowIfNull(durable);
+
+        LocalOptionGuard.Durable(durable, nameof(durable));
+
+        StoredCheckpoint stored = await durable.Store
+            .ReadAsync(graph.Document.Id, durable.Run, cancellationToken)
+            .ConfigureAwait(false) ??
+            throw new InvalidOperationException(
+                $"The checkpoint store holds nothing for the run '{durable.Run}' of the graph '{graph.Document.Id}', so there is no run to continue. A run reaches its first checkpoint only once its declared timing has made one due; a run that crashed before that resumes by being started fresh.");
+
+        if (!LocalCheckpointDocument.TryRead(
+            stored.Document,
+            out LocalCheckpoint? checkpoint,
+            out IReadOnlyList<string> violations))
+        {
+            throw new InvalidOperationException(
+                $"The checkpoint stored for the run '{durable.Run}' of the graph '{graph.Document.Id}' is not one this runtime can read: {string.Join("; ", violations)}.");
+        }
+
+        if (checkpoint!.Graph != graph.Fingerprint)
+        {
+            throw new InvalidOperationException(
+                $"The checkpoint stored for the run '{durable.Run}' was taken of the graph {checkpoint.Graph} and this is a run of {graph.Fingerprint}. A resume continues the very graph the checkpoint describes: v1 resumes at the same revision only, and migrating a checkpoint across a changed document is a recorded deferral rather than something this host will guess at.");
+        }
+
+        if (checkpoint.Revision != graph.Document.Revision)
+        {
+            throw new InvalidOperationException(
+                $"The checkpoint stored for the run '{durable.Run}' was taken at revision {checkpoint.Revision} and this graph is revision {graph.Document.Revision}. A resume continues the same revision; cross-revision migration is a recorded deferral.");
+        }
+
+        return Start(graph, durable, checkpoint, stored.ETag, cancellationToken);
+    }
+
+    /// <summary>Compiles a graph, restores whatever a checkpoint carried, and starts the run.</summary>
+    /// <param name="graph">The closed graph.</param>
+    /// <param name="durable">The declared store, identity, and timing.</param>
+    /// <param name="checkpoint">What a resume read, or <see langword="null"/> for a fresh run.</param>
+    /// <param name="etag">The ETag the first capture presents, or <see langword="null"/>.</param>
+    /// <param name="cancellationToken">A token that cancels the run.</param>
+    /// <returns>The handle of the started run.</returns>
+    /// <remarks>
+    /// The one path both durable spellings share, so that a resumed run and a fresh durable one differ in
+    /// exactly two things — what the seams were handed before the first element, and which ETag the first
+    /// capture presents — and in nothing else. The run identity handed to the planner is the author's rather
+    /// than a fresh one per materialization, because a durable run is the same run continuing and anything
+    /// composing its identity has to say so.
+    /// </remarks>
+    private RunHandle Start(
+        RunnableGraph graph,
+        DurableRunOptions durable,
+        LocalCheckpoint? checkpoint,
+        string? etag,
+        CancellationToken cancellationToken)
+    {
+        GraphValidationReport report = GraphCompiler.Validate(graph.Document, _catalog);
+
+        if (!report.IsValid)
+        {
+            throw new InvalidOperationException(Describe(report));
+        }
+
+        LocalRunPlan plan = LocalRunPlanner.Compile(graph, _binder, durable.Run.Value, _clock);
+
+        if (checkpoint is not null)
+        {
+            LocalResume.Restore(plan, checkpoint);
+        }
+
+        bool declared = durable.Interval is not null || durable.EveryElements is not null;
+
+        LocalRun run = LocalRun.Start(
+            plan,
+            graph.Fingerprint,
+            graph.AuthoringNonce,
+            declared
+                ? started => new LocalCheckpointer(
+                    plan,
+                    started.Pause,
+                    _clock,
+                    durable,
+                    graph.Fingerprint,
+                    graph.Document.Revision,
+                    graph.Document.Id,
+                    etag,
+                    started.Faulted,
+                    started.StopToken)
+                : null,
+            cancellationToken);
+
+        return new RunHandle(run);
     }
 
     /// <summary>Renders a failed validation report as the message of the exception that refuses the graph.</summary>

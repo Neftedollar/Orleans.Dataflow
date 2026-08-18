@@ -1,3 +1,5 @@
+using Orleans.Dataflow.Identity;
+
 namespace Orleans.Dataflow.Runtime;
 
 /// <summary>
@@ -51,6 +53,9 @@ internal sealed class LocalRunPlan
     /// </param>
     /// <param name="feedback">The channels that carry a cycle's elements back round, which is usually none.</param>
     /// <param name="clock">The clock every stage of the run that reads one reads.</param>
+    /// <param name="cursors">The sources of this plan that declare a cursor, keyed by node.</param>
+    /// <param name="durableStates">The durable scopes of this plan, keyed by node.</param>
+    /// <param name="marks">The sinks of this plan that declare a commit mark, keyed by node.</param>
     internal LocalRunPlan(
         IReadOnlyList<LocalSegment> segments,
         IReadOnlyList<LocalBoundary> boundaries,
@@ -59,7 +64,10 @@ internal sealed class LocalRunPlan
         IReadOnlyList<LocalControl> controls,
         IReadOnlyList<int> completesAtStart,
         IReadOnlyList<int> feedback,
-        TimeProvider clock)
+        TimeProvider clock,
+        IReadOnlyDictionary<NodeId, LocalSourceCursor> cursors,
+        IReadOnlyDictionary<NodeId, ILocalDurableState> durableStates,
+        IReadOnlyDictionary<NodeId, LocalMarkingSink> marks)
     {
         Clock = clock;
         Segments = segments;
@@ -69,6 +77,9 @@ internal sealed class LocalRunPlan
         Controls = controls;
         CompletesAtStart = completesAtStart;
         Feedback = feedback;
+        Cursors = cursors;
+        DurableStates = durableStates;
+        Marks = marks;
     }
 
     /// <summary>Gets the clock every stage of this run that reads one reads.</summary>
@@ -160,4 +171,29 @@ internal sealed class LocalRunPlan
     /// had. Cancellation needs no such list, because it cancels every wait in the run at once.
     /// </remarks>
     internal IReadOnlyList<int> Feedback { get; }
+
+    /// <summary>Gets the sources of this plan that declare a cursor.</summary>
+    /// <value>
+    /// One cursor per such source, keyed by the node that declares it; empty for a graph whose sources all
+    /// resume from now.
+    /// </value>
+    /// <remarks>
+    /// Built when the plan is compiled and therefore once per materialization, exactly as an enumerator and
+    /// a fold state are: two runs of one graph have two cursors, and a resume restores into the cursor of
+    /// the run it is a resume of. Keyed by node because a node identifier is the one name a document and a
+    /// checkpoint of it agree on.
+    /// </remarks>
+    internal IReadOnlyDictionary<NodeId, LocalSourceCursor> Cursors { get; }
+
+    /// <summary>Gets the durable scopes of this plan.</summary>
+    /// <value>One scope per <c>durable</c> node, keyed by that node; empty for every other graph.</value>
+    /// <remarks>
+    /// What is <em>not</em> here is every other stage of the graph, and that is the contract rather than an
+    /// omission: everything outside a durable scope resets on resume.
+    /// </remarks>
+    internal IReadOnlyDictionary<NodeId, ILocalDurableState> DurableStates { get; }
+
+    /// <summary>Gets the sinks of this plan that declare a commit mark.</summary>
+    /// <value>One mark per such sink, keyed by the node that declares it.</value>
+    internal IReadOnlyDictionary<NodeId, LocalMarkingSink> Marks { get; }
 }

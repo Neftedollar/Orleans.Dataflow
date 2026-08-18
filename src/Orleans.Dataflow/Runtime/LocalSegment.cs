@@ -42,6 +42,7 @@ internal sealed class LocalSegment
     /// <param name="inputs">The channels this segment reads, which is one, none, or a junction's inputs.</param>
     /// <param name="outputs">The channels this segment writes, which is none, one, or a junction's legs.</param>
     /// <param name="ending">The ending this segment settles, or minus one when it is not the end of a branch.</param>
+    /// <param name="cursor">The cursor this segment's source declares, or <see langword="null"/>.</param>
     internal LocalSegment(
         LocalSource? elements,
         LocalAsyncStage? async,
@@ -52,8 +53,10 @@ internal sealed class LocalSegment
         LocalTerminal? terminal,
         IReadOnlyList<int> inputs,
         IReadOnlyList<int> outputs,
-        int ending)
+        int ending,
+        LocalSourceCursor? cursor = null)
     {
+        Cursor = cursor;
         Elements = elements;
         Async = async;
         MergeMap = mergeMap;
@@ -78,6 +81,18 @@ internal sealed class LocalSegment
     /// run stopped before its first element from touching its source at all.
     /// </remarks>
     internal LocalSource? Elements { get; }
+
+    /// <summary>Gets the cursor this segment's source declares.</summary>
+    /// <value>
+    /// The cursor, or <see langword="null"/> for every segment whose source declares none and for every
+    /// segment that reads a boundary instead of a sequence.
+    /// </value>
+    /// <remarks>
+    /// The cursor is advanced by the run rather than by the sequence, and this is why it is here: only the
+    /// pump knows that the element it pulled has travelled all the way through the segment it entered, and
+    /// that — rather than "the sequence was asked for another one" — is what a stored position means.
+    /// </remarks>
+    internal LocalSourceCursor? Cursor { get; }
 
     /// <summary>Gets the asynchronous stage that heads this segment.</summary>
     /// <value>The stage, or <see langword="null"/> when this segment has no asynchronous head.</value>

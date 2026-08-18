@@ -316,6 +316,119 @@ internal static class LocalOptionGuard
                 parameterName);
     }
 
+    /// <summary>Checks the durable options a run was started under.</summary>
+    /// <param name="options">The options the author supplied, already known to be non-null.</param>
+    /// <param name="parameterName">The name of the host method's parameter the options arrived in.</param>
+    /// <exception cref="ArgumentException">
+    /// The store is <see langword="null"/>, the run identity is the default value, the interval is not
+    /// positive, or the element bound is below one.
+    /// </exception>
+    /// <remarks>
+    /// The one option here that is <em>not</em> checked is "at least one of the two timings is set", because
+    /// declaring neither is a legal and documented state: such a run never touches the store. What is
+    /// refused is a timing that is present and meaningless — an interval of no time would make a capture due
+    /// forever, and a bound of no elements would make one due before an element existed.
+    /// </remarks>
+    internal static void Durable(DurableRunOptions options, string parameterName)
+    {
+        if (options.Store is null)
+        {
+            throw new ArgumentException(
+                $"A durable run needs a checkpoint store to write to, and {nameof(DurableRunOptions.Store)} is null.",
+                parameterName);
+        }
+
+        if (options.Run.IsDefault)
+        {
+            throw new ArgumentException(
+                $"A durable run is named by whoever will resume it, and {nameof(DurableRunOptions.Run)} is the default value. Give the run an identity a resume can present back.",
+                parameterName);
+        }
+
+        if (options.Interval is { } interval && interval <= TimeSpan.Zero)
+        {
+            throw new ArgumentException(
+                string.Create(
+                    CultureInfo.InvariantCulture,
+                    $"A checkpoint interval of {interval} describes a capture that is due forever. Declare a positive interval, or leave {nameof(DurableRunOptions.Interval)} unset and checkpoint on elements alone."),
+                parameterName);
+        }
+
+        if (options.EveryElements is { } elements && elements < 1)
+        {
+            throw new ArgumentException(
+                string.Create(
+                    CultureInfo.InvariantCulture,
+                    $"A checkpoint bound of {elements} elements describes a capture that is due before an element exists. Declare a bound of at least one, or leave {nameof(DurableRunOptions.EveryElements)} unset and checkpoint on time alone."),
+                parameterName);
+        }
+    }
+
+    /// <summary>Checks that every stage of a durable scope is one whose state a checkpoint can carry.</summary>
+    /// <param name="stages">The occurrences the author's scope flow contributes, in flow order.</param>
+    /// <param name="parameterName">The name of the operator's parameter the flow arrived in.</param>
+    /// <returns>The same stages, as the descriptors the scope owns.</returns>
+    /// <exception cref="ArgumentException">
+    /// At least one stage of the flow holds state no checkpoint could carry, is a registered occurrence, or
+    /// declares a runtime control.
+    /// </exception>
+    /// <remarks>
+    /// <para>
+    /// The supervision scope's check read over the shortest of the three admitted lists, and the refusal
+    /// says what this scope needs rather than what the other one does: a stage inside a durable scope has to
+    /// be able to hand its state over as a canonical value, and a stage that cannot is refused <b>by
+    /// name</b> so that an author reads which stage moved out of the scope rather than discovering later
+    /// that a resume reset it.
+    /// </para>
+    /// <para>
+    /// What this check cannot see is a scan with no state codec: a codec is a delegate, so the document
+    /// plane cannot state whether one was bound. That refusal happens when the plan is built, which is the
+    /// same line every other disagreement between a scope's two planes falls on.
+    /// </para>
+    /// </remarks>
+    internal static IReadOnlyList<LocalStageDescriptor> DurableScope(
+        IReadOnlyList<StageOccurrence> stages,
+        string parameterName)
+    {
+        LocalStageDescriptor[] scope = new LocalStageDescriptor[stages.Count];
+        List<string> refused = [];
+        List<string> named = [];
+
+        for (int stage = 0; stage < stages.Count; stage++)
+        {
+            if (stages[stage] is not LocalStageDescriptor descriptor ||
+                !LocalVocabulary.RunsInsideADurableScope(descriptor.Kind))
+            {
+                refused.Add(string.Create(
+                    CultureInfo.InvariantCulture,
+                    $"'{stages[stage].Stage}' at position {stage + 1}"));
+            }
+            else if (descriptor.ControlSlot is { } control)
+            {
+                named.Add(string.Create(
+                    CultureInfo.InvariantCulture,
+                    $"'{stages[stage].Stage}' at position {stage + 1} declaring the control '{control}'"));
+            }
+            else
+            {
+                scope[stage] = descriptor;
+            }
+        }
+
+        if (refused.Count > 0)
+        {
+            throw new ArgumentException(
+                $"A durable scope writes its stages' state into a checkpoint, so it holds stages whose state is a canonical value: {string.Join(", ", refused)}. A mapping and a filter hold nothing, a take and a skip hold a count, and a scan holds whatever its state codec can write down; a distinct, a batch, a sliding window, and the two prefix operators hold values of element types no document names, so a checkpoint could not carry them and a resume would silently reset them. Move such a stage outside the scope, where the reset is the documented contract.",
+                parameterName);
+        }
+
+        return named.Count == 0
+            ? scope
+            : throw new ArgumentException(
+                $"A durable scope's stages are not nodes of the document, so nothing could resolve a runtime control declared on one: {string.Join(", ", named)}. Place the control-bearing spelling before or after the scope, or use the spelling that declares no control inside it.",
+                parameterName);
+    }
+
     /// <summary>Checks that every stage of a supervision scope is one the scope can own the execution of.</summary>
     /// <param name="stages">The occurrences the author's scope flow contributes, in flow order.</param>
     /// <param name="parameterName">The name of the operator's parameter the flow arrived in.</param>

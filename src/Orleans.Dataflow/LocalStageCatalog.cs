@@ -101,7 +101,7 @@ public static class LocalStageCatalog
                     outputs,
                     results,
                     LocalVocabulary.ParameterContractOf(kind),
-                    LocalVocabulary.RequiredCapabilities,
+                    LocalVocabulary.RequiredCapabilitiesOf(kind),
                     validator)
                 : StageSpecification.Create(
                     LocalVocabulary.StageOf(kind),
@@ -109,7 +109,7 @@ public static class LocalStageCatalog
                     outputs,
                     results,
                     LocalVocabulary.ParameterContractOf(kind),
-                    LocalVocabulary.RequiredCapabilities);
+                    LocalVocabulary.RequiredCapabilitiesOf(kind));
         }
     }
 }

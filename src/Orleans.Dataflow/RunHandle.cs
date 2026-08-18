@@ -95,6 +95,19 @@ public sealed class RunHandle : IAsyncDisposable
     /// <remarks>Internal for now, beside <see cref="SupervisedFailures"/> and for the same reason.</remarks>
     internal long PoisonElements => _run.PoisonElements;
 
+    /// <summary>Gets how many checkpoints this run has written.</summary>
+    /// <value>The count of accepted writes; zero for a run with no declared checkpoint timing.</value>
+    /// <remarks>Internal for now, beside the other counters and for the same reason: a monitor is its shape.</remarks>
+    internal long Checkpoints => _run.Checkpoints;
+
+    /// <summary>Gets how long this run has been held by its checkpoints in total.</summary>
+    /// <value>The sum of every hold, measured on the run's clock.</value>
+    /// <remarks>
+    /// The measured cost of ADR 0007's "a checkpoint pauses the run for its duration". Internal beside the
+    /// other counters, and read by the suite so that the sentence is a number rather than a claim.
+    /// </remarks>
+    internal TimeSpan CheckpointHold => _run.CheckpointHold;
+
     /// <summary>Resolves one result this run's graph declares.</summary>
     /// <typeparam name="TResult">The type of the declared result.</typeparam>
     /// <param name="slot">The slot, as closing the graph produced it.</param>
