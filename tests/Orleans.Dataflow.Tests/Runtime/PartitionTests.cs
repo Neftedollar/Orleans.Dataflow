@@ -503,11 +503,15 @@ public sealed class PartitionTests
         await Reaches(gate.Reached, "the routed leg's sink is holding an element");
         await Reaches(exhausted.Task, "the source runs to its end without the junction ever being paced");
 
-        // One in the held sink's hand and at most two in the leg's declared buffer, so at least five of
-        // the eight were answered by the policy rather than waited on. A balance could never report this:
-        // it picks a leg that really has room and therefore never reaches a policy at all.
+        // The claim is that the routed leg's policy was reached at all while the source was never paced —
+        // a balance could never report this, because it picks a leg that really has room and therefore
+        // never reaches a policy. The floor counts every place an element can rest instead of being
+        // dropped: one in the held sink's hand, two in the leg's declared buffer, one in the boundary
+        // between the source and the junction, and the one the junction itself may hold — five at most,
+        // so at least three of the eight were answered by the policy. The first version claimed five and
+        // forgot the last two resting places; CI's scheduling found the difference on the first day.
         Assert.Equal(8, elements.Pulls);
-        Assert.True(run.DroppedElements >= 5, $"dropped {run.DroppedElements} of eight");
+        Assert.True(run.DroppedElements >= 3, $"dropped {run.DroppedElements} of eight");
 
         gate.Open();
 
