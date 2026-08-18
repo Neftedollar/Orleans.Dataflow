@@ -73,4 +73,43 @@ internal readonly record struct LocalRunContext(
     /// case where a waiting source ends its sequence instead of raising.
     /// </value>
     internal bool ShuttingDown => StopToken.IsCancellationRequested && !RunToken.IsCancellationRequested;
+
+    /// <summary>Waits for one of an author's tasks on the segment's own thread and parks afterwards.</summary>
+    /// <param name="callback">The task the author's delegate answered.</param>
+    /// <returns>Its value.</returns>
+    /// <exception cref="OperationCanceledException">
+    /// The author's task was cancelled, or the run was cancelled while this segment was parked afterwards.
+    /// </exception>
+    /// <remarks>
+    /// <para>
+    /// What a stage or a terminal that folds asynchronously does with the task it was given, and it is
+    /// deliberately the plainest thing available: the segment's own dedicated thread waits, which is what
+    /// that thread is for, and one callback of such a stage is in flight at a time because the state of the
+    /// next fold is the answer of this one. There is no window to hold, no slot to free, and nothing to
+    /// admit — which is why an asynchronous fold is a fused stage rather than a pump.
+    /// </para>
+    /// <para>
+    /// <b>Nothing is reported to the pause gate here, and that is the rule rather than an omission.</b> A
+    /// wait this runtime owns says so and is counted as a segment at rest; a wait inside an author's
+    /// delegate says nothing, so a pause waits for it exactly as it waits for a slow synchronous stage. The
+    /// segment is neither parked nor idle while the fold runs, so the counters already report the run as
+    /// moving without anything extra being counted.
+    /// </para>
+    /// <para>
+    /// The park afterwards is the second look the source pump takes after its pull: a fold that finished
+    /// while a pause was in effect leaves its new state in the stage's hand at a safe point instead of
+    /// emitting it, so a paused run holds the state it just computed rather than moving it.
+    /// </para>
+    /// </remarks>
+    internal object? Await(Task<object?> callback)
+    {
+        object? state = callback.GetAwaiter().GetResult();
+
+        while (Pause.Park())
+        {
+            RunToken.ThrowIfCancellationRequested();
+        }
+
+        return state;
+    }
 }

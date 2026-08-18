@@ -1622,10 +1622,11 @@ on, so a slow diverted branch holds the main line up for exactly that long.
 
 ### The engine gap: bounded-parallel flattening
 
-**`MergeMap(maxConcurrency)` is not implemented, and it is not one call away.**
-The matrix row says "concat-map, merge-map with bounded parallelism" and half
-of it ships here; this is what the other half would cost, measured against the
-code rather than guessed.
+**`MergeMap(maxConcurrency)` is not implemented in wave 2, and it is not one
+call away.** The matrix row says "concat-map, merge-map with bounded
+parallelism" and half of it ships here; this is what the other half would cost,
+measured against the code rather than guessed. **It ships in wave 3, and the
+section below records how much of this estimate held.**
 
 The asynchronous pump is a window of `Task<object?>`: it admits up to the
 declared number of callbacks, frees a slot when a *result is emitted*, and
@@ -1664,12 +1665,14 @@ matrix words "concat-map, merge-map" are the operator family and not a promise
 of graph-valued flattening.
 
 **No asynchronous inner sequence.** `Func<T,IAsyncEnumerable<TNext>>` is not
-offered. The mechanism is straightforward — the segment's thread already blocks
-on this runtime's own waits, so an inner `MoveNextAsync` would take the same
-`Idle`/`Busy` bracket every other wait takes — but "straightforward" is not
-"tested", and the pause, shutdown, and cancellation behaviour of a wait inside
-an inner enumeration is exactly the surface that has to be proven rather than
-argued.
+offered in this wave. The mechanism is straightforward — the segment's thread
+already blocks on this runtime's own waits, so an inner `MoveNextAsync` would
+take the same `Idle`/`Busy` bracket every other wait takes — but
+"straightforward" is not "tested", and the pause, shutdown, and cancellation
+behaviour of a wait inside an inner enumeration is exactly the surface that has
+to be proven rather than argued. **Wave 3 offers it, as the shape a merge-map
+takes**, and the bracket sentence above turned out to be the one thing this
+paragraph got wrong: see below.
 
 **Termination watch and monitor are deferred, with a reason each.**
 `WatchTermination` wants to report *how* a stream ended as a value, and ADR
@@ -1704,3 +1707,223 @@ throws while the run is draining a segment's residues faults the run — the
 walk runs inside the same `try` an ordinary element does — but a partial
 residue walk, in which one stage's group was delivered and the next stage's
 was not, is reasoned about rather than measured.
+
+## M4.3 wave 3 (bounded-parallel flattening and the asynchronous folds) — as implemented
+
+Wave 2 named three shapes it could not reach and said why for each: a merge-map
+wants a pump nothing here has, an asynchronous scan wants a fold that awaits,
+and a result-bearing asynchronous terminal wants a combination of two existing
+pieces. This wave builds all three, and the interesting part is that the three
+turned out to be two different sizes: **one of them really is a new pump, and
+the other two are not stages of a pump at all.**
+
+### The merge-map pump, and how much of wave 2's estimate held
+
+The estimate held almost exactly, which is worth recording because it was made
+against the code rather than guessed. `LocalRun.Merge` is the eighth loop shape
+and it is what wave 2 described: a window of **enumerations** rather than tasks,
+a slot freed when an enumeration **ends** rather than when it produces, and a
+sleep over one outstanding `MoveNextAsync` per open inner sequence — a
+`Task.WaitAny` over those steps plus, while there is room to admit one, the
+arrival of an element on the input. It is a boundary for the same reason an
+asynchronous stage is and a stronger version of it: no pass of somebody else's
+loop could ever take that wait.
+
+Four things the estimate did not say, and each of them is a decision rather than
+a detail — the last of them because getting it wrong was the one defect this
+pump actually had.
+
+**The room-wait is not in the wait-set, and that is deliberate.** A merge-map
+waits on two different kinds of thing, and only one of them belongs in the
+`WaitAny`. The steps of its open sequences are events it has to *choose*
+between; downstream room is a wait it simply *takes*, at the moment it has an
+element with nowhere to put it, in the very `Offer` every other segment uses —
+with the `Idle`/`Busy` bracket that offer has had since checkpoint 2. So an
+inner element with no room below parks the pump rather than a thread per inner,
+which is the sentence the design asked for, and it costs no machinery at all.
+The consequence is stated rather than hidden: while the pump is parked for room,
+the other open sequences go on running their own steps, and each of them holds
+at most the one element its step produced.
+
+**An outstanding step is counted as a callback in flight, not as an idle
+segment.** This is the one place wave 2's forward guess was wrong. It said an
+inner `MoveNextAsync` would take "the same `Idle`/`Busy` bracket every other
+wait takes"; it must not. `LocalRunContext` states the rule the guess
+contradicts — *a wait this runtime owns says so, and a wait inside an author's
+delegate says nothing* — and an inner sequence's step is an author's delegate
+running. Reporting it idle would let a pause reach quiescence while an author's
+iterator was mid-element, which is exactly what quiescence says is not
+happening. So the pump does what the asynchronous stage does with a callback:
+`LocalPause.Admitted` when a step is armed and `LocalPause.Completed` when it
+finishes, with the segment itself reporting idle for the `WaitAny` it sleeps in.
+The composite is the honest one — a merge-map is quiescent when every open
+sequence's step has answered and the pump is asleep, holding what those steps
+produced.
+
+**A failing inner sequence has to reach a pump that is not looking.** The
+continuation on each armed step is what makes that true, and the case that
+demands it is a real one rather than a hypothetical: the pump can be parked in a
+full boundary's offer, or at a sink probe's rendezvous, when one of its other
+sequences faults. A failure observed only when the pump next examined its window
+would never be observed at all — the pump is waiting for room that is not
+coming, and the run would hang rather than fail. So each step is observed the
+moment it completes, from whatever thread completed it, by the same
+`LocalRun.Observe` an asynchronous callback goes through; recording the failure
+cancels the run's token, and cancelling the token is what releases the pump from
+the wait it is in. The suite asserts this directly, with a merge-map held at a
+probe sink and a sibling sequence failed underneath it.
+
+**A pass cut short by a pause must not fall through to the wait, and reading the
+gate twice is not how to know.** This is the one defect the implementation
+actually had, and it is worth recording because it is a shape rather than a
+typo. Taking an element from a completed step and delivering it are two steps of
+one pass, so a pass stopped between them leaves an enumeration *holding* an
+element with no step outstanding — and the wait at the bottom of the loop has
+nothing to wait on for that enumeration. Guarding with a second read of the
+pause gate looks sufficient and is not: a resume landing between the two reads
+lets the pass proceed into a wait over an enumeration it had asked nothing of.
+The loop therefore carries whether *this pass* got through its enumerations, and
+an unfinished one goes back to the top — where it either parks or delivers what
+it was holding. The regression is a resume-then-repause storm, once per element
+with three sequences in flight, which is the same idiom checkpoint 5 used on the
+junctions and for the same reason: a hole in this accounting hangs rather than
+fails.
+
+### The two order sentences, and why the pump makes both true
+
+**Emission is unordered across inner sequences, and the order of each inner
+sequence is preserved.** Both halves are the loop rather than a rule applied to
+it. The elements go out as the pump finds them ready, which across several
+sequences is arrival order and nothing else; and an enumeration is never asked
+for its next element until the one before it has been delivered, which is why
+one inner sequence's own order survives being interleaved with every other's.
+The second half is also the whole of the operator's memory bound: an open
+sequence holds at most one element, so a merge-map of `n` holds at most `n`
+elements plus the one it is placing, and `MaxConcurrency = 1` is a concat-map
+that costs a segment.
+
+The bound is proven the way every bound in this suite is proven — as how far a
+held source got. Four elements are absorbed by a merge-map of two with every
+inner sequence held at its first step: two open sequences, one element in the
+handoff channel, and one in the source segment's hand. With a declared buffer of
+four in front, seven are absorbed and not four, because a buffer written in
+front of a merge-map is its own input channel rather than a second one behind an
+implicit handoff — the rule every boundary of this vocabulary follows.
+
+### What a stop does, and the one place this pump differs from the asynchronous one
+
+**A stream ended below releases the open sequences rather than draining them**,
+and that is the deliberate difference. An asynchronous stage drains its
+callbacks because they are an author's code already running and cancelling them
+would report a cancellation nobody asked for; an enumeration is not running of
+its own accord, so there is nothing to be polite to. It is released — which is
+what disposing an enumeration means — and an endless inner sequence therefore
+does not outlive the stream it was feeding. A `Take` below a merge-map ends the
+run successfully with every open sequence's `DisposeAsync` awaited to its
+return.
+
+**A shutdown is the opposite case and plays the open sequences out to their
+natural end.** It reaches the pump as the end of its input, exactly as it
+reaches any other downstream segment, so nothing new arrives and everything
+already admitted finishes. The honest footnote is that "admits no new element"
+is a statement about upstream rather than about the pump: what the boundary in
+front of it already held is delivered and *is* admitted, because draining a
+boundary's contents is what a shutdown does everywhere in this engine. A
+cancellation abandons: the run's token releases every outstanding step, and each
+sequence is released.
+
+**Release is the caller's, on every path.** The open sequences live in
+`LocalRun.Execute`'s own frame beside the head enumerator, and one call releases
+both — which is what makes "an inner enumeration is disposed on every terminal
+path" true of the paths the pump never returns from: a failing selector, a
+cancelled wait, a stream ended below. Releasing one means awaiting its
+outstanding step first (an enumeration whose `MoveNextAsync` is in flight may
+not be disposed at all) and then awaiting its `DisposeAsync` rather than
+starting it. A release that throws is reported under the rule the head
+enumerator already follows: only when nothing else went wrong.
+
+### The asynchronous folds are not stages of a pump, and the sketch that said they were is corrected
+
+Wave 2's audit sketched an asynchronous scan as "the asynchronous stage with a
+concurrency of one, ordered, with the state threaded by a wrapper the planner
+builds". That would work, and it is the wrong shape. **One fold of such a stage
+can never run beside another, because the state the next element folds into is
+this fold's answer** — so a window, an admission rule, a slot freed by emission,
+and the bounded channel in front of them are all machinery with nothing to do.
+Worse, the sequentiality would be a *consequence* of the asynchronous pump's
+admission rule rather than a property of the shape: correctness resting on a
+feature that exists for a different reason.
+
+So `ScanAsync` is a fused stage that waits, and `Sink.AggregateAsync` is a
+terminal that waits, and both go through one method — `LocalRunContext.Await`.
+It blocks the segment's own dedicated thread, which is what that thread is for,
+and then parks against the pause gate, which is the second look every other wait
+here takes. Two consequences are worth stating.
+
+**Nothing is reported to the pause gate while a fold runs, and that is the rule
+rather than an omission.** The segment's own thread is inside the author's
+callback, so it is neither parked nor idle and the counters already report the
+run as moving; a pause therefore waits for a fold in flight exactly as it waits
+for a slow synchronous stage, which is the contract the asynchronous stages
+already state. The park *after* the fold is what keeps a paused run from moving:
+a fold that finished during a pause leaves its new state in the stage's hand at a
+safe point instead of emitting it.
+
+**An asynchronous fold costs no boundary, and that is measurable rather than
+claimed.** With a fold held at its first element, the source has produced
+exactly the element being folded — a fold built on the asynchronous stage's
+machinery would have a handoff channel in front of it and the source would have
+run one further. `Scan` fuses and so does `ScanAsync`; the difference between
+them is the awaiting and nothing else.
+
+The rest of each operator is its synchronous twin's contract, kept: one state
+out per element in, the seed not emitted, an empty stream emitting nothing, the
+state allocated per run, the folder receiving the run's own token, a failure
+mid-fold faulting the run with the author's own exception, and — for the
+terminal — a slot that resolves through the ordinary machinery when the run
+ends, faults with the run's failure, cancels with its cancellation, and resolves
+what was folded so far under a shutdown. `ForEachAsync` declares a bound because
+its callbacks are independent and declares no result because it accumulates
+nothing; `AggregateAsync` declares neither a bound nor independence, and
+declares a result. That is the whole of the difference between them.
+
+### What this wave does not do
+
+**A merge-map with a genuinely quiet inner sequence does not reach quiescence.**
+An outstanding step is an author's code in flight, so a pause waits for it — the
+same rule under which a callback that never completes holds a pause forever.
+That is a real consequence for a merge-map of long-lived streams and it is the
+rule rather than a bug, but it is the reason a merge-map is not the operator to
+reach for when the inner sequences are subscriptions that go quiet for hours.
+
+**A fold that ignores its token delays a stop until it returns.** This is the
+one behaviour where the asynchronous folds differ from `SelectAsync`, which
+abandons its in-flight callbacks on cancellation and lets a continuation observe
+them. A fold is awaited to its outcome instead, for the reason the asynchronous
+cursor is: abandoning it would leave the state neither the old one nor the new
+one, and a failure it was about to report would be lost. The slow-callback rule
+therefore binds harder here, and it is stated rather than discovered.
+
+**A pump whose window is full learns about a stream ended below only at its next
+emission.** When it is not admitting, the input channel's closing is not in its
+wait-set, so a merge-map whose sequences have all gone quiet does not notice a
+`TakeWithin` above it firing. This is the asynchronous pump's shape rather than
+this one's — that pump waits only on its callback latch when its window is full
+— and neither is made worse by the other. Cancellation is in every wait and is
+unaffected.
+
+**Nothing here is a statement about a graph-valued flatten.** `MergeMap`
+flattens `n` local sub-enumerations on one segment's thread. A source of
+sources, in which each inner stream is a graph with its own stages, boundaries
+and junctions, is still a different feature this engine has no shape for, and
+the matrix words "concat-map, merge-map" are still the operator family rather
+than a promise of one.
+
+**The bounds are how far a held source got, and not a measurement of memory.**
+Four elements absorbed by a merge-map of two is an accounting of admitted
+elements, exactly as every bounded-memory claim in this suite is; nothing here
+weighs a heap.
+
+**And the whole of it is the local runtime.** No merge-map and no asynchronous
+fold has been materialized through a silo, and every graph carrying one is
+`nondeployable` because it is a lambda-bound local stage.

@@ -86,8 +86,11 @@ Flow<OrderDocument, PricedOrder> price =
   `RecoverWith`.
 - Async variants are explicit, not overload-inferred: `SelectAsync` (`Task`),
   `SelectValueTaskAsync` (`ValueTask`), each with ordered semantics by
-  default and an `Unordered` sibling. Callbacks receive a
-  `CancellationToken`; cancellation reaches in-flight work.
+  default and an `Unordered` sibling, and `ScanAsync`/`AggregateAsync` for the
+  two folds. Callbacks receive a `CancellationToken`; cancellation reaches
+  in-flight work. The one place two overloads do compete for a lambda is
+  `MergeMap`, and they cannot be confused: an `IAsyncEnumerable<TNext>` is not
+  an `IEnumerable<TNext>`, so the answer's own type picks the overload.
 - Option types are per-concern records (`ParallelismOptions`,
   `BufferOptions`, `RestartOptions`, source/sink adapter options), never one
   generic options bag. Names make ownership obvious; a source option cannot
@@ -237,7 +240,9 @@ validates cleanly through `GraphCompiler`. Because local graphs are typed by
 C# generics and delegates never enter the document, every local port
 declares the single opaque element contract `local-opaque@v1`, parameters
 are the empty payload under `local-parameters@v1`, and the fold's result
-port carries `local-fold-result@v1`. The document stage id stays `fold` —
+port carries `local-fold-result@v1` — which `fold-async` declares too, because
+awaiting is not a different shape and an identity is not renamed to add one.
+The document stage id stays `fold` —
 the semantic name — while the C# surface spells it `Sink.Aggregate` per the
 naming rules and the F# frontend will spell it `Sink.fold`. Delegates and
 the aggregate seed live in an internal binding table on `RunnableGraph`,
@@ -337,8 +342,7 @@ enumeration, a pause parks between two inner elements, and a cancellation
 abandons the rest — so an endless inner sequence is a stream this runtime paces
 rather than a loop the run disappears into. A function answering an empty
 sequence drops its element; one answering `null` fails the run. **Bounded-parallel
-flattening (`MergeMap`) is not here** and is not one call away: see
-LOCAL-RUNTIME.md for what it would cost the engine.
+flattening is `MergeMap` and lands in wave 3**, one section below.
 
 **`DistinctOptions` now carries a policy beside its bound.**
 `KeyOverflowPolicy.Fail` is the default and keeps the operator's promise
@@ -363,6 +367,71 @@ partition holds one element and waits for the leg it belongs on, so a slow
 diverted branch holds the main line up for exactly that long. **They are on
 `Source<T>` only**: a junction joins two streams and a `Flow<TIn,TOut>` is a
 chain with one open input, so there is nowhere for the second stream to enter.
+
+## Bounded-parallel flattening and the asynchronous folds
+
+The M4.3 wave-3 operators are three, and they are the three shapes the earlier
+waves named as missing: the other half of flattening, and the two folds that
+await.
+
+| Spelling | What it does | What it takes |
+|---|---|---|
+| `MergeMap(options, selector)` | merges the sequences of several elements at once, unordered across them | `ParallelismOptions` and `Func<T,IAsyncEnumerable<TNext>>` |
+| `MergeMap(options, selector)` | the same over an ordinary sequence | `ParallelismOptions` and `Func<T,IEnumerable<TNext>>` |
+| `ScanAsync(seed, folder)` | folds every element through an awaiting function and emits each state | a seed and `Func<TState,T,CancellationToken,Task<TState>>` |
+| `Sink.AggregateAsync(seed, folder)` | folds every element through an awaiting function into a declared result | a seed and `Func<TState,T,CancellationToken,Task<TState>>` |
+
+**One sentence is the whole of `MergeMap`'s order contract, and both halves of
+it matter: emission is unordered across inner sequences, and the order of each
+inner sequence is preserved.** An element is emitted as soon as the sequence it
+came from produces it, whichever sequence that is; and a sequence is never asked
+for its next element until the one before it has been delivered, which is why
+its own order survives being interleaved with every other's. `SelectMany` is
+the ordered half — one sequence read to its end before the next element is
+asked for — and an author who needs the result to be a function of the input
+alone wants that one.
+
+**`MaxConcurrency` counts open sequences, and a slot is freed when a sequence
+ends** rather than when it produces one more element. An empty inner sequence
+frees its slot at once; an endless one holds its slot for as long as the run
+lasts, which is worth knowing before writing one. Nothing is collected: each
+open sequence holds at most the one element it has produced and not handed over,
+so a bounded boundary below the stage paces all of them together and a buffer
+written in front of the stage is its own input channel, exactly as it is for an
+asynchronous stage.
+
+**What a stop does to it, in three sentences.** A failure of any inner
+sequence, or of the function itself, faults the run and cancels the rest —
+every sequence the stage opened is released on every terminal path, and
+releasing one means awaiting its own `DisposeAsync` rather than starting it. A
+shutdown plays the sequences already open out to their natural end, because
+their elements were admitted. A cancellation abandons them and releases them at
+once. A function answering `null` fails the run, exactly as a concat-map's
+does.
+
+**The ordinary-sequence spelling is the same operator and the same node**: both
+build a `merge-map` with the same payload and the same fingerprint, because how
+an author's sequence produces its elements is behavior in the way the body of a
+mapping function is. Its one price is stated rather than hidden — an ordinary
+sequence is advanced on the segment's own thread, so an inner sequence that
+*blocks* holds up every other sequence open beside it, which is what the
+asynchronous spelling exists for.
+
+**The two asynchronous folds declare no concurrency, and the absence is the
+contract.** The state the next element folds into is this fold's answer, so one
+fold runs at a time by construction rather than by an admission rule — there is
+no bound for an author to write down, no window to hold, and no boundary: the
+wait happens on the segment's own thread exactly where a synchronous fold's work
+would. `ScanAsync` is `Scan` with a fold that awaits and keeps every one of its
+promises (one state out per element in, the seed not emitted, an empty stream
+emitting nothing, fresh state per run). `Sink.AggregateAsync` is `Aggregate`
+with a fold that awaits, and it is the terminal `ForEachAsync` is not: it
+resolves a declared slot when the run ends, where `ForEachAsync` declares a
+bound because its callbacks are independent and declares no result because it
+accumulates nothing. Both folders receive the run's own token; a failure
+mid-fold faults the run with the author's own exception; a pause parks between
+two folds, holding the state the last one produced; and a shutdown resolves what
+was folded so far.
 
 ## Delegates and deployability
 

@@ -397,6 +397,32 @@ internal sealed class LocalStageDescriptor : StageOccurrence
     internal static LocalStageDescriptor SelectMany(object selector) =>
         new(LocalStageKind.SelectMany, selector, seed: null, LocalVocabulary.EmptyParameters);
 
+    /// <summary>Creates a stage that merges the sequences a function answers, several at a time.</summary>
+    /// <param name="options">The validated bound on how many of those sequences are open at once.</param>
+    /// <param name="selector">The function, as the authoring value received it.</param>
+    /// <returns>The descriptor.</returns>
+    /// <remarks>
+    /// The parallelism contract, shared with the asynchronous stages for the reason they share it with each
+    /// other: a bound on concurrent work is a number a document can state, and what that work is is the
+    /// stage reference's to say. Both spellings of the function — an asynchronous inner sequence and an
+    /// ordinary one — write this same node, because what the author's sequence does to produce its elements
+    /// is behavior in exactly the way the body of a mapping function is.
+    /// </remarks>
+    internal static LocalStageDescriptor MergeMap(ParallelismOptions options, object selector) =>
+        new(LocalStageKind.MergeMap, selector, seed: null, LocalParallelismParameters.Write(options));
+
+    /// <summary>Creates a running fold whose function is asynchronous.</summary>
+    /// <param name="seed">The initial state, which may be <see langword="null"/>.</param>
+    /// <param name="folder">The folding delegate, as the authoring value received it.</param>
+    /// <returns>The descriptor.</returns>
+    /// <remarks>
+    /// No payload, and the absence is the contract: one fold of this stage runs at a time because the next
+    /// one folds this one's answer, so there is no bound for an author to declare and none for a document to
+    /// carry.
+    /// </remarks>
+    internal static LocalStageDescriptor ScanAsync(object? seed, object folder) =>
+        new(LocalStageKind.ScanAsync, folder, seed, LocalVocabulary.EmptyParameters);
+
     /// <summary>Creates a stage that collects a declared number of elements into one list.</summary>
     /// <param name="size">The validated group size.</param>
     /// <param name="freeze">The projection of a group into the typed list the author declared.</param>
@@ -663,6 +689,19 @@ internal sealed class LocalStageDescriptor : StageOccurrence
     /// </remarks>
     internal static LocalStageDescriptor CombineLatest(object combiner) =>
         new(LocalStageKind.CombineLatest, combiner, seed: null, LocalVocabulary.EmptyParameters);
+
+    /// <summary>Creates a folding sink whose function is asynchronous.</summary>
+    /// <param name="seed">The initial state, which may be <see langword="null"/>.</param>
+    /// <param name="folder">The folding delegate, as the authoring value received it.</param>
+    /// <returns>The descriptor.</returns>
+    /// <remarks>
+    /// The result-bearing asynchronous terminal, and it carries no payload for the reason the asynchronous
+    /// scan carries none: one fold runs at a time by construction, so there is no bound to declare. That is
+    /// what separates it from <see cref="ForEachAsync"/>, which declares one because its callbacks are
+    /// independent of each other.
+    /// </remarks>
+    internal static LocalStageDescriptor FoldAsync(object? seed, object folder) =>
+        new(LocalStageKind.FoldAsync, folder, seed, LocalVocabulary.EmptyParameters);
 
     /// <summary>Creates a folding sink.</summary>
     /// <param name="seed">The initial state, which may be <see langword="null"/>.</param>

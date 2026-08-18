@@ -61,7 +61,10 @@ Orleans.Dataflow.Flow<TIn, TOut>.Grouped(int size) -> Orleans.Dataflow.Flow<TIn,
 Orleans.Dataflow.Flow<TIn, TOut>.GroupedWithin(int maxElements, System.TimeSpan window) -> Orleans.Dataflow.Flow<TIn, System.Collections.Generic.IReadOnlyList<TOut>!>!
 Orleans.Dataflow.Flow<TIn, TOut>.GroupedWithin(int maxElements, int maxWeight, System.TimeSpan window, System.Func<TOut, int>! cost) -> Orleans.Dataflow.Flow<TIn, System.Collections.Generic.IReadOnlyList<TOut>!>!
 Orleans.Dataflow.Flow<TIn, TOut>.InitialDelay(System.TimeSpan delay) -> Orleans.Dataflow.Flow<TIn, TOut>!
+Orleans.Dataflow.Flow<TIn, TOut>.MergeMap<TNext>(Orleans.Dataflow.ParallelismOptions! options, System.Func<TOut, System.Collections.Generic.IAsyncEnumerable<TNext>!>! selector) -> Orleans.Dataflow.Flow<TIn, TNext>!
+Orleans.Dataflow.Flow<TIn, TOut>.MergeMap<TNext>(Orleans.Dataflow.ParallelismOptions! options, System.Func<TOut, System.Collections.Generic.IEnumerable<TNext>!>! selector) -> Orleans.Dataflow.Flow<TIn, TNext>!
 Orleans.Dataflow.Flow<TIn, TOut>.Scan<TState>(TState seed, System.Func<TState, TOut, TState>! folder) -> Orleans.Dataflow.Flow<TIn, TState>!
+Orleans.Dataflow.Flow<TIn, TOut>.ScanAsync<TState>(TState seed, System.Func<TState, TOut, System.Threading.CancellationToken, System.Threading.Tasks.Task<TState>!>! folder) -> Orleans.Dataflow.Flow<TIn, TState>!
 Orleans.Dataflow.Flow<TIn, TOut>.Select<TNext>(System.Func<TOut, TNext>! selector) -> Orleans.Dataflow.Flow<TIn, TNext>!
 Orleans.Dataflow.Flow<TIn, TOut>.SelectAsync<TNext>(Orleans.Dataflow.ParallelismOptions! options, System.Func<TOut, System.Threading.CancellationToken, System.Threading.Tasks.Task<TNext>!>! selector) -> Orleans.Dataflow.Flow<TIn, TNext>!
 Orleans.Dataflow.Flow<TIn, TOut>.SelectAsyncUnordered<TNext>(Orleans.Dataflow.ParallelismOptions! options, System.Func<TOut, System.Threading.CancellationToken, System.Threading.Tasks.Task<TNext>!>! selector) -> Orleans.Dataflow.Flow<TIn, TNext>!
@@ -193,6 +196,7 @@ Orleans.Dataflow.Sink
 Orleans.Dataflow.Sink<T>
 Orleans.Dataflow.SinkFactory<T>
 Orleans.Dataflow.SinkFactory<T>.Aggregate<TState>(TState seed, System.Func<TState, T, TState>! folder) -> Orleans.Dataflow.SinkWithResult<T, TState>!
+Orleans.Dataflow.SinkFactory<T>.AggregateAsync<TState>(TState seed, System.Func<TState, T, System.Threading.CancellationToken, System.Threading.Tasks.Task<TState>!>! folder) -> Orleans.Dataflow.SinkWithResult<T, TState>!
 Orleans.Dataflow.SinkFactory<T>.Collect(Orleans.Dataflow.CollectOptions! options) -> Orleans.Dataflow.SinkWithResult<T, System.Collections.Generic.IReadOnlyList<T>!>!
 Orleans.Dataflow.SinkFactory<T>.Count() -> Orleans.Dataflow.SinkWithResult<T, long>!
 Orleans.Dataflow.SinkFactory<T>.First() -> Orleans.Dataflow.SinkWithResult<T, T>!
@@ -228,10 +232,13 @@ Orleans.Dataflow.Source<T>.InitialDelay(System.TimeSpan delay) -> Orleans.Datafl
 Orleans.Dataflow.Source<T>.Interleave(Orleans.Dataflow.Source<T>! other, int segmentSize) -> Orleans.Dataflow.Source<T>!
 Orleans.Dataflow.Source<T>.Merge(Orleans.Dataflow.Source<T>! other) -> Orleans.Dataflow.Source<T>!
 Orleans.Dataflow.Source<T>.Merge(Orleans.Dataflow.Source<T>! second, Orleans.Dataflow.Source<T>! third) -> Orleans.Dataflow.Source<T>!
+Orleans.Dataflow.Source<T>.MergeMap<TNext>(Orleans.Dataflow.ParallelismOptions! options, System.Func<T, System.Collections.Generic.IAsyncEnumerable<TNext>!>! selector) -> Orleans.Dataflow.Source<TNext>!
+Orleans.Dataflow.Source<T>.MergeMap<TNext>(Orleans.Dataflow.ParallelismOptions! options, System.Func<T, System.Collections.Generic.IEnumerable<TNext>!>! selector) -> Orleans.Dataflow.Source<TNext>!
 Orleans.Dataflow.Source<T>.PartitionTo(System.Func<T, int>! router, params Orleans.Dataflow.Branch<T>![]! branches) -> Orleans.Dataflow.RunnableGraph!
 Orleans.Dataflow.Source<T>.Prepend(Orleans.Dataflow.Source<T>! head) -> Orleans.Dataflow.Source<T>!
 Orleans.Dataflow.Source<T>.Prepend(params T[]! elements) -> Orleans.Dataflow.Source<T>!
 Orleans.Dataflow.Source<T>.Scan<TState>(TState seed, System.Func<TState, T, TState>! folder) -> Orleans.Dataflow.Source<TState>!
+Orleans.Dataflow.Source<T>.ScanAsync<TState>(TState seed, System.Func<TState, T, System.Threading.CancellationToken, System.Threading.Tasks.Task<TState>!>! folder) -> Orleans.Dataflow.Source<TState>!
 Orleans.Dataflow.Source<T>.Select<TOut>(System.Func<T, TOut>! selector) -> Orleans.Dataflow.Source<TOut>!
 Orleans.Dataflow.Source<T>.SelectAsync<TOut>(Orleans.Dataflow.ParallelismOptions! options, System.Func<T, System.Threading.CancellationToken, System.Threading.Tasks.Task<TOut>!>! selector) -> Orleans.Dataflow.Source<TOut>!
 Orleans.Dataflow.Source<T>.SelectAsyncUnordered<TOut>(Orleans.Dataflow.ParallelismOptions! options, System.Func<T, System.Threading.CancellationToken, System.Threading.Tasks.Task<TOut>!>! selector) -> Orleans.Dataflow.Source<TOut>!
@@ -388,6 +395,7 @@ static Orleans.Dataflow.ResultContract<TResult>.operator ==(Orleans.Dataflow.Res
 static Orleans.Dataflow.ResultSlot<TResult>.operator !=(Orleans.Dataflow.ResultSlot<TResult> left, Orleans.Dataflow.ResultSlot<TResult> right) -> bool
 static Orleans.Dataflow.ResultSlot<TResult>.operator ==(Orleans.Dataflow.ResultSlot<TResult> left, Orleans.Dataflow.ResultSlot<TResult> right) -> bool
 static Orleans.Dataflow.Sink.Aggregate<T, TState>(TState seed, System.Func<TState, T, TState>! folder) -> Orleans.Dataflow.SinkWithResult<T, TState>!
+static Orleans.Dataflow.Sink.AggregateAsync<T, TState>(TState seed, System.Func<TState, T, System.Threading.CancellationToken, System.Threading.Tasks.Task<TState>!>! folder) -> Orleans.Dataflow.SinkWithResult<T, TState>!
 static Orleans.Dataflow.Sink.Collect<T>(Orleans.Dataflow.CollectOptions! options) -> Orleans.Dataflow.SinkWithResult<T, System.Collections.Generic.IReadOnlyList<T>!>!
 static Orleans.Dataflow.Sink.Count<T>() -> Orleans.Dataflow.SinkWithResult<T, long>!
 static Orleans.Dataflow.Sink.First<T>() -> Orleans.Dataflow.SinkWithResult<T, T>!

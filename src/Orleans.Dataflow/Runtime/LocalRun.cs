@@ -435,15 +435,16 @@ internal sealed class LocalRun
     /// <summary>Runs one segment to its end and reports how it ended to the run.</summary>
     /// <param name="index">The segment's position in the plan.</param>
     /// <remarks>
-    /// The seven loop shapes are chosen here and the outcome of all of them is folded here, so that what a
-    /// failure, a cancellation and a clean end mean is stated once for every segment rather than seven
+    /// The eight loop shapes are chosen here and the outcome of all of them is folded here, so that what a
+    /// failure, a cancellation and a clean end mean is stated once for every segment rather than eight
     /// times. An enumerator obtained by a head segment is released on every path, including the ones
-    /// where obtaining or reading it is what went wrong, which is why it is held in this frame. A joining
-    /// junction is two of the seven: one that emits the element it read, and one that builds a row out of
-    /// several, told apart by whether the junction carries something to build a row with. A splitting one
-    /// is two more, told apart the same way: a junction carrying a routing function reads before it waits,
-    /// because what it is waiting for is what that function answers, and every other splitting junction
-    /// waits before it reads.
+    /// where obtaining or reading it is what went wrong, which is why it is held in this frame; the inner
+    /// enumerations a merge-map opened are held here for exactly the same reason and released by the same
+    /// call. A joining junction is two of the eight: one that emits the element it read, and one that builds
+    /// a row out of several, told apart by whether the junction carries something to build a row with. A
+    /// splitting one is two more, told apart the same way: a junction carrying a routing function reads
+    /// before it waits, because what it is waiting for is what that function answers, and every other
+    /// splitting junction waits before it reads.
     /// </remarks>
     private void Execute(int index)
     {
@@ -452,21 +453,27 @@ internal sealed class LocalRun
         bool canceled = false;
         IEnumerator? elements = null;
 
+        // Allocated for the one segment shape that can open an enumeration and never for any other, which
+        // is the same rule the wakeup latch follows: a segment that cannot do the thing pays nothing for it.
+        List<LocalMergeMapCursor>? inners = segment.MergeMap is null ? null : [];
+
         try
         {
             canceled = segment.Elements is { } source
                 ? Pull(segment, index, source, ref elements)
                 : segment.Async is { } asynchronous
                     ? Map(segment, index, asynchronous)
-                    : segment.FanOut is { } splitting
-                        ? splitting.Router is { } routing
-                            ? Route(segment, index, routing)
-                            : Fan(segment, index, splitting)
-                        : segment.FanIn is { } joining
-                            ? joining.Combiner is { } combining
-                                ? Row(segment, index, joining, combining)
-                                : Join(segment, index, joining)
-                            : Push(segment, index);
+                    : segment.MergeMap is { } merging
+                        ? Merge(segment, index, merging, inners!)
+                        : segment.FanOut is { } splitting
+                            ? splitting.Router is { } routing
+                                ? Route(segment, index, routing)
+                                : Fan(segment, index, splitting)
+                            : segment.FanIn is { } joining
+                                ? joining.Combiner is { } combining
+                                    ? Row(segment, index, joining, combining)
+                                    : Join(segment, index, joining)
+                                : Push(segment, index);
 
             // Inside the try, because a residue travels through the author's own stages and an exception one
             // of them raises is this run's outcome exactly as an ordinary element's would be; and after the
@@ -494,7 +501,7 @@ internal sealed class LocalRun
         }
 
         Detach(segment);
-        Finish(index, Release(elements, failure, canceled), canceled);
+        Finish(index, Release(elements, inners, failure, canceled), canceled);
     }
 
     /// <summary>Gives every stage of one segment that needs its run the run it is part of.</summary>
@@ -1070,16 +1077,25 @@ internal sealed class LocalRun
         return callback;
     }
 
-    /// <summary>Records what one finished callback did to the run.</summary>
-    /// <param name="callback">The finished callback.</param>
+    /// <summary>Records what one finished piece of an author's asynchronous work did to the run.</summary>
+    /// <param name="callback">The finished callback, or the finished step of an inner enumeration.</param>
     /// <remarks>
+    /// <para>
     /// The same rule the segments themselves follow: an <see cref="OperationCanceledException"/> raised
     /// while the run is cancelled is the cancellation the run already knows about, and anything else is a
     /// failure. Reading the outcome through the awaiter rather than through
     /// <see cref="Task.Exception"/> is what keeps the author's own exception instance, unwrapped, as the
     /// one the run faults with.
+    /// </para>
+    /// <para>
+    /// Typed as the plain task both shapes are, because what it does is the same for both and neither
+    /// answer is read here: a callback's result is emitted by the pump that admitted it, and an inner step's
+    /// answer is the pump's to act on. This is only where an outcome is recorded — promptly, from whatever
+    /// thread finished the work, so that a pump parked in a full boundary's offer still learns that the run
+    /// is over.
+    /// </para>
     /// </remarks>
-    private void Observe(Task<object?> callback)
+    private void Observe(Task callback)
     {
         if (callback.IsCompletedSuccessfully)
         {
@@ -1088,7 +1104,7 @@ internal sealed class LocalRun
 
         try
         {
-            _ = callback.GetAwaiter().GetResult();
+            callback.GetAwaiter().GetResult();
         }
         catch (OperationCanceledException) when (_token.IsCancellationRequested)
         {
@@ -1097,6 +1113,208 @@ internal sealed class LocalRun
         catch (Exception error)
         {
             Fail(error);
+        }
+    }
+
+    /// <summary>Drives a merge-map segment: admits inner enumerations to its bound and emits their elements.</summary>
+    /// <param name="segment">The segment being executed.</param>
+    /// <param name="index">Its position in the plan.</param>
+    /// <param name="stage">The merge-map that heads it.</param>
+    /// <param name="inners">
+    /// The enumerations this pump has open, held in the caller's frame so that they are released whatever
+    /// happens next.
+    /// </param>
+    /// <returns><see langword="true"/> when the loop stopped because the run was canceled.</returns>
+    /// <remarks>
+    /// <para>
+    /// One pass does everything that can be done without waiting, in the order that keeps the promises:
+    /// deliver every element an open enumeration is holding, free the slot of every enumeration that has
+    /// ended, then admit as many new elements as the freed slots allow. Emission before admission is what
+    /// makes the bound a bound on enumerations rather than on memory that has not been asked for yet.
+    /// </para>
+    /// <para>
+    /// <b>Emission is unordered across inner sequences and in order within each of them.</b> Both halves are
+    /// this loop rather than a rule applied to it. The elements go out as the pump finds them ready, which
+    /// across several enumerations is arrival order and nothing else; and an enumeration is never asked for
+    /// its next element until the one before it has been delivered, which is why one inner sequence's own
+    /// order survives being interleaved with every other's.
+    /// </para>
+    /// <para>
+    /// <b>One thread waits, and it waits for everything at once.</b> The wait at the bottom is over one
+    /// outstanding step per live enumeration plus, while there is room to admit one, an element arriving on
+    /// the input — so a merge-map of eight inner sequences is one segment thread and not eight. The other
+    /// wait a merge-map takes is the ordinary one: an element with no room below it parks the pump in the
+    /// boundary's offer, which holds the whole window rather than one inner sequence, and is the backpressure
+    /// this operator is bounded by.
+    /// </para>
+    /// <para>
+    /// <b>A slot is freed when an enumeration ends</b>, so an empty inner sequence frees its slot on its
+    /// first step and an endless one holds its slot for as long as the run does. That is the difference
+    /// between this bound and an asynchronous stage's, where the slot is freed by an emission.
+    /// </para>
+    /// <para>
+    /// <b>A stream ended below this segment releases the enumerations rather than draining them.</b> An
+    /// asynchronous stage drains its callbacks because they are an author's code already running and
+    /// cancelling them would report a cancellation nobody asked for; an enumeration is not running of its own
+    /// accord, so there is nothing to be polite to — it is released, which is what disposing an enumeration
+    /// means, and an endless inner sequence therefore does not outlive the stream it was feeding. A shutdown
+    /// is the other case and is the opposite one: it reaches this segment as the end of its input, so nothing
+    /// new is admitted and everything already admitted plays out to its natural end.
+    /// </para>
+    /// </remarks>
+    private bool Merge(LocalSegment segment, int index, LocalMergeMapStage stage, List<LocalMergeMapCursor> inners)
+    {
+        ChannelReader<object?> reader = _channels[segment.Inputs[0]].Reader;
+        Task<bool>? arrival = null;
+        Task[]? waits = null;
+        bool exhausted = false;
+
+        while (true)
+        {
+            if (_token.IsCancellationRequested)
+            {
+                return true;
+            }
+
+            if (Stopping(index))
+            {
+                return false;
+            }
+
+            // Before emitting and before admitting, so a paused merge-map neither delivers an element an
+            // enumeration produced nor opens a new one. What the open enumerations produce meanwhile is held
+            // in their slots, which is the same "held rather than in flight" an asynchronous window gets.
+            if (_pause.Park())
+            {
+                continue;
+            }
+
+            // Whether this pass got through every open enumeration. A pass cut short by a pause may leave one
+            // of them holding an element with no step outstanding, and that state is exactly what the wait at
+            // the bottom has nothing to wait on — so the loop goes back to the top instead, where it either
+            // parks or delivers what it was holding. Reading the gate twice would not do: a resume landing
+            // between the two reads is what would leave this pass waiting on an enumeration it had not asked
+            // anything of.
+            bool interrupted = false;
+
+            for (int inner = 0; inner < inners.Count;)
+            {
+                if (_pause.IsPaused)
+                {
+                    interrupted = true;
+
+                    break;
+                }
+
+                LocalMergeMapCursor cursor = inners[inner];
+
+                if (cursor.Step is { IsCompleted: true } && !cursor.Take())
+                {
+                    // The enumeration ended, which is the only thing that frees a slot. It is released here
+                    // rather than at the end of the run, so a merge-map over a long stream holds the
+                    // enumerations it is actually reading and not every one it has ever opened.
+                    inners.RemoveAt(inner);
+                    cursor.Dispose();
+
+                    continue;
+                }
+
+                if (!cursor.Holding)
+                {
+                    inner++;
+
+                    continue;
+                }
+
+                if (!Deliver(segment, index, cursor.Deliver()))
+                {
+                    return false;
+                }
+
+                cursor.Arm(_pause, Observe);
+                inner++;
+            }
+
+            // A pause that arrived in the middle of a pass is observed here rather than after it, exactly as
+            // the asynchronous pump observes one: the safe point is between elements, and this is where the
+            // loop goes back to it.
+            if (interrupted || _pause.IsPaused)
+            {
+                continue;
+            }
+
+            while (!exhausted &&
+                inners.Count < stage.MaxConcurrency &&
+                !_pause.IsPaused &&
+                reader.TryRead(out object? element))
+            {
+                if (_token.IsCancellationRequested)
+                {
+                    return true;
+                }
+
+                // Added to the list before the step is started, so that an enumeration whose very first step
+                // throws is one the caller still releases.
+                LocalMergeMapCursor opened = new(stage.Open(element, _token));
+
+                inners.Add(opened);
+                opened.Arm(_pause, Observe);
+            }
+
+            if (_pause.IsPaused)
+            {
+                continue;
+            }
+
+            bool admitting = !exhausted && inners.Count < stage.MaxConcurrency;
+
+            // The input is exhausted and every enumeration it opened has ended, which is the only way this
+            // segment ends of its own accord.
+            if (!admitting && inners.Count == 0)
+            {
+                return false;
+            }
+
+            if (admitting)
+            {
+                arrival ??= reader.WaitToReadAsync(_token).AsTask();
+            }
+
+            int waited = inners.Count + (admitting ? 1 : 0);
+
+            // Reused across passes and reallocated only when the number of things waited for changes, which
+            // is when an enumeration is admitted or ends rather than once per element.
+            if (waits is null || waits.Length != waited)
+            {
+                waits = new Task[waited];
+            }
+
+            for (int inner = 0; inner < inners.Count; inner++)
+            {
+                waits[inner] = inners[inner].Step!;
+            }
+
+            if (admitting)
+            {
+                waits[waited - 1] = arrival!;
+            }
+
+            _pause.Idle();
+
+            try
+            {
+                _ = Task.WaitAny(waits, _token);
+            }
+            finally
+            {
+                _pause.Busy();
+            }
+
+            if (arrival is { IsCompleted: true })
+            {
+                exhausted = !arrival.GetAwaiter().GetResult();
+                arrival = null;
+            }
         }
     }
 
@@ -2562,34 +2780,63 @@ internal sealed class LocalRun
 
     /// <summary>Releases a segment's resources and folds a release failure into its outcome.</summary>
     /// <param name="elements">The enumerator to dispose, or <see langword="null"/> when none was obtained.</param>
+    /// <param name="inners">
+    /// The inner enumerations a merge-map still had open, or <see langword="null"/> for every segment that
+    /// is not one.
+    /// </param>
     /// <param name="failure">The failure the segment already had, if any.</param>
     /// <param name="canceled">Whether the segment ended in cancellation.</param>
     /// <returns>The failure the segment should report.</returns>
     /// <remarks>
+    /// <para>
     /// The enumerator is disposed on every terminal path, including the ones where the sequence itself is
     /// what went wrong. A failure from the release is reported only when nothing else went wrong: a run
     /// that already has an outcome keeps it, because replacing an author's exception, or a cancellation
     /// the caller asked for, with a failure from teardown would hide the thing worth reading.
+    /// </para>
+    /// <para>
+    /// A merge-map's open enumerations are the same question asked of several things at once: every one of
+    /// them is released, whatever any of the others did, and the first release failure is reported under the
+    /// very rule the single enumerator follows. Releasing them here rather than in the pump is what makes
+    /// "an inner enumeration is disposed on every terminal path" true of the paths the pump never returns
+    /// from — a failing selector, a cancelled wait, a stream ended below.
+    /// </para>
     /// </remarks>
-    private static Exception? Release(IEnumerator? elements, Exception? failure, bool canceled)
+    private static Exception? Release(
+        IEnumerator? elements,
+        List<LocalMergeMapCursor>? inners,
+        Exception? failure,
+        bool canceled)
     {
-        if (elements is not IDisposable disposable)
+        Exception? released = null;
+
+        for (int inner = 0; inners is not null && inner < inners.Count; inner++)
         {
-            return failure;
+            try
+            {
+                inners[inner].Dispose();
+            }
+            catch (Exception error)
+            {
+                released ??= error;
+            }
         }
 
-        try
+        if (elements is IDisposable disposable)
         {
-            disposable.Dispose();
-        }
-        catch (Exception error)
-        {
-            // A sequence that throws while being released is reported the same way as one that throws
-            // while being read, and for the same reason.
-            return failure ?? (canceled ? null : error);
+            try
+            {
+                disposable.Dispose();
+            }
+            catch (Exception error)
+            {
+                // A sequence that throws while being released is reported the same way as one that throws
+                // while being read, and for the same reason.
+                released ??= error;
+            }
         }
 
-        return failure;
+        return failure ?? (canceled ? null : released);
     }
 
     /// <summary>Reports one segment's outcome to the run and settles the run when it was the last one.</summary>

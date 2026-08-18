@@ -135,6 +135,27 @@ internal sealed class LocalStageAttachment(
         _ = timer.Change(due < MaxTimerInterval ? due : MaxTimerInterval, Timeout.InfiniteTimeSpan);
     }
 
+    /// <summary>Gets the token an author's own callback receives.</summary>
+    /// <value>The run's own token, cancelled when the run is cancelled and when anything in the run fails.</value>
+    /// <remarks>
+    /// The run's token and never the stop token: a shutdown must not cancel an author's fold, because
+    /// everything already admitted keeps flowing and a fold that was handed an element is exactly that.
+    /// </remarks>
+    internal CancellationToken RunToken => context.RunToken;
+
+    /// <summary>Waits for one of an author's tasks on the segment's own thread and parks afterwards.</summary>
+    /// <param name="callback">The task the author's delegate answered.</param>
+    /// <returns>Its value.</returns>
+    /// <exception cref="OperationCanceledException">
+    /// The author's task was cancelled, or the run was cancelled while this segment was parked afterwards.
+    /// </exception>
+    /// <remarks>
+    /// Not one of this runtime's own waits and therefore not reported as one — an author's callback holds
+    /// the thread it was given, and a pause waits for it exactly as it waits for a slow synchronous stage.
+    /// The park at the end is the same second look every other wait here takes.
+    /// </remarks>
+    internal object? Await(Task<object?> callback) => context.Await(callback);
+
     /// <summary>Gets a value indicating whether the run has been asked to stop.</summary>
     /// <value><see langword="true"/> once the run is cancelling or shutting down.</value>
     /// <remarks>

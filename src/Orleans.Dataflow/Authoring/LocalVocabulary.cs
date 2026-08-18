@@ -241,6 +241,14 @@ internal static class LocalVocabulary
     internal static readonly StageRef SelectMany =
         StageRef.Create(Provider, StageId.Create("select-many"), StageRef.FirstMajorVersion);
 
+    /// <summary>The stage reference of a stage that flattens several sequences at once.</summary>
+    internal static readonly StageRef MergeMap =
+        StageRef.Create(Provider, StageId.Create("merge-map"), StageRef.FirstMajorVersion);
+
+    /// <summary>The stage reference of a running fold whose function is asynchronous.</summary>
+    internal static readonly StageRef ScanAsync =
+        StageRef.Create(Provider, StageId.Create("scan-async"), StageRef.FirstMajorVersion);
+
     /// <summary>The stage reference of a stage that collects a declared number of elements per group.</summary>
     internal static readonly StageRef Grouped =
         StageRef.Create(Provider, StageId.Create("grouped"), StageRef.FirstMajorVersion);
@@ -322,6 +330,10 @@ internal static class LocalVocabulary
     /// <summary>The stage reference of a folding sink.</summary>
     internal static readonly StageRef Fold =
         StageRef.Create(Provider, StageId.Create("fold"), StageRef.FirstMajorVersion);
+
+    /// <summary>The stage reference of a folding sink whose function is asynchronous.</summary>
+    internal static readonly StageRef FoldAsync =
+        StageRef.Create(Provider, StageId.Create("fold-async"), StageRef.FirstMajorVersion);
 
     /// <summary>The stage reference of a discarding sink.</summary>
     internal static readonly StageRef Ignore =
@@ -709,6 +721,8 @@ internal static class LocalVocabulary
         LocalStageKind.Distinct => Distinct,
         LocalStageKind.DeduplicateConsecutive => DeduplicateConsecutive,
         LocalStageKind.SelectMany => SelectMany,
+        LocalStageKind.MergeMap => MergeMap,
+        LocalStageKind.ScanAsync => ScanAsync,
         LocalStageKind.Grouped => Grouped,
         LocalStageKind.Sliding => Sliding,
         LocalStageKind.GroupedWithin => GroupedWithin,
@@ -735,6 +749,7 @@ internal static class LocalVocabulary
         LocalStageKind.Zip => Zip,
         LocalStageKind.CombineLatest => CombineLatest,
         LocalStageKind.Fold => Fold,
+        LocalStageKind.FoldAsync => FoldAsync,
         LocalStageKind.Ignore => Ignore,
         LocalStageKind.ForEach => ForEach,
         LocalStageKind.ForEachAsync => ForEachAsync,
@@ -765,7 +780,8 @@ internal static class LocalVocabulary
             LocalStageKind.SelectAsyncUnordered or
             LocalStageKind.SelectValueTaskAsync or
             LocalStageKind.SelectValueTaskAsyncUnordered or
-            LocalStageKind.ForEachAsync => ParallelismParameterContract,
+            LocalStageKind.ForEachAsync or
+            LocalStageKind.MergeMap => ParallelismParameterContract,
         LocalStageKind.Take or
             LocalStageKind.Skip or
             LocalStageKind.Repeat or
@@ -811,6 +827,8 @@ internal static class LocalVocabulary
             LocalStageKind.DeduplicateConsecutive or
             LocalStageKind.SelectMany or
             LocalStageKind.Scan or
+            LocalStageKind.ScanAsync or
+            LocalStageKind.FoldAsync or
             LocalStageKind.TakeWhile or
             LocalStageKind.TakeThrough or
             LocalStageKind.SkipWhile or
@@ -913,6 +931,8 @@ internal static class LocalVocabulary
             LocalStageKind.SelectAsyncUnordered or
             LocalStageKind.SelectValueTaskAsync or
             LocalStageKind.SelectValueTaskAsyncUnordered or
+            LocalStageKind.MergeMap or
+            LocalStageKind.ScanAsync or
             LocalStageKind.Delay or
             LocalStageKind.InitialDelay or
             LocalStageKind.Timeout or
@@ -930,6 +950,7 @@ internal static class LocalVocabulary
             LocalStageKind.Zip or
             LocalStageKind.CombineLatest => LocalStagePlace.FanIn,
         LocalStageKind.Fold or
+            LocalStageKind.FoldAsync or
             LocalStageKind.Ignore or
             LocalStageKind.ForEach or
             LocalStageKind.ForEachAsync or
@@ -1073,7 +1094,8 @@ internal static class LocalVocabulary
 
         return kind switch
         {
-            LocalStageKind.Fold => ResultPortSpecification.Create(ResultPort, FoldResultContract),
+            LocalStageKind.Fold or
+                LocalStageKind.FoldAsync => ResultPortSpecification.Create(ResultPort, FoldResultContract),
             LocalStageKind.First or
                 LocalStageKind.FirstOrDefault or
                 LocalStageKind.Count or

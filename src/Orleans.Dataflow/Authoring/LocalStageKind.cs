@@ -20,14 +20,18 @@ namespace Orleans.Dataflow.Authoring;
 /// port, and the three result-bearing terminals declare a result port on top of that.
 /// </para>
 /// <para>
-/// Nine of the shapes are boundaries: <see cref="Buffer"/>, <see cref="SelectAsync"/>,
+/// Ten of the shapes are boundaries: <see cref="Buffer"/>, <see cref="SelectAsync"/>,
 /// <see cref="SelectAsyncUnordered"/>, <see cref="SelectValueTaskAsync"/>,
 /// <see cref="SelectValueTaskAsyncUnordered"/>, <see cref="ForEachAsync"/>, and <see cref="Delay"/> each cut
-/// the chain into segments the runtime executes as separate loops joined by one bounded channel, and
+/// the chain into segments the runtime executes as separate loops joined by one bounded channel;
 /// M4.3 wave 2 added <see cref="GroupedWithin"/> and <see cref="GroupedWeightedWithin"/> to them for a
-/// reason of their own: a batch closed by a clock has to emit while nothing is arriving, and only a segment
-/// waiting on its own input channel can be woken to do that. Every other shape fuses, which is what makes
-/// fusion the default and a queue something an author asked for.
+/// reason of their own — a batch closed by a clock has to emit while nothing is arriving, and only a segment
+/// waiting on its own input channel can be woken to do that — and M4.3 wave 3 added <see cref="MergeMap"/>,
+/// whose loop sleeps on one outstanding step per open inner sequence and can therefore never be a pass of
+/// somebody else's loop. Every other shape fuses, which is what makes fusion the default and a queue
+/// something an author asked for. <see cref="ScanAsync"/> and <see cref="FoldAsync"/> are deliberately not
+/// among them: one asynchronous fold runs at a time because the next one folds this one's answer, so there
+/// is no window to hold and nothing a boundary would buy.
 /// </para>
 /// <para>
 /// Eight of the shapes read a clock, and every one of them reads the run's own: <see cref="Tick"/>,
@@ -67,7 +71,9 @@ namespace Orleans.Dataflow.Authoring;
 /// <see cref="GroupedWeightedWithin"/> each build a group, and <see cref="SelectMany"/> is the mirror image
 /// — one element in, a sequence out. Both are new shapes of answer rather than new pumps: the run pushes a
 /// residue or an inner element through the stages below the one that produced it, exactly as it pushes an
-/// element that arrived.
+/// element that arrived. <see cref="MergeMap"/> is the sixth and is the one that <i>is</i> a new pump: it
+/// answers one element with a sequence too, but with several of those sequences open at once, and reading
+/// whichever of them has something is a loop rather than a walk.
 /// </para>
 /// <para>
 /// The kind is never serialized. It is recoverable from the node's <see cref="Definition.StageNode.Stage"/>
@@ -189,6 +195,18 @@ internal enum LocalStageKind
     /// time; one input port and one output port.
     /// </summary>
     SelectMany,
+
+    /// <summary>
+    /// Replaces every element with the elements of the sequence a function answers, reading a declared
+    /// number of those sequences at once; one input port and one output port.
+    /// </summary>
+    MergeMap,
+
+    /// <summary>
+    /// Folds every element into a running state through an asynchronous function and emits each
+    /// intermediate state; one input port and one output port.
+    /// </summary>
+    ScanAsync,
 
     /// <summary>
     /// Collects a declared number of elements into one list and emits the last partial one when the stream
@@ -343,6 +361,12 @@ internal enum LocalStageKind
 
     /// <summary>Folds every element into a state value; one input port and one result port.</summary>
     Fold,
+
+    /// <summary>
+    /// Folds every element into a state value through an asynchronous function; one input port and one
+    /// result port.
+    /// </summary>
+    FoldAsync,
 
     /// <summary>Consumes and discards every element; one input port and nothing else.</summary>
     Ignore,

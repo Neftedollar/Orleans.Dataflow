@@ -56,6 +56,15 @@ internal static class LocalDelegateAdapter
     /// <summary>The template closed to wrap an asynchronous mapping over value tasks.</summary>
     private static readonly MethodInfo ValueTaskSelectorTemplate = Template(nameof(BoxValueTaskSelector));
 
+    /// <summary>The template closed to wrap an asynchronous folding delegate.</summary>
+    private static readonly MethodInfo AsyncFolderTemplate = Template(nameof(BoxAsyncFolder));
+
+    /// <summary>The template closed to wrap a merge-map's function over asynchronous sequences.</summary>
+    private static readonly MethodInfo AsyncInnerTemplate = Template(nameof(BoxAsyncInner));
+
+    /// <summary>The template closed to wrap a merge-map's function over ordinary sequences.</summary>
+    private static readonly MethodInfo InnerTemplate = Template(nameof(BoxInner));
+
     /// <summary>The template closed to wrap an asynchronous callback with no result.</summary>
     private static readonly MethodInfo AsyncCallbackTemplate = Template(nameof(BoxAsyncCallback));
 
@@ -323,6 +332,95 @@ internal static class LocalDelegateAdapter
         }
 
         return (Func<object?, object?, object?>)Close(FolderTemplate, [arguments[0], arguments[1]], behavior);
+    }
+
+    /// <summary>Wraps an asynchronous folding delegate into one over boxed state and boxed elements.</summary>
+    /// <param name="behavior">The bound <c>Func&lt;TState, T, CancellationToken, Task&lt;TState&gt;&gt;</c>.</param>
+    /// <param name="kind">The stage shape, for the diagnostic.</param>
+    /// <returns>The wrapped folder.</returns>
+    /// <exception cref="InvalidOperationException">
+    /// <paramref name="behavior"/> is not a three-argument function taking a
+    /// <see cref="CancellationToken"/> and returning a <see cref="Task{TResult}"/> of the state type.
+    /// </exception>
+    /// <remarks>
+    /// One wrapper for the two shapes that fold asynchronously, exactly as there is one for the two that
+    /// fold synchronously: an asynchronous scan and an asynchronous aggregate differ in what the run does
+    /// with the state afterwards and in nothing else. The token is part of the required shape for the reason
+    /// an asynchronous mapping's is — a fold this runtime cannot cancel could not be stopped at all.
+    /// </remarks>
+    internal static Func<object?, object?, CancellationToken, Task<object?>> AsyncFolder(
+        object? behavior,
+        LocalStageKind kind)
+    {
+        const string Expected = "Func<TState, T, CancellationToken, Task<TState>>";
+
+        Type[] arguments = Arguments(behavior, typeof(Func<,,,>), kind, Expected);
+
+        if (arguments[2] != typeof(CancellationToken) ||
+            !arguments[3].IsGenericType ||
+            arguments[3].GetGenericTypeDefinition() != typeof(Task<>) ||
+            arguments[3].GetGenericArguments()[0] != arguments[0])
+        {
+            throw Mismatch(behavior, kind, Expected);
+        }
+
+        return (Func<object?, object?, CancellationToken, Task<object?>>)Close(
+            AsyncFolderTemplate,
+            [arguments[0], arguments[1]],
+            behavior);
+    }
+
+    /// <summary>Wraps a merge-map's function into one that opens an enumeration over boxed elements.</summary>
+    /// <param name="behavior">
+    /// The bound <c>Func&lt;T, IAsyncEnumerable&lt;TNext&gt;&gt;</c> or
+    /// <c>Func&lt;T, IEnumerable&lt;TNext&gt;&gt;</c>.
+    /// </param>
+    /// <returns>The opener, which the pump calls once per admitted element.</returns>
+    /// <exception cref="InvalidOperationException">
+    /// <paramref name="behavior"/> is not a one-argument function answering a sequence of either kind.
+    /// </exception>
+    /// <remarks>
+    /// <para>
+    /// The one binding of this vocabulary that accepts two delegate shapes, and it is what makes the
+    /// ordinary-sequence spelling a convenience over the same machinery rather than a second operator: both
+    /// are wrapped into one opener here, once per materialization, and the pump above never learns which of
+    /// them an occurrence carried. The two therefore build the same document, which is the correct answer —
+    /// what a document states is that this node flattens what its function answers, and how the author's own
+    /// sequence produces its elements is behavior, exactly as the body of a <c>Select</c> is.
+    /// </para>
+    /// <para>
+    /// The element type comes from the delegate's own constructed type and not from the object it answers.
+    /// Reading it from the answer would be wrong for the reason a source's opener is closed at authoring
+    /// time: a sequence interface is an interface, and one class may implement it twice.
+    /// </para>
+    /// </remarks>
+    internal static LocalInnerCursorFactory Inner(object? behavior)
+    {
+        const string Expected = "Func<T, IAsyncEnumerable<TNext>> or Func<T, IEnumerable<TNext>>";
+
+        Type[] arguments = Arguments(behavior, typeof(Func<,>), LocalStageKind.MergeMap, Expected);
+
+        if (!arguments[1].IsGenericType)
+        {
+            throw Mismatch(behavior, LocalStageKind.MergeMap, Expected);
+        }
+
+        Type answered = arguments[1].GetGenericTypeDefinition();
+
+        if (answered == typeof(IAsyncEnumerable<>))
+        {
+            return (LocalInnerCursorFactory)Close(
+                AsyncInnerTemplate,
+                [arguments[0], arguments[1].GetGenericArguments()[0]],
+                behavior);
+        }
+
+        return answered == typeof(IEnumerable<>)
+            ? (LocalInnerCursorFactory)Close(
+                InnerTemplate,
+                [arguments[0], arguments[1].GetGenericArguments()[0]],
+                behavior)
+            : throw Mismatch(behavior, LocalStageKind.MergeMap, Expected);
     }
 
     /// <summary>Wraps a per-element action into one over boxed elements.</summary>
@@ -808,6 +906,60 @@ internal static class LocalDelegateAdapter
     /// <remarks>Invoked only by reflection, over the type arguments recovered from the delegate itself.</remarks>
     private static Func<object?, object?, object?> BoxFolder<TState, TIn>(Func<TState, TIn, TState> folder) =>
         (state, element) => folder((TState)state!, (TIn)element!);
+
+    /// <summary>Wraps a typed asynchronous folder into one over boxed state and boxed elements.</summary>
+    /// <typeparam name="TState">The state type, which is also the result type.</typeparam>
+    /// <typeparam name="TIn">The element type the fold consumes.</typeparam>
+    /// <param name="folder">The author's delegate.</param>
+    /// <returns>The wrapper.</returns>
+    /// <remarks>
+    /// Invoked only by reflection, over the type arguments recovered from the delegate itself. An
+    /// asynchronous method for the reason the asynchronous mapping's wrapper is one: a fold that throws
+    /// before returning its task produces a faulted task exactly as one that throws afterwards does, so the
+    /// stage that awaits it has one way to observe a failure rather than two.
+    /// </remarks>
+    private static Func<object?, object?, CancellationToken, Task<object?>> BoxAsyncFolder<TState, TIn>(
+        Func<TState, TIn, CancellationToken, Task<TState>> folder) =>
+        async (state, element, token) =>
+        {
+            Task<TState> pending = folder((TState)state!, (TIn)element!, token) ??
+                throw new InvalidOperationException(
+                    "The folder of an asynchronous fold returned no task. A folder a graph is bound to has to produce something to await.");
+
+            return await pending.ConfigureAwait(false);
+        };
+
+    /// <summary>Wraps a typed merge-map function over asynchronous sequences into an opener.</summary>
+    /// <typeparam name="TIn">The element type the function consumes.</typeparam>
+    /// <typeparam name="TOut">The element type the sequences it answers carry.</typeparam>
+    /// <param name="selector">The author's delegate.</param>
+    /// <returns>The wrapper.</returns>
+    /// <remarks>
+    /// Invoked only by reflection, over the type arguments recovered from the delegate itself. The
+    /// enumeration is opened with the run's own token, which is what a merge-map's contract that a
+    /// cancellation reaches every inner sequence is made of; a function answering <see langword="null"/> is
+    /// refused rather than read as an empty sequence, for the reason a concat-map's is.
+    /// </remarks>
+    private static LocalInnerCursorFactory BoxAsyncInner<TIn, TOut>(Func<TIn, IAsyncEnumerable<TOut>> selector) =>
+        (element, token) => new LocalAsyncCursor<TOut>((selector((TIn)element!) ?? throw Nothing()).GetAsyncEnumerator(token));
+
+    /// <summary>Wraps a typed merge-map function over ordinary sequences into an opener.</summary>
+    /// <typeparam name="TIn">The element type the function consumes.</typeparam>
+    /// <typeparam name="TOut">The element type the sequences it answers carry.</typeparam>
+    /// <param name="selector">The author's delegate.</param>
+    /// <returns>The wrapper.</returns>
+    /// <remarks>
+    /// Invoked only by reflection, over the type arguments recovered from the delegate itself. The token is
+    /// ignored because an ordinary sequence has nowhere to receive one — the run's own token is examined
+    /// between two of its elements by the pump instead, which is the same discipline a concat-map follows.
+    /// </remarks>
+    private static LocalInnerCursorFactory BoxInner<TIn, TOut>(Func<TIn, IEnumerable<TOut>> selector) =>
+        (element, _) => new LocalSequenceCursor<TOut>((selector((TIn)element!) ?? throw Nothing()).GetEnumerator());
+
+    /// <summary>Builds the refusal of a merge-map function that answered no sequence at all.</summary>
+    /// <returns>The exception to throw.</returns>
+    private static InvalidOperationException Nothing() =>
+        new($"A '{LocalStageKind.MergeMap}' stage's function answered null for an element, and what it answers is merged into the stream. An element that produces nothing is an empty sequence.");
 
     /// <summary>Wraps a typed action into one over boxed elements.</summary>
     /// <typeparam name="TIn">The element type the action consumes.</typeparam>

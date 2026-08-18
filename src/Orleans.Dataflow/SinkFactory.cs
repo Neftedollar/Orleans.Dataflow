@@ -55,6 +55,23 @@ public sealed class SinkFactory<T>
     public SinkWithResult<T, TState> Aggregate<TState>(TState seed, Func<TState, T, TState> folder) =>
         Sink.Aggregate(seed, folder);
 
+    /// <summary>Creates a sink that folds every element through an asynchronous function into a result.</summary>
+    /// <typeparam name="TState">The type of the state, which is also the type of the result.</typeparam>
+    /// <param name="seed">The initial state.</param>
+    /// <param name="folder">The callback combining the running state with the next element.</param>
+    /// <returns>The result-bearing sink.</returns>
+    /// <exception cref="ArgumentNullException"><paramref name="folder"/> is <see langword="null"/>.</exception>
+    /// <remarks>
+    /// The result-bearing asynchronous terminal, with one fold in flight at a time because the next fold
+    /// receives this one's answer. <typeparamref name="TState"/> is inferred from <paramref name="seed"/>
+    /// and the element type is already known, so every parameter of <paramref name="folder"/> is typed
+    /// without an annotation.
+    /// </remarks>
+    public SinkWithResult<T, TState> AggregateAsync<TState>(
+        TState seed,
+        Func<TState, T, CancellationToken, Task<TState>> folder) =>
+        Sink.AggregateAsync(seed, folder);
+
     /// <summary>Creates a sink that hands every element to a callback, one at a time and in order.</summary>
     /// <param name="callback">The action applied to every element.</param>
     /// <returns>The sink.</returns>

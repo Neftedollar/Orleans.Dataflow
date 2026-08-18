@@ -12,9 +12,10 @@ namespace Orleans.Dataflow.Runtime;
 /// runs precisely as it did before buffers existed, whether it is the whole graph or one branch of one.
 /// </para>
 /// <para>
-/// At most one of <see cref="Elements"/>, <see cref="Async"/>, <see cref="FanOut"/>, and
-/// <see cref="FanIn"/> is set, and only for the segments that have a head of their own: a segment at a head
-/// of the graph pulls from a sequence, a segment that begins at an asynchronous stage drives that stage, a
+/// At most one of <see cref="Elements"/>, <see cref="Async"/>, <see cref="MergeMap"/>,
+/// <see cref="FanOut"/>, and <see cref="FanIn"/> is set, and only for the segments that have a head of their
+/// own: a segment at a head of the graph pulls from a sequence, a segment that begins at an asynchronous
+/// stage drives that stage, a segment that begins at a merge-map drives its window of inner enumerations, a
 /// junction segment is the junction and nothing else, and every other segment simply reads its input
 /// channel. <see cref="Terminal"/> is set on a segment that ends a branch and only when the sink there has
 /// something to do with an element.
@@ -33,6 +34,7 @@ internal sealed class LocalSegment
     /// <summary>Initializes a new instance of the <see cref="LocalSegment"/> class.</summary>
     /// <param name="elements">The factory of the sequence to pull from, or <see langword="null"/>.</param>
     /// <param name="async">The asynchronous stage that heads this segment, or <see langword="null"/>.</param>
+    /// <param name="mergeMap">The merge-map that heads this segment, or <see langword="null"/>.</param>
     /// <param name="fanOut">The splitting junction this segment is, or <see langword="null"/>.</param>
     /// <param name="fanIn">The joining junction this segment is, or <see langword="null"/>.</param>
     /// <param name="stages">The fused synchronous stages, in flow order.</param>
@@ -43,6 +45,7 @@ internal sealed class LocalSegment
     internal LocalSegment(
         LocalSource? elements,
         LocalAsyncStage? async,
+        LocalMergeMapStage? mergeMap,
         LocalFanOut? fanOut,
         LocalFanIn? fanIn,
         IReadOnlyList<LocalElementStage> stages,
@@ -53,6 +56,7 @@ internal sealed class LocalSegment
     {
         Elements = elements;
         Async = async;
+        MergeMap = mergeMap;
         FanOut = fanOut;
         FanIn = fanIn;
         Stages = stages;
@@ -78,6 +82,17 @@ internal sealed class LocalSegment
     /// <summary>Gets the asynchronous stage that heads this segment.</summary>
     /// <value>The stage, or <see langword="null"/> when this segment has no asynchronous head.</value>
     internal LocalAsyncStage? Async { get; }
+
+    /// <summary>Gets the merge-map that heads this segment.</summary>
+    /// <value>The stage, or <see langword="null"/> when this segment has no merge-map head.</value>
+    /// <remarks>
+    /// A separate member from <see cref="Async"/> rather than a setting of it, because the two are two
+    /// shapes of loop and not two configurations of one: an asynchronous stage's window holds callbacks and
+    /// frees a slot when a result is emitted, and a merge-map's holds enumerations and frees a slot when one
+    /// ends. Everything they do share — the bounded handoff in front of them, the fused stages they emit
+    /// into, the park points between elements — is stated in <see cref="LocalRun"/> once for both.
+    /// </remarks>
+    internal LocalMergeMapStage? MergeMap { get; }
 
     /// <summary>Gets the splitting junction this segment is.</summary>
     /// <value>The strategy, or <see langword="null"/> for every segment that is not a fan-out.</value>

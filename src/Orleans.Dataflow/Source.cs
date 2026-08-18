@@ -102,6 +102,35 @@ public sealed class Source<T>
         return new Source<TState>(Shape.Append(LocalStageDescriptor.Scan(seed, folder)));
     }
 
+    /// <summary>Extends this source with a running fold whose function is asynchronous.</summary>
+    /// <typeparam name="TState">The type of the state, which becomes the element type.</typeparam>
+    /// <param name="seed">The initial state, which is not emitted.</param>
+    /// <param name="folder">The callback combining the running state with the next element.</param>
+    /// <returns>A new source; this one is unchanged.</returns>
+    /// <exception cref="ArgumentNullException"><paramref name="folder"/> is <see langword="null"/>.</exception>
+    /// <remarks>
+    /// <para>
+    /// <see cref="Scan"/> with a fold that awaits, and everything a scan promises holds unchanged: one state
+    /// out per element in, an empty stream emitting nothing at all, the seed being where the fold starts
+    /// rather than something that happened — so it is not emitted — and the state allocated per run.
+    /// </para>
+    /// <para>
+    /// One fold runs at a time and there is no bound to declare, because the state the next element folds
+    /// into is this fold's answer. So there is no window to hold and no boundary either: the wait happens on
+    /// the segment's own thread, exactly where a synchronous fold's work would happen, which is what makes
+    /// an asynchronous scan cost the awaiting and nothing else. The callback receives the run's own token,
+    /// which is cancelled when the run is cancelled and when anything in the run fails; a failure mid-fold
+    /// faults the run with the author's own exception; and a pause parks between two folds, holding the
+    /// state the last one produced.
+    /// </para>
+    /// </remarks>
+    public Source<TState> ScanAsync<TState>(TState seed, Func<TState, T, CancellationToken, Task<TState>> folder)
+    {
+        ArgumentNullException.ThrowIfNull(folder);
+
+        return new Source<TState>(Shape.Append(LocalStageDescriptor.ScanAsync(seed, folder)));
+    }
+
     /// <summary>Extends this source with a stage that passes a declared number of elements.</summary>
     /// <param name="count">How many elements to pass; zero or more.</param>
     /// <returns>A new source; this one is unchanged.</returns>
@@ -242,6 +271,94 @@ public sealed class Source<T>
         ArgumentNullException.ThrowIfNull(selector);
 
         return new Source<TNext>(Shape.Append(LocalStageDescriptor.SelectMany(selector)));
+    }
+
+    /// <summary>Extends this source with a stage that merges the sequences of several elements at once.</summary>
+    /// <typeparam name="TNext">The element type the sequences carry.</typeparam>
+    /// <param name="options">The greatest number of inner sequences open at one time.</param>
+    /// <param name="selector">The function answering one sequence per element.</param>
+    /// <returns>A new source; this one is unchanged.</returns>
+    /// <exception cref="ArgumentNullException">
+    /// <paramref name="options"/> or <paramref name="selector"/> is <see langword="null"/>.
+    /// </exception>
+    /// <exception cref="ArgumentOutOfRangeException">
+    /// <see cref="ParallelismOptions.MaxConcurrency"/> is below one.
+    /// </exception>
+    /// <remarks>
+    /// <para>
+    /// The other half of flattening, and one sentence says which half it is: <b>emission is unordered across
+    /// inner sequences, and the order of each inner sequence is preserved.</b> An element is emitted as soon
+    /// as the sequence it came from produces it, whichever sequence that is; and an inner sequence is never
+    /// asked for its next element until the one before it has been delivered, which is why its own order
+    /// survives being interleaved with every other's. <see cref="SelectMany"/> is the ordered half — one
+    /// sequence read to its end before the next element is asked for — and an author who needs the result to
+    /// be a function of the input alone wants that one.
+    /// </para>
+    /// <para>
+    /// Up to <see cref="ParallelismOptions.MaxConcurrency"/> sequences are open at once and a slot is freed
+    /// when a sequence <b>ends</b> rather than when it produces one more element. An empty inner sequence
+    /// therefore frees its slot at once, and an endless one holds its slot for as long as the run lasts.
+    /// Nothing is ever collected: each open sequence holds at most the one element it has produced and not
+    /// yet handed over, so a bounded boundary below this stage paces every one of them together, and a pause
+    /// parks between two inner elements with whatever has been produced held where it is.
+    /// </para>
+    /// <para>
+    /// The sequences are opened with the run's own cancellation token. A failure of any of them, or of the
+    /// function itself, faults the run and cancels the rest; every sequence this stage opened is released on
+    /// every terminal path, and releasing one means awaiting its own asynchronous disposal rather than
+    /// merely starting it. A shutdown admits no new element and plays the sequences already open out to
+    /// their natural end, which is what draining means for work already admitted; a cancellation abandons
+    /// them and releases them at once.
+    /// </para>
+    /// <para>
+    /// A function answering <see langword="null"/> fails the run, exactly as a concat-map's does: an element
+    /// that produces nothing is an empty sequence.
+    /// </para>
+    /// </remarks>
+    public Source<TNext> MergeMap<TNext>(
+        ParallelismOptions options,
+        Func<T, IAsyncEnumerable<TNext>> selector)
+    {
+        ArgumentNullException.ThrowIfNull(options);
+        ArgumentNullException.ThrowIfNull(selector);
+
+        return new Source<TNext>(Shape.Append(
+            LocalStageDescriptor.MergeMap(LocalOptionGuard.Parallelism(options, nameof(options)), selector)));
+    }
+
+    /// <summary>Extends this source with a stage that merges ordinary sequences, several at a time.</summary>
+    /// <typeparam name="TNext">The element type the sequences carry.</typeparam>
+    /// <param name="options">The greatest number of inner sequences open at one time.</param>
+    /// <param name="selector">The function answering one sequence per element.</param>
+    /// <returns>A new source; this one is unchanged.</returns>
+    /// <exception cref="ArgumentNullException">
+    /// <paramref name="options"/> or <paramref name="selector"/> is <see langword="null"/>.
+    /// </exception>
+    /// <exception cref="ArgumentOutOfRangeException">
+    /// <see cref="ParallelismOptions.MaxConcurrency"/> is below one.
+    /// </exception>
+    /// <remarks>
+    /// <para>
+    /// The same operator over the sequences C# has had all along, and it is the same machinery rather than a
+    /// second one: the same window of open sequences, the same unordered emission across them with each
+    /// one's own order preserved, the same slot freed when a sequence ends, and the same release on every
+    /// terminal path. Both spellings build the same node, because how an author's sequence produces its
+    /// elements is behavior in the way the body of a mapping function is.
+    /// </para>
+    /// <para>
+    /// The price of the ordinary spelling is worth knowing before writing one: an ordinary sequence is
+    /// advanced on the segment's own thread, so an inner sequence that <i>blocks</i> holds up every other
+    /// sequence open beside it. That is the same slow-source rule this runtime states everywhere else, and
+    /// it is what the asynchronous spelling exists for.
+    /// </para>
+    /// </remarks>
+    public Source<TNext> MergeMap<TNext>(ParallelismOptions options, Func<T, IEnumerable<TNext>> selector)
+    {
+        ArgumentNullException.ThrowIfNull(options);
+        ArgumentNullException.ThrowIfNull(selector);
+
+        return new Source<TNext>(Shape.Append(
+            LocalStageDescriptor.MergeMap(LocalOptionGuard.Parallelism(options, nameof(options)), selector)));
     }
 
     /// <summary>Extends this source with a stage that collects elements into lists of a declared size.</summary>

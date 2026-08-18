@@ -115,6 +115,30 @@ internal sealed class LocalTerminal
     internal static LocalTerminal Folding(Func<object?, object?, object?> folder) =>
         new((state, element, _) => folder(state, element), completesOnFirstElement: false, requiresElement: false);
 
+    /// <summary>Creates the terminal of a sink that folds every element through an asynchronous function.</summary>
+    /// <param name="folder">The author's fold over boxed state, boxed elements, and the run's token.</param>
+    /// <returns>The terminal.</returns>
+    /// <remarks>
+    /// <para>
+    /// The result-bearing asynchronous terminal, and it is the ordinary fold with the wait a fold could not
+    /// take before. Everything else about it is the folding sink's: the state belongs to the run, the slot
+    /// resolves it when the run ends, a failure anywhere faults every slot of the run, and a shutdown
+    /// resolves what was folded so far.
+    /// </para>
+    /// <para>
+    /// One fold at a time and nothing to declare, for the reason the asynchronous scan has none: the state
+    /// the next element folds into is the answer of the previous fold, so a bound on concurrency would be a
+    /// number with only one legal value. That is what makes this a terminal rather than a second
+    /// asynchronous segment — and it is the difference from <c>ForEachAsync</c>, which declares a bound
+    /// because its callbacks are independent and declares no result because it accumulates nothing.
+    /// </para>
+    /// </remarks>
+    internal static LocalTerminal FoldingAsync(Func<object?, object?, CancellationToken, Task<object?>> folder) =>
+        new(
+            (state, element, context) => context.Await(folder(state, element, context.RunToken)),
+            completesOnFirstElement: false,
+            requiresElement: false);
+
     /// <summary>Creates the terminal of a counting sink.</summary>
     /// <returns>The terminal.</returns>
     /// <remarks>

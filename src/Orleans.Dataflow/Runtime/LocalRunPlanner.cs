@@ -318,6 +318,7 @@ internal static class LocalRunPlanner
         {
             LocalSource? elements = null;
             LocalAsyncStage? asynchronous = null;
+            LocalMergeMapStage? merging = null;
             List<LocalElementStage> stages = [];
             LocalBoundary? pending = null;
             LocalTerminal? terminal = null;
@@ -596,6 +597,20 @@ internal static class LocalRunPlanner
                             Fuse(LocalElementStage.SelectMany(
                                 LocalDelegateAdapter.Flattener(descriptor.Behavior)));
                             break;
+                        case LocalStageKind.MergeMap when !first && !last:
+                            // A boundary of its own, like an asynchronous stage and for a stronger version
+                            // of the same reason: this loop sleeps on one outstanding step per open inner
+                            // sequence, and no pass of somebody else's loop could ever take that wait. A
+                            // buffer written in front of it is its input channel rather than a second one,
+                            // which is the rule every boundary of this vocabulary follows.
+                            Open(pending ?? LocalBoundary.Handoff);
+                            merging = Merging(declaration, descriptor);
+                            break;
+                        case LocalStageKind.ScanAsync when !first && !last:
+                            Fuse(LocalAttachedStages.ScanAsync(
+                                descriptor.Seed,
+                                LocalDelegateAdapter.AsyncFolder(descriptor.Behavior, descriptor.Kind)));
+                            break;
                         case LocalStageKind.Grouped when !first && !last:
                             Fuse(LocalElementStage.Grouped(
                                 Count(declaration),
@@ -742,6 +757,13 @@ internal static class LocalRunPlanner
                             seed = descriptor.Seed;
                             produces = true;
                             break;
+                        case LocalStageKind.FoldAsync when last:
+                            Settle();
+                            terminal = LocalTerminal.FoldingAsync(
+                                LocalDelegateAdapter.AsyncFolder(descriptor.Behavior, descriptor.Kind));
+                            seed = descriptor.Seed;
+                            produces = true;
+                            break;
                         case LocalStageKind.Ignore when last:
                             Settle();
                             break;
@@ -806,6 +828,7 @@ internal static class LocalRunPlanner
                     segments.Add(new LocalSegment(
                         elements,
                         asynchronous,
+                        merging,
                         fanOut: null,
                         fanIn: null,
                         [.. stages],
@@ -853,6 +876,7 @@ internal static class LocalRunPlanner
                 segments.Add(new LocalSegment(
                     elements,
                     asynchronous,
+                    merging,
                     fanOut: null,
                     fanIn: null,
                     [.. stages],
@@ -864,6 +888,7 @@ internal static class LocalRunPlanner
                 pending = null;
                 elements = null;
                 asynchronous = null;
+                merging = null;
                 stages.Clear();
                 inputs = [channel];
             }
@@ -875,7 +900,11 @@ internal static class LocalRunPlanner
             // element of slack than the author asked for.
             void Open(LocalBoundary boundary)
             {
-                if (elements is not null || asynchronous is not null || stages.Count > 0 || pending is not null)
+                if (elements is not null ||
+                    asynchronous is not null ||
+                    merging is not null ||
+                    stages.Count > 0 ||
+                    pending is not null)
                 {
                     Cut(boundary);
                 }
@@ -943,6 +972,7 @@ internal static class LocalRunPlanner
                 segments.Add(new LocalSegment(
                     elements: null,
                     async: null,
+                    mergeMap: null,
                     junction,
                     fanIn: null,
                     [],
@@ -1091,6 +1121,7 @@ internal static class LocalRunPlanner
                 segments.Add(new LocalSegment(
                     elements: null,
                     async: null,
+                    mergeMap: null,
                     fanOut: null,
                     Joining(node, joining),
                     [],
@@ -1844,6 +1875,33 @@ internal static class LocalRunPlanner
             },
             options!.MaxConcurrency,
             descriptor.Kind is LocalStageKind.SelectAsync or LocalStageKind.SelectValueTaskAsync);
+    }
+
+    /// <summary>Reads a merge-map node's payload and binding as the stage that heads a segment.</summary>
+    /// <param name="node">The node as the document declares it.</param>
+    /// <param name="descriptor">The occurrence, which carries the kind and the bound function.</param>
+    /// <returns>The stage.</returns>
+    /// <exception cref="InvalidOperationException">
+    /// The payload is not a parallelism payload, or the binding is not a function answering a sequence.
+    /// </exception>
+    /// <remarks>
+    /// The same split the asynchronous stages make and the same payload: how many inner sequences are open
+    /// at once is configuration a document states, and which of the two function shapes the author wrote is
+    /// behavior the binding carries. Both shapes are resolved into one opener here and nowhere else, so the
+    /// pump above promises what it promises once.
+    /// </remarks>
+    private static LocalMergeMapStage Merging(StageNode node, LocalStageDescriptor descriptor)
+    {
+        if (!LocalParallelismParameters.TryRead(
+            node.Parameters,
+            out ParallelismOptions? options,
+            out IReadOnlyList<string> violations))
+        {
+            throw Foreign(
+                $"the merge-map stage '{node.Id}' carries parameters this runtime cannot read: {string.Join("; ", violations)}");
+        }
+
+        return new LocalMergeMapStage(LocalDelegateAdapter.Inner(descriptor.Behavior), options!.MaxConcurrency);
     }
 
     /// <summary>Sorts the document's declared slots into the endings' results and the run's controls.</summary>

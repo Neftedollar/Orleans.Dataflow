@@ -53,6 +53,20 @@ internal static class LocalAttachedStages
     /// <returns>The stage.</returns>
     internal static LocalAttachedStage Valve(LocalValve valve) => new Gated(valve);
 
+    /// <summary>Creates a stage that folds every element through an asynchronous function and emits each state.</summary>
+    /// <param name="seed">The state the first fold receives, which is never emitted.</param>
+    /// <param name="folder">The author's fold over boxed state, boxed elements, and the run's token.</param>
+    /// <returns>The stage.</returns>
+    /// <remarks>
+    /// Here rather than beside the synchronous scan because it needs the run — its callback receives the
+    /// run's own token, and the wait for its answer parks against the run's pause gate — and not because it
+    /// reads a clock. It is the one stage of this group that neither times anything nor acts on silence.
+    /// </remarks>
+    internal static LocalAttachedStage ScanAsync(
+        object? seed,
+        Func<object?, object?, CancellationToken, Task<object?>> folder) =>
+        new Folding(seed, folder);
+
     /// <summary>Creates a stage that holds a stream to a declared rate.</summary>
     /// <param name="elements">The number of cost units admitted per <paramref name="per"/>.</param>
     /// <param name="per">The period the rate is measured over.</param>
@@ -112,6 +126,44 @@ internal static class LocalAttachedStages
             {
                 Run.Hold(valve.Opened);
             }
+
+            return LocalStageOutcome.Emit;
+        }
+    }
+
+    /// <summary>A stage that folds every element through an asynchronous function and emits each state.</summary>
+    /// <param name="seed">The state the first fold receives.</param>
+    /// <param name="folder">The author's fold over boxed state, boxed elements, and the run's token.</param>
+    /// <remarks>
+    /// <para>
+    /// <b>Concurrency is one by construction and is not a number anybody chose.</b> The state the next fold
+    /// receives is the answer of this one, so two folds of one stage can never run at once whatever a bound
+    /// said — which is why this is a fused stage that waits rather than an asynchronous stage with a window
+    /// of one. It costs no boundary, no second thread, and no element of slack, and its sequentiality is a
+    /// property of the shape instead of a consequence of a pump's admission rule.
+    /// </para>
+    /// <para>
+    /// The state is a field of the stage and a stage instance belongs to exactly one segment of exactly one
+    /// run, which is what makes "fresh state per run" true here for the reason it is true of the synchronous
+    /// scan. The seed is not emitted: the state is replaced before it is handed downstream, so the first
+    /// thing anything below sees is what the first element made of the seed.
+    /// </para>
+    /// </remarks>
+    private sealed class Folding(object? seed, Func<object?, object?, CancellationToken, Task<object?>> folder)
+        : LocalAttachedStage
+    {
+        private object? _state = seed;
+
+        /// <inheritdoc/>
+        /// <remarks>
+        /// The state is assigned only once the fold has answered, so a failing fold leaves the state it was
+        /// given rather than a half-made one — which matters not at all to a run that is now failing, and
+        /// matters to a reader deciding what this stage promises.
+        /// </remarks>
+        internal override LocalStageOutcome Apply(object? element, out object? result)
+        {
+            _state = Run.Await(folder(_state, element, Run.RunToken));
+            result = _state;
 
             return LocalStageOutcome.Emit;
         }

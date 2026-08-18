@@ -97,6 +97,42 @@ public static class Sink
         return new SinkWithResult<T, TState>(LocalStageChain.Of(LocalStageDescriptor.Fold(seed, folder)));
     }
 
+    /// <summary>Creates a sink that folds every element through an asynchronous function into a result.</summary>
+    /// <typeparam name="T">The element type to consume.</typeparam>
+    /// <typeparam name="TState">The type of the state, which is also the type of the result.</typeparam>
+    /// <param name="seed">The initial state.</param>
+    /// <param name="folder">The callback combining the running state with the next element.</param>
+    /// <returns>The result-bearing sink.</returns>
+    /// <exception cref="ArgumentNullException"><paramref name="folder"/> is <see langword="null"/>.</exception>
+    /// <remarks>
+    /// <para>
+    /// <see cref="Aggregate{T, TState}"/> with a fold that awaits, and it is the terminal that
+    /// <see cref="ForEachAsync{T}"/> is not: the state it accumulates resolves through a declared slot when
+    /// the run ends, which is what "the result-bearing asynchronous terminal" means. Everything else is the
+    /// ordinary fold's — the state is allocated per run, a shutdown resolves what was folded so far, and a
+    /// failure anywhere in the run faults this slot along with every other.
+    /// </para>
+    /// <para>
+    /// One fold runs at a time and there is no bound to declare, because the state the next element folds
+    /// into is this fold's answer; <see cref="ForEachAsync{T}"/> declares one precisely because its
+    /// callbacks are independent of each other and it accumulates nothing. The callback receives the run's
+    /// own cancellation token, and a failure mid-fold faults the run with the author's own exception.
+    /// </para>
+    /// <para>
+    /// Both type arguments have to be written here for the reason <see cref="Aggregate{T, TState}"/>'s do;
+    /// the inference-free spelling is
+    /// <c>source.To(s =&gt; s.AggregateAsync(seed, folder), "name", out var slot)</c>.
+    /// </para>
+    /// </remarks>
+    public static SinkWithResult<T, TState> AggregateAsync<T, TState>(
+        TState seed,
+        Func<TState, T, CancellationToken, Task<TState>> folder)
+    {
+        ArgumentNullException.ThrowIfNull(folder);
+
+        return new SinkWithResult<T, TState>(LocalStageChain.Of(LocalStageDescriptor.FoldAsync(seed, folder)));
+    }
+
     /// <summary>Creates a sink that hands every element to a callback, one at a time and in order.</summary>
     /// <typeparam name="T">The element type to consume.</typeparam>
     /// <param name="callback">The action applied to every element.</param>
