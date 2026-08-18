@@ -6,6 +6,7 @@
     <LangVersion>latest</LangVersion>
   </PropertyGroup>
   <ItemGroup>
+    <Compile Include="Properties/AssemblyInfo.fs" />
     <Compile Include="Shapes.fs" />
     <Compile Include="Bindings.fs" />
     <Compile Include="Flow.fs" />

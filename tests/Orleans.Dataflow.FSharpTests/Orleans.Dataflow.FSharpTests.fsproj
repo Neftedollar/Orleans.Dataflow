@@ -18,6 +18,7 @@
     <Compile Include="RegisteredParityTests.fs" />
     <Compile Include="RegisteredRunTests.fs" />
     <Compile Include="RunControlTests.fs" />
+    <Compile Include="TestingInterop.fs" />
     <Compile Include="DurabilityTests.fs" />
   </ItemGroup>
   <ItemGroup>

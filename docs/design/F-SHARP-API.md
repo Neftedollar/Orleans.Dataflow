@@ -1,6 +1,6 @@
 # F# API direction
 
-- Status: M7 in flight (started 2026-08-18, after the M6 gate passed)
+- Status: as implemented (M7, closed 2026-08-19; this document is the record of the direction and of where the built thing deviated, each deviation dated and reasoned inline)
 - Package: `Orleans.Dataflow.FSharp`
 
 This document was written before any F# existed so that C# and graph-core
@@ -45,7 +45,13 @@ builds against it. The phase order:
    the same reason: past `AsPipeline` the authoring language is
    invisible, so an F#-authored pipeline is bytes the C# cluster suite
    already covers.
-5. **M7.5 — examples, docs authored as F#, and the M7 exit review.**
+5. **M7.5 — examples, docs, and the exit review** (done 2026-08-19): the
+   README carries the F# twin of its C# example; this document is swept to
+   as-implemented; the Testing-package gap M7.4 found is closed by a
+   tests-only bridge (two friend grants and one occurrence-chain wrapper,
+   never product surface), which put the commit mark into the F# durable
+   test — the stored pair reads 6/6 at the crash and the resumed sink
+   continues to 12, the run's number rather than the attempt's.
 
 ## Principles
 
@@ -145,18 +151,36 @@ let normalizeOrders : Flow<OrderCreated, OrderDocument> =
     |> Flow.andThen (Flow.map OrderDocument.ofEvent)
 
 let definition =
-    Source.fromOrleansStream<OrderCreated> orderSourceOptions
+    Source.ofRegistered orderStream "orders-in" orderStreamParameters
     |> Source.via normalizeOrders
-    |> Source.via enrichOrders
-    |> Source.toSink orderSink
-    |> Pipeline.define
-        (PipelineId "orders-to-documents")
-        (PipelineVersion 1)
+    |> Source.viaRegistered enrich "enrich" enrichParameters
+    |> Source.toRegistered orderSink "orders-out" orderSinkParameters
+    |> Pipeline.define "orders-to-documents" 1
 ```
+
+As built (M7.4), a deployable pipeline is written in the registered
+vocabulary — a typed handle, an occurrence name, a canonical payload —
+and `Pipeline.define` takes the text and the number an author writes,
+calling the identity types' own constructors. The
+`Source.fromOrleansStream<OrderCreated> orderSourceOptions` this sketch
+first imagined is the registered spelling above: an adapter's options
+ARE its canonical payload, written by the adapter's own parameter
+writer, so a per-adapter F# options record would be a second spelling
+of the payload that already exists.
 
 `Flow.andThen` is the primary readable function. A symbolic composition operator may be evaluated later, but documentation must not require users to remember it.
 
 ## Configuration types
+
+**As built (M7.2/M7.4):** the F# frontend reuses the public C# option
+records directly — `ParallelismOptions(MaxConcurrency = 4)` and its
+siblings take F#'s property-initializer syntax without help — and
+registered adapters carry their options as their canonical payloads, so
+none of the sketched records below were created. The sketches stay as
+the rule they were written to state (specific types per concern, never a
+generic options bag), which the C# records already satisfy; they would
+become real types only with the optional external adapters (Kafka, HTTP)
+that remain future work.
 
 A generic `SourceOptions`, `FlowOptions`, or `SinkOptions` type is insufficient for real adapters. It invites unrelated fields and hides ownership. Prefer specific, stable records:
 
@@ -346,6 +370,17 @@ the F# `comparison` constraint requires exactly that interface, not
 explicitly, so no public member is added); and samples must
 write `string value`, never `.ToString()`, on the readonly structs
 (`FS0052` defensive-copy warning under warnings-as-errors).
+
+Two more, found by building M7 against the surface (2026-08-19):
+`Sink.FirstOrDefault<T>()` and `LastOrDefault<T>()` are uncallable from
+F# with a value-type argument — `SinkWithResult<T, T?>` over
+unconstrained `T` asks F# to form `int | null`, which is FS3265 — so any
+F# consumer of the C# package hits it, and the F# module's own
+`firstOrDefault` (typed `SinkWithResult<'T,'T>`) is the spelling that
+avoids it. And module functions cannot take explicit type arguments
+across assemblies (FS0686) — generic *values* like `Source.empty<int>`
+can — so `Source.queue` and `Source.failed` document the annotation
+spelling (`let orders : Source<Order> = Source.queue options "orders"`).
 
 ## Expensive mistakes to avoid
 

@@ -238,7 +238,45 @@ An independent review must confirm:
 
 Only after this gate does F# frontend work begin.
 
-## M7 — Idiomatic F# frontend
+## M7 — Idiomatic F# frontend (closed 2026-08-19; recorded deferrals below)
+
+Five phases in two days, each committed with its suites green, and the
+exit criteria hold with named evidence. **No user-authored C# class**: the
+entire F# suite — 153 tests, including a provider written as an object
+expression against the public SDK — contains none, and the README's F#
+example is the C# example's byte-identical twin. **Names follow the F#
+component guidelines** by construction: qualified modules, camelCase
+functions, one named function per operation, `Pair` names where C# has
+unlike-arity overloads. **No overload guessing, SRTP, serialized closures,
+or mutable builders**: the API is modules over immutable values; the one
+computation-expression-free spelling per operation is the deliberate
+surface, and delegates never enter a document — asserted every time a
+crashing graph and its resumed twin compare fingerprints. **Compatibility
+is byte identity, made falsifiable**: 150+ fingerprint twins across the
+linear, junction, and registered vocabularies, mutation-probed so a
+mis-wired junction fails named tests; identical runtime semantics are held
+by construction (one descriptor vocabulary, one builder, one delegate
+adapter — there is no second runtime to diverge) and spot-proven by
+behavior tests that execute F#-stored delegates through the same engine.
+
+Deferred deliberately, with rationale. **A public F# testing vocabulary**:
+the Testing package answers in C#-facade types; the F# tests reach its
+marking sink and fault point through a tests-only occurrence-chain bridge
+(two friend grants), and promoting that to product surface waits for an
+external F# consumer to need it. **Type abbreviations for the C# option
+types**: naming one currently requires `open Orleans.Dataflow`, whose
+`Source`/`Flow`/`Sink` shadow the F# modules' types order-dependently;
+zero-cost abbreviations in the F# namespace would remove the trap and are
+one file when wanted. **A `Choose` stage kind**: F# `choose` rides
+`SelectMany` at its degenerate size — one honest node — and a dedicated
+kind would remove one small allocation per kept element. **`.fsi`
+signature files**: may lift FS0686 (module functions cannot take explicit
+type arguments cross-assembly), unevaluated. **The group projection's
+fourth private copy** wants the internal seam the C# facade's three
+copies already wanted. Two C#-surface findings from consuming it as F#
+are recorded in F-SHARP-API.md: `Sink.FirstOrDefault<T>()` is uncallable
+from F# with a value-type argument (FS3265), and the slot-name diagnostic
+the F# side once restated now delegates to the guard that owns it.
 
 Deliverables:
 

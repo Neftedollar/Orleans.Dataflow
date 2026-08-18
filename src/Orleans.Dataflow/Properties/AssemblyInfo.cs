@@ -34,3 +34,10 @@ using System.Runtime.CompilerServices;
 // the one builder, and the runtime's delegate adapter is the single owner of how a typed lambda meets a
 // boxed element.
 [assembly: InternalsVisibleTo("Orleans.Dataflow.FSharp")]
+
+// The F# test project is a friend for the reason the C# one is: it asserts facts about internals no
+// public API can observe. Its one structural use beyond that is a tests-only bridge from the Testing
+// package's C#-facade values (a marking sink, a fault point) into the F# frontend's own shapes — the
+// occurrence chain is the shared currency, and reading it here keeps the F# package itself free of any
+// facade detour.
+[assembly: InternalsVisibleTo("Orleans.Dataflow.FSharpTests")]

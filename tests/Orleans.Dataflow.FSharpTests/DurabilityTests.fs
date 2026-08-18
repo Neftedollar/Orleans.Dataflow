@@ -44,6 +44,35 @@ type DurabilityTests() =
             RunId = RunId.Create run,
             EveryElements = System.Nullable everyElements)
 
+    /// <summary>Reads the commit mark the store currently holds for one durable run.</summary>
+    /// <remarks>
+    /// Read through the core package's own checkpoint reader — this project is a friend for exactly this
+    /// kind of assertion — because what a resume restores is what was written down, and a number read off a
+    /// live sink would only say what that sink believes.
+    /// </remarks>
+    static let storedMark (store: Orleans.Dataflow.Testing.InMemoryCheckpointStore) (run: string) =
+        task {
+            let! stored = store.ReadAsync(anonymous, RunId.Create run)
+
+            Assert.True(stored.HasValue, "the store holds a checkpoint for the run")
+
+            match Orleans.Dataflow.Runtime.LocalCheckpointDocument.TryRead stored.Value.Document with
+            | true, checkpoint, _ ->
+                let mark = (nonNull checkpoint).Marks |> Seq.exactlyOne
+
+                return
+                    mark.Value
+                        .ToElement()
+                        .GetProperty(Orleans.Dataflow.Runtime.LocalMarkingSink.CommittedMember)
+                        .GetInt64()
+            | false, _, violations ->
+                let reasons = String.concat "; " violations
+
+                Assert.Fail($"the stored checkpoint does not read: {reasons}")
+
+                return 0L
+        }
+
     /// <summary>The twelve-element graph both attempts run, with the element that kills the first.</summary>
     /// <remarks>
     /// The failing element is a parameter and the delegate is not document content, so the crashing attempt
@@ -104,6 +133,60 @@ type DurabilityTests() =
             Assert.Equal<int>([ 7; 8 ], first |> Seq.skip 6 |> Seq.toList)
             Assert.Equal<int>([ 1..12 ], Seq.append first second |> Seq.distinct |> Seq.sort |> Seq.toList)
             Assert.Equal(14, first.Count + second.Count)
+        }
+
+    [<Fact>]
+    member _.``A commit mark travels through an F#-authored graph and the resumed sink continues it``() : Task =
+        task {
+            let store = Orleans.Dataflow.Testing.InMemoryCheckpointStore()
+            let firstCommitted = ResizeArray<int>()
+            let secondCommitted = ResizeArray<int>()
+
+            // The marking sink is the Testing package's own, reached through the tests-only bridge: the C#
+            // facade value's occurrence chain is the currency both frontends share, so the mark in this
+            // document is the very stage the C# suite measures with.
+            let marked (committed: ResizeArray<int>) (failAt: int) =
+                Source.ofSeq [ 1..12 ]
+                |> Source.map (fun value ->
+                    if value = failAt then
+                        raise (System.InvalidOperationException $"the attempt dies at element {failAt}")
+                    else
+                        value)
+                |> Source.toSink (
+                    TestingInterop.sink (Orleans.Dataflow.Testing.TestSink.Marking<int>("mark", fun value -> committed.Add value)))
+
+            let! attempt = host.MaterializeDurableAsync(marked firstCommitted 9, durable store "marked" 3, token ())
+
+            do!
+                Assert.ThrowsAsync<System.InvalidOperationException>(fun () -> attempt.Completion)
+                :> Task
+
+            do! attempt.DisposeAsync()
+
+            Assert.Equal<int>([ 1..8 ], firstCommitted)
+
+            // The stored pair, read out of the store rather than off the run: at the second capture the
+            // element bound held the run at element six, the sink's callback had returned for all six, so
+            // cursor and mark agree — a mark advances after its effect, and nothing here holds elements
+            // between the two.
+            let! storedBefore = storedMark store "marked"
+
+            Assert.Equal(6L, storedBefore)
+
+            let! continued =
+                host.MaterializeFromCheckpointAsync(marked secondCommitted 0, durable store "marked" 3, token ())
+
+            do! continued.Completion
+            do! continued.DisposeAsync()
+
+            Assert.Equal<int>([ 7..12 ], secondCommitted)
+
+            // The mark is the run's number and not the attempt's: the resumed sink was handed six committed
+            // elements and counted its own on top, so the last capture — at the twelfth element — stored
+            // twelve. A mark that restarted with the attempt would have stored six.
+            let! storedAfter = storedMark store "marked"
+
+            Assert.Equal(12L, storedAfter)
         }
 
     [<Fact>]
