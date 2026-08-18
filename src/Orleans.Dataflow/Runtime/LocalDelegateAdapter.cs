@@ -154,15 +154,45 @@ internal static class LocalDelegateAdapter
     /// the junction's port order, which is why nothing here can check the answer — how many legs this
     /// occurrence has is stated by its edges, and the pump is where the range is known.
     /// </remarks>
-    internal static Func<object?, int> Router(object? behavior)
+    internal static Func<object?, int> Router(object? behavior) =>
+        Counting(behavior, LocalStageKind.Partition);
+
+    /// <summary>Wraps a throttle's cost function into one over boxed elements.</summary>
+    /// <param name="behavior">The bound <c>Func&lt;T, int&gt;</c>.</param>
+    /// <returns>The wrapped cost function.</returns>
+    /// <exception cref="InvalidOperationException">
+    /// <paramref name="behavior"/> is not a one-argument function returning <see cref="int"/>.
+    /// </exception>
+    /// <remarks>
+    /// The same shape a partition's router has, wrapped by the same template, and answering a different
+    /// question: what one element costs the rate rather than which leg it belongs on. Nothing here checks
+    /// the answer either — what a cost may be is the throttle's business, and the stage is where the burst
+    /// it has to fit inside is known.
+    /// </remarks>
+    internal static Func<object?, int> Cost(object? behavior) =>
+        Counting(behavior, LocalStageKind.Throttle);
+
+    /// <summary>Wraps a one-argument function answering an integer into one over boxed elements.</summary>
+    /// <param name="behavior">The bound <c>Func&lt;T, int&gt;</c>.</param>
+    /// <param name="kind">The stage shape, for the diagnostic.</param>
+    /// <returns>The wrapped function.</returns>
+    /// <exception cref="InvalidOperationException">
+    /// <paramref name="behavior"/> is not a one-argument function returning <see cref="int"/>.
+    /// </exception>
+    /// <remarks>
+    /// Two stages ask an author's function for a number about an element, and they differ in the number's
+    /// meaning rather than in its shape; the shared body is what keeps them one recovery rather than two
+    /// that have to agree.
+    /// </remarks>
+    private static Func<object?, int> Counting(object? behavior, LocalStageKind kind)
     {
         const string Expected = "Func<T, int>";
 
-        Type[] arguments = Arguments(behavior, typeof(Func<,>), LocalStageKind.Partition, Expected);
+        Type[] arguments = Arguments(behavior, typeof(Func<,>), kind, Expected);
 
         if (arguments[1] != typeof(int))
         {
-            throw Mismatch(behavior, LocalStageKind.Partition, Expected);
+            throw Mismatch(behavior, kind, Expected);
         }
 
         return (Func<object?, int>)Close(RouterTemplate, [arguments[0]], behavior);

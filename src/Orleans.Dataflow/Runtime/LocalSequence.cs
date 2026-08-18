@@ -283,6 +283,111 @@ internal static class LocalSequence
         }
     }
 
+    /// <summary>The sequence of a source that emits the number of every tick of an interval.</summary>
+    /// <param name="initialDelay">How long after the run starts tick zero is due.</param>
+    /// <param name="interval">How long after each tick the next one is due.</param>
+    /// <param name="context">The tokens, the pause gate, and the clock of the run.</param>
+    /// <returns>The endless sequence of tick numbers.</returns>
+    /// <remarks>
+    /// <para>
+    /// Tick <c>n</c> is due at <c>initialDelay + n * interval</c> after the <i>run</i> started rather than
+    /// after this sequence was first pulled, which is the same zero every other clock-reading stage of the
+    /// run measures from. A source whose first pull is late is therefore late for its own first tick rather
+    /// than shifting the whole schedule, and two tick sources of one run agree about which moment tick zero
+    /// belongs to.
+    /// </para>
+    /// <para>
+    /// <b>A tick is a clock, not a queue.</b> This source is pulled like every other, so a tick that comes
+    /// due while the run is busy with the previous one is not queued for later — it is skipped, and the next
+    /// element is the number of the tick that is due now. That is the same honesty the reminder trigger has
+    /// about missed ticks, and it is the only answer a bounded runtime can give: queueing them would make an
+    /// idle consumer accumulate an unbounded backlog of moments that have already passed.
+    /// </para>
+    /// <para>
+    /// <b>The element is the tick's number and the number is elapsed rather than emitted.</b> Tick
+    /// <c>n</c> is due at <c>initialDelay + n * interval</c> after the run started, whether or not it was
+    /// emitted, so a consumer that missed three ticks receives a number three higher than the one it would
+    /// otherwise have seen. Akka's tick source emits a fixed element an author supplies, which is honest for
+    /// a push-paced source that never skips; here the skipping is the contract, and a counter that jumped
+    /// silently would hide exactly what an author needs to see. A stream of a constant is one
+    /// <c>Select</c> away, and a stream of timestamps is one more.
+    /// </para>
+    /// <para>
+    /// The wait is this runtime's own and says so to the pause gate, so a pause takes effect between ticks
+    /// rather than waiting for the next one. A shutdown ends the sequence as running out of elements would,
+    /// and a cancellation is raised — the drain-versus-abandon split applied to a source with nothing
+    /// queued. Time passes while a run is paused, so the ticks a pause covers are missed ticks like any
+    /// others and are skipped like any others.
+    /// </para>
+    /// </remarks>
+    internal static IEnumerable Ticks(TimeSpan initialDelay, TimeSpan interval, LocalRunContext context)
+    {
+        long started = context.Started;
+        TimeSpan due = initialDelay;
+        long number = 0;
+
+        while (true)
+        {
+            TimeSpan elapsed = context.Clock.GetElapsedTime(started);
+
+            if (elapsed < due)
+            {
+                if (!Sleep(due - elapsed, context))
+                {
+                    yield break;
+                }
+
+                elapsed = context.Clock.GetElapsedTime(started);
+            }
+
+            // Whole intervals only: a tick is skipped when its own moment has passed, not when the run is a
+            // fraction of an interval late for it, so an exactly-paced consumer never loses one to rounding.
+            if (elapsed - due >= interval)
+            {
+                long missed = (elapsed - due).Ticks / interval.Ticks;
+
+                number += missed;
+                due += TimeSpan.FromTicks(missed * interval.Ticks);
+            }
+
+            yield return number;
+
+            number++;
+            due += interval;
+        }
+    }
+
+    /// <summary>Waits out one duration on the run's clock, telling a shutdown from a cancellation.</summary>
+    /// <param name="duration">How long to wait.</param>
+    /// <param name="context">The tokens, the pause gate, and the clock of the run.</param>
+    /// <returns><see langword="false"/> when a graceful stop released the wait, which ends the sequence.</returns>
+    /// <exception cref="OperationCanceledException">The run was cancelled.</exception>
+    /// <remarks>
+    /// Not an iterator, because it catches. It is one of this runtime's own waits and says so to the pause
+    /// gate, so a pause of a run whose only source is a clock takes effect between ticks instead of waiting
+    /// for the next one. The wait is on the run's <see cref="TimeProvider"/> and never on the system clock,
+    /// which is what lets a test advance time instead of spending it.
+    /// </remarks>
+    private static bool Sleep(TimeSpan duration, LocalRunContext context)
+    {
+        context.Pause.Idle();
+
+        try
+        {
+            Task.Delay(duration, context.Clock, context.StopToken).GetAwaiter().GetResult();
+
+            return true;
+        }
+        catch (OperationCanceledException) when (context.ShuttingDown)
+        {
+            return false;
+        }
+        finally
+        {
+            context.Pause.Busy();
+        }
+    }
+
     /// <summary>Waits for a channel to have an element or to end, telling a shutdown from a cancellation.</summary>
     /// <param name="reader">The bridge over the author's reader.</param>
     /// <param name="context">The tokens of the run.</param>

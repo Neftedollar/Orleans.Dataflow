@@ -50,6 +50,7 @@ internal sealed class LocalRunPlan
     /// The segments whose stream is over before the run begins, which is usually none.
     /// </param>
     /// <param name="feedback">The channels that carry a cycle's elements back round, which is usually none.</param>
+    /// <param name="clock">The clock every stage of the run that reads one reads.</param>
     internal LocalRunPlan(
         IReadOnlyList<LocalSegment> segments,
         IReadOnlyList<LocalBoundary> boundaries,
@@ -57,8 +58,10 @@ internal sealed class LocalRunPlan
         IReadOnlyList<LocalEnding> endings,
         IReadOnlyList<LocalControl> controls,
         IReadOnlyList<int> completesAtStart,
-        IReadOnlyList<int> feedback)
+        IReadOnlyList<int> feedback,
+        TimeProvider clock)
     {
+        Clock = clock;
         Segments = segments;
         Boundaries = boundaries;
         Producers = producers;
@@ -67,6 +70,17 @@ internal sealed class LocalRunPlan
         CompletesAtStart = completesAtStart;
         Feedback = feedback;
     }
+
+    /// <summary>Gets the clock every stage of this run that reads one reads.</summary>
+    /// <value>The host's <see cref="TimeProvider"/>, which is <see cref="TimeProvider.System"/> unless the
+    /// host was given another.</value>
+    /// <remarks>
+    /// On the plan rather than in the document, because a clock is runtime and never definition (ADR 0005):
+    /// two runs of one graph may be measured by two different clocks, and the fingerprint of the graph is
+    /// the same for both. It is resolved when the plan is compiled, which is once per materialization, so
+    /// the delegates a timing stage is built from close over the clock of their own run.
+    /// </remarks>
+    internal TimeProvider Clock { get; }
 
     /// <summary>Gets the segments this plan executes.</summary>
     /// <value>

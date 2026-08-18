@@ -100,6 +100,74 @@ internal static class LocalParameterPayload
         return true;
     }
 
+    /// <summary>Reads a member that has to be a positive duration, written as a count of ticks.</summary>
+    /// <param name="payload">The payload object.</param>
+    /// <param name="member">The member name.</param>
+    /// <param name="violations">The report under construction, appended to when the member is wrong.</param>
+    /// <param name="value">
+    /// When this method returns <see langword="true"/>, the duration; otherwise
+    /// <see cref="TimeSpan.Zero"/>.
+    /// </param>
+    /// <returns><see langword="true"/> when the member is present and is a positive count of ticks.</returns>
+    /// <remarks>
+    /// <para>
+    /// A duration reaches a document as a count of <see cref="TimeSpan.Ticks"/> and never as text, because
+    /// canonical JSON has numbers and strings and a duration is a number (ADR 0003); a formatted duration
+    /// would be a second grammar to parse and a second way for two documents that mean the same thing to
+    /// differ. Ticks rather than milliseconds because ticks are what a <see cref="TimeSpan"/> is: rounding
+    /// an author's value on the way into the document would make the graph do something they did not write.
+    /// </para>
+    /// <para>
+    /// Sixty-four bits are the range, which is the whole range of a <see cref="TimeSpan"/> and exactly what
+    /// canonical JSON admits. Zero is refused for every duration this vocabulary carries: a delay of no
+    /// time, a window of no duration, and a period of no length all describe an operator that should have
+    /// been left out rather than written with nothing in it.
+    /// </para>
+    /// </remarks>
+    internal static bool TryReadDuration(
+        JsonElement payload,
+        string member,
+        List<string> violations,
+        out TimeSpan value)
+    {
+        value = TimeSpan.Zero;
+
+        if (!payload.TryGetProperty(member, out JsonElement declared))
+        {
+            violations.Add(DescribeMissing(member));
+
+            return false;
+        }
+
+        if (declared.ValueKind is not JsonValueKind.Number)
+        {
+            violations.Add(DescribeWrongKind(member, declared, "a positive count of ticks"));
+
+            return false;
+        }
+
+        if (!declared.TryGetInt64(out long ticks))
+        {
+            violations.Add(
+                $"the member '{member}' is {declared.GetRawText()}, and it is a count of ticks no greater than {long.MaxValue.ToString(CultureInfo.InvariantCulture)}");
+
+            return false;
+        }
+
+        if (ticks < 1)
+        {
+            violations.Add(string.Create(
+                CultureInfo.InvariantCulture,
+                $"the member '{member}' is {ticks}, and it is a positive count of ticks"));
+
+            return false;
+        }
+
+        value = TimeSpan.FromTicks(ticks);
+
+        return true;
+    }
+
     /// <summary>Reads a member that has to be an integer of at least zero.</summary>
     /// <param name="payload">The payload object.</param>
     /// <param name="member">The member name.</param>

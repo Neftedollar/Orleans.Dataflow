@@ -221,6 +221,212 @@ public sealed class Source<T>
             Shape.Append(LocalStageDescriptor.Buffer(LocalOptionGuard.Buffer(options, nameof(options)))));
     }
 
+    /// <summary>Extends this source with a stage that holds every element for a declared duration.</summary>
+    /// <param name="delay">How long each element is held before it is emitted.</param>
+    /// <param name="holdback">How many elements may be held at once, and what happens to the next one.</param>
+    /// <returns>A new source; this one is unchanged.</returns>
+    /// <exception cref="ArgumentNullException"><paramref name="holdback"/> is <see langword="null"/>.</exception>
+    /// <exception cref="ArgumentOutOfRangeException">
+    /// <paramref name="delay"/> is not positive, <see cref="BufferOptions.Capacity"/> is below one, or
+    /// <see cref="BufferOptions.OverflowPolicy"/> is not a declared member of its enumeration.
+    /// </exception>
+    /// <remarks>
+    /// <para>
+    /// The stream is shifted rather than paced: every element starts its own wait when the stage takes it,
+    /// the results are emitted in the order the elements arrived, and a burst that fits the declared
+    /// holdback comes out with its gaps intact, later by the delay. The holdback is required and is the
+    /// bound on that: <see cref="BufferOptions.Capacity"/> elements may be waiting out their delay at once,
+    /// with one more in the handoff in front of them as there is in front of every asynchronous stage, and
+    /// an element arriving when both are occupied is answered by
+    /// <see cref="BufferOptions.OverflowPolicy"/> — the upstream waits, an element is dropped, or the run
+    /// fails, exactly as it would at a buffer. A <c>Buffer</c> written immediately before the delay is that
+    /// handoff rather than a second queue, so an author who wants a deeper one says so there.
+    /// </para>
+    /// <para>
+    /// The clock is the host's, resolved when the graph is materialized. A cancellation abandons the
+    /// elements being held; a graceful shutdown drains them, waiting out the delays already started as it
+    /// waits out an asynchronous callback in flight, and a pause waits for them for the same reason —
+    /// which is bounded by the delay itself.
+    /// </para>
+    /// </remarks>
+    public Source<T> Delay(TimeSpan delay, BufferOptions holdback)
+    {
+        ArgumentNullException.ThrowIfNull(holdback);
+
+        return new Source<T>(Shape.Append(LocalStageDescriptor.Delay(
+            LocalOptionGuard.Duration(delay, nameof(delay)),
+            LocalOptionGuard.Buffer(holdback, nameof(holdback)))));
+    }
+
+    /// <summary>Extends this source with a stage that holds the first element until a duration has passed.</summary>
+    /// <param name="delay">How long after the run starts the first element may be emitted.</param>
+    /// <returns>A new source; this one is unchanged.</returns>
+    /// <exception cref="ArgumentOutOfRangeException"><paramref name="delay"/> is not positive.</exception>
+    /// <remarks>
+    /// The delay is on the stream and not on its elements: the first element is held until
+    /// <paramref name="delay"/> has passed since the run started, and everything after it passes untouched.
+    /// A stream whose first element arrives later than that is not delayed at all, because the wait is for
+    /// the moment rather than for the duration. A cancellation abandons the element being held and a
+    /// graceful shutdown releases it, which is where this differs from <see cref="Delay"/>: an element in
+    /// the segment's own hand is delivered by a stop, and one in an asynchronous window is waited out.
+    /// </remarks>
+    public Source<T> InitialDelay(TimeSpan delay) =>
+        new Source<T>(Shape.Append(LocalStageDescriptor.Timed(
+            LocalStageKind.InitialDelay,
+            LocalOptionGuard.Duration(delay, nameof(delay)))));
+
+    /// <summary>Extends this source with a stage that fails the run when the stream goes quiet.</summary>
+    /// <param name="gap">The greatest silence allowed between two elements, and before the first.</param>
+    /// <returns>A new source; this one is unchanged.</returns>
+    /// <exception cref="ArgumentOutOfRangeException"><paramref name="gap"/> is not positive.</exception>
+    /// <remarks>
+    /// <para>
+    /// The run faults with a <see cref="StreamTimeoutException"/> when <paramref name="gap"/> passes with
+    /// no element reaching this stage — counted from the previous element, and for the first element from
+    /// the moment the run started, so a stream that never produces anything at all fails rather than
+    /// hanging. Nothing is dropped and nothing is retried: a timeout is a statement that the stream broke
+    /// its own promise.
+    /// </para>
+    /// <para>
+    /// What is measured is arrivals at this stage and never the time an element spends below it. The clock
+    /// is the host's and keeps running while the run is paused, so a run held for longer than the gap
+    /// fails: a pause holds the elements, not the clock.
+    /// </para>
+    /// </remarks>
+    public Source<T> Timeout(TimeSpan gap) =>
+        new Source<T>(Shape.Append(LocalStageDescriptor.Timed(
+            LocalStageKind.Timeout,
+            LocalOptionGuard.Duration(gap, nameof(gap)))));
+
+    /// <summary>Extends this source with a stage that ends the stream when a duration has passed.</summary>
+    /// <param name="window">How long after the run starts the stream ends.</param>
+    /// <returns>A new source; this one is unchanged.</returns>
+    /// <exception cref="ArgumentOutOfRangeException"><paramref name="window"/> is not positive.</exception>
+    /// <remarks>
+    /// The window is wall-clock and not a count: everything emitted before it closes is kept, the element
+    /// that arrives at or after it is not emitted, and the stream ends there the way reaching a
+    /// <c>Take</c> bound ends it — upstream stops and is released, everything already downstream drains,
+    /// and the run reports success. A stream that has gone quiet still ends at the deadline rather than
+    /// waiting for an element to notice it with, which is the case this operator exists for.
+    /// </remarks>
+    public Source<T> TakeWithin(TimeSpan window) =>
+        new Source<T>(Shape.Append(LocalStageDescriptor.Timed(
+            LocalStageKind.TakeWithin,
+            LocalOptionGuard.Duration(window, nameof(window)))));
+
+    /// <summary>Extends this source with a stage that drops every element until a duration has passed.</summary>
+    /// <param name="window">How long after the run starts elements begin to pass.</param>
+    /// <returns>A new source; this one is unchanged.</returns>
+    /// <exception cref="ArgumentOutOfRangeException"><paramref name="window"/> is not positive.</exception>
+    /// <remarks>
+    /// The mirror of <see cref="TakeWithin"/> and the wall-clock <c>Skip</c>: an element arriving inside
+    /// the window is dropped rather than held, and everything from the first element after it passes. The
+    /// stage never waits — it has an answer for every element the moment it arrives — so a stream that
+    /// produces nothing during the window costs nothing at all.
+    /// </remarks>
+    public Source<T> SkipWithin(TimeSpan window) =>
+        new Source<T>(Shape.Append(LocalStageDescriptor.Timed(
+            LocalStageKind.SkipWithin,
+            LocalOptionGuard.Duration(window, nameof(window)))));
+
+    /// <summary>Extends this source with a stage that holds the stream to a declared rate.</summary>
+    /// <param name="options">The rate, the burst, and what to do with an element there is no budget for.</param>
+    /// <returns>A new source; this one is unchanged.</returns>
+    /// <exception cref="ArgumentNullException"><paramref name="options"/> is <see langword="null"/>.</exception>
+    /// <exception cref="ArgumentOutOfRangeException">
+    /// <see cref="ThrottleOptions.Elements"/> is below one, <see cref="ThrottleOptions.Per"/> is not
+    /// positive, <see cref="ThrottleOptions.MaximumBurst"/> is below
+    /// <see cref="ThrottleOptions.Elements"/>, or <see cref="ThrottleOptions.Mode"/> is not a declared
+    /// member of its enumeration.
+    /// </exception>
+    /// <remarks>
+    /// Every element costs one unit. The budget is a token bucket that starts full, holds
+    /// <see cref="ThrottleOptions.MaximumBurst"/> units, and refills continuously at
+    /// <see cref="ThrottleOptions.Elements"/> per <see cref="ThrottleOptions.Per"/>, so a stream at or
+    /// below the declared rate passes untouched and a faster one is either paced or refused by
+    /// <see cref="ThrottleOptions.Mode"/>. Nothing is ever dropped here: a shaping throttle waits on the
+    /// segment's own thread, which backpressures upstream, and an enforcing one fails the run with a
+    /// <see cref="RateLimitExceededException"/>.
+    /// </remarks>
+    public Source<T> Throttle(ThrottleOptions options)
+    {
+        ArgumentNullException.ThrowIfNull(options);
+
+        return new Source<T>(Shape.Append(LocalStageDescriptor.Throttle(
+            LocalOptionGuard.Throttle(options, nameof(options)),
+            cost: null)));
+    }
+
+
+    /// <summary>Extends this source with a gate an author opens and closes while the run is running.</summary>
+    /// <param name="controlName">The author-stable name to expose the valve under.</param>
+    /// <param name="initialMode">The state the valve starts each run in.</param>
+    /// <returns>A new source; this one is unchanged.</returns>
+    /// <exception cref="ArgumentNullException"><paramref name="controlName"/> is <see langword="null"/>.</exception>
+    /// <exception cref="ArgumentException">
+    /// <paramref name="controlName"/> is not a valid result slot identifier.
+    /// </exception>
+    /// <exception cref="ArgumentOutOfRangeException">
+    /// <paramref name="initialMode"/> is not a declared member of its enumeration.
+    /// </exception>
+    /// <remarks>
+    /// <para>
+    /// The control is an <see cref="IValve"/> resolved by name from the run handle, and it exists as soon as
+    /// the run does — a control is a thing an author uses while the run is running, which is what separates
+    /// it from a result. Closing it holds the element the stage has in its hand and backpressures everything
+    /// above it, exactly as a full buffer does; nothing is dropped and nothing is buffered here, because a
+    /// valve has no capacity of its own. Elements accumulate in whatever boundaries the author declared
+    /// above it, under the policies declared there.
+    /// </para>
+    /// <para>
+    /// The state the valve starts in is written into the document, because a graph whose valve starts closed
+    /// produces nothing until something opens it; what an author does to it afterwards is a run's own
+    /// business and is never durable topology. A closed valve is one of this runtime's own waits: a paused
+    /// run comes to rest inside it, a shutdown releases it and the element is delivered, and a cancellation
+    /// abandons the run.
+    /// </para>
+    /// </remarks>
+    public Source<T> Valve(string controlName, ValveMode initialMode = ValveMode.Open) =>
+        new Source<T>(Shape.Append(LocalStageDescriptor.Valve(
+            LocalOptionGuard.Valve(initialMode, nameof(initialMode)),
+            LocalOptionGuard.SlotName(controlName, nameof(controlName)))));
+
+    /// <summary>Extends this source with a stage that holds the stream to a declared rate by cost.</summary>
+    /// <param name="options">The rate, the burst, and what to do with an element there is no budget for.</param>
+    /// <param name="cost">What one element costs the rate; zero or more.</param>
+    /// <returns>A new source; this one is unchanged.</returns>
+    /// <exception cref="ArgumentNullException">
+    /// <paramref name="options"/> or <paramref name="cost"/> is <see langword="null"/>.
+    /// </exception>
+    /// <exception cref="ArgumentOutOfRangeException">
+    /// <see cref="ThrottleOptions.Elements"/> is below one, <see cref="ThrottleOptions.Per"/> is not
+    /// positive, <see cref="ThrottleOptions.MaximumBurst"/> is below
+    /// <see cref="ThrottleOptions.Elements"/>, or <see cref="ThrottleOptions.Mode"/> is not a declared
+    /// member of its enumeration.
+    /// </exception>
+    /// <remarks>
+    /// <para>
+    /// The same bucket, charged by what the element is worth rather than by one per element: a rate of a
+    /// thousand per second with a cost function answering a batch's size admits a thousand rows per second
+    /// however many batches carry them. The function runs once per element, on the segment's own thread,
+    /// before the budget is examined.
+    /// </para>
+    /// <para>
+    /// An element whose cost exceeds <see cref="ThrottleOptions.MaximumBurst"/> fails the run in both
+    /// modes, because no amount of waiting could ever admit it; a negative cost fails the run too, because
+    /// an element cannot give a stream budget back.
+    /// </para>
+    /// </remarks>
+    public Source<T> Throttle(ThrottleOptions options, Func<T, int> cost)
+    {
+        ArgumentNullException.ThrowIfNull(options);
+        ArgumentNullException.ThrowIfNull(cost);
+
+        return new Source<T>(Shape.Append(LocalStageDescriptor.Throttle(
+            LocalOptionGuard.Throttle(options, nameof(options)),
+            cost)));
+    }
+
     /// <summary>Extends this source with an asynchronous mapping stage that preserves input order.</summary>
     /// <typeparam name="TOut">The element type the mapping produces.</typeparam>
     /// <param name="options">The greatest number of callbacks in flight at one time.</param>
@@ -1497,6 +1703,46 @@ public static class Source
     /// </para>
     /// </remarks>
     public static Source<T> Never<T>() => new(LocalStageChain.Of(LocalStageDescriptor.Never()));
+
+    /// <summary>Starts a source that emits the number of every tick of an interval.</summary>
+    /// <param name="initialDelay">How long after the run starts tick zero is due.</param>
+    /// <param name="interval">How long after each tick the next one is due.</param>
+    /// <returns>The source, ready to be extended with operators.</returns>
+    /// <exception cref="ArgumentOutOfRangeException">
+    /// <paramref name="initialDelay"/> or <paramref name="interval"/> is not positive.
+    /// </exception>
+    /// <remarks>
+    /// <para>
+    /// <b>A tick is a clock, not a queue.</b> The source is pulled like every other, so a tick that comes
+    /// due while the run is still busy with the previous one is <i>skipped</i> rather than queued: nothing
+    /// accumulates, and the next element is the number of the tick that is due now. That is the same
+    /// honesty the reminder trigger has about missed ticks, and it is the only answer a bounded runtime can
+    /// give — a queue of moments that have already passed grows without bound whenever the consumer is
+    /// slower than the interval.
+    /// </para>
+    /// <para>
+    /// <b>The element is the tick's number, and the number counts ticks that were due rather than ticks
+    /// that were emitted.</b> Tick <c>n</c> is due at <c>initialDelay + n * interval</c> after the run
+    /// started, so a consumer that missed three ticks receives a number three higher than it otherwise
+    /// would and can see that it fell behind. Akka's tick source emits a fixed element the author supplies,
+    /// which is honest for a source that never skips; here the skipping is the contract, and a counter
+    /// jumping silently would hide the one thing worth reading. A stream of a constant is
+    /// <c>Tick(d, i).Select(_ => value)</c> and a stream of timestamps is one more <c>Select</c>.
+    /// </para>
+    /// <para>
+    /// The source is endless, is not durable, and belongs to its run exactly as the .NET timer adapter's
+    /// belongs to its activation: two runs of one graph tick independently, a run that ends stops ticking,
+    /// and nothing is replayed. It is bounded downstream by <c>Take</c>, <c>TakeWithin</c>, or a stop.
+    /// The clock is the host's <see cref="TimeProvider"/>, resolved when the graph is materialized, which
+    /// is what makes a deterministic test of a ticking graph possible; a pause holds the elements and not
+    /// the clock, so the ticks a pause covers are missed ticks like any others and are skipped like any
+    /// others.
+    /// </para>
+    /// </remarks>
+    public static Source<long> Tick(TimeSpan initialDelay, TimeSpan interval) =>
+        new(LocalStageChain.Of(LocalStageDescriptor.Tick(
+            LocalOptionGuard.Duration(initialDelay, nameof(initialDelay)),
+            LocalOptionGuard.Duration(interval, nameof(interval)))));
 
     /// <summary>Starts a source that repeats an in-memory sequence for as long as it is pulled.</summary>
     /// <typeparam name="T">The element type.</typeparam>

@@ -165,6 +165,38 @@ internal static class LocalVocabulary
     internal static readonly StageRef FromChannel =
         StageRef.Create(Provider, StageId.Create("from-channel"), StageRef.FirstMajorVersion);
 
+    /// <summary>The stage reference of a source that emits the number of every tick of an interval.</summary>
+    internal static readonly StageRef Tick =
+        StageRef.Create(Provider, StageId.Create("tick"), StageRef.FirstMajorVersion);
+
+    /// <summary>The stage reference of a stage that holds every element for a declared duration.</summary>
+    internal static readonly StageRef Delay =
+        StageRef.Create(Provider, StageId.Create("delay"), StageRef.FirstMajorVersion);
+
+    /// <summary>The stage reference of a stage that holds the first element until a duration has passed.</summary>
+    internal static readonly StageRef InitialDelay =
+        StageRef.Create(Provider, StageId.Create("initial-delay"), StageRef.FirstMajorVersion);
+
+    /// <summary>The stage reference of a stage that fails the run when the stream goes quiet.</summary>
+    internal static readonly StageRef Timeout =
+        StageRef.Create(Provider, StageId.Create("timeout"), StageRef.FirstMajorVersion);
+
+    /// <summary>The stage reference of a stage that ends the stream after a declared duration.</summary>
+    internal static readonly StageRef TakeWithin =
+        StageRef.Create(Provider, StageId.Create("take-within"), StageRef.FirstMajorVersion);
+
+    /// <summary>The stage reference of a stage that drops elements for a declared duration.</summary>
+    internal static readonly StageRef SkipWithin =
+        StageRef.Create(Provider, StageId.Create("skip-within"), StageRef.FirstMajorVersion);
+
+    /// <summary>The stage reference of a stage that holds a stream to a declared rate.</summary>
+    internal static readonly StageRef Throttle =
+        StageRef.Create(Provider, StageId.Create("throttle"), StageRef.FirstMajorVersion);
+
+    /// <summary>The stage reference of a stage that holds elements while its control is closed.</summary>
+    internal static readonly StageRef Valve =
+        StageRef.Create(Provider, StageId.Create("valve"), StageRef.FirstMajorVersion);
+
     /// <summary>The stage reference of a mapping stage.</summary>
     internal static readonly StageRef Select =
         StageRef.Create(Provider, StageId.Create("select"), StageRef.FirstMajorVersion);
@@ -389,6 +421,53 @@ internal static class LocalVocabulary
             ContractId.Create("local-interleave-parameters"),
             ContractReference.FirstMajorVersion);
 
+    /// <summary>The parameter contract a stage configured by one duration declares.</summary>
+    /// <remarks>
+    /// One contract for the initial delay, the two windows, and the timeout, because a duration is a
+    /// duration: which of them a node is is the stage reference's job to say, exactly as it is for the three
+    /// stages that share a count. <see cref="LocalDurationParameters"/> owns the shape.
+    /// </remarks>
+    internal static readonly ContractReference DurationParameterContract =
+        ContractReference.Create(
+            ContractId.Create("local-duration-parameters"),
+            ContractReference.FirstMajorVersion);
+
+    /// <summary>The parameter contract a tick source declares.</summary>
+    /// <remarks>
+    /// Two durations rather than one, so a contract of its own for the reason a range has one:
+    /// the delay before the first tick and the interval between ticks are two numbers that mean different
+    /// things. <see cref="LocalTickParameters"/> owns the shape.
+    /// </remarks>
+    internal static readonly ContractReference TickParameterContract =
+        ContractReference.Create(ContractId.Create("local-tick-parameters"), ContractReference.FirstMajorVersion);
+
+    /// <summary>The parameter contract a delay declares.</summary>
+    /// <remarks>
+    /// A duration and a holdback — a capacity and an overflow policy — which is more than the shared
+    /// duration contract can say and more than a buffer's contract can.
+    /// <see cref="LocalDelayParameters"/> owns the shape.
+    /// </remarks>
+    internal static readonly ContractReference DelayParameterContract =
+        ContractReference.Create(ContractId.Create("local-delay-parameters"), ContractReference.FirstMajorVersion);
+
+    /// <summary>The parameter contract a throttle declares.</summary>
+    /// <remarks>
+    /// The rate, the period, the burst, and the mode are configuration and are written down; what an
+    /// element costs is behavior and is not. <see cref="LocalThrottleParameters"/> owns the shape.
+    /// </remarks>
+    internal static readonly ContractReference ThrottleParameterContract =
+        ContractReference.Create(
+            ContractId.Create("local-throttle-parameters"),
+            ContractReference.FirstMajorVersion);
+
+    /// <summary>The parameter contract a valve declares.</summary>
+    /// <remarks>
+    /// The state the valve starts a run in is configuration and is written down; what an author does to it
+    /// while the run is running is not. <see cref="LocalValveParameters"/> owns the shape.
+    /// </remarks>
+    internal static readonly ContractReference ValveParameterContract =
+        ContractReference.Create(ContractId.Create("local-valve-parameters"), ContractReference.FirstMajorVersion);
+
     /// <summary>The parameter contract a collecting sink declares.</summary>
     /// <remarks>
     /// The bound on collected elements is configuration and is written down; the element type is not, for
@@ -559,6 +638,7 @@ internal static class LocalVocabulary
         LocalStageKind.UnfoldAsync => UnfoldAsync,
         LocalStageKind.Queue => Queue,
         LocalStageKind.FromChannel => FromChannel,
+        LocalStageKind.Tick => Tick,
         LocalStageKind.Select => Select,
         LocalStageKind.Where => Where,
         LocalStageKind.Scan => Scan,
@@ -573,6 +653,13 @@ internal static class LocalVocabulary
         LocalStageKind.SelectAsyncUnordered => SelectAsyncUnordered,
         LocalStageKind.SelectValueTaskAsync => SelectValueTaskAsync,
         LocalStageKind.SelectValueTaskAsyncUnordered => SelectValueTaskAsyncUnordered,
+        LocalStageKind.Delay => Delay,
+        LocalStageKind.InitialDelay => InitialDelay,
+        LocalStageKind.Timeout => Timeout,
+        LocalStageKind.TakeWithin => TakeWithin,
+        LocalStageKind.SkipWithin => SkipWithin,
+        LocalStageKind.Throttle => Throttle,
+        LocalStageKind.Valve => Valve,
         LocalStageKind.Broadcast => Broadcast,
         LocalStageKind.Balance => Balance,
         LocalStageKind.Partition => Partition,
@@ -616,6 +703,14 @@ internal static class LocalVocabulary
             LocalStageKind.ForEachAsync => ParallelismParameterContract,
         LocalStageKind.Take or LocalStageKind.Skip or LocalStageKind.Repeat => CountParameterContract,
         LocalStageKind.Range => RangeParameterContract,
+        LocalStageKind.Tick => TickParameterContract,
+        LocalStageKind.Delay => DelayParameterContract,
+        LocalStageKind.Throttle => ThrottleParameterContract,
+        LocalStageKind.Valve => ValveParameterContract,
+        LocalStageKind.InitialDelay or
+            LocalStageKind.Timeout or
+            LocalStageKind.TakeWithin or
+            LocalStageKind.SkipWithin => DurationParameterContract,
         LocalStageKind.Distinct => DistinctParameterContract,
         LocalStageKind.Collect => CollectParameterContract,
         LocalStageKind.Interleave => InterleaveParameterContract,
@@ -682,6 +777,11 @@ internal static class LocalVocabulary
             _ when contract == DistinctParameterContract => LocalDistinctParameters.Validator,
             _ when contract == CollectParameterContract => LocalCollectParameters.Validator,
             _ when contract == InterleaveParameterContract => LocalInterleaveParameters.Validator,
+            _ when contract == DurationParameterContract => LocalDurationParameters.Validator,
+            _ when contract == TickParameterContract => LocalTickParameters.Validator,
+            _ when contract == DelayParameterContract => LocalDelayParameters.Validator,
+            _ when contract == ThrottleParameterContract => LocalThrottleParameters.Validator,
+            _ when contract == ValveParameterContract => LocalValveParameters.Validator,
             _ => null,
         };
     }
@@ -713,7 +813,8 @@ internal static class LocalVocabulary
             LocalStageKind.Cycle or
             LocalStageKind.UnfoldAsync or
             LocalStageKind.Queue or
-            LocalStageKind.FromChannel => LocalStagePlace.Source,
+            LocalStageKind.FromChannel or
+            LocalStageKind.Tick => LocalStagePlace.Source,
         LocalStageKind.Select or
             LocalStageKind.Where or
             LocalStageKind.Scan or
@@ -727,7 +828,14 @@ internal static class LocalVocabulary
             LocalStageKind.SelectAsync or
             LocalStageKind.SelectAsyncUnordered or
             LocalStageKind.SelectValueTaskAsync or
-            LocalStageKind.SelectValueTaskAsyncUnordered => LocalStagePlace.Operator,
+            LocalStageKind.SelectValueTaskAsyncUnordered or
+            LocalStageKind.Delay or
+            LocalStageKind.InitialDelay or
+            LocalStageKind.Timeout or
+            LocalStageKind.TakeWithin or
+            LocalStageKind.SkipWithin or
+            LocalStageKind.Throttle or
+            LocalStageKind.Valve => LocalStagePlace.Operator,
         LocalStageKind.Broadcast or
             LocalStageKind.Balance or
             LocalStageKind.Partition or
@@ -889,6 +997,7 @@ internal static class LocalVocabulary
                 LocalStageKind.LastOrDefault or
                 LocalStageKind.Collect => ResultPortSpecification.Create(ResultPort, ResultContract),
             LocalStageKind.Queue or
+                LocalStageKind.Valve or
                 LocalStageKind.SinkProbe => ResultPortSpecification.Create(ControlPort, ControlContract),
             _ => null,
         };

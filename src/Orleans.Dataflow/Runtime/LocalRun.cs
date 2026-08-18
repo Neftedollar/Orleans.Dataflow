@@ -119,7 +119,7 @@ internal sealed class LocalRun
         _token = _cancellation.Token;
         _stopping = CancellationTokenSource.CreateLinkedTokenSource(_token);
         _pause = new LocalPause(plan.Segments.Count);
-        _context = new LocalRunContext(_pause, _token, _stopping.Token);
+        _context = new LocalRunContext(_pause, plan.Clock, plan.Clock.GetTimestamp(), _token, _stopping.Token);
 
         // Stopping wins over pausing, and this is the whole of that rule: every way a run stops — the
         // caller's token, this run's own cancellation, a failure, a graceful shutdown — cancels the stop
@@ -408,6 +408,16 @@ internal sealed class LocalRun
             Complete(_plan.CompletesAtStart[index]);
         }
 
+        // Before any segment starts, so that a stage measuring "since the run started" measures from the
+        // moment the run was built rather than from the moment its thread happened to be scheduled. Both
+        // hooks are safe here: a window that closes before its segment runs leaves it stopped at its first
+        // look, and a timeout that fires first cancels a run that has not pulled anything. A valve is
+        // attached by the same walk and for the same reason — what it needs is the run's waits.
+        for (int index = 0; index < _plan.Segments.Count; index++)
+        {
+            Attach(_plan.Segments[index], index);
+        }
+
         for (int index = 0; index < _plan.Segments.Count; index++)
         {
             int segment = index;
@@ -473,7 +483,68 @@ internal sealed class LocalRun
             Fail(error);
         }
 
+        Detach(segment);
         Finish(index, Release(elements, failure, canceled), canceled);
+    }
+
+    /// <summary>Gives every stage of one segment that needs its run the run it is part of.</summary>
+    /// <param name="segment">The segment about to be started.</param>
+    /// <param name="index">Its position in the plan.</param>
+    /// <remarks>
+    /// <para>
+    /// A handful of stages cannot be pure functions of their element: they need the run's clock, which
+    /// belongs to the run rather than to the plan; they need somewhere for a wait to report itself; and two
+    /// of the shapes have to act when no element arrives at all, which no per-element method could ever be
+    /// asked. This is where all three are handed over, on the thread that launches the run and before any
+    /// segment has started.
+    /// </para>
+    /// <para>
+    /// One <see cref="LocalStageAttachment"/> per segment, and every one of them over the run's own start
+    /// reading, so that "since the run started" means one moment across the whole graph. The two hooks are
+    /// this run's own <see cref="Complete"/> and <see cref="Fail"/> — the same walk a downstream completion
+    /// takes and the same record a throwing stage makes, both already safe from any thread — so a timer that
+    /// fires does exactly what an element could have done and nothing a segment could not.
+    /// </para>
+    /// <para>
+    /// Nothing at all happens for a segment with no timed stage in it, which is every segment of every graph
+    /// written before this vocabulary had a clock: the scan is over a list that is usually empty and the
+    /// closures are allocated only when one is found.
+    /// </para>
+    /// </remarks>
+    private void Attach(LocalSegment segment, int index)
+    {
+        LocalStageAttachment? attachment = null;
+
+        for (int stage = 0; stage < segment.Stages.Count; stage++)
+        {
+            if (segment.Stages[stage] is LocalAttachedStage attached)
+            {
+                attachment ??= new LocalStageAttachment(_context, () => Complete(index), Fail);
+
+                attached.Attach(attachment);
+            }
+        }
+    }
+
+    /// <summary>Releases whatever the attached stages of one segment started.</summary>
+    /// <param name="segment">The segment that has stopped.</param>
+    /// <remarks>
+    /// Called on every terminal path of the segment, including the ones where an attached stage is what
+    /// went wrong: a timer that outlived its run would complete or fail a run that had already ended, and
+    /// one on a controlled clock would be held by that clock until the test released it. Detaching cannot
+    /// throw past this method for the same reason releasing an enumerator cannot — but unlike an enumerator
+    /// it is this runtime's own code, so it is not wrapped and a failure here would be a defect rather than
+    /// an author's exception.
+    /// </remarks>
+    private static void Detach(LocalSegment segment)
+    {
+        for (int stage = 0; stage < segment.Stages.Count; stage++)
+        {
+            if (segment.Stages[stage] is LocalAttachedStage attached)
+            {
+                attached.Detach();
+            }
+        }
     }
 
     /// <summary>Pulls the head segment's sequence until it ends or the run stops.</summary>

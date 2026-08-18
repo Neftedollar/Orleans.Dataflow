@@ -22,28 +22,54 @@ namespace Orleans.Dataflow;
 /// instance can materialize any number of graphs from any number of threads.
 /// </para>
 /// <para>
-/// <b>Scope of this checkpoint.</b> The host executes the local, lambda-implemented vocabulary as one
-/// linear chain. Adjacent synchronous stages fuse into one loop holding one element, and a queue exists
-/// only where the author asked for one with a buffer or an asynchronous stage. Pause and resume, a
-/// controllable clock, and every operator that would need one — windows, throttling, timeouts — are later
-/// milestones and are absent here rather than approximated.
+/// <b>The clock is the host's.</b> Every stage of a run that reads a clock reads the one this host was
+/// given, resolved when the graph is materialized and carried by the run from there (ADR 0005). The default
+/// is <see cref="TimeProvider.System"/>; a test hands over a controlled one and the delays, the windows, the
+/// timeouts, the rates, and the ticks of every run this host starts are measured by it. A document never
+/// carries a clock, because a clock is runtime and not definition: two runs of one graph may be measured by
+/// two different clocks and their fingerprints are the same.
 /// </para>
 /// </remarks>
 public sealed class LocalDataflowHost
 {
     private readonly IStageCatalog _catalog;
     private readonly StageRuntimeBinder _binder;
+    private readonly TimeProvider _clock;
 
     /// <summary>Initializes a new instance of the <see cref="LocalDataflowHost"/> class.</summary>
     /// <remarks>
     /// The lambda-only host. It resolves exactly <see cref="LocalStageCatalog.Instance"/> and no registered
     /// provider, so a graph containing a registered stage is refused by name rather than half-executed. A
-    /// host that has to run one takes the overload that registers the provider.
+    /// host that has to run one takes the overload that registers the provider. Its clock is
+    /// <see cref="TimeProvider.System"/>.
     /// </remarks>
     public LocalDataflowHost()
+        : this(TimeProvider.System)
     {
+    }
+
+    /// <summary>Initializes a new instance of the <see cref="LocalDataflowHost"/> class with a clock.</summary>
+    /// <param name="timeProvider">The clock every run this host starts measures time by.</param>
+    /// <exception cref="ArgumentNullException"><paramref name="timeProvider"/> is <see langword="null"/>.</exception>
+    /// <remarks>
+    /// <para>
+    /// The one option this host has, and it is a service rather than a setting: the operators that read a
+    /// clock — <c>Delay</c>, <c>InitialDelay</c>, <c>Timeout</c>, <c>TakeWithin</c>, <c>SkipWithin</c>,
+    /// <c>Throttle</c>, and <c>Source.Tick</c> — read this one and never
+    /// <see cref="TimeProvider.System"/>, which is what makes a deterministic test of them possible at all.
+    /// </para>
+    /// <para>
+    /// The clock is read when a graph is materialized and carried by the run, so a host handed a controlled
+    /// clock measures every run it starts by it, and a graph is the same graph under either.
+    /// </para>
+    /// </remarks>
+    public LocalDataflowHost(TimeProvider timeProvider)
+    {
+        ArgumentNullException.ThrowIfNull(timeProvider);
+
         _catalog = LocalStageCatalog.Instance;
         _binder = StageRuntimeBinder.None;
+        _clock = timeProvider;
     }
 
     /// <summary>Initializes a new instance of the <see cref="LocalDataflowHost"/> class with providers.</summary>
@@ -63,8 +89,28 @@ public sealed class LocalDataflowHost
     /// </para>
     /// </remarks>
     public LocalDataflowHost(Action<IDotnetDataflowBuilder> configure)
+        : this(TimeProvider.System, configure)
     {
+    }
+
+    /// <summary>Initializes a new instance of the <see cref="LocalDataflowHost"/> class with a clock and providers.</summary>
+    /// <param name="timeProvider">The clock every run this host starts measures time by.</param>
+    /// <param name="configure">The registration of this host's .NET push adapters.</param>
+    /// <exception cref="ArgumentNullException">
+    /// <paramref name="timeProvider"/> or <paramref name="configure"/> is <see langword="null"/>.
+    /// </exception>
+    /// <exception cref="ArgumentException"><paramref name="configure"/> registered one name twice.</exception>
+    /// <remarks>
+    /// The two options a host has, together. They are independent of each other: the clock reaches the local
+    /// vocabulary's timing stages, and a registered stage receives the run's tokens and whatever its own
+    /// provider gave it.
+    /// </remarks>
+    public LocalDataflowHost(TimeProvider timeProvider, Action<IDotnetDataflowBuilder> configure)
+    {
+        ArgumentNullException.ThrowIfNull(timeProvider);
         ArgumentNullException.ThrowIfNull(configure);
+
+        _clock = timeProvider;
 
         DotnetRegistrations registrations = new();
 
@@ -128,7 +174,8 @@ public sealed class LocalDataflowHost
         LocalRunPlan plan = LocalRunPlanner.Compile(
             graph,
             _binder,
-            string.Create(CultureInfo.InvariantCulture, $"local/{Guid.NewGuid():n}"));
+            string.Create(CultureInfo.InvariantCulture, $"local/{Guid.NewGuid():n}"),
+            _clock);
         LocalRun run = LocalRun.Start(plan, graph.Fingerprint, graph.AuthoringNonce, cancellationToken);
 
         return new ValueTask<RunHandle>(new RunHandle(run));

@@ -86,20 +86,26 @@ internal static class LocalRunPlanner
     /// <param name="graph">The closed graph, already validated against the host's catalog.</param>
     /// <param name="binder">The resolver of every node no local behavior is bound to.</param>
     /// <param name="runIdentity">What the run this plan is for is called in this process.</param>
+    /// <param name="clock">The host's clock, which every stage of this run that reads one reads.</param>
     /// <returns>The plan.</returns>
     /// <exception cref="InvalidOperationException">
     /// The document is not a shape this runtime executes, a node has no binding, a binding does not have
     /// the shape the stage it is bound to requires, or a parameterized stage carries a payload this runtime
     /// cannot read.
     /// </exception>
-    internal static LocalRunPlan Compile(RunnableGraph graph, StageRuntimeBinder binder, string runIdentity) =>
-        Compile(graph.Document, graph.LocalBindings, binder, runIdentity);
+    internal static LocalRunPlan Compile(
+        RunnableGraph graph,
+        StageRuntimeBinder binder,
+        string runIdentity,
+        TimeProvider clock) =>
+        Compile(graph.Document, graph.LocalBindings, binder, runIdentity, clock);
 
     /// <summary>Compiles a document into the plan for one run.</summary>
     /// <param name="document">The document, already validated against the host's catalog.</param>
     /// <param name="bindings">The authoring-side behavior of every locally bound node.</param>
     /// <param name="binder">The resolver of every node no local behavior is bound to.</param>
     /// <param name="runIdentity">What the run this plan is for is called in this deployment.</param>
+    /// <param name="clock">The host's clock, which every stage of this run that reads one reads.</param>
     /// <returns>The plan.</returns>
     /// <exception cref="InvalidOperationException">
     /// The document is not a shape this runtime executes, a node is neither locally bound nor resolvable
@@ -118,7 +124,8 @@ internal static class LocalRunPlanner
         GraphDocument document,
         IReadOnlyDictionary<NodeId, LocalStageDescriptor> bindings,
         StageRuntimeBinder binder,
-        string runIdentity)
+        string runIdentity,
+        TimeProvider clock)
     {
         Dictionary<NodeId, StageNode> declarations = Declarations(document);
         Dictionary<PortAddress, GraphEdge> downstream = new(document.Edges.Count);
@@ -301,7 +308,8 @@ internal static class LocalRunPlanner
             endings,
             declared,
             completesAtStart,
-            feedbackChannels);
+            feedbackChannels,
+            clock);
 
         // Compiles one maximal junction-free chain, from the node that begins it to the terminal or the
         // junction that ends it. A head branch begins at a source and reads no channel; every other branch
@@ -533,6 +541,15 @@ internal static class LocalRunPlanner
                             break;
                         }
 
+                        case LocalStageKind.Tick when first && !last:
+                        {
+                            (TimeSpan initialDelay, TimeSpan interval) = Ticking(declaration);
+
+                            elements = context => LocalSequence.Ticks(initialDelay, interval, context);
+
+                            break;
+                        }
+
                         case LocalStageKind.Select when !first && !last:
                             Fuse(LocalElementStage.Select(LocalDelegateAdapter.Selector(descriptor.Behavior)));
                             break;
@@ -575,6 +592,66 @@ internal static class LocalRunPlanner
                             Open(pending ?? LocalBoundary.Handoff);
                             asynchronous = Asynchronous(declaration, descriptor);
                             break;
+                        case LocalStageKind.Delay when !first && !last:
+                        {
+                            (TimeSpan shift, BufferOptions holdback) = Delaying(declaration);
+
+                            // The declared capacity is the window — how many elements are waiting out their
+                            // delay at once — and not the channel in front of it, which is the ordinary
+                            // handoff every asynchronous stage gets. Giving the channel the declared capacity
+                            // too would hold twice what the author wrote down. What the channel does carry is
+                            // the declared policy, because that is the moment the policy is about: an element
+                            // arriving when the window is full and the handoff occupied is the element a
+                            // holdback has to answer for. A buffer the author placed in front of the delay is
+                            // that channel instead, exactly as it is for any asynchronous stage, and its
+                            // capacity adds to the window the way two declared boundaries always add.
+                            Open(pending ?? new LocalBoundary(capacity: 1, holdback.OverflowPolicy));
+                            asynchronous = new LocalAsyncStage(
+                                Holding(shift, clock),
+                                holdback.Capacity,
+                                ordered: true);
+
+                            break;
+                        }
+
+                        case LocalStageKind.InitialDelay when !first && !last:
+                            Fuse(LocalAttachedStages.InitialDelay(Duration(declaration)));
+                            break;
+                        case LocalStageKind.Timeout when !first && !last:
+                            Fuse(LocalAttachedStages.Timeout(Duration(declaration)));
+                            break;
+                        case LocalStageKind.TakeWithin when !first && !last:
+                            Fuse(LocalAttachedStages.TakeWithin(Duration(declaration)));
+                            break;
+                        case LocalStageKind.SkipWithin when !first && !last:
+                            Fuse(LocalAttachedStages.SkipWithin(Duration(declaration)));
+                            break;
+                        case LocalStageKind.Throttle when !first && !last:
+                        {
+                            ThrottleOptions rate = Throttling(declaration);
+
+                            Fuse(LocalAttachedStages.Throttle(
+                                rate.Elements,
+                                rate.Per,
+                                rate.MaximumBurst!.Value,
+                                rate.Mode is ThrottleMode.Enforcing,
+                                descriptor.Behavior is null
+                                    ? null
+                                    : LocalDelegateAdapter.Cost(descriptor.Behavior)));
+
+                            break;
+                        }
+
+                        case LocalStageKind.Valve when !first && !last:
+                        {
+                            LocalValve valve = new(Valving(declaration));
+
+                            controls.Add(current, (null, valve));
+                            Fuse(LocalAttachedStages.Valve(valve));
+
+                            break;
+                        }
+
                         case LocalStageKind.Broadcast when !first && !last:
                             Split(declaration, descriptor.Kind, LocalFanOut.Broadcast());
                             return;
@@ -969,8 +1046,23 @@ internal static class LocalRunPlanner
         {
             NodeId target = onwards.To.Node;
 
-            if (!bindings.TryGetValue(target, out LocalStageDescriptor? buffer) ||
-                buffer.Kind is not LocalStageKind.Buffer ||
+            if (!bindings.TryGetValue(target, out LocalStageDescriptor? below))
+            {
+                return (LocalBoundary.Handoff, target, onwards.To.Port);
+            }
+
+            // A delay standing here is not skipped — it is a stage and not a channel — but the channel it
+            // reads is the one this junction writes, so the policy it declared has to be that channel's or
+            // it would silently not apply. Its capacity is its window rather than this channel's, which is
+            // the same split a delay makes anywhere else.
+            if (below.Kind is LocalStageKind.Delay)
+            {
+                (TimeSpan _, BufferOptions holdback) = Delaying(declarations[target]);
+
+                return (new LocalBoundary(capacity: 1, holdback.OverflowPolicy), target, onwards.To.Port);
+            }
+
+            if (below.Kind is not LocalStageKind.Buffer ||
                 !leaving.TryGetValue(target, out List<GraphEdge>? edges) ||
                 edges.Count != 1)
             {
@@ -1492,6 +1584,105 @@ internal static class LocalRunPlanner
             ? segmentSize
             : throw Foreign(
                 $"the interleave '{node.Id}' carries parameters this runtime cannot read: {string.Join("; ", violations)}");
+
+    /// <summary>Reads a timed node's payload as the duration it declares.</summary>
+    /// <param name="node">The node as the document declares it.</param>
+    /// <returns>The duration.</returns>
+    /// <exception cref="InvalidOperationException">The payload is not a duration payload.</exception>
+    /// <remarks>
+    /// Unreachable for a document validated against the local catalog, whose timing stages run the very same
+    /// reader as their parameter check. It is here because this type is also handed documents that were
+    /// never validated, and a duration it could not read would otherwise become a window of some silently
+    /// chosen length.
+    /// </remarks>
+    private static TimeSpan Duration(StageNode node) =>
+        LocalDurationParameters.TryRead(node.Parameters, out TimeSpan duration, out IReadOnlyList<string> violations)
+            ? duration
+            : throw Foreign(
+                $"the node '{node.Id}' carries parameters this runtime cannot read: {string.Join("; ", violations)}");
+
+    /// <summary>Reads a tick node's payload as the two durations it declares.</summary>
+    /// <param name="node">The node as the document declares it.</param>
+    /// <returns>The delay before the first tick and the interval between ticks.</returns>
+    /// <exception cref="InvalidOperationException">The payload is not a tick payload.</exception>
+    private static (TimeSpan InitialDelay, TimeSpan Interval) Ticking(StageNode node) =>
+        LocalTickParameters.TryRead(
+            node.Parameters,
+            out TimeSpan initialDelay,
+            out TimeSpan interval,
+            out IReadOnlyList<string> violations)
+            ? (initialDelay, interval)
+            : throw Foreign(
+                $"the tick source '{node.Id}' carries parameters this runtime cannot read: {string.Join("; ", violations)}");
+
+    /// <summary>Reads a delay node's payload as the duration and the holdback it declares.</summary>
+    /// <param name="node">The node as the document declares it.</param>
+    /// <returns>The delay applied to each element and the bound on how many are held at once.</returns>
+    /// <exception cref="InvalidOperationException">The payload is not a delay payload.</exception>
+    private static (TimeSpan Delay, BufferOptions Holdback) Delaying(StageNode node) =>
+        LocalDelayParameters.TryRead(
+            node.Parameters,
+            out TimeSpan delay,
+            out BufferOptions? holdback,
+            out IReadOnlyList<string> violations)
+            ? (delay, holdback!)
+            : throw Foreign(
+                $"the delay '{node.Id}' carries parameters this runtime cannot read: {string.Join("; ", violations)}");
+
+    /// <summary>Reads a valve node's payload as the state it starts in.</summary>
+    /// <param name="node">The node as the document declares it.</param>
+    /// <returns>The state the run's valve starts in.</returns>
+    /// <exception cref="InvalidOperationException">The payload is not a valve payload.</exception>
+    private static ValveMode Valving(StageNode node) =>
+        LocalValveParameters.TryRead(node.Parameters, out ValveMode mode, out IReadOnlyList<string> violations)
+            ? mode
+            : throw Foreign(
+                $"the valve '{node.Id}' carries parameters this runtime cannot read: {string.Join("; ", violations)}");
+
+    /// <summary>Reads a throttle node's payload as the rate it declares.</summary>
+    /// <param name="node">The node as the document declares it.</param>
+    /// <returns>The options, whose burst the reader has already stated rather than defaulted.</returns>
+    /// <exception cref="InvalidOperationException">The payload is not a throttle payload.</exception>
+    private static ThrottleOptions Throttling(StageNode node) =>
+        LocalThrottleParameters.TryRead(node.Parameters, out ThrottleOptions? options, out IReadOnlyList<string> violations)
+            ? options!
+            : throw Foreign(
+                $"the throttle '{node.Id}' carries parameters this runtime cannot read: {string.Join("; ", violations)}");
+
+    /// <summary>Builds the callback that holds one element of a delay for its duration.</summary>
+    /// <param name="delay">The duration each element is held for.</param>
+    /// <param name="clock">The run's clock.</param>
+    /// <returns>The callback the asynchronous driver runs per element.</returns>
+    /// <remarks>
+    /// <para>
+    /// A delay is the one timing operator that is a window rather than a hold, and that is why it is driven
+    /// by the machinery an asynchronous stage is driven by rather than fused as an element stage. The
+    /// difference is what an author means by the word: an element admitted here starts its own wait at once
+    /// and the results are emitted in input order, so a burst that fits the declared holdback comes out
+    /// shifted by the delay with its gaps intact, while a stage that held one element at a time would have
+    /// turned the same burst into a stream paced at one element per delay, which is a throttle and not a
+    /// delay.
+    /// </para>
+    /// <para>
+    /// The clock is closed over here rather than read from the run's context, because that is what the
+    /// callback shape gives: the driver hands a callback its element and the run's token. Both are what a
+    /// delay needs — the token is what abandons a wait when the run is cancelled — and the clock is fixed
+    /// per materialization, which is exactly when this closure is built.
+    /// </para>
+    /// <para>
+    /// The token is the run's own and not the stop token, which is the asynchronous window's rule rather
+    /// than a choice made here: a graceful shutdown drains what a window already admitted, so it waits out
+    /// the delays in flight exactly as it waits out an author's callbacks, and a cancellation abandons them.
+    /// A pause waits for them for the same reason, which is bounded by the delay itself.
+    /// </para>
+    /// </remarks>
+    private static Func<object?, CancellationToken, Task<object?>> Holding(TimeSpan delay, TimeProvider clock) =>
+        async (element, cancellationToken) =>
+        {
+            await Task.Delay(delay, clock, cancellationToken).ConfigureAwait(false);
+
+            return element;
+        };
 
     /// <summary>Reads a distinct node's payload as the key bound it declares.</summary>
     /// <param name="node">The node as the document declares it.</param>

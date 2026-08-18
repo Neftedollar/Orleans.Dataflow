@@ -84,11 +84,17 @@ internal static class PipelineMaterializer
             throw new InvalidOperationException(Describe(report));
         }
 
+        // The system clock, and not an option of this seam. Every stage of this runtime that reads a clock
+        // is a stage of the local vocabulary, and the local vocabulary has no binding here: a document
+        // materialized through this path is registered stages only, so nothing it holds can ask the time.
+        // When a registered stage ever needs one, it arrives through the runtime-factory seam beside the
+        // tokens rather than through here.
         LocalRunPlan plan = LocalRunPlanner.Compile(
             document,
             new Dictionary<Identity.NodeId, Authoring.LocalStageDescriptor>(),
             new StageRuntimeBinder(catalog, factories),
-            runIdentity);
+            runIdentity,
+            TimeProvider.System);
 
         return LocalRun.Start(plan, fingerprint, PipelineNonce, cancellationToken);
     }

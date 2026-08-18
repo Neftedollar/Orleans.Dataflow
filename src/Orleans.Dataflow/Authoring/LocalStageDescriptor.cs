@@ -296,6 +296,23 @@ internal sealed class LocalStageDescriptor : StageOccurrence
     internal static LocalStageDescriptor FromChannel(object reader) =>
         new(LocalStageKind.FromChannel, reader, seed: null, LocalVocabulary.EmptyParameters);
 
+    /// <summary>Creates a source that emits the number of every tick of an interval.</summary>
+    /// <param name="initialDelay">The validated delay before the first tick.</param>
+    /// <param name="interval">The validated interval between ticks.</param>
+    /// <returns>The descriptor.</returns>
+    /// <remarks>
+    /// The third shape with no delegate at all, after the buffer and the range: its elements are the tick
+    /// numbers, and two durations say exactly which ones and when. What it does not say is which clock
+    /// measures them, because a clock is a property of the run and never of the document — the host's
+    /// <see cref="TimeProvider"/> is resolved at materialization (ADR 0005).
+    /// </remarks>
+    internal static LocalStageDescriptor Tick(TimeSpan initialDelay, TimeSpan interval) =>
+        new(
+            LocalStageKind.Tick,
+            behavior: null,
+            seed: null,
+            LocalTickParameters.Write(initialDelay, interval));
+
     /// <summary>Creates a mapping stage.</summary>
     /// <param name="selector">The mapping delegate, as the authoring value received it.</param>
     /// <returns>The descriptor.</returns>
@@ -406,6 +423,70 @@ internal sealed class LocalStageDescriptor : StageOccurrence
             selector,
             seed: null,
             LocalParallelismParameters.Write(options));
+
+    /// <summary>Creates a stage that holds every element for a declared duration.</summary>
+    /// <param name="delay">The validated duration each element is held for.</param>
+    /// <param name="holdback">The validated bound on how many are held at once, and its overflow policy.</param>
+    /// <returns>The descriptor.</returns>
+    /// <remarks>
+    /// No behavior at all: a delay is decided entirely by its numbers, so there is nothing left for a
+    /// binding to say. The holdback is payload for the reason a buffer's capacity is — it is a number that
+    /// changes what the graph does — and the duration for the same reason.
+    /// </remarks>
+    internal static LocalStageDescriptor Delay(TimeSpan delay, BufferOptions holdback) =>
+        new(
+            LocalStageKind.Delay,
+            behavior: null,
+            seed: null,
+            LocalDelayParameters.Write(delay, holdback));
+
+    /// <summary>Creates a stage configured by one duration.</summary>
+    /// <param name="kind">
+    /// Which of the four the occurrence is: an initial delay, a timeout, or one of the two windows.
+    /// </param>
+    /// <param name="duration">The validated duration.</param>
+    /// <returns>The descriptor.</returns>
+    /// <remarks>
+    /// One factory for the four shapes that carry a duration and nothing else, because the descriptor they
+    /// build differs in exactly one field — the kind — and a second factory per shape would be four copies
+    /// of one line. The stage reference the kind derives is what says which of them a node is.
+    /// </remarks>
+    internal static LocalStageDescriptor Timed(LocalStageKind kind, TimeSpan duration) =>
+        new(kind, behavior: null, seed: null, LocalDurationParameters.Write(duration));
+
+    /// <summary>Creates a stage that holds a stream to a declared rate.</summary>
+    /// <param name="options">The validated rate, burst, and mode.</param>
+    /// <param name="cost">
+    /// The function answering what one element costs, as the authoring value received it, or
+    /// <see langword="null"/> when every element costs one.
+    /// </param>
+    /// <returns>The descriptor.</returns>
+    /// <remarks>
+    /// The cost function is behavior for the reason a partition's router is: what an element costs is a
+    /// statement about an element type, and an element type never appears in a local document. Its absence
+    /// is behavior too — an occurrence with no cost function charges one per element — and that is why the
+    /// binding may legitimately be <see langword="null"/> here.
+    /// </remarks>
+    internal static LocalStageDescriptor Throttle(ThrottleOptions options, object? cost) =>
+        new(LocalStageKind.Throttle, cost, seed: null, LocalThrottleParameters.Write(options));
+
+    /// <summary>Creates a stage that holds elements while its control is closed.</summary>
+    /// <param name="mode">The validated state the valve starts a run in.</param>
+    /// <param name="controlSlot">The validated name the control is declared under.</param>
+    /// <returns>The descriptor.</returns>
+    /// <remarks>
+    /// The one control-bearing shape with no behavior at all. A queue and a probe carry a factory that
+    /// wraps the runtime's object into the author's element type; a valve has no element type to wrap, so
+    /// the runtime object is the control an author receives and the binding has nothing to say.
+    /// </remarks>
+    internal static LocalStageDescriptor Valve(ValveMode mode, ResultSlotId controlSlot) =>
+        new(
+            LocalStageKind.Valve,
+            behavior: null,
+            seed: null,
+            LocalValveParameters.Write(mode),
+            controlSlot,
+            typeof(IValve));
 
     /// <summary>Creates a junction that delivers every element to every live output.</summary>
     /// <returns>The descriptor.</returns>

@@ -245,6 +245,51 @@ keyed by node id, for the local runtime to bind at materialization; that
 table is the concrete meaning of the `nondeployable` token every such
 document declares, and auto-named occurrences add `ephemeral-identity`.
 
+## Timing, rate, and the clock
+
+The operators that read a clock are ordinary members of `Source<T>` and
+`Flow<TIn,TOut>`, mirrored on both per the ADR 0004 discipline, and .NET-first
+in name per the naming rules above:
+
+| Spelling | What it does | What it takes |
+|---|---|---|
+| `Source.Tick(initialDelay, interval)` | emits the number of every tick, skipping the ticks a slow consumer missed | two positive durations |
+| `Delay(delay, holdback)` | shifts every element by the delay, holding at most the declared number at once | a positive duration and `BufferOptions` |
+| `InitialDelay(delay)` | holds the first element until the duration has passed since the run started | a positive duration |
+| `Timeout(gap)` | fails the run when the stream goes quiet for longer than the gap | a positive duration |
+| `TakeWithin(window)` | ends the stream when the window closes | a positive duration |
+| `SkipWithin(window)` | drops everything that arrives before the window closes | a positive duration |
+| `Throttle(options)` | holds the stream to a declared rate | `ThrottleOptions` |
+| `Throttle(options, cost)` | the same, charged by what each element is worth | `ThrottleOptions` and `Func<T,int>` |
+| `Valve(controlName, initialMode)` | holds the stream while its control is closed | a control name and a `ValveMode` |
+
+`ThrottleOptions` is a per-concern record like every other (`Elements`, `Per`,
+`MaximumBurst`, `Mode`), and `ThrottleMode` is two declared values —
+`Shaping`, which waits, and `Enforcing`, which fails the run with
+`RateLimitExceededException`. A delay's holdback is spelled with the very
+`BufferOptions` a buffer takes, for the reason a queue's bounds are: a
+capacity and an overflow policy are a capacity and an overflow policy wherever
+they stand. Every duration is required to be positive — zero, negative, and
+`Timeout.InfiniteTimeSpan` all describe an operator that should have been left
+out — and every refusal names the operator's own parameter.
+
+**The clock is the host's.** `new LocalDataflowHost(timeProvider)` (and the
+overload that also registers providers) fixes the `TimeProvider` every run that
+host starts measures by; the default is `TimeProvider.System`. Nothing about
+the clock reaches the document, so a graph has one fingerprint under any
+clock, and `Orleans.Dataflow.Testing.TestClock` is what turns "after exactly
+the delay, and not a tick before" into a test rather than a hope. `Timeout`
+fails with `StreamTimeoutException`, a `TimeoutException` subclass, so a caller
+can tell a stream's own silence from a timed-out call in their callback.
+
+`Valve` is the one of these that reads no clock and the first control this
+surface declares in the middle of a chain: the run hands out an `IValve` under
+the name the author gave, `Close()` holds the stream where the valve stands and
+backpressures everything above it, `Open()` lets it go, and neither ever
+drops an element. The state it starts in is `ValveMode.Open` unless the author
+says otherwise, and that state is in the document because a graph whose valve
+starts closed produces nothing until something opens it.
+
 ## Delegates and deployability
 
 Lambda-based operators (`Select(x => ...)`) construct graphs that carry the

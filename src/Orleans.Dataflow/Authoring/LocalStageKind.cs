@@ -20,11 +20,19 @@ namespace Orleans.Dataflow.Authoring;
 /// port, and the three result-bearing terminals declare a result port on top of that.
 /// </para>
 /// <para>
-/// Six of the shapes are boundaries: <see cref="Buffer"/>, <see cref="SelectAsync"/>,
+/// Seven of the shapes are boundaries: <see cref="Buffer"/>, <see cref="SelectAsync"/>,
 /// <see cref="SelectAsyncUnordered"/>, <see cref="SelectValueTaskAsync"/>,
-/// <see cref="SelectValueTaskAsyncUnordered"/>, and <see cref="ForEachAsync"/> each cut the chain into
-/// segments the runtime executes as separate loops joined by one bounded channel. Every other shape fuses,
-/// which is what makes fusion the default and a queue something an author asked for.
+/// <see cref="SelectValueTaskAsyncUnordered"/>, <see cref="ForEachAsync"/>, and <see cref="Delay"/> each cut
+/// the chain into segments the runtime executes as separate loops joined by one bounded channel. Every other
+/// shape fuses, which is what makes fusion the default and a queue something an author asked for.
+/// </para>
+/// <para>
+/// Six of the shapes read a clock, and every one of them reads the run's own: <see cref="Tick"/>,
+/// <see cref="Delay"/>, <see cref="InitialDelay"/>, <see cref="Timeout"/>, <see cref="TakeWithin"/>, and
+/// <see cref="SkipWithin"/>, together with <see cref="Throttle"/>, which reads one to measure a rate. The
+/// clock is the host's <see cref="System.TimeProvider"/>, resolved at materialization and carried by the run
+/// (ADR 0005); no stage of this vocabulary reads <see cref="System.TimeProvider.System"/> directly, which is
+/// what makes a deterministic test of one possible at all.
 /// </para>
 /// <para>
 /// Nine of the shapes are junctions. <see cref="Broadcast"/>, <see cref="Balance"/>,
@@ -35,6 +43,12 @@ namespace Orleans.Dataflow.Authoring;
 /// because a junction's pump shape — several channels on one side, one on the other, and a rule about which
 /// of them moves next — is the whole of what it is. Their contracts are ADR 0005's two tables, and the
 /// runtime holds them per junction rather than per graph.
+/// </para>
+/// <para>
+/// <see cref="Valve"/> is the one shape that is neither a source nor a terminal and still declares a
+/// control port. Its state is a runtime object an author flips while the run is running, which is what a
+/// control is; the state it <i>starts</i> in is configuration and is written into the document like every
+/// other number.
 /// </para>
 /// <para>
 /// <see cref="SinkProbe"/> is the one shape no author-facing operator of this package builds: it is the
@@ -103,6 +117,12 @@ internal enum LocalStageKind
 
     /// <summary>Emits the elements of a channel the author owns; one output port, no input port.</summary>
     FromChannel,
+
+    /// <summary>
+    /// Emits the number of every tick of a declared interval, skipping the ticks a slow consumer missed;
+    /// one output port, no input port.
+    /// </summary>
+    Tick,
 
     /// <summary>Maps every element through a function; one input port and one output port.</summary>
     Select,
@@ -174,6 +194,48 @@ internal enum LocalStageKind
     /// order; one input port and one output port.
     /// </summary>
     SelectValueTaskAsyncUnordered,
+
+    /// <summary>
+    /// Holds every element for a declared duration and emits it in arrival order, with a declared number of
+    /// them being held at once; one input port and one output port.
+    /// </summary>
+    Delay,
+
+    /// <summary>
+    /// Holds the first element until a declared duration has passed since the run started, and nothing after
+    /// it; one input port and one output port.
+    /// </summary>
+    InitialDelay,
+
+    /// <summary>
+    /// Fails the run when a declared duration passes with no element, counting from the previous element or
+    /// from the start of the run; one input port and one output port.
+    /// </summary>
+    Timeout,
+
+    /// <summary>
+    /// Ends the stream when a declared duration has passed since the run started; one input port and one
+    /// output port.
+    /// </summary>
+    TakeWithin,
+
+    /// <summary>
+    /// Drops every element until a declared duration has passed since the run started; one input port and
+    /// one output port.
+    /// </summary>
+    SkipWithin,
+
+    /// <summary>
+    /// Holds a stream to a declared rate, waiting for budget or failing the run by its declared mode; one
+    /// input port and one output port.
+    /// </summary>
+    Throttle,
+
+    /// <summary>
+    /// Holds every element while its control is closed and passes them while it is open; one input port,
+    /// one output port, and one control result port.
+    /// </summary>
+    Valve,
 
     /// <summary>
     /// Delivers every element to every live output; one input port and between two and

@@ -1196,3 +1196,249 @@ rather than stages, so a branching document executes inside one local engine
 there too — but no test in this checkpoint materializes one through a silo, and
 "the control plane holds across a distributed DAG" is a sentence nobody has
 earned yet.
+
+## M4.3 wave 1 (time) — as implemented
+
+The clock arrives, and with it every operator that reads one. What follows is
+where the clock lives, what a wait on it owes the control plane, what each
+operator's contract turned out to be once it had to run in a pull engine, and
+what this wave does not do.
+
+### Where the clock lives
+
+**The clock is the host's, resolved at materialization, carried by the run.**
+`LocalDataflowHost` takes a `TimeProvider` (default `TimeProvider.System`);
+the planner puts it on the plan, the run puts it in the context every source,
+terminal, and clock-reading stage already receives, and no stage of this
+vocabulary ever names `TimeProvider.System` itself. That is ADR 0005's
+sentence made mechanical, and the reason it has to be mechanical is that a
+single stage reaching for the system clock would make every deterministic
+test of a graph containing it a lie.
+
+**The document never carries a clock**, because a clock is runtime and not
+definition: two runs of one graph may be measured by two different clocks and
+their fingerprints are identical. What *is* in the document is every number an
+author wrote — the delay, the two windows, the timeout's gap, the rate, the
+burst, the mode, the tick source's two durations — written as counts of
+`TimeSpan.Ticks` under contracts of their own, so two graphs differing only in
+a duration are two graphs with two fingerprints, and a run executes the
+document's number rather than the binding's.
+
+**The run has one zero.** The clock is read once, when the run is built, and
+that reading is what every "since the run started" duration measures from: an
+initial delay, both windows, a timeout's first gap, a throttle's first budget,
+and a tick source's tick zero. One reading rather than one per stage, because
+the alternative is a zero that depends on when a thread happened to be
+scheduled — a race an author could observe and a test could not pin. The
+clock-reading stages are attached to the run before any segment is launched
+for the same reason.
+
+### What a clock wait owes the control plane
+
+Checkpoint 5's rule is the one every new wait was written against: **a wait
+that does not report itself is a hole in quiescence.** Every clock wait this
+wave adds takes the `Idle`/`Busy` bracket, so a run parked in one comes to
+rest under `PauseAsync` without the clock moving at all, and every one of them
+is taken on a token, so a stop releases it. Three consequences are contracts
+rather than incidents.
+
+- **A stop releases a clock wait and keeps the element.** A shutdown ends the
+  wait of an initial delay, a throttle, or a tick source at once: a stop is not
+  a stream, so the element in the segment's hand is delivered rather than held
+  back for a clock that no longer paces anything. A cancellation raises and
+  abandons it. The same split every other wait of this runtime makes.
+- **A wait that finishes during a pause parks instead of delivering.** The
+  stage returns to the gate before it emits, which is the second look the
+  source pump has taken since checkpoint 1. A paused run whose budget arrives
+  is still a paused run.
+- **Time passes while a run is paused.** A pause holds elements at safe
+  points; it does not stop the clock, and pretending otherwise would need
+  every timing stage to observe the gate's edges and re-derive its deadlines
+  from them. So a run held for longer than a timeout's gap fails, and one held
+  past a window's end closes that window. Stated, tested, and documented
+  rather than discovered.
+
+**Two stages act when no element arrives at all**, which no per-element method
+could ever be asked: a timeout has to fail a stream that has gone silent, and
+a take-within has to end one whose window closed while nothing came. Each
+holds one timer of the run's clock and acts from it through two hooks the run
+already had — `Complete`, the walk a downstream completion takes, and `Fail`,
+the record a throwing stage makes, both already safe from any thread. No pump
+shape was added and no wait discipline changed; what is new is only that a
+timer may be the caller. The timers are released when their segment stops, so
+none outlives its run.
+
+Three details of those timers are worth stating because each was a defect
+before it was a rule. A timer is created **disarmed** and armed afterwards, so
+the stage's own field is assigned before anything can fire — a timer armed in
+its constructor may fire first, and with a controlled clock a test can make
+that happen by advancing while the run is being launched. A fire is a
+**question rather than a verdict**: both stages re-read the elapsed time and
+re-arm if the moment has not come, which is what lets a watchdog ignore a
+stream that kept its promise and what makes the third rule possible. And the
+arm is **clamped to what the clock accepts** — the BCL's timers count
+milliseconds in an unsigned 32-bit number, so a due time past about
+forty-nine days is refused, and a window or a gap of months is an ordinary
+thing for an author to write. Before the clamp, `Timeout(TimeSpan.FromDays(400))`
+threw an argument exception out of `MaterializeAsync` from inside a timer
+nobody had asked about.
+
+### The operators, and what each one turned out to mean
+
+**`Delay(d, holdback)` shifts a stream; it does not pace one.** It is driven
+by the machinery an asynchronous stage is driven by, because that is the shape
+of the promise: an element admitted starts its own wait at once, results are
+emitted in input order, and a burst that fits the declared holdback comes out
+with its gaps intact, later by the delay. A stage holding one element at a time
+would have turned the same burst into a stream paced at one element per delay,
+which is a throttle and not a delay. The holdback is required — the declared
+capacity is how many elements are waiting out their delay at once, with one
+more in the handoff in front of them as there is in front of every
+asynchronous stage — and the declared overflow policy answers the element that
+arrives when both are occupied, exactly as a buffer's would.
+
+Being a window rather than a hold has two consequences this engine states
+rather than hides: **a pause waits for the delays in flight** and **a shutdown
+drains them**, both exactly as they do for an author's callback in flight, and
+both bounded by the delay itself. That is the one clock wait a stop does not
+cut short, and it is the async window's rule rather than a decision taken here.
+
+**`InitialDelay(d)` delays the stream and not its elements.** The first
+element is held until `d` has passed since the run started and everything
+after it passes untouched; a stream whose first element arrives later than that
+is not delayed at all, because the wait is for a moment rather than for a
+duration.
+
+**`SkipWithin(w)` is the wall-clock `Skip`** and the one clock-reading stage
+that never waits: an element arriving inside the window is dropped the moment
+it arrives, and the clock stops being read once the window has closed, because
+the answer can never change again.
+
+**`TakeWithin(w)` ends the stream at its deadline**, and does so from two
+sides that say one thing: the element arriving at or after the deadline is not
+emitted, and the timer ends the stream when the window closes with nothing
+there to end it on. The second is the operator's reason to exist, and the
+honest limit is worth naming: **the stream ends at that stage, and a source
+above it that is asleep in one of this runtime's own waits learns at its next
+element.** That is the engine's existing rule — a completion below does not
+release a source's own wait — so a run over a ticking source ends within one
+interval of the deadline rather than at it, and a run over `Source.Never`
+does not end until it is stopped. The elements are exactly those that arrived
+before the deadline either way.
+
+**`Timeout(d)` fails a stream that goes quiet**, counting from the previous
+element and, for the first one, from the moment the run started; the run
+faults with `StreamTimeoutException`, which is a `TimeoutException` a caller
+can catch by its own name. The timer is a watchdog rather than a deadline: it
+is armed once and, when it fires, asks how long the stream has actually been
+silent, re-arming for the remainder if an element arrived meanwhile. So the
+ordinary element pays one timestamp and no timer call, and a timeout that did
+not happen cannot be reported.
+
+**`Throttle(options)` is a token bucket counted in exact integers.** The
+budget is held in element-ticks — a tick of elapsed time is worth `Elements`
+of them and one cost unit costs `Per.Ticks` of them — so the refill is
+continuous rather than stepped: three per second admits an element every third
+of a second instead of three at each second's edge. The bucket starts full,
+holds `MaximumBurst` (defaulting to `Elements`, written into the document
+either way), and charges what the cost function answers when there is one.
+`Shaping` waits for budget on the segment's own thread, which backpressures
+upstream; `Enforcing` fails the run with `RateLimitExceededException`. Nothing
+is ever dropped by either. Two failures belong to both modes: an element
+costing more than the whole burst, which no amount of waiting could admit, and
+a negative cost, which would give a stream budget back.
+
+**`Valve(controlName, initialMode)` is the one operator of this wave that
+reads no clock**, and it is here because it needs the other half of the same
+attachment: somewhere to wait that reports itself. It is also the first control
+this vocabulary declares in the middle of a chain rather than at one of its
+ends, and the M2 control seam needed no line for that — the graph builder
+already collected a control from any occurrence, the planner already sorted
+controls by the port they are declared on rather than by where the node stands,
+and a run already handed every control out as soon as it existed. It is the
+simplest control there is, because a valve has no element type: the runtime
+object *is* the `IValve` an author receives, so there is no facade to build.
+
+A closed valve holds the element the stage has in its hand and backpressures
+everything above it, with no capacity of its own — what accumulates is exactly
+the declared buffer above it plus the element the valve holds plus the one in
+the source's hand — and nothing is dropped. Closing takes effect at the next
+element and never retroactively. Two valves in one chain are two controls and
+both have to be open; two runs of one graph have two valves. The state a valve
+*starts* in is in the document, because a graph whose valve starts closed
+produces nothing until something opens it; what an author does to it afterwards
+is a run's own business.
+
+**`Source.Tick(initialDelay, interval)` emits tick numbers, and the numbers
+are the contract.** A tick that comes due while the run is busy is *skipped*
+rather than queued — a queue of moments that have already passed grows without
+bound whenever the consumer is slower than the interval — and tick `n` is due
+at `initialDelay + n * interval` after the run started whether or not it was
+emitted, so a consumer that missed three receives a number three higher and
+can see that it fell behind. Akka's tick source emits a fixed element the
+author supplies, which is honest for a source that never skips; here the
+skipping is the contract, and a counter that jumped silently would hide the
+one thing worth reading. A stream of a constant is one `Select` away. The
+source is endless, non-durable, and belongs to its run the way an enumerator
+does: two runs of one graph tick independently, and it is bounded by whatever
+is written below it or by a stop.
+
+### The test clock
+
+`Orleans.Dataflow.Testing.TestClock` is a `TimeProvider` a test moves by hand:
+a monotonic reading, a wall-clock reading, and timers that fire when the test
+says so. Everything in the BCL that takes a `TimeProvider` — `Task.Delay`
+above all, which every wait here is built on — is built on exactly those, so
+implementing the four members is smaller than a package dependency would be
+and leaves nothing to discover about what it does. `Advance` moves to each due
+moment in turn rather than jumping to the end, so a callback reads the clock at
+its own due moment and a timer it arms inside the window fires within the same
+advance; `WaitForTimersAsync` is the synchronization a virtual clock needs and
+a real one does not, because advancing past a wait the run has not armed yet
+would arm it after the moment it was waiting for.
+
+What it is not is a scheduler: the segments of a run are real threads doing
+real work, and only their *waiting* is virtual, so a test still synchronizes
+with the run through a probe, a slot, or completion.
+
+### A correction to ADR 0005, measured rather than argued
+
+The ADR lists, beside a dropping buffer, "an explicit delay" as a boundary
+that makes a cycle legal. For this engine that is not true, and the rule is
+not implemented: a delay waits for room below it exactly as a backpressuring
+buffer does — its window fills, and then the pump above it waits for a slot
+only the pump below could free — so it postpones the deadlock rather than
+breaking it. A cycle whose only boundary is a delay is refused like any other
+waiting loop, with the delay named in the path. The predicate stays what
+checkpoint 4 implemented: a declared buffer whose overflow policy is not
+backpressure, and nothing else.
+
+### What this wave does not do
+
+**Nothing here is proven across a junction.** Every graph in this wave's suite
+is a chain. A delay on one leg of a broadcast, a timeout on one input of a
+zip, and a throttle inside a cycle are all expressible and none is asserted;
+the operators are ordinary stages of the vocabulary and compose by
+construction, but "compose by construction" is an argument rather than a
+measurement.
+
+**One race is closed by discipline rather than by a test.** A timing stage is
+attached before any segment starts and detached when its own segment stops, so
+a timer of a run that has ended cannot fire; but a run that ends in the same
+instant its window closes is a race between the two, and the outcome is
+whichever got there first. That is inherent to a deadline — a stream that ends
+exactly at its timeout has no true answer — and it is named rather than
+papered over.
+
+**The bounds are proven as how far a held source got**, which is the accounting
+every bounded-memory test in this suite makes, and not as a measurement of a
+stage's own memory. A delay's holdback is asserted as the number of elements a
+recording source hands out before the run stops asking — the window plus the
+handoff plus the element in the source's hand — read while nothing can move
+because the clock is not moving.
+
+**Nothing here says anything about a distributed run.** The clock is the local
+host's; a registered stage receives the run's tokens and whatever its own
+provider gave it, and the Orleans path materializes with `TimeProvider.System`
+because no stage it can execute reads a clock at all. A silo-wide controlled
+clock is not a thing this milestone has.

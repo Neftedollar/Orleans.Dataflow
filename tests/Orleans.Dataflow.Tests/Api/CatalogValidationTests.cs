@@ -1,3 +1,4 @@
+using System.Globalization;
 using Orleans.Dataflow.Authoring;
 using Orleans.Dataflow.Compilation;
 using Orleans.Dataflow.Definition;
@@ -48,7 +49,7 @@ public sealed class CatalogValidationTests
 
             for (int index = 0; index < operators; index++)
             {
-                source = (index % 13) switch
+                source = (index % 21) switch
                 {
                     0 => source.Select(value => value + 1),
                     1 => source.Where(value => value > 0),
@@ -70,7 +71,25 @@ public sealed class CatalogValidationTests
                     11 => source.SelectValueTaskAsyncUnordered(
                         new ParallelismOptions { MaxConcurrency = index + 1 },
                         (value, _) => ValueTask.FromResult(value)),
-                    _ => source.Distinct(new DistinctOptions { MaxTrackedKeys = index + 1 }),
+                    12 => source.Distinct(new DistinctOptions { MaxTrackedKeys = index + 1 }),
+                    13 => source.Delay(
+                        TimeSpan.FromSeconds(index + 1),
+                        new BufferOptions { Capacity = index + 1 }),
+                    14 => source.InitialDelay(TimeSpan.FromSeconds(index + 1)),
+                    15 => source.Timeout(TimeSpan.FromHours(index + 1)),
+                    16 => source.TakeWithin(TimeSpan.FromHours(index + 1)),
+                    17 => source.SkipWithin(TimeSpan.FromTicks(index + 1)),
+                    18 => source.Throttle(new ThrottleOptions
+                    {
+                        Elements = index + 1,
+                        Per = TimeSpan.FromTicks(index + 1),
+                    }),
+                    19 => source.Throttle(
+                        new ThrottleOptions { Elements = index + 1, Per = TimeSpan.FromTicks(index + 1) },
+                        cost: _ => 1),
+                    _ => source.Valve(
+                        string.Create(CultureInfo.InvariantCulture, $"valve-{index}"),
+                        ValveMode.Closed),
                 };
             }
 
@@ -160,6 +179,7 @@ public sealed class CatalogValidationTests
                 LocalStage("concat"),
                 LocalStage("count"),
                 LocalStage("cycle"),
+                LocalStage("delay"),
                 LocalStage("distinct"),
                 LocalStage("empty"),
                 LocalStage("failed"),
@@ -175,6 +195,7 @@ public sealed class CatalogValidationTests
                 LocalStage("from-factory"),
                 LocalStage("from-task"),
                 LocalStage("ignore"),
+                LocalStage("initial-delay"),
                 LocalStage("interleave"),
                 LocalStage("last"),
                 LocalStage("last-or-default"),
@@ -194,13 +215,19 @@ public sealed class CatalogValidationTests
                 LocalStage("sink-probe"),
                 LocalStage("skip"),
                 LocalStage("skip-while"),
+                LocalStage("skip-within"),
                 LocalStage("take"),
                 LocalStage("take-through"),
                 LocalStage("take-while"),
+                LocalStage("take-within"),
+                LocalStage("throttle"),
+                LocalStage("tick"),
+                LocalStage("timeout"),
                 LocalStage("to-channel"),
                 LocalStage("unfold"),
                 LocalStage("unfold-async"),
                 LocalStage("unzip"),
+                LocalStage("valve"),
                 LocalStage("where"),
                 LocalStage("zip"),
             ],
@@ -246,6 +273,7 @@ public sealed class CatalogValidationTests
             "range",
             "repeat",
             "single",
+            "tick",
             "unfold",
             "unfold-async",
         ];
@@ -379,6 +407,7 @@ public sealed class CatalogValidationTests
                 ["concat"] = "local-parameters",
                 ["count"] = "local-parameters",
                 ["cycle"] = "local-parameters",
+                ["delay"] = "local-delay-parameters",
                 ["distinct"] = "local-distinct-parameters",
                 ["empty"] = "local-parameters",
                 ["failed"] = "local-parameters",
@@ -394,6 +423,7 @@ public sealed class CatalogValidationTests
                 ["from-factory"] = "local-parameters",
                 ["from-task"] = "local-parameters",
                 ["ignore"] = "local-parameters",
+                ["initial-delay"] = "local-duration-parameters",
                 ["interleave"] = "local-interleave-parameters",
                 ["last"] = "local-parameters",
                 ["last-or-default"] = "local-parameters",
@@ -413,13 +443,19 @@ public sealed class CatalogValidationTests
                 ["sink-probe"] = "local-parameters",
                 ["skip"] = "local-count-parameters",
                 ["skip-while"] = "local-parameters",
+                ["skip-within"] = "local-duration-parameters",
                 ["take"] = "local-count-parameters",
                 ["take-through"] = "local-parameters",
                 ["take-while"] = "local-parameters",
+                ["take-within"] = "local-duration-parameters",
+                ["throttle"] = "local-throttle-parameters",
+                ["tick"] = "local-tick-parameters",
+                ["timeout"] = "local-duration-parameters",
                 ["to-channel"] = "local-parameters",
                 ["unfold"] = "local-parameters",
                 ["unfold-async"] = "local-parameters",
                 ["unzip"] = "local-parameters",
+                ["valve"] = "local-valve-parameters",
                 ["where"] = "local-parameters",
                 ["zip"] = "local-parameters",
             },
@@ -491,7 +527,7 @@ public sealed class CatalogValidationTests
                     (string expectedPort, string expectedContract) = specification.Stage.Stage.Value switch
                     {
                         "fold" => ("result", "local-fold-result"),
-                        "queue" or "sink-probe" => ("control", "local-control"),
+                        "queue" or "sink-probe" or "valve" => ("control", "local-control"),
                         _ => ("result", "local-result"),
                     };
 
@@ -520,6 +556,7 @@ public sealed class CatalogValidationTests
                 ["concat"] = 0,
                 ["count"] = 1,
                 ["cycle"] = 0,
+                ["delay"] = 0,
                 ["distinct"] = 0,
                 ["empty"] = 0,
                 ["failed"] = 0,
@@ -535,6 +572,7 @@ public sealed class CatalogValidationTests
                 ["from-factory"] = 0,
                 ["from-task"] = 0,
                 ["ignore"] = 0,
+                ["initial-delay"] = 0,
                 ["interleave"] = 0,
                 ["last"] = 1,
                 ["last-or-default"] = 1,
@@ -554,13 +592,19 @@ public sealed class CatalogValidationTests
                 ["sink-probe"] = 1,
                 ["skip"] = 0,
                 ["skip-while"] = 0,
+                ["skip-within"] = 0,
                 ["take"] = 0,
                 ["take-through"] = 0,
                 ["take-while"] = 0,
+                ["take-within"] = 0,
+                ["throttle"] = 0,
+                ["tick"] = 0,
+                ["timeout"] = 0,
                 ["to-channel"] = 0,
                 ["unfold"] = 0,
                 ["unfold-async"] = 0,
                 ["unzip"] = 0,
+                ["valve"] = 1,
                 ["where"] = 0,
                 ["zip"] = 0,
             },
@@ -741,6 +785,9 @@ public sealed class CatalogValidationTests
         yield return ("single-element source", Source.Single(1).To(Sink.Ignore<int>()));
         yield return ("repeating source", Source.Repeat(1, 3).To(Sink.Ignore<int>()));
         yield return ("range source", Source.Range(-1, 4).To(Sink.Ignore<int>()));
+        yield return (
+            "tick source",
+            Source.Tick(TimeSpan.FromSeconds(1), TimeSpan.FromSeconds(1)).To(Sink.Ignore<long>()));
         yield return ("task source", Source.FromTask(Task.FromResult(1)).To(Sink.Ignore<int>()));
         yield return (
             "failed source",

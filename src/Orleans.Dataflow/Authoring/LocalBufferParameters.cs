@@ -92,19 +92,7 @@ internal static class LocalBufferParameters
             capacity = declared;
         }
 
-        if (!payload.TryGetProperty(PolicyMember, out JsonElement policyMember))
-        {
-            found.Add(LocalParameterPayload.DescribeMissing(PolicyMember));
-        }
-        else if (policyMember.ValueKind is not JsonValueKind.String)
-        {
-            found.Add(LocalParameterPayload.DescribeWrongKind(PolicyMember, policyMember, "one of five policy names"));
-        }
-        else if (!TryParse(policyMember.GetString()!, out policy))
-        {
-            found.Add(
-                $"the member '{PolicyMember}' is '{policyMember.GetString()}', and an overflow policy is one of 'backpressure', 'drop-oldest', 'drop-newest', 'drop-buffer', and 'fail'");
-        }
+        _ = TryReadPolicy(payload, PolicyMember, found, out policy);
 
         LocalParameterPayload.ReportUnknownMembers(payload, [CapacityMember, PolicyMember], found);
 
@@ -117,6 +105,54 @@ internal static class LocalBufferParameters
 
         violations = [];
         options = new BufferOptions { Capacity = capacity, OverflowPolicy = policy };
+
+        return true;
+    }
+
+    /// <summary>Reads a member that has to be one of the five overflow policy names.</summary>
+    /// <param name="payload">The payload object.</param>
+    /// <param name="member">The member name.</param>
+    /// <param name="violations">The report under construction, appended to when the member is wrong.</param>
+    /// <param name="policy">
+    /// When this method returns <see langword="true"/>, the policy; otherwise
+    /// <see cref="OverflowPolicy.Backpressure"/>.
+    /// </param>
+    /// <returns><see langword="true"/> when the member is present and names a declared policy.</returns>
+    /// <remarks>
+    /// Shared with every other payload that carries a policy — a delay's holdback is the second — so that
+    /// the five spellings and the sentence that lists them are written once. A payload's policy is a name
+    /// rather than a number for the reason ADR 0003 gives: a number would make the document's meaning depend
+    /// on the declaration order of a CLR enumeration.
+    /// </remarks>
+    internal static bool TryReadPolicy(
+        JsonElement payload,
+        string member,
+        List<string> violations,
+        out OverflowPolicy policy)
+    {
+        policy = OverflowPolicy.Backpressure;
+
+        if (!payload.TryGetProperty(member, out JsonElement declared))
+        {
+            violations.Add(LocalParameterPayload.DescribeMissing(member));
+
+            return false;
+        }
+
+        if (declared.ValueKind is not JsonValueKind.String)
+        {
+            violations.Add(LocalParameterPayload.DescribeWrongKind(member, declared, "one of five policy names"));
+
+            return false;
+        }
+
+        if (!TryParse(declared.GetString()!, out policy))
+        {
+            violations.Add(
+                $"the member '{member}' is '{declared.GetString()}', and an overflow policy is one of 'backpressure', 'drop-oldest', 'drop-newest', 'drop-buffer', and 'fail'");
+
+            return false;
+        }
 
         return true;
     }

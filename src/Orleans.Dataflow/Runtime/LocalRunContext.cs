@@ -1,12 +1,21 @@
 namespace Orleans.Dataflow.Runtime;
 
 /// <summary>
-/// The three things a source or a terminal of one run needs to know about that run: when it must abandon
-/// its work, when it may stop producing, and where its own waits report that they are waiting.
+/// The four things a source, a terminal, or a clock-reading stage of one run needs to know about that run:
+/// when it must abandon its work, when it may stop producing, where its own waits report that they are
+/// waiting, and what time it is.
 /// </summary>
 /// <param name="Pause">
 /// The run's pause gate. A wait that belongs to this runtime reports itself idle for its duration, so that
 /// a pause can take effect while the run is waiting for something that is not coming.
+/// </param>
+/// <param name="Clock">
+/// The clock every stage of this run that reads one reads. It is the host's, resolved at materialization
+/// and carried here so that no stage ever reaches for <see cref="TimeProvider.System"/> itself.
+/// </param>
+/// <param name="Started">
+/// The clock's reading when this run was materialized, which is the zero every duration measured "since the
+/// run started" is measured from.
 /// </param>
 /// <param name="RunToken">
 /// The run's own token, cancelled when the run is cancelled and when anything in the run fails. This is
@@ -37,9 +46,24 @@ namespace Orleans.Dataflow.Runtime;
 /// it exactly as a shutdown does. The rule is one rule stated twice: what the runtime waits for, the
 /// runtime can account for.
 /// </para>
+/// <para>
+/// <paramref name="Clock"/> is here for the same reason the tokens are: it is a property of the run and not
+/// of the graph. A document never carries a clock — a clock is runtime, not definition — so two runs of one
+/// graph may be measured by two different clocks, which is exactly what a deterministic test of a timing
+/// operator does. Time passes for a paused run: a pause holds the elements, not the clock.
+/// </para>
+/// <para>
+/// <paramref name="Started"/> is read once, when the run is built, and is what every "since the run started"
+/// duration means: an initial delay, the two windows, a timeout's first gap, a throttle's first budget, and
+/// a tick source's zero all measure from this one reading. One reading rather than one per stage, because
+/// the alternative is a zero that depends on when a thread happened to be scheduled — which is a race an
+/// author could observe and a test could not pin.
+/// </para>
 /// </remarks>
 internal readonly record struct LocalRunContext(
     LocalPause Pause,
+    TimeProvider Clock,
+    long Started,
     CancellationToken RunToken,
     CancellationToken StopToken)
 {

@@ -142,7 +142,12 @@ Five rules hold for every junction, stated once:
 A cycle is legal exactly when every cycle in the graph passes through at
 least one boundary that can hold an element and answer without waiting for
 its own downstream — a buffer whose overflow policy is anything but
-`Backpressure`, or (once M4's timing operators exist) an explicit delay.
+`Backpressure`. This ADR originally guessed that an explicit delay would
+also qualify once the timing operators existed; wave 1 measured the guess
+wrong and it is corrected here: a delay holds elements for a time and then
+waits for room below exactly as a backpressuring buffer does, so it
+relieves nothing, and a cycle whose only boundary is a delay is refused
+with the same sentence.
 Validation enforces this before execution: a cycle of nothing but
 backpressuring edges is refused with the cycle's node path in the
 diagnostic, because in a pull engine such a loop is a deadlock by
