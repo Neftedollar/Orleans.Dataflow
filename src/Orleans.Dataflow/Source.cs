@@ -219,15 +219,18 @@ public sealed class Source<T>
         return new Source<T>(Shape.Append(LocalStageDescriptor.TakeWhile(predicate)));
     }
 
-    /// <summary>Extends this source with a stage that passes elements up to and including one the predicate accepts.</summary>
-    /// <param name="predicate">The test that decides which element is the last one.</param>
+    /// <summary>Extends this source with a stage that passes elements while a predicate holds, delivering the element that ends it.</summary>
+    /// <param name="predicate">The test that decides whether the stream keeps going.</param>
     /// <returns>A new source; this one is unchanged.</returns>
     /// <exception cref="ArgumentNullException"><paramref name="predicate"/> is <see langword="null"/>.</exception>
     /// <remarks>
     /// The inclusive counterpart of <see cref="TakeWhile"/>, and the streaming name rather than a LINQ one
-    /// because LINQ has no such operator to borrow from: the element the predicate accepts is emitted and
-    /// the run completes after it. This is how a stream ends at a terminator it has to deliver — the last
-    /// page, the closing record, the sentinel.
+    /// because LINQ has no such operator to borrow from: the first element the predicate rejects is emitted
+    /// and the run completes after it, where <see cref="TakeWhile"/> ends without delivering it. This is
+    /// how a stream ends at a terminator it has to deliver — the last page, the closing record, the
+    /// sentinel — spelled as the predicate for "not yet the terminator". This doc once said the opposite
+    /// ("the element the predicate accepts is emitted"); the runtime and the suite always meant this one,
+    /// and the M7.2 twin-frontend pass is what caught the drift.
     /// </remarks>
     public Source<T> TakeThrough(Func<T, bool> predicate)
     {

@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using System.Globalization;
 using Orleans.Dataflow.Adapters;
 using Orleans.Dataflow.Hosting;
@@ -787,11 +788,15 @@ internal static class Poll
 {
     /// <summary>The greatest number of turns a poll takes before it reports that it gave up.</summary>
     /// <remarks>
-    /// Thirty seconds at the default interval, which is far longer than anything here takes and far shorter
-    /// than forever. The bound exists so that a broken expectation fails with a sentence rather than hanging
-    /// a suite: a poll that waits without end turns every regression into a timeout somewhere else.
+    /// Two minutes of wall clock, which is far longer than anything here takes and far shorter than
+    /// forever. The bound exists so that a broken expectation fails with a sentence rather than hanging a
+    /// suite: a poll that waits without end turns every regression into a timeout somewhere else. It is
+    /// measured in elapsed time rather than in turns, because a turn count silently shrinks under CPU
+    /// contention — a suite sharing the machine with two other test hosts once stretched a fifteen-second
+    /// test to forty-nine and blew a thirty-second turn budget on a run that was healthy (observed
+    /// 2026-08-19, the M7.2 pass) — while a deadline holds still whatever the scheduler is doing.
     /// </remarks>
-    private const int MaxTurns = 1500;
+    private static readonly TimeSpan PollBudget = TimeSpan.FromMinutes(2);
 
     /// <summary>Waits until a condition holds.</summary>
     /// <param name="condition">The condition.</param>
@@ -807,8 +812,9 @@ internal static class Poll
     internal static async Task UntilAsync(Func<Task<bool>> condition, string expectation)
     {
         CancellationToken token = TestContext.Current.CancellationToken;
+        long started = Stopwatch.GetTimestamp();
 
-        for (int turn = 0; turn < MaxTurns; turn++)
+        while (Stopwatch.GetElapsedTime(started) < PollBudget)
         {
             if (await condition())
             {
@@ -820,6 +826,7 @@ internal static class Poll
             await Task.Delay(OrleansDataflowClientOptions.DefaultPollInterval, token);
         }
 
-        Assert.Fail($"Waited {MaxTurns} turns of the poll interval and {expectation} never became true.");
+        Assert.Fail(
+            $"Waited {Stopwatch.GetElapsedTime(started).TotalSeconds:F0}s and {expectation} never became true.");
     }
 }
