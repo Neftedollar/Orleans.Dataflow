@@ -1,4 +1,3 @@
-using System.Text.Json;
 using Orleans.Dataflow.Hosting;
 using Orleans.Dataflow.Identity;
 using static Orleans.Dataflow.Tests.Api.ApiFixtures;
@@ -74,15 +73,16 @@ internal sealed class RegisteredJunctionProvider : IDataflowStageFactory
                 static element => new OrderKey(((OrderDocument)element!).OrderId)),
             "index-sink" or "durable-sink" => Counting(producesResult: false),
             "count-sink" or "key-count-sink" or "pair-count-sink" => Counting(producesResult: true),
-            "split" or "spread" => Mode(request) switch
+            "split" or "spread" => Splitting(request) switch
             {
-                "balance" => DataflowStageRuntime.Balance(),
+                SplitMode.Balance => DataflowStageRuntime.Balance(),
 
                 // A deliberately wrong answer, reachable only from a payload that asks for it: two
                 // projections for a junction whose document wires three legs. It exists so that the
                 // planner's "a stage says one thing and the document says another" refusal can be
                 // reached through the seam rather than only reasoned about.
-                "halves" => DataflowStageRuntime.Unzip([static element => element, static element => element]),
+                SplitMode.Halves =>
+                    DataflowStageRuntime.Unzip([static element => element, static element => element]),
                 _ => DataflowStageRuntime.Broadcast(),
             },
             "divide" => DataflowStageRuntime.Unzip(
@@ -90,7 +90,7 @@ internal sealed class RegisteredJunctionProvider : IDataflowStageFactory
                 static element => element,
                 static element => new OrderKey(((OrderDocument)element!).OrderId),
             ]),
-            "join" or "gather" => Mode(request) is "concat"
+            "join" or "gather" => Joining(request) is JoinMode.Concat
                 ? DataflowStageRuntime.Concat()
                 : DataflowStageRuntime.Merge(),
 
@@ -119,19 +119,46 @@ internal sealed class RegisteredJunctionProvider : IDataflowStageFactory
             finish: null,
             producesResult);
 
-    /// <summary>Reads the <c>mode</c> member of an occurrence's payload.</summary>
+    /// <summary>Reads what a fan-out occurrence's payload declares.</summary>
     /// <param name="request">The node as the document declares it.</param>
-    /// <returns>The declared mode, or the empty string when the payload states none.</returns>
-    private static string Mode(DataflowStageRequest request)
-    {
-        JsonElement payload = request.Node.Parameters.ToElement();
+    /// <returns>The declared mode.</returns>
+    /// <exception cref="InvalidOperationException">The payload is not readable.</exception>
+    /// <remarks>
+    /// Through the vocabulary's own reader rather than through a parse of this factory's own, which is the
+    /// half of the typed-parameter-builder pattern that lives on this side of the seam: the writer, the
+    /// validator, and this all read one statement of what the payload is, so a member renamed in one place
+    /// stops compiling in the other two. The refusal is unreachable by construction — the graph compiler ran
+    /// the very same reader before a run was planned — and stated anyway, because a factory that defaulted
+    /// instead would make an unreadable payload behave like a broadcast.
+    /// </remarks>
+    private static SplitMode Splitting(DataflowStageRequest request) =>
+        JunctionModePayload.TryReadSplit(
+            request.Node.Parameters,
+            out SplitMode mode,
+            out IReadOnlyList<string> violations)
+            ? mode
+            : throw Unreadable(request, violations);
 
-        return payload.ValueKind is JsonValueKind.Object &&
-            payload.TryGetProperty("mode", out JsonElement mode) &&
-            mode.ValueKind is JsonValueKind.String
-                ? mode.GetString() ?? string.Empty
-                : string.Empty;
-    }
+    /// <summary>Reads what a fan-in occurrence's payload declares.</summary>
+    /// <param name="request">The node as the document declares it.</param>
+    /// <returns>The declared mode.</returns>
+    /// <exception cref="InvalidOperationException">The payload is not readable.</exception>
+    private static JoinMode Joining(DataflowStageRequest request) =>
+        JunctionModePayload.TryReadJoin(
+            request.Node.Parameters,
+            out JoinMode mode,
+            out IReadOnlyList<string> violations)
+            ? mode
+            : throw Unreadable(request, violations);
+
+    /// <summary>Says that a node carries a payload this provider cannot read.</summary>
+    /// <param name="request">The node.</param>
+    /// <param name="violations">What the reader said was wrong with it.</param>
+    /// <returns>The exception to throw.</returns>
+    private static InvalidOperationException Unreadable(
+        DataflowStageRequest request,
+        IReadOnlyList<string> violations) =>
+        new($"The node '{request.Node.Id}', an occurrence of '{request.Node.Stage}', carries parameters this provider cannot read: {string.Join("; ", violations)}.");
 
     /// <summary>Opens one enumeration of the fixture's order events.</summary>
     /// <returns>The events, as the engine pulls them.</returns>

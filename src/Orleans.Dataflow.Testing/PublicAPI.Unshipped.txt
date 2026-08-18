@@ -12,6 +12,18 @@ Orleans.Dataflow.Testing.ProbeTerminatedException
 Orleans.Dataflow.Testing.ProbeTerminatedException.ProbeTerminatedException() -> void
 Orleans.Dataflow.Testing.ProbeTerminatedException.ProbeTerminatedException(string! message) -> void
 Orleans.Dataflow.Testing.ProbeTerminatedException.ProbeTerminatedException(string! message, System.Exception! innerException) -> void
+Orleans.Dataflow.Testing.ProviderConformance
+Orleans.Dataflow.Testing.ProviderConformance.Check(string! check) -> void
+Orleans.Dataflow.Testing.ProviderConformance.CheckAll() -> void
+Orleans.Dataflow.Testing.ProviderConformanceException
+Orleans.Dataflow.Testing.ProviderConformanceException.Failures.get -> System.Collections.Generic.IReadOnlyList<string!>!
+Orleans.Dataflow.Testing.ProviderConformanceException.ProviderConformanceException() -> void
+Orleans.Dataflow.Testing.ProviderConformanceException.ProviderConformanceException(string! message) -> void
+Orleans.Dataflow.Testing.ProviderConformanceException.ProviderConformanceException(string! message, System.Exception! innerException) -> void
+Orleans.Dataflow.Testing.ProviderStageSample
+Orleans.Dataflow.Testing.ProviderStageSample.OptionalMembers.get -> System.Collections.Generic.IReadOnlyList<string!>!
+Orleans.Dataflow.Testing.ProviderStageSample.Parameters.get -> Orleans.Dataflow.Serialization.CanonicalJsonValue
+Orleans.Dataflow.Testing.ProviderStageSample.Stage.get -> Orleans.Dataflow.Identity.StageRef
 Orleans.Dataflow.Testing.TestClock
 Orleans.Dataflow.Testing.TestClock.Advance(System.TimeSpan delta) -> void
 Orleans.Dataflow.Testing.TestClock.PendingTimers.get -> int
@@ -20,10 +32,16 @@ Orleans.Dataflow.Testing.TestClock.TestClock(System.DateTimeOffset start) -> voi
 Orleans.Dataflow.Testing.TestClock.WaitForTimersAsync(int count, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task!
 Orleans.Dataflow.Testing.TestSink
 Orleans.Dataflow.Testing.TestSource
+override Orleans.Dataflow.Testing.ProviderConformance.ToString() -> string!
+override Orleans.Dataflow.Testing.ProviderStageSample.ToString() -> string!
 override Orleans.Dataflow.Testing.TestClock.CreateTimer(System.Threading.TimerCallback! callback, object? state, System.TimeSpan dueTime, System.TimeSpan period) -> System.Threading.ITimer!
 override Orleans.Dataflow.Testing.TestClock.GetTimestamp() -> long
 override Orleans.Dataflow.Testing.TestClock.GetUtcNow() -> System.DateTimeOffset
 override Orleans.Dataflow.Testing.TestClock.TimestampFrequency.get -> long
 override Orleans.Dataflow.Testing.TestClock.ToString() -> string!
+static Orleans.Dataflow.Testing.ProviderConformance.Checks.get -> System.Collections.Generic.IReadOnlyList<string!>!
+static Orleans.Dataflow.Testing.ProviderConformance.Create(Orleans.Dataflow.Identity.ProviderId provider, Orleans.Dataflow.Definition.IStageCatalog! catalog, Orleans.Dataflow.Hosting.IDataflowStageFactory! factory, System.Collections.Generic.IEnumerable<Orleans.Dataflow.Testing.ProviderStageSample!>! samples) -> Orleans.Dataflow.Testing.ProviderConformance!
+static Orleans.Dataflow.Testing.ProviderStageSample.Create(Orleans.Dataflow.Identity.StageRef stage, Orleans.Dataflow.Serialization.CanonicalJsonValue parameters) -> Orleans.Dataflow.Testing.ProviderStageSample!
+static Orleans.Dataflow.Testing.ProviderStageSample.Create(Orleans.Dataflow.Identity.StageRef stage, Orleans.Dataflow.Serialization.CanonicalJsonValue parameters, System.Collections.Generic.IEnumerable<string!>! optionalMembers) -> Orleans.Dataflow.Testing.ProviderStageSample!
 static Orleans.Dataflow.Testing.TestSink.Probe<T>(string! controlName) -> Orleans.Dataflow.Sink<T>!
 static Orleans.Dataflow.Testing.TestSource.Probe<T>(string! controlName) -> Orleans.Dataflow.Source<T>!

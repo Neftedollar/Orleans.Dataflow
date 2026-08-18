@@ -241,8 +241,13 @@ internal sealed class LocalRegistrations : ILocalDataflowBuilder
 
     /// <summary>Builds the factory that executes the .NET registration's stages.</summary>
     /// <returns>The provider key and its factory.</returns>
+    /// <remarks>
+    /// Unwrapped through the very adapter a deployment's own factory goes through, because the .NET
+    /// vocabulary is written against the public seam like any other provider's: the package that publishes
+    /// the seam is not a place where it may be skipped.
+    /// </remarks>
     internal KeyValuePair<ProviderId, IStageRuntimeFactory> Factory =>
-        new(DotnetStages.Provider, new DotnetStageFactory(Resolve()));
+        new(DotnetStages.Provider, new DataflowStageFactoryAdapter(new DotnetStageFactory(Resolve())));
 
     /// <summary>Returns the built .NET registry, building it if the host did not.</summary>
     /// <returns>The registry.</returns>

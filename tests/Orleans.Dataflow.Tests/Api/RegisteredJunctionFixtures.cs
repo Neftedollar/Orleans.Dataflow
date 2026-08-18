@@ -34,23 +34,19 @@ namespace Orleans.Dataflow.Tests.Api;
 internal static class RegisteredJunctionFixtures
 {
     /// <summary>The payload the like-legged fan-out carries when it is to broadcast.</summary>
-    internal static readonly CanonicalJsonValue BroadcastParameters =
-        CanonicalJsonValue.Parse("""{"mode":"broadcast"}""");
+    internal static readonly CanonicalJsonValue BroadcastParameters = SplitParameters(SplitMode.Broadcast);
 
     /// <summary>The payload the like-legged fan-out carries when it is to balance.</summary>
-    internal static readonly CanonicalJsonValue BalanceParameters =
-        CanonicalJsonValue.Parse("""{"mode":"balance"}""");
+    internal static readonly CanonicalJsonValue BalanceParameters = SplitParameters(SplitMode.Balance);
 
     /// <summary>The payload the unlike-legged fan-out carries.</summary>
     internal static readonly CanonicalJsonValue DivideParameters = CanonicalJsonValue.Parse("{}");
 
     /// <summary>The payload the like-input fan-in carries when it is to merge.</summary>
-    internal static readonly CanonicalJsonValue MergeParameters =
-        CanonicalJsonValue.Parse("""{"mode":"merge"}""");
+    internal static readonly CanonicalJsonValue MergeParameters = JoinParameters(JoinMode.Merge);
 
     /// <summary>The payload the like-input fan-in carries when it is to concatenate.</summary>
-    internal static readonly CanonicalJsonValue ConcatParameters =
-        CanonicalJsonValue.Parse("""{"mode":"concat"}""");
+    internal static readonly CanonicalJsonValue ConcatParameters = JoinParameters(JoinMode.Concat);
 
     /// <summary>The payload the unlike-input fan-in carries.</summary>
     internal static readonly CanonicalJsonValue PairParameters = CanonicalJsonValue.Parse("{}");
@@ -59,16 +55,31 @@ internal static class RegisteredJunctionFixtures
     internal static readonly CanonicalJsonValue KeyParameters = CanonicalJsonValue.Parse("{}");
 
     /// <summary>The payload that makes the three-legged fan-out claim two legs.</summary>
-    internal static readonly CanonicalJsonValue HalvesParameters =
-        CanonicalJsonValue.Parse("""{"mode":"halves"}""");
+    internal static readonly CanonicalJsonValue HalvesParameters = SplitParameters(SplitMode.Halves);
 
     /// <summary>The payload the three-legged fan-out carries.</summary>
-    internal static readonly CanonicalJsonValue SpreadParameters =
-        CanonicalJsonValue.Parse("""{"mode":"broadcast"}""");
+    internal static readonly CanonicalJsonValue SpreadParameters = SplitParameters(SplitMode.Broadcast);
 
     /// <summary>The payload the three-input fan-in carries.</summary>
-    internal static readonly CanonicalJsonValue GatherParameters =
-        CanonicalJsonValue.Parse("""{"mode":"merge"}""");
+    internal static readonly CanonicalJsonValue GatherParameters = JoinParameters(JoinMode.Merge);
+
+    /// <summary>Writes the payload of one fan-out occurrence.</summary>
+    /// <param name="mode">What the junction is to do with an element.</param>
+    /// <returns>The canonical payload.</returns>
+    /// <remarks>
+    /// The typed parameter builder, at the size the pattern comes in for a one-member payload: the member
+    /// name is spelled in <see cref="JunctionModePayload"/> and nowhere else, and an author writing a mode
+    /// this vocabulary does not have is stopped by the C# compiler rather than by a validator. What the
+    /// validator is still for is a document that was not written through here — one hand-authored, one from
+    /// another version, one from another provider entirely.
+    /// </remarks>
+    internal static CanonicalJsonValue SplitParameters(SplitMode mode) =>
+        JunctionModePayload.WriteSplit(mode);
+
+    /// <summary>Writes the payload of one fan-in occurrence.</summary>
+    /// <param name="mode">How the junction is to join its inputs.</param>
+    /// <returns>The canonical payload.</returns>
+    internal static CanonicalJsonValue JoinParameters(JoinMode mode) => JunctionModePayload.WriteJoin(mode);
 
     /// <summary>Gets the catalog a deployment would register these stages in.</summary>
     /// <value>The linear fixture stages and the junctions together, which is one provider's vocabulary.</value>
@@ -306,7 +317,8 @@ internal static class RegisteredJunctionFixtures
                 [Output("left", "order-document"), Output("right", "order-document")],
                 [],
                 Parameters("split"),
-                []),
+                [],
+                new JunctionModeValidator(joining: false)),
             StageSpecification.Create(
                 Stage("divide"),
                 [Input("in", "order-document")],
@@ -320,7 +332,8 @@ internal static class RegisteredJunctionFixtures
                 [Output("out", "order-document")],
                 [],
                 Parameters("join"),
-                []),
+                [],
+                new JunctionModeValidator(joining: true)),
             StageSpecification.Create(
                 Stage("pair"),
                 [Input("first", "order-document"), Input("second", "order-key")],
@@ -345,7 +358,8 @@ internal static class RegisteredJunctionFixtures
                 ],
                 [],
                 Parameters("split"),
-                []),
+                [],
+                new JunctionModeValidator(joining: false)),
             StageSpecification.Create(
                 Stage("gather"),
                 [
@@ -356,7 +370,8 @@ internal static class RegisteredJunctionFixtures
                 [Output("out", "order-document")],
                 [],
                 Parameters("join"),
-                []),
+                [],
+                new JunctionModeValidator(joining: true)),
         ]);
 
     /// <summary>Builds the parameter contract of one fixture stage.</summary>

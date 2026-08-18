@@ -1,8 +1,9 @@
 # Registered stages and pipeline definitions
 
 - Status: M1 design for the deployable authoring surface, extended by M4.5 with
-  multi-port registered stages and the public runtime-factory seam; signatures
-  settle with the implementation checkpoint
+  multi-port registered stages and the public runtime-factory seam, and by
+  M4.5b with the conformance kit and the typed-parameter-builder pattern;
+  signatures settle with the implementation checkpoint
 - Depends on: [ADR 0001](../architecture/0001-definition-runtime-authoring-planes.md),
   [ADR 0004](../architecture/0004-csharp-api-baseline.md) §6,
   [DEFINITION-MODEL.md](DEFINITION-MODEL.md)
@@ -156,8 +157,11 @@ RunnableGraph graph = source
 
 Parameters are `CanonicalJsonValue` payloads validated against the
 specification's parameter contract by the graph compiler (and by the
-specification's validator when it has one). Typed parameter builders are
-provider-SDK sugar (M4); the M1 surface is honest raw payloads.
+specification's validator when it has one). The M1 surface is honest raw
+payloads, and M4.5 keeps that promise rather than replacing it: the typed
+parameter builders below write those very bytes — see *Typed parameter
+builders* — so a provider that adopts them changes no document and no
+fingerprint.
 
 Mixing is legal at authoring: a chain may hold registered and lambda
 stages, and closure works. But the implementation proved a limit worth
@@ -271,6 +275,172 @@ different halves (ADR 0001): a catalog is all a validator needs, and only a
 host that will run the graph needs a factory. A host with the catalog and no
 factory validates a document and refuses it at materialization, naming the
 provider that has nothing to build it.
+
+## Typed parameter builders
+
+The M1 note promised sugar for payloads in M4. What ships is a **pattern
+rather than a framework**, and the reason is that both real providers in this
+repository had already grown it: `OrleansStages` has ten typed writers
+(`StreamSourceParameters`, `GrainCallParameters`, `ReminderTriggerParameters`,
+…) and `DotnetStages` has two. There was nothing left to invent, only something
+to name and to check.
+
+**A provider's payload lives in exactly three places, and the pattern is that
+they are three views of one statement:**
+
+| Place | What it is | Example |
+|---|---|---|
+| The member names and one reader | `internal static class XxxPayload` with `const string` members, `Write`, and `TryRead` | `OrleansStagePayloads.cs`, `DotnetStagePayloads.cs` |
+| A typed writer per stage | `public static CanonicalJsonValue XxxParameters(…)` on the vocabulary type | `OrleansStages.ReminderTriggerParameters(period, ingress)` |
+| A validator over the reader | `IStageParameterValidator` that runs `TryRead` and answers its violations | `OrleansStageValidator`, `DotnetStageValidator` |
+
+and the factory that executes the stage reads the node's payload through **the
+same `TryRead`**, so a member renamed in one place stops compiling in the other
+three.
+
+```csharp
+public static CanonicalJsonValue ReminderTriggerParameters(TimeSpan period, BufferOptions ingress)
+{
+    ArgumentNullException.ThrowIfNull(ingress);
+    ArgumentOutOfRangeException.ThrowIfLessThan(period.TotalMilliseconds, 1, nameof(period));
+
+    if (ingress.OverflowPolicy is OverflowPolicy.Backpressure)
+    {
+        throw new ArgumentException("A reminder trigger cannot backpressure a cluster reminder…", nameof(ingress));
+    }
+
+    return ReminderTriggerPayload.Write(period, ingress);
+}
+```
+
+**What the writer buys is a refusal at the line the author wrote.** A period of
+zero, a backpressuring ingress for a clock, a mode this vocabulary does not
+have — each is an `ArgumentException` at the call rather than a diagnostic when
+the graph closes, and none of them can be spelled at all when the value is an
+enumeration. **What it cannot buy is the check**, and that is why the validator
+is not optional: a document reaching a silo was not necessarily written through
+the builder. It may be hand-authored, from another version, or from another
+provider entirely, and the reader is the only thing standing between it and the
+factory.
+
+**The builders are sugar over the raw payload and nothing more**, which is what
+makes them safe to adopt: `SplitParameters(SplitMode.Broadcast)` writes
+`{"mode":"broadcast"}`, byte for byte what the literal wrote, so documents and
+fingerprints are unchanged (`JunctionParameterTests`). The definition plane
+never learns that a builder exists.
+
+**A generic builder framework was considered and rejected.** A fluent
+`PayloadBuilder` with typed member descriptors would have to describe what each
+reader already states in twenty lines of ordinary C#, and it would buy one
+thing — deriving the reader from the writer — at the price of a second way to
+spell a payload, a reflection or source-generation step in a package that has
+neither, and a shape fixed before three providers exist. The repository has
+twice preferred an honest pattern to a framework (the `Local*Parameters` types,
+the probe stages), and this is the third time. The smallest complete instance
+is `JunctionModePayload` in the test provider: one member, one closed set of
+values, a writer, a reader, a validator, and a factory reading through it.
+
+## Conformance: `ProviderConformance`
+
+A provider ships a catalog and a factory, and everything that can go wrong
+between them goes wrong quietly. `Orleans.Dataflow.Testing.ProviderConformance`
+is the mechanical half of the provider SDK: a provider author points it at
+their own registration plus one accepted payload per stage, and gets nine
+checks that were previously nine hand-written tests per provider.
+
+```csharp
+public static TheoryData<string> Checks => [.. ProviderConformance.Checks];
+
+[Theory]
+[MemberData(nameof(Checks))]
+public void TheProviderConforms(string check) => Kit().Check(check);
+
+private static ProviderConformance Kit() =>
+    ProviderConformance.Create(
+        MyStages.Provider,
+        MyStages.Catalog,
+        new MyStageFactory(registry),
+        [ProviderStageSample.Create(MyStages.ReadStage, MyStages.ReadParameters(…))]);
+```
+
+One theory over `Checks` is the whole of what an author writes, and a check
+added to the kit becomes a test in every provider's suite without that file
+changing. Nothing in the kit names a test framework: a failure is a
+`ProviderConformanceException` carrying every violation the check found, in the
+numbered form this project uses for every other report.
+
+The nine checks, and where each one came from:
+
+| Check | What it asserts | Extracted from |
+|---|---|---|
+| `EveryPortCarriesADeclaredContractInCanonicalOrder` | Every port declares a created contract, names are unique across the stage, each port list is in ordinal order of its names, and a stage declares at least one port | The canonical-order rule the junction handles, the planner, and a provider's own router all read |
+| `EveryStagesPayloadIsReadByAValidatorThatRefusesWhatItDoesNotDeclare` | The stage has a reader; it accepts the sample; it refuses an added member, each removed required member, each retyped member, and a payload that is not an object — naming the member in single quotes each time; and it accepts a removed *optional* member | The unknown-member refusal every adapter payload performs |
+| `TheCatalogFingerprintIsTheSameForEveryRegistrationOfTheSameStages` | Registration order does not change the fingerprint, two reads of the catalog do not, and a changed parameter contract does | The catalog fingerprint a cluster negotiates on |
+| `TheFactoryAnswersForEveryStageTheCatalogDeclares` | The factory builds a non-null runtime for every declared stage | One registration per vocabulary: half a vocabulary fails at the first element |
+| `TheFactoryRefusesAStageTheCatalogDoesNotDeclare` | An unknown stage id and an unregistered major version are refused by throwing, naming the stage, and not by a null reference, an index, a missing key, or a cast | The explicit lookup every factory here writes instead of dereferencing |
+| `EveryRuntimeHasTheShapeItsSpecificationDeclares` | Port counts imply a shape and the built runtime is that shape; a terminal produces a result exactly when the stage declares a result port; an unzip's projections match the leg count | The M4.5a negative tests — `enrich-miscast` and the three-legged fan-out that split a row into two — generalized |
+| `EveryStageHasATypedHandleThatRefusesTheWrongShape` | The handle the specification implies is creatable, a handle of another shape is refused, and a contract no port declares is refused | Handle-creation validation, which turns a catalog mismatch into an `ArgumentException` at the author's own line |
+| `NoParameterPayloadNamesAClrType` | No string in a payload resolves to a `Type`, and none is assembly-qualified | ADR 0001: a document causes no code loading |
+| `NoCoreOptionTypeNamesAnythingOfThisProvider` | No public `*Options` type of the core packages names a type of the provider's assembly or namespace | The M4 exit criterion "provider packages do not leak their configuration into core option types" |
+
+**The kit refuses to measure nothing.** A catalog declaring no stage of the
+named provider, a declared stage with no sample, and a sample naming a stage
+the catalog does not declare are all refused at `Create`, because a green suite
+that measured nothing reads exactly like a green suite that measured
+everything.
+
+**Its first consumers are the two vocabularies this repository ships.** The
+.NET adapters run it in the core suite against `DotnetStages.Publish` and
+`DotnetStageFactory`; the Orleans adapters run it inside the cluster collection
+against `OrleansStages.Publish` and `OrleansStageFactory`, because building a
+stream stage resolves a stream provider and building a reminder trigger reads
+the cluster's own minimum period. Both pass every check. **One change was
+needed to make that possible and it is a real one**: `DotnetStageFactory`
+implemented the engine's internal factory interface, one unwrap closer to the
+planner than the seam this milestone published, so the SDK's own vocabulary
+could not be pointed at the SDK's own kit. It now implements
+`IDataflowStageFactory` and is unwrapped through `DataflowStageFactoryAdapter`
+exactly as the Orleans adapter factory already was, which also makes "a
+provider writes its vocabulary once and both hosts take it" true of the
+vocabulary shipped inside the core package.
+
+**The kit is checked as an instrument before anything is asserted through it.**
+`ProviderConformanceTests` points each check at a provider broken in the one
+way that check is about — a stage with no port, a reader that lets an unknown
+member through, a reader whose refusals name nothing, a catalog that publishes
+a different vocabulary on every read, a factory that does not implement a stage
+its own catalog declares, a factory that builds a stranger, one that fails on a
+stranger by accident, one that refuses without naming, a factory that builds a
+junction where its catalog declares a chain, a terminal that produces no result
+for a stage declaring one, an unzip that splits a row into fewer parts than it
+has legs, a junction no typed handle can author, and a payload naming a CLR
+type — with a correct control that passes all nine.
+
+**What the kit does not check, stated rather than discovered:**
+
+- **Semantics.** Whether a source really ends its sequence on a stop token,
+  whether a terminal's fold is associative, whether an adapter's acknowledgement
+  boundary is where its documentation says it is: none of that is derivable from
+  a catalog and a factory. ADAPTERS.md is where those answers live and a
+  provider's own tests are what prove them.
+- **The runtime it builds is never run.** The factory is asked to build and the
+  shape of what it built is read; nothing is opened, pulled, folded, or
+  disposed. A source that throws on its first `MoveNextAsync` passes every check
+  here.
+- **Two checks cannot fail from a test assembly, and it is a property of what
+  they assert.** The canonical-order and unique-name clauses re-derive
+  invariants `StageSpecification.Create` already enforces, so a specification
+  breaking them cannot be constructed through the public factory at all — what
+  is falsifiable there is the clause that factory does *not* enforce, a stage
+  with no port, and that one has a test. And
+  `NoCoreOptionTypeNamesAnythingOfThisProvider` fails only when a type shipped in
+  the core package names a type of the provider's, which no test can arrange: it
+  guards a future change to `Orleans.Dataflow` rather than reporting a present
+  state.
+- **The samples are the provider's own claim.** The kit mutates one payload per
+  stage, so a member the sample omits is a member nothing is checked about. The
+  sample should be the fullest payload the stage accepts, with its genuinely
+  optional members named as such.
 
 ## What the multi-port half does not claim
 

@@ -14,5 +14,10 @@
     <PackageReference Include="Microsoft.Orleans.TestingHost" />
     <ProjectReference Include="../../src/Orleans.Dataflow/Orleans.Dataflow.csproj" />
     <ProjectReference Include="../../src/Orleans.Dataflow.Orleans/Orleans.Dataflow.Orleans.csproj" />
+    <!--
+      The test-support package, for the provider conformance kit: the Orleans adapters are one of its two
+      shipped consumers, and a silo is where the factory half of it can be answered.
+    -->
+    <ProjectReference Include="../../src/Orleans.Dataflow.Testing/Orleans.Dataflow.Testing.csproj" />
   </ItemGroup>
 </Project>

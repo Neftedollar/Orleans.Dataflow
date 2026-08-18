@@ -1,4 +1,5 @@
 using Orleans.Dataflow.Definition;
+using Orleans.Dataflow.Hosting;
 using Orleans.Dataflow.Runtime;
 using Orleans.Dataflow.Serialization;
 
@@ -27,11 +28,21 @@ namespace Orleans.Dataflow.Adapters;
 /// repeated anyway, because a factory that dereferenced a missing registration would report a
 /// configuration problem as a null reference somewhere else entirely.
 /// </para>
+/// <para>
+/// <b>It is written against the public seam.</b> This vocabulary ships inside the core package and could
+/// therefore have implemented the engine's internal factory interface directly, one unwrap closer to the
+/// planner; it implements <see cref="IDataflowStageFactory"/> instead, exactly as the Orleans adapter
+/// vocabulary in the neighbouring package does. Two reasons, and both are about what the seam claims: a
+/// provider's factory is a value both hosts accept, and the only way to keep that true is for the
+/// vocabulary this package ships to be one of those values; and it is what lets
+/// <c>ProviderConformance</c> be pointed at the .NET adapters, so the SDK's own vocabulary is checked by
+/// the kit the SDK publishes rather than exempt from it.
+/// </para>
 /// </remarks>
-internal sealed class DotnetStageFactory(DotnetAdapterRegistry registry) : IStageRuntimeFactory
+internal sealed class DotnetStageFactory(DotnetAdapterRegistry registry) : IDataflowStageFactory
 {
     /// <inheritdoc/>
-    public StageRuntime Create(StageRuntimeRequest request)
+    public DataflowStageRuntime Create(DataflowStageRequest request)
     {
         StageNode node = request.Node;
 
@@ -39,7 +50,7 @@ internal sealed class DotnetStageFactory(DotnetAdapterRegistry registry) : IStag
         {
             TimerDeclaration declaration = Read<TimerDeclaration>(node, TimerPayload.TryRead);
 
-            return StageRuntime.Source(tokens => Ticks(declaration.Period, declaration.TickLimit, tokens));
+            return DataflowStageRuntime.Source(tokens => Ticks(declaration.Period, declaration.TickLimit, tokens));
         }
 
         if (node.Stage == DotnetStages.ObservableStage)
@@ -52,7 +63,7 @@ internal sealed class DotnetStageFactory(DotnetAdapterRegistry registry) : IStag
                     $"The node '{node.Id}', an occurrence of '{node.Stage}', addresses the observable '{declaration.Source}', which this host does not register.");
             }
 
-            return StageRuntime.Source(tokens => Pushes(source!, declaration.Ingress, tokens));
+            return DataflowStageRuntime.Source(tokens => Pushes(source!, declaration.Ingress, tokens));
         }
 
         throw new InvalidOperationException(
@@ -77,7 +88,7 @@ internal sealed class DotnetStageFactory(DotnetAdapterRegistry registry) : IStag
     /// path because it disposes the enumeration on all of them. Nothing about this source outlives its run.
     /// </para>
     /// </remarks>
-    private static async IAsyncEnumerable<object?> Ticks(TimeSpan period, long limit, StageRunTokens tokens)
+    private static async IAsyncEnumerable<object?> Ticks(TimeSpan period, long limit, DataflowRunTokens tokens)
     {
         using PeriodicTimer timer = new(period);
 
@@ -125,7 +136,7 @@ internal sealed class DotnetStageFactory(DotnetAdapterRegistry registry) : IStag
     private static async IAsyncEnumerable<object?> Pushes(
         IObservableEntry source,
         BufferOptions ingress,
-        StageRunTokens tokens)
+        DataflowRunTokens tokens)
     {
         LocalIngressQueue queue = new(ingress.Capacity, ingress.OverflowPolicy);
         IDisposable subscription;
