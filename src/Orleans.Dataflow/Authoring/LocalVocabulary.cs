@@ -233,6 +233,10 @@ internal static class LocalVocabulary
     internal static readonly StageRef Distinct =
         StageRef.Create(Provider, StageId.Create("distinct"), StageRef.FirstMajorVersion);
 
+    /// <summary>The stage reference of a stage that runs one substream per key.</summary>
+    internal static readonly StageRef GroupBy =
+        StageRef.Create(Provider, StageId.Create("group-by"), StageRef.FirstMajorVersion);
+
     /// <summary>The stage reference of a stage that drops an element equal to the one before it.</summary>
     internal static readonly StageRef DeduplicateConsecutive =
         StageRef.Create(Provider, StageId.Create("deduplicate-consecutive"), StageRef.FirstMajorVersion);
@@ -449,6 +453,18 @@ internal static class LocalVocabulary
             ContractId.Create("local-distinct-parameters"),
             ContractReference.FirstMajorVersion);
 
+    /// <summary>The parameter contract a keyed stage declares.</summary>
+    /// <remarks>
+    /// The bound on active keys, what the key past it costs, and the chain one key's substream is made of
+    /// are all configuration and are written down; the key selector, the key type's equality, and the
+    /// delegates inside that chain are behavior and are not. <see cref="LocalGroupByParameters"/> owns the
+    /// shape.
+    /// </remarks>
+    internal static readonly ContractReference GroupByParameterContract =
+        ContractReference.Create(
+            ContractId.Create("local-group-by-parameters"),
+            ContractReference.FirstMajorVersion);
+
     /// <summary>The parameter contract an interleave declares.</summary>
     /// <remarks>
     /// The rotation's segment size is configuration and is written down; how many inputs the rotation runs
@@ -649,6 +665,18 @@ internal static class LocalVocabulary
     /// </remarks>
     internal static readonly CanonicalJsonValue EmptyParameters = CanonicalJsonValue.Parse("{}");
 
+    /// <summary>Every shape of this vocabulary by the text its stage reference renders as.</summary>
+    /// <remarks>
+    /// Declared here rather than beside <see cref="TryReadStage"/> because it composes every stage
+    /// reference above it, and the fields of this type are initialized in textual order. It is built from
+    /// <see cref="StageOf"/> so that the two directions cannot disagree, and it is ordinal because a stage
+    /// reference is machine text: <c>local/take@v1</c> is one stage and nothing about a reader's culture
+    /// changes that.
+    /// </remarks>
+    private static readonly Dictionary<string, LocalStageKind> Shapes = Enum
+        .GetValues<LocalStageKind>()
+        .ToDictionary(kind => StageOf(kind).ToString(), kind => kind, StringComparer.Ordinal);
+
     /// <summary>The capability token a document with automatically named occurrences declares.</summary>
     /// <remarks>
     /// This is the well-known token of ADR 0004 section 6, promoted onto
@@ -719,6 +747,7 @@ internal static class LocalVocabulary
         LocalStageKind.TakeThrough => TakeThrough,
         LocalStageKind.SkipWhile => SkipWhile,
         LocalStageKind.Distinct => Distinct,
+        LocalStageKind.GroupBy => GroupBy,
         LocalStageKind.DeduplicateConsecutive => DeduplicateConsecutive,
         LocalStageKind.SelectMany => SelectMany,
         LocalStageKind.MergeMap => MergeMap,
@@ -799,6 +828,7 @@ internal static class LocalVocabulary
             LocalStageKind.TakeWithin or
             LocalStageKind.SkipWithin => DurationParameterContract,
         LocalStageKind.Distinct => DistinctParameterContract,
+        LocalStageKind.GroupBy => GroupByParameterContract,
         LocalStageKind.Collect => CollectParameterContract,
         LocalStageKind.Interleave => InterleaveParameterContract,
         LocalStageKind.FromEnumerable or
@@ -866,6 +896,7 @@ internal static class LocalVocabulary
             _ when contract == CountParameterContract => LocalCountParameters.Validator,
             _ when contract == RangeParameterContract => LocalRangeParameters.Validator,
             _ when contract == DistinctParameterContract => LocalDistinctParameters.Validator,
+            _ when contract == GroupByParameterContract => LocalGroupByParameters.Validator,
             _ when contract == WindowParameterContract => LocalWindowParameters.Validator,
             _ when contract == GroupedWithinParameterContract => LocalGroupedWithinParameters.Validator,
             _ when contract == GroupedWeightedParameterContract => LocalGroupedWeightedParameters.Validator,
@@ -920,6 +951,7 @@ internal static class LocalVocabulary
             LocalStageKind.TakeThrough or
             LocalStageKind.SkipWhile or
             LocalStageKind.Distinct or
+            LocalStageKind.GroupBy or
             LocalStageKind.DeduplicateConsecutive or
             LocalStageKind.SelectMany or
             LocalStageKind.Grouped or
@@ -964,6 +996,60 @@ internal static class LocalVocabulary
             LocalStageKind.SinkProbe => LocalStagePlace.Terminal,
         _ => throw new ArgumentOutOfRangeException(nameof(kind)),
     };
+
+    /// <summary>Reports whether an occurrence of <paramref name="kind"/> may stand inside a group flow.</summary>
+    /// <param name="kind">The stage shape.</param>
+    /// <returns><see langword="true"/> for the shapes a keyed stage can run one instance of per key.</returns>
+    /// <remarks>
+    /// <para>
+    /// The admitted list is exactly the shapes that are <em>a function of an element and their own state</em>
+    /// — nothing else can be instantiated per key inside one fused stage. An asynchronous stage, a
+    /// merge-map, and a buffer all want a segment and a channel of their own; a junction wants several; a
+    /// clock-reading stage wants a run to attach to and, for two of them, a timer that can complete or fail
+    /// the run; a source and a terminal are not stages of a chain at all.
+    /// </para>
+    /// <para>
+    /// Two of the admitted-looking shapes are refused for reasons of this operator's own rather than of
+    /// their machinery. <see cref="LocalStageKind.SelectMany"/> would have its inner sequence
+    /// <em>materialized</em> rather than streamed, because what a keyed stage hands the run is one sequence
+    /// per element and the run reads it after the stage has returned — so an author's endless inner sequence
+    /// would stop being bounded by the boundary below, which is the one thing this operator exists to
+    /// promise. And <see cref="LocalStageKind.GroupBy"/> inside a group flow would be a second bound and a
+    /// second key table per key of the first, which is a real feature and is not this one.
+    /// </para>
+    /// </remarks>
+    internal static bool RunsInsideAGroup(LocalStageKind kind) => kind switch
+    {
+        LocalStageKind.Select or
+            LocalStageKind.Where or
+            LocalStageKind.Scan or
+            LocalStageKind.Take or
+            LocalStageKind.Skip or
+            LocalStageKind.TakeWhile or
+            LocalStageKind.TakeThrough or
+            LocalStageKind.SkipWhile or
+            LocalStageKind.Distinct or
+            LocalStageKind.DeduplicateConsecutive or
+            LocalStageKind.Grouped or
+            LocalStageKind.Sliding => true,
+        _ => false,
+    };
+
+    /// <summary>Recovers the shape a stage reference names, when this vocabulary declares one.</summary>
+    /// <param name="stage">The reference as a document spells it, such as <c>local/take@v1</c>.</param>
+    /// <param name="kind">
+    /// When this method returns <see langword="true"/>, the shape; otherwise an unspecified value.
+    /// </param>
+    /// <returns><see langword="true"/> when the text names a stage of this vocabulary.</returns>
+    /// <remarks>
+    /// The one place that reads a stage reference back into a shape, and it is built from
+    /// <see cref="StageOf"/> rather than written out, so a stage added to the vocabulary is recoverable
+    /// here without anybody remembering to add it. A group flow's payload is the only thing that needs
+    /// this: everywhere else a document's node carries its reference as a value and nothing has to parse
+    /// one.
+    /// </remarks>
+    internal static bool TryReadStage(string stage, out LocalStageKind kind) =>
+        Shapes.TryGetValue(stage, out kind);
 
     /// <summary>Reports whether an occurrence of <paramref name="kind"/> consumes elements.</summary>
     /// <param name="kind">The stage shape.</param>

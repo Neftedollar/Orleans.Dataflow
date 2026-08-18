@@ -478,6 +478,31 @@ internal sealed class LocalStageDescriptor : StageOccurrence
             seed: null,
             LocalGroupedWeightedParameters.Write(maxElements, maxWeight, window));
 
+    /// <summary>Creates a stage that runs one instance of a chain of element stages per key.</summary>
+    /// <param name="options">The validated bound on active keys and the policy past it.</param>
+    /// <param name="keySelector">The key function, as the authoring value received it.</param>
+    /// <param name="comparer">The key type's own equality.</param>
+    /// <param name="group">The validated stages of the group flow, in flow order.</param>
+    /// <returns>The descriptor.</returns>
+    /// <remarks>
+    /// The one descriptor whose payload carries other descriptors' payloads. The split is the usual one
+    /// read one level down: what a key is, what the key type's equality is, and what each stage of the
+    /// group flow does are behavior; how many keys may be active, what the key past that costs, and
+    /// <em>which stages the group flow is</em> are configuration a document states. The binding holds the
+    /// descriptors themselves rather than only their delegates, because the runtime needs both halves of
+    /// each of them and reading the payload against the binding is what makes the two planes agree.
+    /// </remarks>
+    internal static LocalStageDescriptor GroupBy(
+        GroupByOptions options,
+        object keySelector,
+        object comparer,
+        IReadOnlyList<LocalStageDescriptor> group) =>
+        new(
+            LocalStageKind.GroupBy,
+            new object?[] { keySelector, comparer, group },
+            seed: null,
+            LocalGroupByParameters.Write(options, group));
+
     /// <summary>Creates a bounded buffer.</summary>
     /// <param name="options">The validated capacity and overflow policy.</param>
     /// <returns>The descriptor.</returns>

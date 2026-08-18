@@ -233,6 +233,19 @@ internal enum LocalStageKind
     GroupedWeightedWithin,
 
     /// <summary>
+    /// Runs one instance of a declared chain of element stages per key, for at most a declared number of
+    /// keys at once, and merges what they emit into one stream; one input port and one output port.
+    /// </summary>
+    /// <remarks>
+    /// The one shape whose payload carries other stages. What a key is and what its substream does are
+    /// behavior and stay in the binding; how many keys may be active, what the key past that bound costs,
+    /// and <em>which stages the substream is made of</em> are all statements a document can make honestly,
+    /// so they are the payload. Two graphs grouping by the same selector through two different chains are
+    /// two graphs, and their fingerprints say so.
+    /// </remarks>
+    GroupBy,
+
+    /// <summary>
     /// Holds up to a declared number of elements between two segments; one input port and one output port.
     /// </summary>
     Buffer,

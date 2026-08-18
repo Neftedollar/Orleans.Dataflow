@@ -2609,7 +2609,19 @@ internal sealed class LocalRun
 
         for (int stage = 0; stage < stages.Count; stage++)
         {
-            if (stages[stage].Flush(out object? residue) && !Advance(segment, index, residue, stage + 1))
+            LocalStageOutcome outcome = stages[stage].Flush(out object? residue);
+
+            if (outcome is LocalStageOutcome.Emit && !Advance(segment, index, residue, stage + 1))
+            {
+                return;
+            }
+
+            // A stage holding several residues walks the very path a flattening stage's sequence walks: the
+            // run owns the enumerator, examines its token and the pause gate between two of them, and
+            // releases it on every path. A keyed stage is the one shape that answers this way, because the
+            // end of a stream is where every key it still holds hands over what it was building.
+            if (outcome is LocalStageOutcome.EmitMany &&
+                !Expand(segment, index, (IEnumerator)residue!, stage + 1))
             {
                 return;
             }

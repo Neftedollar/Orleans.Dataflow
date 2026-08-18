@@ -1,7 +1,9 @@
 using System.Collections;
+using System.Globalization;
 using Orleans.Dataflow.Authoring;
 using Orleans.Dataflow.Definition;
 using Orleans.Dataflow.Identity;
+using Orleans.Dataflow.Serialization;
 
 namespace Orleans.Dataflow.Runtime;
 
@@ -400,6 +402,22 @@ internal static class LocalRunPlanner
                                 $"the node '{declaration.Id}' is an occurrence of the stage '{declaration.Stage}', whose runtime factory built a '{provided.Shape}' shape, and that shape cannot stand at position {position} of {document.Nodes.Count}");
                     }
                 }
+
+                // Asked before the switch rather than as thirteen arms of it, because these are the shapes a
+                // keyed stage also has to build — one instance of each per key — and one factory read by
+                // both is what keeps the two builds from drifting. A shape that answers here but stands
+                // where it cannot falls through to the switch, which has no arm for it and reports the
+                // position exactly as it did when the arms were there.
+                else if (!first && !last &&
+                    Fusible(
+                        descriptor.Kind,
+                        declaration.Parameters,
+                        descriptor.Behavior,
+                        descriptor.Seed,
+                        $"the node '{declaration.Id}'") is { } fusible)
+                {
+                    Fuse(fusible());
+                }
                 else
                 {
                     switch (descriptor.Kind)
@@ -551,51 +569,8 @@ internal static class LocalRunPlanner
                             break;
                         }
 
-                        case LocalStageKind.Select when !first && !last:
-                            Fuse(LocalElementStage.Select(LocalDelegateAdapter.Selector(descriptor.Behavior)));
-                            break;
-                        case LocalStageKind.Where when !first && !last:
-                            Fuse(LocalElementStage.Where(Predicate(descriptor)));
-                            break;
-                        case LocalStageKind.Scan when !first && !last:
-                            Fuse(LocalElementStage.Scan(
-                                descriptor.Seed,
-                                LocalDelegateAdapter.Folder(descriptor.Behavior, descriptor.Kind)));
-                            break;
-                        case LocalStageKind.Take when !first && !last:
-                            Fuse(LocalElementStage.Take(Count(declaration)));
-                            break;
-                        case LocalStageKind.Skip when !first && !last:
-                            Fuse(LocalElementStage.Skip(Count(declaration)));
-                            break;
-                        case LocalStageKind.TakeWhile when !first && !last:
-                            Fuse(LocalElementStage.TakeWhile(Predicate(descriptor), inclusive: false));
-                            break;
-                        case LocalStageKind.TakeThrough when !first && !last:
-                            Fuse(LocalElementStage.TakeWhile(Predicate(descriptor), inclusive: true));
-                            break;
-                        case LocalStageKind.SkipWhile when !first && !last:
-                            Fuse(LocalElementStage.SkipWhile(Predicate(descriptor)));
-                            break;
-                        case LocalStageKind.Distinct when !first && !last:
-                        {
-                            DistinctOptions deduplication = Distinct(declaration);
-
-                            Fuse(LocalElementStage.Distinct(
-                                deduplication.MaxTrackedKeys,
-                                deduplication.OverflowPolicy is KeyOverflowPolicy.EvictOldest,
-                                LocalDelegateAdapter.Comparer(descriptor.Behavior)));
-
-                            break;
-                        }
-
-                        case LocalStageKind.DeduplicateConsecutive when !first && !last:
-                            Fuse(LocalElementStage.DeduplicateConsecutive(
-                                LocalDelegateAdapter.Comparer(descriptor.Behavior)));
-                            break;
-                        case LocalStageKind.SelectMany when !first && !last:
-                            Fuse(LocalElementStage.SelectMany(
-                                LocalDelegateAdapter.Flattener(descriptor.Behavior)));
+                        case LocalStageKind.GroupBy when !first && !last:
+                            Fuse(Keyed(declaration, descriptor));
                             break;
                         case LocalStageKind.MergeMap when !first && !last:
                             // A boundary of its own, like an asynchronous stage and for a stronger version
@@ -611,23 +586,6 @@ internal static class LocalRunPlanner
                                 descriptor.Seed,
                                 LocalDelegateAdapter.AsyncFolder(descriptor.Behavior, descriptor.Kind)));
                             break;
-                        case LocalStageKind.Grouped when !first && !last:
-                            Fuse(LocalElementStage.Grouped(
-                                Count(declaration),
-                                LocalDelegateAdapter.Freeze(descriptor.Behavior, descriptor.Kind)));
-                            break;
-                        case LocalStageKind.Sliding when !first && !last:
-                        {
-                            (int size, int step) = Windowing(declaration);
-
-                            Fuse(LocalElementStage.Sliding(
-                                size,
-                                step,
-                                LocalDelegateAdapter.Freeze(descriptor.Behavior, descriptor.Kind)));
-
-                            break;
-                        }
-
                         case LocalStageKind.GroupedWithin when !first && !last:
                         {
                             (int maxElements, TimeSpan window) = Batching(declaration);
@@ -1625,11 +1583,22 @@ internal static class LocalRunPlanner
     /// were never validated, and a count it could not read would otherwise become a bound of some silently
     /// chosen size.
     /// </remarks>
-    private static int Count(StageNode node) =>
-        LocalCountParameters.TryRead(node.Parameters, out int count, out IReadOnlyList<string> violations)
+    private static int Count(StageNode node) => Count(node.Parameters, $"the node '{node.Id}'");
+
+    /// <summary>Reads a counted payload as the number of elements it declares.</summary>
+    /// <param name="parameters">The payload.</param>
+    /// <param name="what">What carries it, for the diagnostic.</param>
+    /// <returns>The count.</returns>
+    /// <exception cref="InvalidOperationException">The payload is not a count payload.</exception>
+    /// <remarks>
+    /// The payload and its subject are separate arguments because a count is carried by a node in a document
+    /// and by a stage of a group flow, which is not a node and has no identifier: what a reader has to be
+    /// told is where the payload was, and that is a sentence rather than a node.
+    /// </remarks>
+    private static int Count(CanonicalJsonValue parameters, string what) =>
+        LocalCountParameters.TryRead(parameters, out int count, out IReadOnlyList<string> violations)
             ? count
-            : throw Foreign(
-                $"the node '{node.Id}' carries parameters this runtime cannot read: {string.Join("; ", violations)}");
+            : throw Foreign($"{what} carries parameters this runtime cannot read: {string.Join("; ", violations)}");
 
     /// <summary>Reads a range node's payload as the bounds it declares.</summary>
     /// <param name="node">The node as the document declares it.</param>
@@ -1780,25 +1749,236 @@ internal static class LocalRunPlanner
             return element;
         };
 
-    /// <summary>Reads a distinct node's payload as the key bound it declares.</summary>
+    /// <summary>Builds the factory of one fused element stage, when the shape is one of those.</summary>
+    /// <param name="kind">The stage shape.</param>
+    /// <param name="parameters">The payload the document states for it.</param>
+    /// <param name="behavior">The delegate, comparer, or projection the binding states for it.</param>
+    /// <param name="seed">The initial state, for the shapes that carry one.</param>
+    /// <param name="what">What carries the two halves, for the diagnostic.</param>
+    /// <returns>
+    /// A factory of fresh instances, or <see langword="null"/> when the shape is not one that fuses as an
+    /// element stage.
+    /// </returns>
+    /// <exception cref="InvalidOperationException">
+    /// The payload is not one this shape reads, or the binding does not have the shape it requires.
+    /// </exception>
+    /// <remarks>
+    /// <para>
+    /// The one place these shapes are built, read by the two callers that build them: a chain of a document,
+    /// where each is built exactly once, and a keyed stage, which builds one of each per key. Everything
+    /// that costs something — reading the payload, wrapping the author's delegate, the reflection inside
+    /// that wrapping — happens here, once, when the plan is built; what the factory does per key is
+    /// construct an object over values it is already holding.
+    /// </para>
+    /// <para>
+    /// Answering <see langword="null"/> rather than throwing for every other shape is what lets the caller
+    /// go on to say something sharper: a chain's switch reports where a shape cannot stand, and a keyed
+    /// stage never asks at all, because its group flow was checked against
+    /// <see cref="LocalVocabulary.RunsInsideAGroup"/> before anything was built.
+    /// </para>
+    /// </remarks>
+    private static Func<LocalElementStage>? Fusible(
+        LocalStageKind kind,
+        CanonicalJsonValue parameters,
+        object? behavior,
+        object? seed,
+        string what)
+    {
+        switch (kind)
+        {
+            case LocalStageKind.Select:
+            {
+                Func<object?, object?> selector = LocalDelegateAdapter.Selector(behavior);
+
+                return () => LocalElementStage.Select(selector);
+            }
+
+            case LocalStageKind.Where:
+            {
+                Func<object?, bool> predicate = LocalDelegateAdapter.Predicate(behavior, kind);
+
+                return () => LocalElementStage.Where(predicate);
+            }
+
+            case LocalStageKind.Scan:
+            {
+                Func<object?, object?, object?> folder = LocalDelegateAdapter.Folder(behavior, kind);
+
+                return () => LocalElementStage.Scan(seed, folder);
+            }
+
+            case LocalStageKind.Take:
+            {
+                int count = Count(parameters, what);
+
+                return () => LocalElementStage.Take(count);
+            }
+
+            case LocalStageKind.Skip:
+            {
+                int count = Count(parameters, what);
+
+                return () => LocalElementStage.Skip(count);
+            }
+
+            case LocalStageKind.TakeWhile or LocalStageKind.TakeThrough:
+            {
+                Func<object?, bool> predicate = LocalDelegateAdapter.Predicate(behavior, kind);
+                bool inclusive = kind is LocalStageKind.TakeThrough;
+
+                return () => LocalElementStage.TakeWhile(predicate, inclusive);
+            }
+
+            case LocalStageKind.SkipWhile:
+            {
+                Func<object?, bool> predicate = LocalDelegateAdapter.Predicate(behavior, kind);
+
+                return () => LocalElementStage.SkipWhile(predicate);
+            }
+
+            case LocalStageKind.Distinct:
+            {
+                DistinctOptions deduplication = Distinct(parameters, what);
+                IEqualityComparer comparer = LocalDelegateAdapter.Comparer(behavior);
+                bool evicting = deduplication.OverflowPolicy is KeyOverflowPolicy.EvictOldest;
+
+                return () =>
+                    LocalElementStage.Distinct(deduplication.MaxTrackedKeys, evicting, comparer);
+            }
+
+            case LocalStageKind.DeduplicateConsecutive:
+            {
+                IEqualityComparer comparer = LocalDelegateAdapter.Comparer(behavior);
+
+                return () => LocalElementStage.DeduplicateConsecutive(comparer);
+            }
+
+            case LocalStageKind.SelectMany:
+            {
+                Func<object?, IEnumerable> flattener = LocalDelegateAdapter.Flattener(behavior);
+
+                return () => LocalElementStage.SelectMany(flattener);
+            }
+
+            case LocalStageKind.Grouped:
+            {
+                int size = Count(parameters, what);
+                Func<object?, object?> freeze = LocalDelegateAdapter.Freeze(behavior, kind);
+
+                return () => LocalElementStage.Grouped(size, freeze);
+            }
+
+            case LocalStageKind.Sliding:
+            {
+                (int size, int step) = Windowing(parameters, what);
+                Func<object?, object?> freeze = LocalDelegateAdapter.Freeze(behavior, kind);
+
+                return () => LocalElementStage.Sliding(size, step, freeze);
+            }
+
+            default:
+                return null;
+        }
+    }
+
+    /// <summary>Builds a keyed stage from what the document says it is and what the binding says it does.</summary>
     /// <param name="node">The node as the document declares it.</param>
+    /// <param name="descriptor">The occurrence, which carries the key function, the comparer, and the flow.</param>
+    /// <returns>The stage.</returns>
+    /// <exception cref="InvalidOperationException">
+    /// The payload is not a keyed-stage payload, the binding is not a keyed stage's triple, or the two
+    /// planes disagree about what the group flow is.
+    /// </exception>
+    /// <remarks>
+    /// <para>
+    /// The two planes have to be talking about the same group flow, and this is where they say so. The
+    /// document states which stages it is made of and what each of them is configured with; the binding
+    /// states what each of them does. Neither is trusted to imply the other, which is the rule this planner
+    /// follows for every node — read one level down, because the stages of a group flow are not nodes and
+    /// there is nothing else to check them against.
+    /// </para>
+    /// <para>
+    /// The disagreements are two and are reported apart, because they are different mistakes: a group flow
+    /// of a different length is a document and a binding built from two different graphs, and a stage of a
+    /// different shape at the same position is one graph whose two halves were edited apart. Both are
+    /// unreachable through the authoring API, which writes the payload from the very descriptors it binds.
+    /// </para>
+    /// </remarks>
+    private static LocalElementStage Keyed(StageNode node, LocalStageDescriptor descriptor)
+    {
+        if (!LocalGroupByParameters.TryRead(
+            node.Parameters,
+            out GroupByOptions? options,
+            out IReadOnlyList<LocalGroupStage> declared,
+            out IReadOnlyList<string> violations))
+        {
+            throw Foreign(
+                $"the keyed stage '{node.Id}' carries parameters this runtime cannot read: {string.Join("; ", violations)}");
+        }
+
+        (Func<object?, object?> key, IEqualityComparer comparer, IReadOnlyList<LocalStageDescriptor> bound) =
+            LocalDelegateAdapter.Keyed(descriptor.Behavior);
+
+        if (bound.Count != declared.Count)
+        {
+            throw Foreign(
+                $"the keyed stage '{node.Id}' declares a group flow of {declared.Count} stages and is bound to one of {bound.Count}");
+        }
+
+        Func<LocalElementStage>[] group = new Func<LocalElementStage>[declared.Count];
+
+        for (int stage = 0; stage < group.Length; stage++)
+        {
+            string what = string.Create(
+                CultureInfo.InvariantCulture,
+                $"stage {stage + 1} of the group flow of the keyed stage '{node.Id}'");
+
+            if (bound[stage].Kind != declared[stage].Kind)
+            {
+                throw Foreign(
+                    $"{what} is declared as '{LocalVocabulary.StageOf(declared[stage].Kind)}' and bound as '{bound[stage].Stage}'");
+            }
+
+            group[stage] =
+                Fusible(
+                    declared[stage].Kind,
+                    declared[stage].Parameters,
+                    bound[stage].Behavior,
+                    bound[stage].Seed,
+                    what) ??
+                throw Foreign(
+                    $"{what} is an occurrence of the stage '{bound[stage].Stage}', and a group flow runs fused per key, so it holds element stages only");
+        }
+
+        return LocalElementStage.GroupBy(
+            options!.MaxActiveKeys,
+            options.OverflowPolicy is ActiveKeyOverflowPolicy.EvictIdle,
+            key,
+            comparer,
+            group);
+    }
+
+    /// <summary>Reads a distinct node's payload as the key bound it declares.</summary>
+    /// <param name="parameters">The payload.</param>
+    /// <param name="what">What carries it, for the diagnostic.</param>
     /// <returns>The greatest number of keys the stage may remember.</returns>
     /// <exception cref="InvalidOperationException">The payload is not a distinct payload.</exception>
-    private static DistinctOptions Distinct(StageNode node) =>
-        LocalDistinctParameters.TryRead(node.Parameters, out DistinctOptions? options, out IReadOnlyList<string> violations)
+    private static DistinctOptions Distinct(CanonicalJsonValue parameters, string what) =>
+        LocalDistinctParameters.TryRead(parameters, out DistinctOptions? options, out IReadOnlyList<string> violations)
             ? options!
             : throw Foreign(
-                $"the distinct stage '{node.Id}' carries parameters this runtime cannot read: {string.Join("; ", violations)}");
+                $"{what} carries parameters this runtime cannot read: {string.Join("; ", violations)}");
 
     /// <summary>Reads a sliding window's payload as the size and step it declares.</summary>
-    /// <param name="node">The node as the document declares it.</param>
+    /// <param name="parameters">The payload.</param>
+    /// <param name="what">What carries it, for the diagnostic.</param>
     /// <returns>How many elements a window carries and how far it advances.</returns>
     /// <exception cref="InvalidOperationException">The payload is not a sliding-window payload.</exception>
-    private static (int Size, int Step) Windowing(StageNode node) =>
-        LocalWindowParameters.TryRead(node.Parameters, out int size, out int step, out IReadOnlyList<string> violations)
+    private static (int Size, int Step) Windowing(CanonicalJsonValue parameters, string what) =>
+        LocalWindowParameters.TryRead(parameters, out int size, out int step, out IReadOnlyList<string> violations)
             ? (size, step)
             : throw Foreign(
-                $"the sliding stage '{node.Id}' carries parameters this runtime cannot read: {string.Join("; ", violations)}");
+                $"{what} carries parameters this runtime cannot read: {string.Join("; ", violations)}");
 
     /// <summary>Reads a batch's payload as the element bound and the window it declares.</summary>
     /// <param name="node">The node as the document declares it.</param>
@@ -1828,17 +2008,6 @@ internal static class LocalRunPlanner
             ? (maxElements, maxWeight, window)
             : throw Foreign(
                 $"the weighted batch '{node.Id}' carries parameters this runtime cannot read: {string.Join("; ", violations)}");
-
-    /// <summary>Reads a node's binding as the predicate its shape requires.</summary>
-    /// <param name="descriptor">The occurrence, which carries the kind and the bound delegate.</param>
-    /// <returns>The wrapped predicate.</returns>
-    /// <exception cref="InvalidOperationException">The binding is not a predicate.</exception>
-    /// <remarks>
-    /// Four shapes test elements with a predicate and are told apart by their stage reference alone, so the
-    /// kind travels into the diagnostic and the wrapping is one call.
-    /// </remarks>
-    private static Func<object?, bool> Predicate(LocalStageDescriptor descriptor) =>
-        LocalDelegateAdapter.Predicate(descriptor.Behavior, descriptor.Kind);
 
     /// <summary>Reads an asynchronous node's payload and binding as the stage that heads a segment.</summary>
     /// <param name="node">The node as the document declares it.</param>

@@ -110,9 +110,22 @@ internal static class LocalDelegateAdapter
     /// <param name="behavior">The bound <c>Func&lt;TIn, TOut&gt;</c>.</param>
     /// <returns>The wrapped mapping.</returns>
     /// <exception cref="InvalidOperationException"><paramref name="behavior"/> is not a one-argument function.</exception>
-    internal static Func<object?, object?> Selector(object? behavior)
+    internal static Func<object?, object?> Selector(object? behavior) =>
+        Selector(behavior, LocalStageKind.Select);
+
+    /// <summary>Wraps a one-argument function into one over boxed elements.</summary>
+    /// <param name="behavior">The bound <c>Func&lt;TIn, TOut&gt;</c>.</param>
+    /// <param name="kind">The stage shape, for the diagnostic.</param>
+    /// <returns>The wrapped function.</returns>
+    /// <exception cref="InvalidOperationException"><paramref name="behavior"/> is not a one-argument function.</exception>
+    /// <remarks>
+    /// Two shapes bind a plain one-argument function and mean different things by it — a mapping answers the
+    /// next element, and a keyed stage answers the key of this one — so the wrapping is one method and the
+    /// diagnostic names which of them was written.
+    /// </remarks>
+    internal static Func<object?, object?> Selector(object? behavior, LocalStageKind kind)
     {
-        Type[] arguments = Arguments(behavior, typeof(Func<,>), LocalStageKind.Select, "Func<TIn, TOut>");
+        Type[] arguments = Arguments(behavior, typeof(Func<,>), kind, "Func<TIn, TOut>");
 
         return (Func<object?, object?>)Close(SelectorTemplate, [arguments[0], arguments[1]], behavior);
     }
@@ -710,6 +723,36 @@ internal static class LocalDelegateAdapter
         }
 
         return (Cost(pair[0]), Freeze(pair[1], Kind));
+    }
+
+    /// <summary>Reads a keyed stage's binding as the three things it binds.</summary>
+    /// <param name="behavior">The bound triple, in that order.</param>
+    /// <returns>The wrapped key function, the key type's equality, and the group flow's occurrences.</returns>
+    /// <exception cref="InvalidOperationException"><paramref name="behavior"/> is not such a triple.</exception>
+    /// <remarks>
+    /// The one stage of this vocabulary that binds another stage's binding. The occurrences are carried
+    /// whole rather than reduced to their delegates here, because the planner needs each one's kind to check
+    /// it against what the document says the group flow is, and a list of bare delegates could not be
+    /// checked against anything.
+    /// </remarks>
+    internal static (Func<object?, object?> Key, IEqualityComparer Comparer, IReadOnlyList<LocalStageDescriptor> Group)
+        Keyed(object? behavior)
+    {
+        const LocalStageKind Kind = LocalStageKind.GroupBy;
+        const string Expected = "triple of a Func<T, TKey> key function, its comparer, and the group flow";
+
+        if (behavior is not object?[] { Length: 3 } triple ||
+            triple[2] is not IReadOnlyList<LocalStageDescriptor> group)
+        {
+            throw Mismatch(behavior, Kind, Expected);
+        }
+
+        return (
+            Selector(triple[0], Kind),
+            triple[1] as IEqualityComparer ??
+                throw new InvalidOperationException(
+                    $"A '{Kind}' stage must be bound to its key type's equality comparer, and this one is bound to {Describe(triple[1])}."),
+            group);
     }
 
     /// <summary>Bridges a channel reader into the boxed vocabulary a pull loop speaks.</summary>

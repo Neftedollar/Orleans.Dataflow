@@ -228,6 +228,75 @@ public sealed class Source<T>
                 EqualityComparer<T>.Default)));
     }
 
+    /// <summary>Extends this source with a stage that runs one substream per key.</summary>
+    /// <typeparam name="TKey">The key type, whose own equality decides which elements share a substream.</typeparam>
+    /// <typeparam name="TOut">The element type the group flow produces.</typeparam>
+    /// <param name="options">The bound on active keys and what the key past it costs.</param>
+    /// <param name="keySelector">The function answering which key an element belongs to.</param>
+    /// <param name="group">The flow one key's substream is, instantiated once per key.</param>
+    /// <returns>A new source of what the substreams emit; this one is unchanged.</returns>
+    /// <exception cref="ArgumentNullException">
+    /// <paramref name="options"/>, <paramref name="keySelector"/>, or <paramref name="group"/> is
+    /// <see langword="null"/>.
+    /// </exception>
+    /// <exception cref="ArgumentOutOfRangeException">
+    /// <see cref="GroupByOptions.MaxActiveKeys"/> is below one.
+    /// </exception>
+    /// <exception cref="ArgumentException">
+    /// <paramref name="group"/> holds a stage that cannot be run per key; the message names every one of
+    /// them and its position.
+    /// </exception>
+    /// <remarks>
+    /// <para>
+    /// <b>The group flow is declared once and instantiated per key.</b> Every key gets its own instance of
+    /// every stage in it, so two keys' scans keep two states and two keys' batches build two groups; and
+    /// <b>emission is merged</b> — what a substream emits leaves as it happens, so the keys' outputs
+    /// interleave downstream in the order their elements arrived. Emission is unordered across keys, and the
+    /// order of each key's own substream is preserved.
+    /// </para>
+    /// <para>
+    /// <b>The bound is the contract.</b> <see cref="GroupByOptions.MaxActiveKeys"/> is how many keys may
+    /// have a substream at once, and there is no unbounded spelling.
+    /// <see cref="ActiveKeyOverflowPolicy.Fail"/> faults the run at the key past it, naming the bound and
+    /// the key. <see cref="ActiveKeyOverflowPolicy.EvictIdle"/> flushes the key that has waited longest for
+    /// an element — its stages hand over whatever they were holding, downstream, at that moment — and then
+    /// forgets it completely, so a later element of that key starts a <em>fresh</em> substream. Eviction is
+    /// a flush-and-forget, so one key can appear more than once downstream; that is what bounded means here.
+    /// </para>
+    /// <para>
+    /// <b>The end of the stream flushes every key that is still open, in the order its key first arrived.</b>
+    /// A shutdown ends the stream as running out does and therefore flushes; a cancellation abandons what
+    /// every substream was holding; and a pause parks between two elements with every substream's state
+    /// intact.
+    /// </para>
+    /// <para>
+    /// <b>The group flow holds element stages only.</b> It is fused per key, so an asynchronous stage, a
+    /// buffer, a junction, and a stage that reads the clock are refused where the flow is composed, by a
+    /// message naming each of them: one instance per key of a thing that wants a segment, a channel, or a
+    /// run of its own is not something a fused stage can hold. A flattening stage and a nested
+    /// <c>GroupBy</c> are refused too, for this operator's own reasons — the first because its inner
+    /// sequence would be materialized rather than streamed, and the second because it would be a second
+    /// bound per key of the first. A stage inside the flow that <em>ends</em> its stream — a <c>Take</c>
+    /// reaching its bound — ends that key's substream and not the run: the key's residues walk downstream at
+    /// once, and every later element of that key is dropped while the key keeps its place.
+    /// </para>
+    /// </remarks>
+    public Source<TOut> GroupBy<TKey, TOut>(
+        GroupByOptions options,
+        Func<T, TKey> keySelector,
+        Flow<T, TOut> group)
+    {
+        ArgumentNullException.ThrowIfNull(options);
+        ArgumentNullException.ThrowIfNull(keySelector);
+        ArgumentNullException.ThrowIfNull(group);
+
+        return new Source<TOut>(Shape.Append(LocalStageDescriptor.GroupBy(
+            LocalOptionGuard.GroupBy(options, nameof(options)),
+            keySelector,
+            EqualityComparer<TKey>.Default,
+            LocalOptionGuard.Group(group.Stages, nameof(group)))));
+    }
+
     /// <summary>Extends this source with a stage that drops an element equal to the one before it.</summary>
     /// <returns>A new source; this one is unchanged.</returns>
     /// <remarks>

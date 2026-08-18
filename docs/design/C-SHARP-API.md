@@ -433,6 +433,74 @@ mid-fold faults the run with the author's own exception; a pause parks between
 two folds, holding the state the last one produced; and a shutdown resolves what
 was folded so far.
 
+## Grouping by key
+
+The M4.4 operator is one member on `Source<T>` and `Flow<TIn,TOut>`, mirrored
+per the ADR 0004 discipline, and it is the first one that takes a *flow* as an
+argument:
+
+| Spelling | What it does | What it takes |
+|---|---|---|
+| `GroupBy(options, keySelector, group)` | runs one instance of `group` per key and merges what they emit | `GroupByOptions`, `Func<T,TKey>`, and `Flow<T,TOut>` |
+
+**The substream flow is declared once and instantiated per key.** `group` is an
+ordinary flow value — reusable, immutable, composable into as many graphs as you
+like — and every key gets its own instance of every stage in it, so two keys'
+scans keep two states and two keys' batches build two groups. There is no
+`Source<Source<T>>` and nothing to consume or dispose: an author writes what a
+key's stream *is*, and the runtime runs one of those per key.
+
+**One sentence is the whole of the order contract, and both halves matter:
+emission is unordered across keys, and the order of each key's own substream is
+preserved.** What a substream emits leaves as it happens, so the keys interleave
+downstream in the order their elements arrived; and one element is pushed
+through one key's chain to its end before the next element is looked at, which
+is why a key's own order survives being interleaved with every other's.
+
+**The bound is the contract.** `GroupByOptions.MaxActiveKeys` is required and
+there is no unbounded spelling, exactly as for `Distinct`. A key already active
+costs nothing new however many elements it carries, and a key whose substream
+ended of its own accord — a `Take` inside the group flow reaching its bound —
+keeps its place, because remembering that a key ended is what keeps it ended.
+What the key past the bound costs is `ActiveKeyOverflowPolicy`:
+
+- `Fail` (the default) faults the run with `TrackedKeyOverflowException`, naming
+  the bound and the key that broke it.
+- `EvictIdle` flushes the key that has waited longest for an element — whatever
+  its stages were holding walks downstream at that moment — and then forgets it.
+  **Eviction is a flush-and-forget, so a later element of that key starts a
+  fresh substream and one key can appear more than once downstream**, with a
+  scan restarting from its seed and a batch from an empty group. That is what
+  bounded means here, and it is the only reading of this policy to rely on.
+
+**The end of the stream flushes every key still open, in the order its substream
+opened.** A shutdown does the same, because it ends the stream as running out
+does; a cancellation abandons what every key was holding; and a pause parks
+between two elements with every key's state intact.
+
+**The group flow holds element stages only, and that is this version's honesty
+rather than a hidden limit.** It is fused per key, so it holds `Select`,
+`Where`, `Scan`, `Take`, `Skip`, `TakeWhile`, `TakeThrough`, `SkipWhile`,
+`Distinct`, `DeduplicateConsecutive`, `Grouped`, and `Sliding`. An asynchronous
+stage, a buffer, a junction, and a stage that reads the clock each want a
+segment, a channel, or a run of their own, and one per key is not something a
+fused stage can hold; the refusal is an `ArgumentException` at the call site
+naming every offending stage and its position. `SelectMany` and a nested
+`GroupBy` are refused for this operator's own reasons — an inner sequence would
+be materialized rather than streamed, and a nested bound is a different feature
+with a contract of its own to state.
+
+**A stage inside the group flow that ends its stream ends that key and not the
+run.** Its residues walk downstream at once and every later element of that key
+is dropped, while the run carries on delivering the other keys'.
+
+**The group flow is in the document.** `local-group-by-parameters@v1` carries
+the bound, the policy, and one entry per stage of the flow with that stage's own
+reference and its own payload, so two graphs grouping through different flows
+have different fingerprints. The delegates — the key function, the key type's
+equality, and everything inside the flow — stay in the binding table, where
+every behavior stays.
+
 ## Delegates and deployability
 
 Lambda-based operators (`Select(x => ...)`) construct graphs that carry the

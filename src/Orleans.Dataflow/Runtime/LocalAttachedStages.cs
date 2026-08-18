@@ -581,18 +581,18 @@ internal static class LocalAttachedStages
         }
 
         /// <inheritdoc/>
-        internal override bool Flush(out object? residue)
+        internal override LocalStageOutcome Flush(out object? residue)
         {
             if (_group.Count == 0)
             {
                 residue = null;
 
-                return false;
+                return LocalStageOutcome.Drop;
             }
 
             residue = Close();
 
-            return true;
+            return LocalStageOutcome.Emit;
         }
 
         /// <inheritdoc/>

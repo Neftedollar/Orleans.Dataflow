@@ -1927,3 +1927,234 @@ weighs a heap.
 **And the whole of it is the local runtime.** No merge-map and no asynchronous
 fold has been materialized through a silo, and every graph carrying one is
 `nondeployable` because it is a lambda-bound local stage.
+
+## M4.4 (bounded group-by) — as implemented
+
+The first substream operator, and the one the capability matrix marks P1. The
+row's demand is a single clause — *maximum active keys, eviction, cancellation,
+and idle cleanup are bounded* — so bounds are not a quality of this operator but
+the whole of what it is, and every decision below is downstream of that.
+
+The shape is: **the substream flow is declared once and instantiated per key.**
+`source.GroupBy(options, keySelector, groupFlow)` takes an ordinary
+`Flow<T,TOut>` and runs one instance of it per key, merging what the instances
+emit into one stream. There is no `Source<Source<T>>`, no sub-graph
+materialized per element, and no new pump: a keyed stage is a **fused element
+stage** like a batch or a scan, and the per-key chains are instances of the very
+`LocalElementStage` shapes a top-level chain fuses.
+
+### The seams stretched, and one of them widened by a word
+
+Wave 2 left three seams — a residue at the end of a stream, a sequence instead
+of an element, and a wake with no element behind it. This operator needed the
+first two and needed the first one to say slightly more.
+
+**Emission is merged through `EmitMany`, and for the ordinary element it is not
+even that.** Pushing one element through one key's chain produces zero, one, or
+several emissions; the stage collects them into a list of its own and answers
+`Drop`, `Emit`, or `EmitMany` according to how many there were. The three-way
+answer is not an optimization dressed as a contract: the ordinary element of an
+ordinary group flow produces exactly one emission, and a sequence of one would
+cost an allocation and a walk of the run's flattening path to say what `Emit`
+says.
+
+**`Flush` answers an outcome rather than a flag.** A batch holds one residue and
+a keyed stage holds one *per active key*, so the end of a stream is where
+several of them have to leave at once. Rather than a second flush seam, `Flush`
+now returns the element vocabulary's own `LocalStageOutcome` — `Drop`, `Emit`,
+or `EmitMany` — and the run walks a many-residue answer through the very
+`Expand` it walks a flattening stage's sequence through, with the token and the
+pause gate examined between two of them exactly as before. `Due` stays a flag,
+because the one shape that answers it emits exactly one group.
+
+**Nothing re-enters the run, and that is why this is a stage rather than a
+pump.** The worry worth naming — a per-key chain wanting to emit *during*
+another key's flush, or a residue walk re-entering itself — does not arise,
+because a substream never talks to the run at all. Its emissions go into the
+stage's own list and the run reads that list after the method has returned. The
+list is reused across elements, which is safe for one reason and it is worth
+writing down: the run's walk only ever pushes elements through the stages
+*below* this one, so nothing downstream can call back into it while its sequence
+is being read. Two keyed stages fused in one segment are two lists, and the
+suite runs that graph on purpose.
+
+### One key's chain is the run's own walk, read one level down
+
+Pushing an element through a key's stages is `LocalRun.Advance` with one
+difference, and the difference is the whole of what a substream is: **a stage
+that ends the stream ends that key's stream and not the run's.** Everything else
+is the same shape — an emitting stage passes its element on, a dropping one
+stops the walk, a stage that emits and completes does both — and when a key's
+chain does end, that key is drained by `LocalRun.Drain` read one level down:
+every stage asked in flow order, each residue pushed through the stages below
+the one that gave it, and the walk stopping at the first residue that ends the
+stream. A spent `Take` inside a group flow refuses the residue offered to it for
+the same arithmetic reason a top-level one does.
+
+**A key whose substream ended keeps its place, and every later element of that
+key is dropped.** Remembering that a key has ended is what keeps it ended, and
+what that memory costs is one of the declared places — a run whose keys all end
+early still fails at the key past the bound, which the suite asserts, because
+"active" counts the keys this stage is answering for rather than the ones still
+producing.
+
+### Bounds are the contract
+
+`GroupByOptions.MaxActiveKeys` is required and has no unbounded spelling, for
+the reason `DistinctOptions.MaxTrackedKeys` has none: one substream per key a
+stream ever carried is unbounded memory, and a default would be a leak nobody
+wrote down. What the key past the bound costs is
+`ActiveKeyOverflowPolicy`, and the two values are two different operators.
+
+- **`Fail`** faults the run with `TrackedKeyOverflowException` naming the bound
+  *and the key*. The key is in the sentence and a deduplicating stage's is not,
+  because a stage that holds a substream per key fails on the shape of the data
+  and the key that broke the bound is usually the whole diagnosis — a null, an
+  identifier meant to be coarse, a timestamp used as a key.
+- **`EvictIdle`** flushes the key that has waited longest for an element and
+  then forgets it completely. **Eviction is a flush-and-forget**: the evicted
+  substream's residues walk downstream at that moment — the wave-2 residue
+  discipline applied per key — and an element of that key arriving later starts
+  a *fresh* substream from its own seed. **One key can therefore appear more
+  than once downstream, with a scan restarting from zero and a batch from an
+  empty group. That is what bounded means here**, and it is asserted rather than
+  footnoted.
+
+**Idleness is when a key last had an element**, which is the only reading under
+which this policy differs from a deduplicating stage's `EvictOldest`. An element
+of a key marks it active whether or not its substream still accepts elements, so
+an ended key whose elements keep arriving is not idle — and an ended key that
+*does* go idle is evicted without being flushed a second time, after which its
+next element opens a substream again.
+
+A third enumeration rather than a reading of the second, because the two
+evictions have two prices: forgetting a set member costs one element emitted
+twice, and forgetting a substream costs whatever that substream was holding.
+
+### The end of the stream, and what a stop does
+
+**Every key still open is flushed, in the order its substream opened.** Arrival
+order rather than idleness, because it is the order that does not depend on the
+policy: a run under `Fail` has no idleness order at all, and a reader comparing
+two runs of one graph should not have to know which policy was declared to know
+what order the tail comes out in. Under eviction "the order its substream
+opened" and "the order its key first arrived" part company for a key that was
+evicted and came back, which is the honest wording of the same rule.
+
+Shutdown, cancellation, and pause need nothing new and get nothing new. A
+shutdown ends the stream as running out does, so every key's residues are handed
+over; a cancellation abandons what every key was holding, exactly as it abandons
+a batch's open group; and a pause parks between two elements with every key's
+state intact, which the suite asserts with the double-pause idiom and a scan per
+key whose sums carry on across the hold rather than restarting. The one new
+state a pause can land in is **the middle of the end-of-stream flush** — several
+residues on their way out, one delivered and the rest still in the stage's hand
+— and it is asserted there too, because that is where the widened seam meets the
+control plane. It comes to rest, resumes, and delivers the rest unchanged; a
+spent bound below it cuts the same walk short instead, which is the run's
+existing rule read over an answer carrying several residues.
+
+**A keyed stage is not a boundary.** It fuses, so a run of one pulls its source
+exactly as far as the element in its hand — measured as how far a held source
+got, which is the accounting every bounded-memory claim in this suite makes.
+
+### The group flow holds element stages only, and that is v1's honesty
+
+A group flow is fused per key, so it holds the shapes that are a function of an
+element and their own state: `Select`, `Where`, `Scan`, `Take`, `Skip`,
+`TakeWhile`, `TakeThrough`, `SkipWhile`, `Distinct`, `DeduplicateConsecutive`,
+`Grouped`, and `Sliding`. An asynchronous stage, a merge-map, and a buffer each
+want a segment and a channel of their own; a junction wants several; a
+clock-reading stage wants a run to attach to and, for two of them, a timer that
+can complete or fail the run. One instance per key of any of those is not
+something a fused stage can hold, and the refusal names every offending stage
+and its position rather than the first one — a group flow is written as one
+expression, and an author fixing them one per compile is an author running the
+same call four times.
+
+Two more are refused for this operator's own reasons rather than for their
+machinery's, and both are stated as v1's honesty:
+
+- **A flattening stage.** What a keyed stage hands the run is one sequence per
+  element, read after the stage has returned, so a `SelectMany` inside a group
+  flow would have its inner sequence **materialized** rather than streamed —
+  bounded by what the author knows about the inner sizes rather than by the
+  boundary below. That is exactly the promise this operator exists to make, so
+  the shape is refused instead of being quietly weakened. Every admitted shape
+  answers at most one element per element, which is what makes the emissions of
+  one element bounded by the length of the chain, and the emissions of the end
+  of the stream bounded by the declared bound times that length.
+- **A nested `GroupBy`.** A second bound and a second key table per key of the
+  first is a real feature with a real contract to state, and it is not this one.
+
+### The document states the group flow
+
+A keyed stage is the first shape of this vocabulary whose payload carries other
+stages. It has to: leaving the flow out would make two graphs that observably
+differ look identical — grouping through a `Take(2)` and through a `Grouped(3)`
+would be one document and one fingerprint — and this vocabulary's rule is that
+what changes a graph observably belongs in the payload. So the contract
+`local-group-by-parameters@v1` carries `maxActiveKeys`, `overflowPolicy`, and
+`group` — an array of one entry per stage, each naming its own stage reference
+and carrying its own payload, validated by the very reader that stage uses when
+it stands on its own. What the stages *do* is not there, exactly as it is
+nowhere else in a local document.
+
+What that payload is *not* is a nested document: there are no identities, no
+ports, and no edges, because a group flow is a chain fused per key and its order
+is the array's order. And because both planes now describe the flow, the planner
+checks that they are describing the same one — a group flow of a different
+length is a document and a binding built from two different graphs, and a
+different shape at the same position is one graph whose halves were edited
+apart. Both are reported by name, and both are unreachable through the authoring
+API, which writes the payload from the very descriptors it binds.
+
+One refactoring came with that. The thirteen fused element shapes were thirteen
+arms of the planner's switch and are now one factory — `Fusible` — read by both
+callers: a chain of a document builds each of them once, and a keyed stage
+builds one of each per key. Everything that costs something (reading the
+payload, wrapping the author's delegate, the reflection inside that wrapping)
+happens once when the plan is built; what a factory does per key is construct an
+object over values it is already holding. A shape that answers the factory and
+stands where it cannot falls through to the switch, which reports the position
+exactly as it did when the arms were there.
+
+### What this wave does not do
+
+**There is no `Source<Source<T>>` and this is not one.** The substream is a flow
+declared at authoring time, not a stream an author receives and consumes; split,
+prefix-and-tail, and dynamic hubs are the other substream rows and are
+untouched. A group flow that could itself contain a junction or an asynchronous
+stage is the feature that needs sub-graphs materialized per key, and nothing in
+this engine has a shape for that.
+
+**One composition of each kind is proven, and the general statement is not.**
+Two keyed branches joined by a merge keep their own tables, and an element a
+timed batch produced from a timer's wake is an ordinary element to a keyed stage
+below it — those two are measured rather than argued, because "composes by
+construction" is an argument. Every other topology is not: a keyed stage on one
+leg of a broadcast, one inside a cycle, one under a partition, and a group flow
+that would like a window of its own are all unasserted, and the last of them is
+refused outright.
+
+**The order of an eviction's residues against the arriving element's own
+emissions is implemented and not observable.** The eviction happens first, so
+its residues are collected first; but with one flow instantiated per key, a
+substream whose first element emits is a substream that holds no residue, so no
+graph can be written in which both happen for one element. The order is recorded
+as the implementation's and not as a tested claim.
+
+**The bounds are proven as how far a held source got and as what a run
+delivered**, which is the accounting every bounded-memory claim in this suite
+makes; nothing here weighs a heap or counts the substream table's memory.
+
+**The reuse of one emission list is argued rather than measured.** The claim
+that nothing downstream can call back into a keyed stage is a property of the
+run's walk — it only ever enters the stages below — and a test could not fail if
+it stopped being true; what the suite does assert is the case that would break
+first, two keyed stages fused in one segment with the upper one's residues
+travelling through the lower one's table.
+
+**And the whole of it is the local runtime.** No keyed stage has been
+materialized through a silo, and every graph carrying one is `nondeployable`
+because it is a lambda-bound local stage.

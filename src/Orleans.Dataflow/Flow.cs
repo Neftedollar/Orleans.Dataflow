@@ -219,6 +219,51 @@ public sealed class Flow<TIn, TOut>
                 EqualityComparer<TOut>.Default)));
     }
 
+    /// <summary>Extends this flow with a stage that runs one substream per key.</summary>
+    /// <typeparam name="TKey">The key type, whose own equality decides which elements share a substream.</typeparam>
+    /// <typeparam name="TNext">The element type the group flow produces.</typeparam>
+    /// <param name="options">The bound on active keys and what the key past it costs.</param>
+    /// <param name="keySelector">The function answering which key an element belongs to.</param>
+    /// <param name="group">The flow one key's substream is, instantiated once per key.</param>
+    /// <returns>A new flow; this one is unchanged.</returns>
+    /// <exception cref="ArgumentNullException">
+    /// <paramref name="options"/>, <paramref name="keySelector"/>, or <paramref name="group"/> is
+    /// <see langword="null"/>.
+    /// </exception>
+    /// <exception cref="ArgumentOutOfRangeException">
+    /// <see cref="GroupByOptions.MaxActiveKeys"/> is below one.
+    /// </exception>
+    /// <exception cref="ArgumentException">
+    /// <paramref name="group"/> holds a stage that cannot be run per key; the message names every one of
+    /// them and its position.
+    /// </exception>
+    /// <remarks>
+    /// The group flow is declared once and instantiated per key, so every key keeps its own state; emission
+    /// is merged, so the keys interleave downstream in the order their elements arrived while each key's own
+    /// order is preserved; the bound on active keys is required and is what the operator promises, with the
+    /// key past it either faulting the run or evicting the idlest key by flushing and forgetting it; and the
+    /// end of the stream flushes every key still open, in the order its key first arrived. The flow holds
+    /// element stages only, because it is fused per key. <see cref="Source{T}.GroupBy"/> states all of it in
+    /// full, and everything there holds here.
+    /// </remarks>
+    public Flow<TIn, TNext> GroupBy<TKey, TNext>(
+        GroupByOptions options,
+        Func<TOut, TKey> keySelector,
+        Flow<TOut, TNext> group)
+    {
+        ArgumentNullException.ThrowIfNull(options);
+        ArgumentNullException.ThrowIfNull(keySelector);
+        ArgumentNullException.ThrowIfNull(group);
+
+        return new Flow<TIn, TNext>(LocalStageChain.Append(
+            Stages,
+            LocalStageDescriptor.GroupBy(
+                LocalOptionGuard.GroupBy(options, nameof(options)),
+                keySelector,
+                EqualityComparer<TKey>.Default,
+                LocalOptionGuard.Group(group.Stages, nameof(group)))));
+    }
+
     /// <summary>Extends this flow with a stage that drops an element equal to the one before it.</summary>
     /// <returns>A new flow; this one is unchanged.</returns>
     /// <remarks>

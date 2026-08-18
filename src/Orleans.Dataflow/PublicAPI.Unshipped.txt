@@ -1,4 +1,7 @@
 #nullable enable
+Orleans.Dataflow.ActiveKeyOverflowPolicy
+Orleans.Dataflow.ActiveKeyOverflowPolicy.EvictIdle = 1 -> Orleans.Dataflow.ActiveKeyOverflowPolicy
+Orleans.Dataflow.ActiveKeyOverflowPolicy.Fail = 0 -> Orleans.Dataflow.ActiveKeyOverflowPolicy
 Orleans.Dataflow.Adapters.DotnetStages
 Orleans.Dataflow.Adapters.ObservableBinding
 Orleans.Dataflow.Adapters.ObservableBinding<T>
@@ -57,6 +60,7 @@ Orleans.Dataflow.Flow<TIn, TOut>.Buffer(Orleans.Dataflow.BufferOptions! options)
 Orleans.Dataflow.Flow<TIn, TOut>.DeduplicateConsecutive() -> Orleans.Dataflow.Flow<TIn, TOut>!
 Orleans.Dataflow.Flow<TIn, TOut>.Delay(System.TimeSpan delay, Orleans.Dataflow.BufferOptions! holdback) -> Orleans.Dataflow.Flow<TIn, TOut>!
 Orleans.Dataflow.Flow<TIn, TOut>.Distinct(Orleans.Dataflow.DistinctOptions! options) -> Orleans.Dataflow.Flow<TIn, TOut>!
+Orleans.Dataflow.Flow<TIn, TOut>.GroupBy<TKey, TNext>(Orleans.Dataflow.GroupByOptions! options, System.Func<TOut, TKey>! keySelector, Orleans.Dataflow.Flow<TOut, TNext>! group) -> Orleans.Dataflow.Flow<TIn, TNext>!
 Orleans.Dataflow.Flow<TIn, TOut>.Grouped(int size) -> Orleans.Dataflow.Flow<TIn, System.Collections.Generic.IReadOnlyList<TOut>!>!
 Orleans.Dataflow.Flow<TIn, TOut>.GroupedWithin(int maxElements, System.TimeSpan window) -> Orleans.Dataflow.Flow<TIn, System.Collections.Generic.IReadOnlyList<TOut>!>!
 Orleans.Dataflow.Flow<TIn, TOut>.GroupedWithin(int maxElements, int maxWeight, System.TimeSpan window, System.Func<TOut, int>! cost) -> Orleans.Dataflow.Flow<TIn, System.Collections.Generic.IReadOnlyList<TOut>!>!
@@ -97,6 +101,14 @@ Orleans.Dataflow.Flow<TIn, TOut>.Where(System.Func<TOut, bool>! predicate) -> Or
 Orleans.Dataflow.Fork<T1, T2>
 Orleans.Dataflow.Fork<T1, T2>.Zip() -> Orleans.Dataflow.Source<(T1 First, T2 Second)>!
 Orleans.Dataflow.Fork<T1, T2>.Zip<TOut>(System.Func<T1, T2, TOut>! combine) -> Orleans.Dataflow.Source<TOut>!
+Orleans.Dataflow.GroupByOptions
+Orleans.Dataflow.GroupByOptions.<Clone>$() -> Orleans.Dataflow.GroupByOptions!
+Orleans.Dataflow.GroupByOptions.Equals(Orleans.Dataflow.GroupByOptions? other) -> bool
+Orleans.Dataflow.GroupByOptions.GroupByOptions() -> void
+Orleans.Dataflow.GroupByOptions.MaxActiveKeys.get -> int
+Orleans.Dataflow.GroupByOptions.MaxActiveKeys.init -> void
+Orleans.Dataflow.GroupByOptions.OverflowPolicy.get -> Orleans.Dataflow.ActiveKeyOverflowPolicy
+Orleans.Dataflow.GroupByOptions.OverflowPolicy.init -> void
 Orleans.Dataflow.Hosting.IDotnetDataflowBuilder
 Orleans.Dataflow.Hosting.IDotnetDataflowBuilder.AddDotnetStages() -> Orleans.Dataflow.Hosting.IDotnetDataflowBuilder!
 Orleans.Dataflow.Hosting.IDotnetDataflowBuilder.AddObservable<T>(Orleans.Dataflow.Adapters.ObservableBinding<T>! source) -> Orleans.Dataflow.Hosting.IDotnetDataflowBuilder!
@@ -225,6 +237,7 @@ Orleans.Dataflow.Source<T>.Distinct(Orleans.Dataflow.DistinctOptions! options) -
 Orleans.Dataflow.Source<T>.DivertTo(System.Func<T, bool>! predicate, Orleans.Dataflow.Branch<T>! side) -> Orleans.Dataflow.Source<T>!
 Orleans.Dataflow.Source<T>.Fork<T1, T2>(Orleans.Dataflow.Flow<T, T1>! left, Orleans.Dataflow.Flow<T, T2>! right) -> Orleans.Dataflow.Fork<T1, T2>!
 Orleans.Dataflow.Source<T>.ForkMerge<TOut>(Orleans.Dataflow.Flow<T, TOut>! left, Orleans.Dataflow.Flow<T, TOut>! right) -> Orleans.Dataflow.Source<TOut>!
+Orleans.Dataflow.Source<T>.GroupBy<TKey, TOut>(Orleans.Dataflow.GroupByOptions! options, System.Func<T, TKey>! keySelector, Orleans.Dataflow.Flow<T, TOut>! group) -> Orleans.Dataflow.Source<TOut>!
 Orleans.Dataflow.Source<T>.Grouped(int size) -> Orleans.Dataflow.Source<System.Collections.Generic.IReadOnlyList<T>!>!
 Orleans.Dataflow.Source<T>.GroupedWithin(int maxElements, System.TimeSpan window) -> Orleans.Dataflow.Source<System.Collections.Generic.IReadOnlyList<T>!>!
 Orleans.Dataflow.Source<T>.GroupedWithin(int maxElements, int maxWeight, System.TimeSpan window, System.Func<T, int>! cost) -> Orleans.Dataflow.Source<System.Collections.Generic.IReadOnlyList<T>!>!
@@ -327,6 +340,9 @@ override Orleans.Dataflow.ElementContract<T>.GetHashCode() -> int
 override Orleans.Dataflow.ElementContract<T>.ToString() -> string!
 override Orleans.Dataflow.Flow<TIn, TOut>.ToString() -> string!
 override Orleans.Dataflow.Fork<T1, T2>.ToString() -> string!
+override Orleans.Dataflow.GroupByOptions.Equals(object? obj) -> bool
+override Orleans.Dataflow.GroupByOptions.GetHashCode() -> int
+override Orleans.Dataflow.GroupByOptions.ToString() -> string!
 override Orleans.Dataflow.ParallelismOptions.Equals(object? obj) -> bool
 override Orleans.Dataflow.ParallelismOptions.GetHashCode() -> int
 override Orleans.Dataflow.ParallelismOptions.ToString() -> string!
@@ -382,6 +398,8 @@ static Orleans.Dataflow.ElementContract.For<T>(string! contractId, int majorVers
 static Orleans.Dataflow.ElementContract<T>.operator !=(Orleans.Dataflow.ElementContract<T> left, Orleans.Dataflow.ElementContract<T> right) -> bool
 static Orleans.Dataflow.ElementContract<T>.operator ==(Orleans.Dataflow.ElementContract<T> left, Orleans.Dataflow.ElementContract<T> right) -> bool
 static Orleans.Dataflow.Flow.For<T>() -> Orleans.Dataflow.Flow<T, T>!
+static Orleans.Dataflow.GroupByOptions.operator !=(Orleans.Dataflow.GroupByOptions? left, Orleans.Dataflow.GroupByOptions? right) -> bool
+static Orleans.Dataflow.GroupByOptions.operator ==(Orleans.Dataflow.GroupByOptions? left, Orleans.Dataflow.GroupByOptions? right) -> bool
 static Orleans.Dataflow.LocalStageCatalog.Instance.get -> Orleans.Dataflow.Definition.IStageCatalog!
 static Orleans.Dataflow.ParallelismOptions.operator !=(Orleans.Dataflow.ParallelismOptions? left, Orleans.Dataflow.ParallelismOptions? right) -> bool
 static Orleans.Dataflow.ParallelismOptions.operator ==(Orleans.Dataflow.ParallelismOptions? left, Orleans.Dataflow.ParallelismOptions? right) -> bool

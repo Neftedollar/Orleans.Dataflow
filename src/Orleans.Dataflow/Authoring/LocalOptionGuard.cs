@@ -234,6 +234,88 @@ internal static class LocalOptionGuard
         return options;
     }
 
+    /// <summary>Checks the options of a keyed stage.</summary>
+    /// <param name="options">The options the author supplied, already known to be non-null.</param>
+    /// <param name="parameterName">The name of the operator's parameter the options arrived in.</param>
+    /// <returns>The same options.</returns>
+    /// <exception cref="ArgumentOutOfRangeException">
+    /// <see cref="GroupByOptions.MaxActiveKeys"/> is below one, or
+    /// <see cref="GroupByOptions.OverflowPolicy"/> is not a declared member of its enumeration.
+    /// </exception>
+    internal static GroupByOptions GroupBy(GroupByOptions options, string parameterName)
+    {
+        if (options.MaxActiveKeys < 1)
+        {
+            throw new ArgumentOutOfRangeException(
+                parameterName,
+                options.MaxActiveKeys,
+                $"A keyed stage holds a substream for at least one key, so {nameof(GroupByOptions.MaxActiveKeys)} must be 1 or more. There is no spelling for an unbounded number of active keys: one substream per key a stream ever carried is unbounded memory, and a stage that could hold none could not accept its first element.");
+        }
+
+        if (LocalGroupByParameters.Spell(options.OverflowPolicy) is null)
+        {
+            throw new ArgumentOutOfRangeException(
+                parameterName,
+                options.OverflowPolicy,
+                string.Create(
+                    CultureInfo.InvariantCulture,
+                    $"The value {(int)options.OverflowPolicy} is not a declared {nameof(ActiveKeyOverflowPolicy)}, so there is no answer for the key past the bound. The declared policies are {nameof(ActiveKeyOverflowPolicy.Fail)}, which fails the run, and {nameof(ActiveKeyOverflowPolicy.EvictIdle)}, which flushes and forgets the key that has waited longest for an element."));
+        }
+
+        return options;
+    }
+
+    /// <summary>Checks that every stage of a group flow is one a keyed stage can run per key.</summary>
+    /// <param name="stages">The occurrences the author's group flow contributes, in flow order.</param>
+    /// <param name="parameterName">The name of the operator's parameter the flow arrived in.</param>
+    /// <returns>The same stages, as the descriptors a keyed stage instantiates per key.</returns>
+    /// <exception cref="ArgumentException">
+    /// At least one stage of the flow is not one that fuses per key, or is a registered occurrence.
+    /// </exception>
+    /// <remarks>
+    /// <para>
+    /// The refusal names <em>every</em> offending stage and its position rather than the first one, because
+    /// a group flow is written as one expression and an author fixing them one per compile is an author
+    /// re-running the same call four times. The wording is the same claim the payload reader makes, so a
+    /// hand-written document and an authored one are refused for the same reason in the same words.
+    /// </para>
+    /// <para>
+    /// A registered occurrence is refused with the rest and named by its stage reference. A registered
+    /// element stage really is a function of an element, so it could one day be instantiated per key — but
+    /// its behavior is resolved through a catalog and a binder rather than carried by a descriptor, and
+    /// resolving one per key is machinery this version does not have. Refusing it by name is honest; letting
+    /// it through and failing at plan time would not be.
+    /// </para>
+    /// </remarks>
+    internal static IReadOnlyList<LocalStageDescriptor> Group(
+        IReadOnlyList<StageOccurrence> stages,
+        string parameterName)
+    {
+        LocalStageDescriptor[] group = new LocalStageDescriptor[stages.Count];
+        List<string> refused = [];
+
+        for (int stage = 0; stage < stages.Count; stage++)
+        {
+            if (stages[stage] is LocalStageDescriptor descriptor &&
+                LocalVocabulary.RunsInsideAGroup(descriptor.Kind))
+            {
+                group[stage] = descriptor;
+            }
+            else
+            {
+                refused.Add(string.Create(
+                    CultureInfo.InvariantCulture,
+                    $"'{stages[stage].Stage}' at position {stage + 1}"));
+            }
+        }
+
+        return refused.Count == 0
+            ? group
+            : throw new ArgumentException(
+                $"A group flow runs fused per key, so it holds element stages only: {string.Join(", ", refused)}. An asynchronous stage, a buffer, a junction, and a stage that reads the clock each want a segment, a channel, or a run of their own, and one per key is not something a fused stage can hold. A flattening stage and a nested group-by are refused for this operator's own reasons, which are stated in the documentation.",
+                parameterName);
+    }
+
     /// <summary>Checks the options of a collecting sink.</summary>
     /// <param name="options">The options the author supplied, already known to be non-null.</param>
     /// <param name="parameterName">The name of the factory's parameter the options arrived in.</param>

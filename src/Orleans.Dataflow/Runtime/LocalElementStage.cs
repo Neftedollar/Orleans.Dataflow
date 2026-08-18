@@ -147,6 +147,26 @@ internal abstract class LocalElementStage
     internal static LocalElementStage Sliding(int size, int step, Func<object?, object?> freeze) =>
         new Windowing(size, step, freeze);
 
+    /// <summary>Creates a stage that runs one instance of a chain of stages per key.</summary>
+    /// <param name="maxActiveKeys">The greatest number of keys to hold a substream for; at least one.</param>
+    /// <param name="evicting">
+    /// Whether the key past the bound flushes and forgets the idlest key instead of faulting.
+    /// </param>
+    /// <param name="key">The key function over boxed elements.</param>
+    /// <param name="comparer">The key type's own equality.</param>
+    /// <param name="group">
+    /// One factory per stage of the group flow, in flow order; each is called once per key, so every key's
+    /// substream holds its own state.
+    /// </param>
+    /// <returns>The stage.</returns>
+    internal static LocalElementStage GroupBy(
+        int maxActiveKeys,
+        bool evicting,
+        Func<object?, object?> key,
+        IEqualityComparer comparer,
+        IReadOnlyList<Func<LocalElementStage>> group) =>
+        new Keyed(maxActiveKeys, evicting, key, comparer, group);
+
     /// <summary>Pushes one element through this stage.</summary>
     /// <param name="element">The element arriving from upstream.</param>
     /// <param name="result">
@@ -163,16 +183,21 @@ internal abstract class LocalElementStage
 
     /// <summary>Hands over whatever this stage still holds, because the stream reaching it has ended.</summary>
     /// <param name="residue">
-    /// When this method returns <see langword="true"/>, the one element to push through the stages below
-    /// this one; otherwise an unspecified value.
+    /// The one element or the sequence to push through the stages below this one, according to the outcome;
+    /// an unspecified value for <see cref="LocalStageOutcome.Drop"/>.
     /// </param>
-    /// <returns><see langword="true"/> when there was something to hand over.</returns>
+    /// <returns>
+    /// <see cref="LocalStageOutcome.Drop"/> when there was nothing to hand over,
+    /// <see cref="LocalStageOutcome.Emit"/> for one element, and
+    /// <see cref="LocalStageOutcome.EmitMany"/> for a sequence of them.
+    /// </returns>
     /// <remarks>
     /// <para>
     /// Nothing at all for every stage that answers each element as it arrives, which is all of them but the
-    /// batchers: a filter that dropped an element is not holding it, and a scan's state is not an element
-    /// that was never emitted. A batch is the first shape of this vocabulary whose whole point is to hold
-    /// elements back, so the end of the stream is the only moment its last partial group can be emitted at.
+    /// batchers and the keyed one: a filter that dropped an element is not holding it, and a scan's state is
+    /// not an element that was never emitted. A batch is the first shape of this vocabulary whose whole
+    /// point is to hold elements back, so the end of the stream is the only moment its last partial group
+    /// can be emitted at.
     /// </para>
     /// <para>
     /// Asked on the segment's own thread, once per stage, in flow order, after the loop that fed it has
@@ -180,12 +205,20 @@ internal abstract class LocalElementStage
     /// ordinary element, which is what makes a spent <c>Take</c> refuse it exactly as it refuses any element
     /// past its bound.
     /// </para>
+    /// <para>
+    /// The answer is an outcome rather than a flag because since M4.4 a stage can be holding <em>several</em>
+    /// residues: a keyed stage holds one substream per active key, and the end of the stream is where every
+    /// one of them hands over what it was still building. That is the element vocabulary's own
+    /// <see cref="LocalStageOutcome.EmitMany"/> read at the end of a stream rather than in the middle of one,
+    /// and the run walks it through the very method it walks a flattening stage's sequence through.
+    /// <see cref="Due"/> stays a flag, because the one shape that answers it emits exactly one group.
+    /// </para>
     /// </remarks>
-    internal virtual bool Flush(out object? residue)
+    internal virtual LocalStageOutcome Flush(out object? residue)
     {
         residue = null;
 
-        return false;
+        return LocalStageOutcome.Drop;
     }
 
     /// <summary>Hands over whatever this stage holds if the moment it was waiting for has come.</summary>
@@ -392,8 +425,8 @@ internal abstract class LocalElementStage
     private sealed class Deduplicating(int maxTrackedKeys, bool evicting, IEqualityComparer comparer)
         : LocalElementStage
     {
-        private readonly HashSet<object?> _keys = new(new Keys(comparer));
-        private readonly Queue<object?> _order = new();
+        private readonly HashSet<Key> _keys = new(new Keys(comparer));
+        private readonly Queue<Key> _order = new();
 
         /// <inheritdoc/>
         /// <exception cref="TrackedKeyOverflowException">
@@ -409,7 +442,9 @@ internal abstract class LocalElementStage
         {
             result = element;
 
-            if (_keys.Contains(element))
+            Key key = new(element);
+
+            if (_keys.Contains(key))
             {
                 return LocalStageOutcome.Drop;
             }
@@ -424,31 +459,10 @@ internal abstract class LocalElementStage
                 _ = _keys.Remove(_order.Dequeue());
             }
 
-            _ = _keys.Add(element);
-            _order.Enqueue(element);
+            _ = _keys.Add(key);
+            _order.Enqueue(key);
 
             return LocalStageOutcome.Emit;
-        }
-
-        /// <summary>The element type's own equality, seen as the set of boxed elements needs it.</summary>
-        /// <param name="comparer">The comparer to defer to.</param>
-        /// <remarks>
-        /// <see cref="EqualityComparer{T}.Default"/> is an <see cref="IEqualityComparer"/> and not an
-        /// <see cref="IEqualityComparer{T}"/> of <see cref="object"/>, so an adapter is what lets a set of
-        /// boxed elements use the very equality the element type defines. Its non-generic members already
-        /// answer for null — equal only to null, hashed as zero — so nothing here has to.
-        /// </remarks>
-        private sealed class Keys(IEqualityComparer comparer) : IEqualityComparer<object?>
-        {
-            /// <inheritdoc/>
-            /// <remarks>
-            /// Hides the static <see cref="object.Equals(object?, object?)"/>, which has this signature and
-            /// is not what an implementation of the interface means.
-            /// </remarks>
-            public new bool Equals(object? x, object? y) => comparer.Equals(x, y);
-
-            /// <inheritdoc/>
-            public int GetHashCode(object obj) => comparer.GetHashCode(obj);
         }
     }
 
@@ -542,19 +556,19 @@ internal abstract class LocalElementStage
         /// one is not a group and is not emitted, which is what makes a stream whose length is a multiple
         /// of the size emit exactly the groups it filled.
         /// </remarks>
-        internal override bool Flush(out object? residue)
+        internal override LocalStageOutcome Flush(out object? residue)
         {
             if (_group.Count == 0)
             {
                 residue = null;
 
-                return false;
+                return LocalStageOutcome.Drop;
             }
 
             residue = freeze(_group);
             _group.Clear();
 
-            return true;
+            return LocalStageOutcome.Emit;
         }
     }
 
@@ -619,20 +633,408 @@ internal abstract class LocalElementStage
         }
 
         /// <inheritdoc/>
-        internal override bool Flush(out object? residue)
+        internal override LocalStageOutcome Flush(out object? residue)
         {
             if (_unseen == 0)
             {
                 residue = null;
 
-                return false;
+                return LocalStageOutcome.Drop;
             }
 
             residue = freeze(_window);
             _unseen = 0;
             _window.Clear();
 
-            return true;
+            return LocalStageOutcome.Emit;
         }
+    }
+
+    /// <summary>A stage that runs one instance of a chain of stages per key and merges what they emit.</summary>
+    /// <param name="maxActiveKeys">The greatest number of keys to hold a substream for; at least one.</param>
+    /// <param name="evicting">Whether the key past the bound evicts the idlest key instead of faulting.</param>
+    /// <param name="keySelector">The key function over boxed elements.</param>
+    /// <param name="comparer">The key type's own equality.</param>
+    /// <param name="group">One factory per stage of the group flow, in flow order.</param>
+    /// <remarks>
+    /// <para>
+    /// <b>The group flow is declared once and instantiated per key.</b> Every key gets its own array of
+    /// stages built from the same factories, so two keys' scans do not share a state and two keys' batches
+    /// do not share a group; and because the factories were resolved when the plan was built, opening a key
+    /// costs one array and one object per stage rather than any reflection.
+    /// </para>
+    /// <para>
+    /// <b>Emission is merged.</b> What a substream emits leaves this stage as it happens, so the elements of
+    /// two keys interleave downstream in the order their keys' elements arrived: emission is unordered
+    /// across keys, and the order of each key's own substream is preserved. The second half is a property of
+    /// the walk rather than a rule applied to it — one element is pushed through one key's chain to its end
+    /// before the next element is looked at.
+    /// </para>
+    /// <para>
+    /// <b>What this stage holds is exactly the bound.</b> One substream per active key, at most
+    /// <paramref name="maxActiveKeys"/> of them, each holding whatever its own stages hold; plus, for the
+    /// duration of one element, the emissions that element produced. That second number is bounded by the
+    /// chain — a stage of a group flow answers at most one element per element, so one element in yields at
+    /// most one out plus the residues of the key an eviction closed — and at the end of the stream by the
+    /// bound itself, which is one residue per stage per active key.
+    /// </para>
+    /// <para>
+    /// <b>Nothing here re-enters the run.</b> A substream's emissions are collected into this stage's own
+    /// list and handed back as one outcome, so the run pushes them downstream after this method has
+    /// returned, one at a time, under the very token and pause discipline every other element pays. That is
+    /// what keeps a merged emission from being a second pump: the reentrancy that a per-key chain emitting
+    /// during another key's flush would have needed simply does not arise.
+    /// </para>
+    /// </remarks>
+    private sealed class Keyed(
+        int maxActiveKeys,
+        bool evicting,
+        Func<object?, object?> keySelector,
+        IEqualityComparer comparer,
+        IReadOnlyList<Func<LocalElementStage>> group) : LocalElementStage
+    {
+        private readonly Dictionary<Key, Substream> _keys = new(new Keys(comparer));
+        private readonly LinkedList<Substream> _arrival = new();
+        private readonly LinkedList<Substream> _idle = new();
+        private readonly List<object?> _emissions = [];
+
+        /// <inheritdoc/>
+        /// <exception cref="TrackedKeyOverflowException">
+        /// The element's key is the one past the bound and the declared policy is to fail.
+        /// </exception>
+        /// <remarks>
+        /// <para>
+        /// A key already active costs nothing new, which is what makes a stream of one key run inside a
+        /// bound of one. What the key past the bound costs is the declared policy's answer: the run faults
+        /// naming the bound and the key, or the idlest key is flushed and forgotten and its residues leave
+        /// ahead of this element's own emissions, because the eviction happened first.
+        /// </para>
+        /// <para>
+        /// A substream that has ended — a <c>Take</c> inside the group flow reaching its bound — keeps its
+        /// place and drops the elements of its key, and each of those elements still marks the key active.
+        /// Remembering that a key ended is what keeps it ended, and a key whose elements keep arriving is
+        /// not idle whether or not anything is still listening to them.
+        /// </para>
+        /// </remarks>
+        internal override LocalStageOutcome Apply(object? element, out object? result)
+        {
+            Key name = new(keySelector(element));
+
+            _emissions.Clear();
+
+            if (_keys.TryGetValue(name, out Substream? substream))
+            {
+                Touch(substream);
+            }
+            else
+            {
+                if (_keys.Count == maxActiveKeys)
+                {
+                    if (!evicting)
+                    {
+                        throw TrackedKeyOverflowException.Active(maxActiveKeys, name.Value);
+                    }
+
+                    Evict();
+                }
+
+                substream = Open(name);
+            }
+
+            if (substream.Open && !Push(substream, element, 0))
+            {
+                Drain(substream);
+            }
+
+            return Answer(out result);
+        }
+
+        /// <inheritdoc/>
+        /// <remarks>
+        /// <b>Every key that is still open is flushed, in the order its substream opened.</b> That order
+        /// rather than idleness, because it is the one that does not depend on the eviction policy: a run
+        /// under <see cref="ActiveKeyOverflowPolicy.Fail"/> has no idleness order at all, and a reader
+        /// comparing two runs of one graph should not have to know which policy was declared to know what
+        /// order the tail comes out in. It is the order the keys first arrived in for every run that
+        /// evicts nothing, and it parts company with that only for a key that was evicted and came back —
+        /// which is a second substream and takes its place at the end. Each key's residues walk its own
+        /// stages exactly as the run's own residue walk does, so a batch inside a group flow hands over its
+        /// partial group per key.
+        /// </remarks>
+        internal override LocalStageOutcome Flush(out object? residue)
+        {
+            _emissions.Clear();
+
+            for (LinkedListNode<Substream>? node = _arrival.First; node is not null; node = node.Next)
+            {
+                if (node.Value.Open)
+                {
+                    Drain(node.Value);
+                }
+            }
+
+            return Answer(out residue);
+        }
+
+        /// <summary>Answers with whatever the substreams emitted while this stage was being asked.</summary>
+        /// <param name="result">The one element, the sequence of them, or an unspecified value.</param>
+        /// <returns>The outcome the count implies.</returns>
+        /// <remarks>
+        /// Three answers rather than always a sequence, because the ordinary element of an ordinary group
+        /// flow produces exactly one emission and a sequence of one would cost an allocation and a walk of
+        /// the run's own flattening path to say what <see cref="LocalStageOutcome.Emit"/> says. The list is
+        /// this stage's and is reused: the run reads the sequence to its end before this stage is applied
+        /// again, because reading it is what the run does with the outcome it was just handed.
+        /// </remarks>
+        private LocalStageOutcome Answer(out object? result)
+        {
+            switch (_emissions.Count)
+            {
+                case 0:
+                    result = null;
+
+                    return LocalStageOutcome.Drop;
+                case 1:
+                    result = _emissions[0];
+
+                    return LocalStageOutcome.Emit;
+                default:
+                    result = ((IEnumerable)_emissions).GetEnumerator();
+
+                    return LocalStageOutcome.EmitMany;
+            }
+        }
+
+        /// <summary>Pushes one element through one key's stages from one of them onwards.</summary>
+        /// <param name="substream">The key's substream.</param>
+        /// <param name="element">The element entering the stage named by <paramref name="from"/>.</param>
+        /// <param name="from">The first stage to apply.</param>
+        /// <returns>
+        /// <see langword="true"/> when this key's substream is still open; <see langword="false"/> when a
+        /// stage of it has ended its own stream.
+        /// </returns>
+        /// <remarks>
+        /// The run's own walk over a segment's fused stages, read one level down, with one difference that
+        /// is the whole of what a substream is: a stage that ends the stream ends <em>this key's</em> stream
+        /// and not the run's. Everything else is the same shape — an emitting stage passes its element on, a
+        /// dropping one stops the walk, and a stage that emits and completes does both.
+        /// </remarks>
+        private bool Push(Substream substream, object? element, int from)
+        {
+            LocalElementStage[] stages = substream.Stages;
+            bool completing = false;
+
+            for (int stage = from; stage < stages.Length; stage++)
+            {
+                LocalStageOutcome outcome = stages[stage].Apply(element, out element);
+
+                if (outcome is LocalStageOutcome.EmitAndComplete)
+                {
+                    completing = true;
+
+                    continue;
+                }
+
+                if (outcome is LocalStageOutcome.Emit)
+                {
+                    continue;
+                }
+
+                // Defensive, and recorded as defensive: no shape a group flow may hold answers with a
+                // sequence today, because a flattening stage is refused inside one. Handling it here is what
+                // keeps that a statement about which stages are admitted rather than about this walk.
+                if (outcome is LocalStageOutcome.EmitMany)
+                {
+                    return Expand(substream, (IEnumerator)element!, stage + 1) && !completing;
+                }
+
+                return outcome is not LocalStageOutcome.Complete && !completing;
+            }
+
+            _emissions.Add(element);
+
+            return !completing;
+        }
+
+        /// <summary>Pushes every element of one stage's sequence through the stages below it.</summary>
+        /// <param name="substream">The key's substream.</param>
+        /// <param name="inner">The sequence, which this method owns and releases.</param>
+        /// <param name="from">The first stage below the one that produced it.</param>
+        /// <returns><see langword="true"/> when this key's substream is still open.</returns>
+        private bool Expand(Substream substream, IEnumerator inner, int from)
+        {
+            try
+            {
+                while (inner.MoveNext())
+                {
+                    if (!Push(substream, inner.Current, from))
+                    {
+                        return false;
+                    }
+                }
+
+                return true;
+            }
+            finally
+            {
+                (inner as IDisposable)?.Dispose();
+            }
+        }
+
+        /// <summary>Ends one key's substream and emits whatever its stages were still holding.</summary>
+        /// <param name="substream">The key's substream.</param>
+        /// <remarks>
+        /// The run's own residue walk, read one level down and with the same three rules holding for the
+        /// same reasons: every stage is asked in flow order, each residue travels through the stages below
+        /// the one that gave it, and the walk stops at the first residue that ends the stream. The substream
+        /// is closed before any of it, so a stage whose residue ends the stream cannot start a second walk.
+        /// </remarks>
+        private void Drain(Substream substream)
+        {
+            substream.Open = false;
+
+            LocalElementStage[] stages = substream.Stages;
+
+            for (int stage = 0; stage < stages.Length; stage++)
+            {
+                LocalStageOutcome outcome = stages[stage].Flush(out object? residue);
+
+                if (outcome is LocalStageOutcome.Emit && !Push(substream, residue, stage + 1))
+                {
+                    return;
+                }
+
+                if (outcome is LocalStageOutcome.EmitMany &&
+                    !Expand(substream, (IEnumerator)residue!, stage + 1))
+                {
+                    return;
+                }
+            }
+        }
+
+        /// <summary>Opens a substream for a key that has none.</summary>
+        /// <param name="name">The key.</param>
+        /// <returns>The substream, already recorded in the table and in the orders.</returns>
+        private Substream Open(Key name)
+        {
+            LocalElementStage[] stages = new LocalElementStage[group.Count];
+
+            for (int stage = 0; stage < stages.Length; stage++)
+            {
+                stages[stage] = group[stage]();
+            }
+
+            Substream substream = new(name, stages);
+
+            _keys.Add(name, substream);
+            substream.Arrival = _arrival.AddLast(substream);
+
+            if (evicting)
+            {
+                substream.Idle = _idle.AddLast(substream);
+            }
+
+            return substream;
+        }
+
+        /// <summary>Records that a key has just had an element.</summary>
+        /// <param name="substream">The key's substream.</param>
+        /// <remarks>
+        /// The idleness order is maintained only under the evicting policy, because under the failing one
+        /// nothing is ever evicted and a list nobody reads is a list nobody should be paying for. The
+        /// arrival order is maintained always, because the end of the stream reads it whatever the policy
+        /// was.
+        /// </remarks>
+        private void Touch(Substream substream)
+        {
+            if (!evicting)
+            {
+                return;
+            }
+
+            _idle.Remove(substream.Idle!);
+            _idle.AddLast(substream.Idle!);
+        }
+
+        /// <summary>Flushes and forgets the key that has waited longest for an element.</summary>
+        /// <remarks>
+        /// The idlest key is the head of the idleness list and needs no search, which is what that list buys.
+        /// Its substream is flushed on the way out — the residues it was holding are elements that arrived
+        /// and were accepted, exactly as a batch's last partial group is — and then it is forgotten
+        /// completely, so an element of that key arriving later opens a fresh substream from its own seed.
+        /// A substream that had already ended is forgotten without being flushed a second time.
+        /// </remarks>
+        private void Evict()
+        {
+            Substream victim = _idle.First!.Value;
+
+            if (victim.Open)
+            {
+                Drain(victim);
+            }
+
+            _ = _keys.Remove(victim.Key);
+            _arrival.Remove(victim.Arrival!);
+            _idle.Remove(victim.Idle!);
+        }
+
+        /// <summary>One key's own instance of the group flow, and its places in the two orders.</summary>
+        /// <param name="key">The key, kept so that an eviction can remove it from the table.</param>
+        /// <param name="stages">This key's own stages, in flow order.</param>
+        private sealed class Substream(Key key, LocalElementStage[] stages)
+        {
+            /// <summary>Gets the key this substream belongs to.</summary>
+            internal Key Key { get; } = key;
+
+            /// <summary>Gets this key's own stages, in flow order.</summary>
+            internal LocalElementStage[] Stages { get; } = stages;
+
+            /// <summary>Gets or sets this substream's place in arrival order.</summary>
+            internal LinkedListNode<Substream>? Arrival { get; set; }
+
+            /// <summary>Gets or sets this substream's place in idleness order.</summary>
+            /// <value><see langword="null"/> under the failing policy, which keeps no idleness order.</value>
+            internal LinkedListNode<Substream>? Idle { get; set; }
+
+            /// <summary>Gets or sets a value indicating whether this substream still accepts elements.</summary>
+            /// <value>
+            /// <see langword="false"/> once a stage of it has ended its own stream and its residues have
+            /// been handed over.
+            /// </value>
+            internal bool Open { get; set; } = true;
+        }
+    }
+
+    /// <summary>One boxed element or key, wrapped so that a set or a table can hold it.</summary>
+    /// <param name="Value">The element or the key, which may legitimately be <see langword="null"/>.</param>
+    /// <remarks>
+    /// A <see cref="Dictionary{TKey, TValue}"/> refuses a null key outright and a
+    /// <see cref="HashSet{T}"/> treats one as a case of its own, and a key of null is a perfectly ordinary
+    /// key: a nullable element type has one, and a key function may answer it. Wrapping is what makes null
+    /// an ordinary value again — the struct is never null, so the collections have nothing to special-case
+    /// and neither does the code that reads them. It costs no allocation, because a struct holding one
+    /// reference is that reference.
+    /// </remarks>
+    private readonly record struct Key(object? Value);
+
+    /// <summary>An element or key type's own equality, seen as a set or a table of them needs it.</summary>
+    /// <param name="comparer">The comparer to defer to.</param>
+    /// <remarks>
+    /// <see cref="EqualityComparer{T}.Default"/> is an <see cref="IEqualityComparer"/> and not an
+    /// <see cref="IEqualityComparer{T}"/> of <see cref="Key"/>, so an adapter is what lets a set or a table
+    /// of boxed values use the very equality their type defines. Shared by the deduplicating stage, whose
+    /// keys are its elements, and by the keyed stage, whose keys are what a function answered about them.
+    /// A null value is answered here rather than deferred: it is equal to null alone and hashes as zero,
+    /// which is what the non-generic members of the framework's own comparers do, said in the one place
+    /// this runtime depends on it.
+    /// </remarks>
+    private sealed class Keys(IEqualityComparer comparer) : IEqualityComparer<Key>
+    {
+        /// <inheritdoc/>
+        public bool Equals(Key x, Key y) =>
+            x.Value is null || y.Value is null ? x.Value is null && y.Value is null : comparer.Equals(x.Value, y.Value);
+
+        /// <inheritdoc/>
+        public int GetHashCode(Key obj) => obj.Value is null ? 0 : comparer.GetHashCode(obj.Value);
     }
 }
