@@ -139,7 +139,50 @@ Exit criteria:
 - every adapter publishes an acknowledgement/delivery/checkpoint/idempotency table;
 - provider packages do not leak their configuration into core option types.
 
-## M5 — Supervision, durability, and compatibility
+## M5 — Supervision, durability, and compatibility (closed 2026-08-18; recorded deferrals below)
+
+Deferred deliberately, with their rationale. **Restart-section with backoff**
+(and alternate-source recover, which is the same boundary) is new design
+rather than a missing composition: a scope containing a *source* changes what
+reset means for cursors, subscriptions, and buffered elements, and the
+matrix row records the verdict with the parts it would be built from.
+**Exception-type taxonomy** stays out per ADR 0007 — no form names an
+exception type in v1. **Cross-revision checkpoint migration** is priced and
+deferred by the M5.4 amendment: beside, replace, or refuse — never migrate —
+until a deployment demands a declared correspondence between two documents'
+seams. **Per-scope observability** remains one counter per run (the M5.1
+note), and the monitor and meter both say so rather than implying finer
+resolution. **Incremental/overlapped checkpoint capture** stays unbuilt on
+purpose: the hold cost is measured (`TotalCheckpointHold`, the hold
+histogram), and cleverness waits for a number that demands it. Two seams
+surfaced by M5.5's own testing joined the list: **adapter-private ingress
+drops** are counted inside the stream/broadcast/observer/reminder adapters
+and not yet folded into the run's `DroppedElements`, stated on the snapshot
+type; and a **registered supervision vocabulary** does not exist, so
+supervised/poison counters are structurally zero in deployable pipelines.
+One residual is a limit rather than a deferral and is documented as such:
+a silo dying between a run's ending and the report landing loses the
+report, and that run is resumed once — the honest cost of two separate
+writes.
+
+Exit criteria were met with named evidence: the crash suite proves the
+stated windows at every boundary (cursor:
+`ADurableRunResumesOnASurvivingSiloAndReplaysExactlyTheWindowSinceItsLastCheckpoint`;
+sink mark:
+`TheCommitMarkOfATerminatingGrainCallBoundsTheDuplicateWindowAndContinuesAcrossTheResume`;
+held-element loss:
+`AnElementHeldBetweenACursorAndItsMarkIsLostByAResumeAndTheCheckpointSaysHowMany`;
+torn documents and the declared bound:
+`RepeatedKillsLeaveACheckpointThatStillReadsAndAWindowNoWiderThanTheDeclaredBound`;
+staged supersede:
+`ASupersededAttemptsCheckpointWriteIsRefusedAndKillsThatAttempt`); the
+exactly-once sweep found the phrase only in negations across docs and
+source; and state reset versus durable-state survival is proved by values
+per restart form
+(`DurableStateSurvivesAResumeAndEverythingElseResetsProvedByValues` and the
+M5.1 supervision suite). The durable-resume matrix row advanced to
+**Qualified** on the M5.5 sink-mark evidence, with what qualification does
+not cover named on the row.
 
 Deliverables:
 

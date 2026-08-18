@@ -698,15 +698,20 @@ public sealed class GroupByTests
 
         IIngressQueue<int> queue = await run.GetValueAsync(graph.Control<IIngressQueue<int>>("in"), TestToken);
 
-        Assert.Equal(QueueOfferOutcome.Accepted, await queue.OfferAsync(1, TestToken));
-        Assert.Equal(QueueOfferOutcome.Accepted, await queue.OfferAsync(2, TestToken));
+        // One element per window, because that is the only shape with a rendezvous. Acceptance into the
+        // ingress is not arrival at the stage, and the one fact a test can await before moving the clock is
+        // the window's timer being armed — which its first element's arrival is what does. A second element
+        // in the same window would have no arming of its own to wait for, and an advance racing it closes
+        // the window without it.
+        Assert.Equal(QueueOfferOutcome.Accepted, await queue.OfferAsync(3, TestToken));
 
+        await clock.WaitForTimersAsync(1, TestToken);
         await clock.AdvanceAsync(1, TimingFixtures.Second, TestToken);
         await TimingFixtures.Reaches(() => observed.Count == 1, "the first window closing", TestToken);
 
-        Assert.Equal(QueueOfferOutcome.Accepted, await queue.OfferAsync(3, TestToken));
-        Assert.Equal(QueueOfferOutcome.Accepted, await queue.OfferAsync(4, TestToken));
+        Assert.Equal(QueueOfferOutcome.Accepted, await queue.OfferAsync(7, TestToken));
 
+        await clock.WaitForTimersAsync(1, TestToken);
         await clock.AdvanceAsync(1, TimingFixtures.Second, TestToken);
         await TimingFixtures.Reaches(() => observed.Count == 2, "the second window closing", TestToken);
 
@@ -714,9 +719,10 @@ public sealed class GroupByTests
         await run.Completion;
 
         // Both elements reached the keyed stage from a timer's wake rather than from a pull, and the key's
-        // state carried across them: 3, then 3 + 7. A clock-reading stage may not stand *inside* a group
-        // flow, and one standing above a keyed stage is an ordinary producer of ordinary elements — the
-        // segment's own thread does the batching, the walk, and the keying, exactly as wave 2 says it does.
+        // state carried across them: 3, then 3 + 7 under the same key. A clock-reading stage may not stand
+        // *inside* a group flow, and one standing above a keyed stage is an ordinary producer of ordinary
+        // elements — the segment's own thread does the batching, the walk, and the keying, exactly as wave
+        // 2 says it does.
         Assert.Equal([3, 10], observed);
     }
 

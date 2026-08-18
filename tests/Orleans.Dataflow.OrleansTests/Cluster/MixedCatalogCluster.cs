@@ -336,11 +336,21 @@ public sealed class MixedCatalogCluster : IAsyncLifetime
     /// <returns>That silo's address.</returns>
     /// <exception cref="ArgumentNullException"><paramref name="grain"/> is <see langword="null"/>.</exception>
     /// <remarks>
+    /// <para>
     /// <b>A grain already on the target is left alone, and that check is load-bearing rather than an
     /// optimisation.</b> Measured the hard way: <see cref="InProcessTestCluster.MigrateAsync"/> waits for the
     /// current activation to <em>deactivate</em>, and asking an activation to migrate to the silo it is
     /// already on deactivates nothing — so the call never returns. With two silos and random placement that
     /// is a coin flip, which is exactly the kind of hang a suite must not contain.
+    /// </para>
+    /// <para>
+    /// <b>And a migration that deactivated is still only a hint about where the next activation lands.</b>
+    /// Measured too, at soak rates: the placement of the reactivation is the director's answer, and it can
+    /// answer with the silo the grain just left — under this fixture's random placement, rarely but
+    /// stably, and a single poll then waits its whole budget on a grain that is not moving. So the move is
+    /// asked for again per bounded wait rather than once per test: each attempt migrates, waits a slice of
+    /// the poll budget, and looks; a grain that landed wrong is simply asked to move again.
+    /// </para>
     /// </remarks>
     private async Task<SiloAddress> PlaceAsync(IAddressable grain, InProcessSiloHandle silo)
     {
@@ -348,18 +358,31 @@ public sealed class MixedCatalogCluster : IAsyncLifetime
 
         SiloAddress target = silo.SiloAddress;
 
-        if (target.Equals(await Management.GetActivationAddress(grain)))
+        for (int attempt = 0; attempt < 8; attempt++)
         {
-            return target;
+            if (target.Equals(await Management.GetActivationAddress(grain)))
+            {
+                return target;
+            }
+
+            await Cluster.MigrateAsync(grain, target);
+
+            for (int turn = 0; turn < 40; turn++)
+            {
+                if (target.Equals(await Management.GetActivationAddress(grain)))
+                {
+                    return target;
+                }
+
+                await Task.Delay(
+                    OrleansDataflowClientOptions.DefaultPollInterval,
+                    TestContext.Current.CancellationToken);
+            }
         }
 
-        await Cluster.MigrateAsync(grain, target);
+        Assert.Fail($"The grain '{grain.GetGrainId()}' did not land on {silo.Name} after eight migrations.");
 
-        await Poll.UntilAsync(
-            async () => target.Equals(await Management.GetActivationAddress(grain)),
-            $"the grain '{grain.GetGrainId()}' moved to {silo.Name}");
-
-        return target;
+        throw new InvalidOperationException("unreachable");
     }
 
     /// <summary>Gets a silo that publishes the current vocabulary and that the cluster still believes in.</summary>

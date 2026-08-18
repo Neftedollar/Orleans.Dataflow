@@ -373,6 +373,13 @@ public sealed class PartitionTests
         // probe's rendezvous. A callback blocks quiescence by design, so a test built that way would be
         // asserting a pause that the pause contract says cannot happen; the probe is checkpoint 5's, and
         // so is this case.
+        //
+        // The gate in the routing function is what makes "paused while running" a fact rather than a race:
+        // sixteen elements through two collects can finish before a pause lands, and a run that has ended
+        // reports IsPaused false by contract. Held inside the router, the run provably has an element in
+        // the routed pump's own hands when the pause is requested, so the pause parks a moving run — and
+        // the pending pause is asserted as pending for exactly that reason.
+        Gate gate = new();
         RunnableGraph graph = Graph(
             Declaring(
                 [
@@ -387,13 +394,27 @@ public sealed class PartitionTests
                 (
                     "stage-1",
                     LocalStageDescriptor.FromEnumerable(new RecordingEnumerable<int>([.. Enumerable.Range(1, 16)]))),
-                ("stage-2", Routing(value => value % 2)),
+                ("stage-2", Routing(value =>
+                {
+                    gate.Wait();
+
+                    return value % 2;
+                })),
                 ("stage-3", Collecting(32)),
                 ("stage-4", Collecting(32))));
 
         await using RunHandle run = await Host.MaterializeAsync(graph, TestToken);
 
-        await Reaches(run.PauseAsync(TestToken), "the pause takes effect on a routed run");
+        await gate.Reached;
+
+        Task paused = run.PauseAsync(TestToken);
+
+        // The routed pump is inside the author's routing function with an element in its hands, so a pause
+        // reporting quiescence now would be reporting something untrue.
+        Assert.False(paused.IsCompleted);
+
+        gate.Open();
+        await Reaches(paused, "the pause takes effect on a routed run");
 
         Assert.True(run.IsPaused);
 
