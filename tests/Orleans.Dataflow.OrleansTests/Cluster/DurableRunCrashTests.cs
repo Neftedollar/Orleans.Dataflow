@@ -363,17 +363,20 @@ public sealed class DurableRunCrashTests(MultiSiloCluster cluster) : IAsyncLifet
     }
 
     [Fact]
-    public async Task ACompletedDurableRunIsContinuedByALaterActivationAndRunsItsTailAgain()
+    public async Task ACompletedDurableRunReportsHowItEndedToALaterActivationRatherThanRunningItsTailAgain()
     {
         const string Log = "durable-completed";
         const string Run = "completed";
 
         TestDeliveries.Clear(Log);
 
-        // The limit this milestone leaves, pinned by value rather than described. A run grain persists
-        // nothing about how an attempt ended, so once its activation is gone the checkpoint is all there is
-        // — and a checkpoint says *where*, never *whether*. A durable run that finished is therefore
-        // indistinguishable from one that died at the same position, and the next activation continues it.
+        // The M5.3 limit this milestone closes, pinned by value on both sides of the change. A checkpoint
+        // says *where* a run reached and never *whether* it is over, so a run grain that persisted nothing
+        // about its ending left a completed run indistinguishable from one that died at the same position —
+        // and the next activation continued it, delivering `…, 4, 5, 5`. The run now reports the terminal
+        // state it reached to its coordinator, the declaration records it, and a later activation is told
+        // how the run ended instead of being handed a position to continue.
+        //
         // Five elements at a capture every two, so the captures fall due at the second and the fourth and
         // the last of them completes while the run is plainly still going — the fifth element is what
         // releases it. A count that put the last capture on the very last element would be asking about a
@@ -394,13 +397,19 @@ public sealed class DurableRunCrashTests(MultiSiloCluster cluster) : IAsyncLifet
 
         await using OrleansRunHandle again = await cluster.MaterializeDurableAsync(pipeline, Run, everyElements: 2);
 
-        await Deadline.Within(again.Completion, $"the continued run {again.RunId} completed");
+        await Deadline.Within(again.Completion, $"the continued run {again.RunId} reported how it ended");
 
-        // The tail after the stored cursor, delivered a second time. At-least-once taken to its conclusion
-        // rather than a defect — and the reason a durable run is declared by an author who means it, rather
-        // than being what every run gets. Forgetting a finished run's position is an operational decision
-        // (`ICheckpointStore.ClearAsync`) that no runtime here makes on a deployment's behalf.
-        Assert.Equal([1L, 2L, 3L, 4L, 5L, 5L], TestDeliveries.Of(Log));
+        // Nothing ran, so nothing was delivered twice. The tail after the stored cursor stays where the first
+        // attempt left it, and the second handle's completion is the first attempt's ending read back off
+        // the declaration rather than a second run of the same elements.
+        Assert.Equal([1L, 2L, 3L, 4L, 5L], TestDeliveries.Of(Log));
+
+        // And the checkpoint is still there. Marking the declaration finished is what retires the run;
+        // clearing the store would have taken the forensic trail with it, and where a finished run got to is
+        // exactly the question an operator asks afterwards. Forgetting it is an explicit operation
+        // (`ICheckpointStore.ClearAsync`, or a replacement) that no runtime here performs on its own.
+        Assert.True(cluster.Checkpoints.Holds(GraphId.Create(pipeline.Id.Value), RunId.Create(Run)));
+        Assert.Equal(4L, await StoredCursorAsync(pipeline, Run));
     }
 
     [Fact]

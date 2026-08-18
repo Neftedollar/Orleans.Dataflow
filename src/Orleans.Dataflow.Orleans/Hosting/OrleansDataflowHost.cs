@@ -163,13 +163,104 @@ public sealed class OrleansDataflowHost
             .WaitAsync(cancellationToken)
             .ConfigureAwait(false);
 
+        return await StartAsync(pipeline, declared, cancellationToken).ConfigureAwait(false);
+    }
+
+    /// <summary>Destroys what a durable run identity holds and runs a document under it from the beginning.</summary>
+    /// <param name="pipeline">The pipeline the identity is to run from now on.</param>
+    /// <param name="durable">What the run is called and when it takes a checkpoint.</param>
+    /// <param name="cancellationToken">A token that stops this call; it does not stop a started run.</param>
+    /// <returns>The handle of the replacement run.</returns>
+    /// <exception cref="ArgumentNullException">
+    /// <paramref name="pipeline"/> or <paramref name="durable"/> is <see langword="null"/>.
+    /// </exception>
+    /// <exception cref="ArgumentException">
+    /// <see cref="DurablePipelineOptions.RunId"/> is not a valid run identifier, or one of the two bounds is
+    /// not usable.
+    /// </exception>
+    /// <exception cref="PipelineRejectedException">
+    /// The silo refused the document, or it registers no checkpoint store for a durable run to write to.
+    /// </exception>
+    /// <exception cref="CheckpointConflictException">
+    /// The stored checkpoint moved between being read and being cleared, so something is still writing under
+    /// the identity. Retrying the replacement is safe and is the answer.
+    /// </exception>
+    /// <remarks>
+    /// <para>
+    /// <b>The destructive spelling, and the only one.</b> <see cref="MaterializeDurableAsync"/> refuses a run
+    /// identity that already holds a different document, by name and with both fingerprints, because
+    /// migrating a checkpoint across a changed graph is a recorded deferral rather than something a cluster
+    /// will guess at (ADR 0007). This is what a deployment says when it means the other thing: <b>the stored
+    /// checkpoint is cleared</b>, the previous attempt is <b>superseded by a fresh epoch</b>, and the
+    /// document runs from the beginning under the name it took over.
+    /// </para>
+    /// <para>
+    /// <b>The document does not have to differ.</b> Replacing an identity with the very document it already
+    /// held is how a finished durable run is run again — a run that has ended stays ended, and no poll
+    /// revives it — and replacing it with a new revision is how an identity moves forward. Both destroy the
+    /// same thing, which is why they are one call.
+    /// </para>
+    /// <para>
+    /// <b>The previous attempt is abandoned by the second of this call's two hops.</b> The coordinator only
+    /// fences it — the member that rewrites the register may not await a run grain — but Orleans permits one
+    /// activation per run grain, so the activation this call then asks to start is the very one hosting the
+    /// old attempt, and it disposes that engine before starting the replacement. What is left over is the
+    /// window between the two hops, in which the old attempt is executing under a claim that is already
+    /// stale; a capture taken in it is refused by a store it no longer holds an ETag for.
+    /// </para>
+    /// </remarks>
+    public async Task<OrleansRunHandle> ReplaceDurableRunAsync(
+        PipelineDefinition pipeline,
+        DurablePipelineOptions durable,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(pipeline);
+        ArgumentNullException.ThrowIfNull(durable);
+
+        Guard(durable);
+
+        byte[] canonical = GraphDocumentSerializer.Serialize(pipeline.Document);
+
+        PipelineRunTicket declared = await _grains
+            .GetGrain<IPipelineCoordinatorGrain>(pipeline.Id.Value)
+            .ReplaceDurableRunAsync(
+                canonical,
+                new DurableRunDeclaration
+                {
+                    RunId = durable.RunId,
+                    Interval = durable.Interval,
+                    EveryElements = durable.EveryElements,
+                })
+            .WaitAsync(cancellationToken)
+            .ConfigureAwait(false);
+
+        return await StartAsync(pipeline, declared, cancellationToken).ConfigureAwait(false);
+    }
+
+    /// <summary>Drives the second hop of a durable materialization and composes the handle.</summary>
+    /// <param name="pipeline">The pipeline, whose fingerprint the handle validates slots against.</param>
+    /// <param name="declared">The ticket the declaration or the replacement answered with.</param>
+    /// <param name="cancellationToken">A token that stops the wait for the start to be accepted.</param>
+    /// <returns>The handle.</returns>
+    /// <remarks>
+    /// Shared by the two durable spellings, and sharing it is the statement: declaring and replacing differ
+    /// in exactly one call to the coordinator and in nothing a run does afterwards. The epoch is composed
+    /// from both answers rather than taken from the declaration, because the two can differ by one attempt —
+    /// declaring a run whose previous host died records nothing new, and the activation that then picks it up
+    /// claims a fresh epoch. Taking the live number here is what keeps the returned handle's first call from
+    /// being fenced by a run it just started.
+    /// </remarks>
+    private async Task<OrleansRunHandle> StartAsync(
+        PipelineDefinition pipeline,
+        PipelineRunTicket declared,
+        CancellationToken cancellationToken)
+    {
         IPipelineRunGrain run = _grains.GetGrain<IPipelineRunGrain>($"{declared.GraphId}/{declared.RunId}");
 
-        // Composed from both answers rather than taken from the declaration, because the two can differ by
-        // one attempt: declaring a run whose previous host died records nothing new, and the activation that
-        // then picks it up claims a fresh epoch. Taking the live number here is what keeps the returned
-        // handle's first call from being fenced by a run it just started.
-        long epoch = await run.EnsureStartedAsync().WaitAsync(cancellationToken).ConfigureAwait(false);
+        long epoch = await run
+            .EnsureStartedAsync(declared.Epoch)
+            .WaitAsync(cancellationToken)
+            .ConfigureAwait(false);
 
         PipelineRunTicket ticket = new()
         {

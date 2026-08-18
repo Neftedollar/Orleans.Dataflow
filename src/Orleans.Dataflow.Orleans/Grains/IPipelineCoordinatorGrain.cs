@@ -90,6 +90,86 @@ public interface IPipelineCoordinatorGrain : IGrainWithStringKey
     /// </remarks>
     Task<PipelineRunTicket> DeclareDurableRunAsync(byte[] canonicalDocument, DurableRunDeclaration declaration);
 
+    /// <summary>Destroys whatever one durable run identity holds and declares it afresh over a new document.</summary>
+    /// <param name="canonicalDocument">The canonical bytes of the document the name is to run from now on.</param>
+    /// <param name="declaration">What the run is called and when it checkpoints.</param>
+    /// <returns>The ticket addressing the replacement.</returns>
+    /// <exception cref="PipelineRejectedException">
+    /// The same refusals a declaration meets: the bytes are not a canonical document, the document belongs
+    /// to another pipeline, the run identity is not a valid one, this silo registers no checkpoint store, or
+    /// the document does not resolve against this silo's catalog and factories.
+    /// </exception>
+    /// <exception cref="Orleans.Dataflow.Hosting.CheckpointConflictException">
+    /// The stored checkpoint moved between this call reading it and clearing it, so somebody is still
+    /// writing under the identity being replaced. Retrying the replacement is safe and is the answer.
+    /// </exception>
+    /// <remarks>
+    /// <para>
+    /// <b>This is the destructive operation and it is spelled to say so.</b> The checkpoint stored for the
+    /// run is <em>cleared</em> — a position taken of the old document could not describe the new one and
+    /// migrating it is a recorded deferral (ADR 0007), not something a silo will attempt — and a fresh epoch
+    /// supersedes whatever was executing: its control calls are fenced from the moment this returns and its
+    /// next capture is refused by a store it no longer holds an ETag for. Nothing here is a migration and
+    /// nothing here is silent.
+    /// </para>
+    /// <para>
+    /// <b>Replacing does not require the document to differ.</b> A name replaced with the very document it
+    /// already held is "run this from the beginning again", which is the only way to re-run a durable run
+    /// that has finished; a name replaced with a new one is a revision taking over an identity. The two are
+    /// the same operation because they destroy the same thing, and a caller that meant neither should be
+    /// calling <see cref="DeclareDurableRunAsync"/>, which refuses a changed document by name rather than
+    /// acting on it.
+    /// </para>
+    /// <para>
+    /// <b>It fences the previous attempt and does not stop it, because it may not.</b> Killing a run would
+    /// mean awaiting a run grain from a member that writes the register, which is the one edge this grain's
+    /// shape forbids. What stops the previous attempt is the <em>start</em> of the replacement: Orleans
+    /// permits one activation per run grain, so the activation
+    /// <see cref="IPipelineRunGrain.EnsureStartedAsync"/> reaches is the one hosting it, and it abandons what
+    /// it is holding before taking up the newer declaration. A caller that replaces here and never starts the
+    /// replacement leaves the old attempt running until its next capture is refused by a store it no longer
+    /// holds an ETag for — or, if it declared no timing at all and therefore never captures, until something
+    /// else ends it. That is stated rather than smoothed over, and it is why a replacement is an operator's
+    /// decision.
+    /// </para>
+    /// </remarks>
+    Task<PipelineRunTicket> ReplaceDurableRunAsync(byte[] canonicalDocument, DurableRunDeclaration declaration);
+
+    /// <summary>Records that one durable run reached a terminal state and will not be continued.</summary>
+    /// <param name="runId">The run identity from its ticket.</param>
+    /// <param name="terminal">
+    /// The terminal snapshot the reporting attempt read of itself, carrying the epoch it owns the run under.
+    /// </param>
+    /// <returns>A task that completes when the declaration has been marked finished.</returns>
+    /// <exception cref="ArgumentException">
+    /// <paramref name="runId"/> is not a valid run identifier, or the phase reported is not one a durable
+    /// run is finished by.
+    /// </exception>
+    /// <exception cref="PipelineFencingException">
+    /// The reporting attempt no longer owns the run, so what it is reporting the end of is somebody else's
+    /// work.
+    /// </exception>
+    /// <remarks>
+    /// <para>
+    /// <b>Called by the run grain and never by a client</b>, and it is the second of the two calls that flow
+    /// from a run back to its coordinator. It exists because a checkpoint says <em>where</em> a run reached
+    /// and never <em>whether</em> it is over: without this, a run that completed and then lost its activation
+    /// was indistinguishable from one that died at the same position, so the next activation continued it and
+    /// re-ran its tail.
+    /// </para>
+    /// <para>
+    /// <b>Completing and failing are endings; cancelling is not.</b> A deactivation cancels the run it was
+    /// hosting, so accepting a cancellation here would retire every durable run whose silo recycled — the
+    /// exact behaviour durability exists to prevent. A cancelled durable run is therefore continued by its
+    /// next activation exactly as a crashed one is, and the phase is refused by name.
+    /// </para>
+    /// <para>
+    /// It writes the register and calls nothing, which is what keeps the two-grain edge one-way: the members
+    /// here that touch state await no run grain, and the members that await a run grain touch no state.
+    /// </para>
+    /// </remarks>
+    Task ReportDurableRunEndedAsync(string runId, RunStatusSnapshot terminal);
+
     /// <summary>Claims ownership of one declared durable run for the activation about to host it.</summary>
     /// <param name="runId">The run identity from its ticket.</param>
     /// <returns>
@@ -112,6 +192,11 @@ public interface IPipelineCoordinatorGrain : IGrainWithStringKey
     /// An identity this coordinator has no record of answers <see langword="null"/> rather than refusing.
     /// That is what an ordinary, non-durable run's grain asks and hears, and it is why an activation of one
     /// still reports a lost attempt exactly as it did before durability existed.
+    /// </para>
+    /// <para>
+    /// A run whose last attempt reported an ending answers with that ending and with no epoch of its own:
+    /// there is nothing to fence when nothing is going to run. The claiming activation reports the terminal
+    /// state instead of materializing anything, which is what stops a finished run being resumed.
     /// </para>
     /// </remarks>
     Task<DurableRunClaim?> ClaimDurableRunAsync(string runId);

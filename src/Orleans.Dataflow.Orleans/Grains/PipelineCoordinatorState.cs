@@ -68,6 +68,15 @@ internal sealed class PipelineCoordinatorState
 /// two stores a chance to disagree about one run.
 /// </para>
 /// <para>
+/// <b>Except for <em>whether</em> it is over, which M5.4 puts here and nowhere else.</b> A checkpoint says
+/// where a run reached and never whether it is finished, so a completed run whose grain was collected used
+/// to be resumed and re-run its tail. <see cref="Outcome"/> is the missing half, and it is recorded on the
+/// declaration rather than in the checkpoint document on purpose: the store holds positions, this holds
+/// claims, and "this run is over" is a claim. The checkpoint of a finished run is left exactly where it is —
+/// clearing it would destroy the forensic trail of how far the run got, which is the one thing an operator
+/// asks afterwards — and a deployment that wants it gone says so with <c>ICheckpointStore.ClearAsync</c>.
+/// </para>
+/// <para>
 /// <see cref="Claimed"/> is what keeps the first attempt's ticket honest. A declaration records an epoch
 /// and hands it to the client; the activation that first hosts the run receives that same epoch rather than
 /// a fresh one, because nothing has owned the run yet. Every later claim is a resume and takes the next
@@ -117,4 +126,39 @@ internal sealed class DurableRunRecord
     /// </value>
     [Id(5)]
     public bool Claimed { get; set; }
+
+    /// <summary>Gets or sets how this run ended, once an attempt of it has reported reaching a terminal state.</summary>
+    /// <value>
+    /// <see cref="RunPhase.Completed"/> or <see cref="RunPhase.Faulted"/> for a finished run, and
+    /// <see langword="null"/> for one that may still be continued.
+    /// </value>
+    /// <remarks>
+    /// <para>
+    /// The two values a run can be finished by, and deliberately not the third.
+    /// <see cref="RunPhase.Canceled"/> is never recorded here because a deactivation cancels the run it was
+    /// hosting: treating cancellation as an ending would make every recycled activation declare its run over,
+    /// which is the exact opposite of what a durable run is for.
+    /// </para>
+    /// <para>
+    /// Once set, only <c>ReplaceDurableRunAsync</c> clears it, which is what makes "finished" a state a
+    /// deployment leaves on purpose rather than one a poll can undo.
+    /// </para>
+    /// </remarks>
+    [Id(6)]
+    public RunPhase? Outcome { get; set; }
+
+    /// <summary>Gets or sets the CLR type name of the exception that ended this run.</summary>
+    /// <value>The full type name for a faulted run; otherwise <see langword="null"/>.</value>
+    [Id(7)]
+    public string? FailureType { get; set; }
+
+    /// <summary>Gets or sets the message of the exception that ended this run.</summary>
+    /// <value>The message for a faulted run; otherwise <see langword="null"/>.</value>
+    /// <remarks>
+    /// Kept beside the type for the reason <see cref="RunStatusSnapshot"/> keeps both: an attempt that has
+    /// been collected can no longer be asked, so what a later activation reports is what was written down
+    /// here at the moment the run ended.
+    /// </remarks>
+    [Id(8)]
+    public string? FailureMessage { get; set; }
 }

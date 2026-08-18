@@ -33,6 +33,13 @@ namespace Orleans.Dataflow.Grains;
 /// grain never has to know which of the two it is answering — which is also why nothing here ever awaits a
 /// run grain while holding the register, and why the three passthroughs that do await one interleave.
 /// </para>
+/// <para>
+/// <b>Since M5.4 the register also records that a run is over.</b> A run grain reports the terminal state it
+/// reached, this grain writes it onto the declaration, and a later claim answers with it instead of handing
+/// out a document to continue. The edge is one-way exactly as the claim is — a report writes state and calls
+/// nobody — so the shape argument above is unchanged: the members that touch the register still await no run
+/// grain, and the members that await a run grain still touch no state.
+/// </para>
 /// </remarks>
 internal sealed class PipelineCoordinatorGrain(
     [PersistentState("pipeline", OrleansDataflowStorage.CoordinatorProviderName)]
@@ -81,34 +88,7 @@ internal sealed class PipelineCoordinatorGrain(
         ArgumentNullException.ThrowIfNull(canonicalDocument);
         ArgumentNullException.ThrowIfNull(declaration);
 
-        GraphDocument document = Read(canonicalDocument);
-        string pipeline = this.GetPrimaryKeyString();
-
-        if (!GraphId.TryCreate(pipeline, out GraphId addressed) || document.Id != addressed)
-        {
-            throw new PipelineRejectedException(
-                $"The document declares the pipeline '{document.Id}' and this coordinator owns the pipeline '{pipeline}'. A coordinator starts runs of its own pipeline only, because the epochs it issues order claims to that pipeline and nothing else.");
-        }
-
-        if (!RunId.TryCreate(declaration.RunId, out RunId run))
-        {
-            throw new PipelineRejectedException(
-                $"'{declaration.RunId}' is not a valid run identifier, so it names no run a checkpoint could be keyed by. A durable run is named by whoever will resume it, and the name has to be one this runtime can address.");
-        }
-
-        // Refused here rather than at the first capture, because a deployment that forgot the store would
-        // otherwise learn of it from a run that had already performed side effects: the whole point of
-        // declaring a run durable is that its position survives, and a silo with nowhere to put a position
-        // cannot honor that however well the graph runs.
-        if (registry.CheckpointStore is null)
-        {
-            throw new PipelineRejectedException(
-                $"The run '{run}' of the pipeline '{document.Id}' was declared durable and this silo registers no checkpoint store, so there is nowhere for its position to be written. A deployment that runs durable pipelines calls UseCheckpointStore when it adds Orleans.Dataflow; which store stands behind it is the deployment's decision, exactly as the coordinator's own is.");
-        }
-
-        Refuse(document);
-
-        GraphFingerprint fingerprint = GraphFingerprint.OfSerialized(canonicalDocument);
+        (GraphDocument document, RunId run, GraphFingerprint fingerprint) = Admit(canonicalDocument, declaration);
         string declared = fingerprint.ToString();
 
         if (state.State.DurableRuns.TryGetValue(run.Value, out DurableRunRecord? existing))
@@ -121,6 +101,15 @@ internal sealed class PipelineCoordinatorGrain(
             if (!string.Equals(existing.GraphFingerprint, declared, StringComparison.Ordinal))
             {
                 throw PipelineResumeRefusedException.Mismatched(run.Value, existing.GraphFingerprint, declared);
+            }
+
+            // A finished declaration is a record and not a run, so nothing is updated and nothing is
+            // written: the cadence of a run that will never take another checkpoint is not a fact worth an
+            // ETag. What the caller receives is the epoch the last attempt held, which is what its handle
+            // then presents to hear how the run ended.
+            if (existing.Outcome is not null)
+            {
+                return Ticket(document.Id, run, existing.Epoch, fingerprint);
             }
 
             existing.Interval = declaration.Interval;
@@ -150,6 +139,92 @@ internal sealed class PipelineCoordinatorGrain(
     }
 
     /// <inheritdoc/>
+    public async Task<PipelineRunTicket> ReplaceDurableRunAsync(
+        byte[] canonicalDocument,
+        DurableRunDeclaration declaration)
+    {
+        ArgumentNullException.ThrowIfNull(canonicalDocument);
+        ArgumentNullException.ThrowIfNull(declaration);
+
+        (GraphDocument document, RunId run, GraphFingerprint fingerprint) = Admit(canonicalDocument, declaration);
+
+        // The store is emptied before the register is rewritten, and the order is the whole of this
+        // operation's crash story. Cleared-then-not-recorded leaves a run that will restart from the
+        // beginning under the document it already had, which its own at-least-once contract already admits;
+        // recorded-then-not-cleared would leave a declaration naming one document beside a checkpoint of
+        // another, which is the sticky refusal nothing but a second replace could clear. Retrying a replace
+        // that failed halfway is therefore always safe: clearing a pair the store no longer holds is a
+        // no-op, and rewriting the record is idempotent.
+        if (registry.CheckpointStore is { } store &&
+            await store.ReadAsync(document.Id, run, CancellationToken.None) is { } stored)
+        {
+            await store.ClearAsync(document.Id, run, stored.ETag, CancellationToken.None);
+        }
+
+        // A fresh epoch, unconditionally, because that is what supersedes whatever was executing under the
+        // old declaration: its control calls are fenced from here on and its next capture is refused by the
+        // store it no longer has an ETag for. Claimed goes back to false so the first activation of the
+        // replacement takes this very number, exactly as a first declaration's does.
+        state.State.LastEpoch++;
+        state.State.DurableRuns[run.Value] = new DurableRunRecord
+        {
+            CanonicalDocument = canonicalDocument,
+            GraphFingerprint = fingerprint.ToString(),
+            Interval = declaration.Interval,
+            EveryElements = declaration.EveryElements,
+            Epoch = state.State.LastEpoch,
+            Claimed = false,
+        };
+
+        await state.WriteStateAsync();
+
+        return Ticket(document.Id, run, state.State.LastEpoch, fingerprint);
+    }
+
+    /// <inheritdoc/>
+    public async Task ReportDurableRunEndedAsync(string runId, RunStatusSnapshot terminal)
+    {
+        ArgumentNullException.ThrowIfNull(runId);
+        ArgumentNullException.ThrowIfNull(terminal);
+
+        if (!RunId.TryCreate(runId, out RunId run))
+        {
+            throw new ArgumentException(
+                $"'{runId}' is not a valid run identifier, so it names no run this coordinator could have declared.",
+                nameof(runId));
+        }
+
+        if (terminal.Phase is not (RunPhase.Completed or RunPhase.Faulted))
+        {
+            throw new ArgumentException(
+                $"The run '{run}' is reported as having ended in the phase '{terminal.Phase}', and a durable run is finished by completing or by failing and by nothing else. Cancellation in particular is not an ending here: a deactivation cancels the run it was hosting, so recording that as the run being over would retire every durable run its silo recycled.",
+                nameof(terminal));
+        }
+
+        // An identity with no record is not an error, for the reason a claim of one is not: an ordinary run
+        // reports nothing and a declaration a replace has already rewritten belongs to somebody else.
+        if (!state.State.DurableRuns.TryGetValue(run.Value, out DurableRunRecord? record))
+        {
+            return;
+        }
+
+        // The same fencing every other epoch-carrying call performs, and it is what stops a superseded
+        // attempt from retiring a run that has already been claimed by somebody else. A stale attempt that
+        // completes late is precisely the case: its work is finished, its claim is not current, and the run
+        // it would be reporting the end of is one another activation is executing.
+        if (terminal.Epoch != record.Epoch)
+        {
+            throw new PipelineFencingException(record.Epoch, terminal.Epoch);
+        }
+
+        record.Outcome = terminal.Phase;
+        record.FailureType = terminal.FailureType;
+        record.FailureMessage = terminal.FailureMessage;
+
+        await state.WriteStateAsync();
+    }
+
+    /// <inheritdoc/>
     public async Task<DurableRunClaim?> ClaimDurableRunAsync(string runId)
     {
         ArgumentNullException.ThrowIfNull(runId);
@@ -164,6 +239,24 @@ internal sealed class PipelineCoordinatorGrain(
         if (!state.State.DurableRuns.TryGetValue(run.Value, out DurableRunRecord? record))
         {
             return null;
+        }
+
+        // A finished run answers with how it ended and costs nothing: no epoch is minted, because an epoch
+        // orders claims to ownership and nothing is going to own this, and no state is written, because
+        // nothing about the record changed. The checkpoint is left where it is and is simply no longer a
+        // reason to run anything.
+        if (record.Outcome is { } outcome)
+        {
+            return new DurableRunClaim
+            {
+                Epoch = record.Epoch,
+                CanonicalDocument = record.CanonicalDocument,
+                Interval = record.Interval,
+                EveryElements = record.EveryElements,
+                Outcome = outcome,
+                FailureType = record.FailureType,
+                FailureMessage = record.FailureMessage,
+            };
         }
 
         // The first claim takes the epoch the declaration recorded and every later one takes a fresh
@@ -198,6 +291,54 @@ internal sealed class PipelineCoordinatorGrain(
 
     /// <inheritdoc/>
     public Task CancelRunAsync(string runId, long epoch) => Run(runId).CancelAsync(epoch);
+
+    /// <summary>Checks everything a durable run has to satisfy before this coordinator records anything.</summary>
+    /// <param name="canonicalDocument">The document's canonical bytes.</param>
+    /// <param name="declaration">What the run is called and when it checkpoints.</param>
+    /// <returns>The decoded document, the run identity, and the fingerprint of the bytes.</returns>
+    /// <exception cref="PipelineRejectedException">
+    /// The bytes are not a canonical document, the document is another pipeline's, the run identity is not
+    /// one this runtime can address, this silo registers no checkpoint store, or the document does not
+    /// resolve against this silo's catalog and factories.
+    /// </exception>
+    /// <remarks>
+    /// Shared by declaring and by replacing, and that sharing is the contract rather than a convenience: a
+    /// replacement is admitted on exactly the terms a declaration is, so nothing reaches the register through
+    /// the destructive door that could not have reached it through the ordinary one.
+    /// </remarks>
+    private (GraphDocument Document, RunId Run, GraphFingerprint Fingerprint) Admit(
+        byte[] canonicalDocument,
+        DurableRunDeclaration declaration)
+    {
+        GraphDocument document = Read(canonicalDocument);
+        string pipeline = this.GetPrimaryKeyString();
+
+        if (!GraphId.TryCreate(pipeline, out GraphId addressed) || document.Id != addressed)
+        {
+            throw new PipelineRejectedException(
+                $"The document declares the pipeline '{document.Id}' and this coordinator owns the pipeline '{pipeline}'. A coordinator starts runs of its own pipeline only, because the epochs it issues order claims to that pipeline and nothing else.");
+        }
+
+        if (!RunId.TryCreate(declaration.RunId, out RunId run))
+        {
+            throw new PipelineRejectedException(
+                $"'{declaration.RunId}' is not a valid run identifier, so it names no run a checkpoint could be keyed by. A durable run is named by whoever will resume it, and the name has to be one this runtime can address.");
+        }
+
+        // Refused here rather than at the first capture, because a deployment that forgot the store would
+        // otherwise learn of it from a run that had already performed side effects: the whole point of
+        // declaring a run durable is that its position survives, and a silo with nowhere to put a position
+        // cannot honor that however well the graph runs.
+        if (registry.CheckpointStore is null)
+        {
+            throw new PipelineRejectedException(
+                $"The run '{run}' of the pipeline '{document.Id}' was declared durable and this silo registers no checkpoint store, so there is nowhere for its position to be written. A deployment that runs durable pipelines calls UseCheckpointStore when it adds Orleans.Dataflow; which store stands behind it is the deployment's decision, exactly as the coordinator's own is.");
+        }
+
+        Refuse(document);
+
+        return (document, run, GraphFingerprint.OfSerialized(canonicalDocument));
+    }
 
     /// <summary>Composes the key one run grain is addressed by.</summary>
     /// <param name="graph">The pipeline the run belongs to.</param>

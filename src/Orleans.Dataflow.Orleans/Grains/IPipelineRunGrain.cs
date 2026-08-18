@@ -55,6 +55,9 @@ public interface IPipelineRunGrain : IGrainWithStringKey
     Task StartAsync(byte[] canonicalDocument, long epoch);
 
     /// <summary>Starts, or continues, the durable run this grain is.</summary>
+    /// <param name="declaredEpoch">
+    /// The epoch the declaration this call is driving recorded, as its ticket reports it.
+    /// </param>
     /// <returns>The ownership epoch this run is now executing under.</returns>
     /// <exception cref="PipelineRunLostException">
     /// The coordinator holds no durable declaration under this run's identity, so there is nothing to
@@ -82,13 +85,26 @@ public interface IPipelineRunGrain : IGrainWithStringKey
     /// does, never in which method the caller had to choose.
     /// </para>
     /// <para>
+    /// <b><paramref name="declaredEpoch"/> is what makes a replacement land.</b> Declaring an existing run
+    /// again leaves its epoch where it was, so a live attempt's number is never lower than what this call
+    /// carries and it answers with its own; a replacement mints a fresh number, so what this call carries is
+    /// higher and the attempt it finds here has been superseded — abandoned, and the replacement started in
+    /// its place. The same comparison retires a refusal this activation was remembering: the same
+    /// declaration hears the same refusal without another claim, and a newer one has the question asked
+    /// again.
+    /// </para>
+    /// <para>
+    /// A run whose declaration records that it has ended answers with that epoch and starts nothing; how it
+    /// ended is what a status poll then reports.
+    /// </para>
+    /// <para>
     /// The epoch it returns is the one this attempt owns, which is <em>not</em> necessarily the one the
     /// declaration recorded: an attempt after a crash claims a fresh number. A caller holding an older
     /// ticket is not wrong, it is out of date, and the fencing refusal it receives names the current epoch
     /// so it can catch up.
     /// </para>
     /// </remarks>
-    Task<long> EnsureStartedAsync();
+    Task<long> EnsureStartedAsync(long declaredEpoch);
 
     /// <summary>Reports where this run is.</summary>
     /// <param name="epoch">The ownership epoch from the run's ticket.</param>

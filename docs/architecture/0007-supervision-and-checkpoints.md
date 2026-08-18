@@ -169,6 +169,69 @@ rather than a hook reaching into the engine.
   v1 — same-revision resume only — and cross-revision migration is
   M5's last phase or a recorded deferral, decided by what the
   compatibility rules turn out to cost.
+
+  **Amendment (M5.4): the compatibility rules cost one method, and
+  migration is the recorded deferral.** The clause above left the choice
+  open on purpose and this is it being made, with the price written down
+  rather than described. What the rules turned out to need is three
+  statements and no new machinery:
+
+  1. **A new revision under a new run identity runs beside the old one.**
+     Nothing had to be built for this: a checkpoint is keyed by
+     `(graph, run)`, so two revisions under two names already have two
+     positions and two endings. It is proved side by side rather than
+     assumed.
+  2. **A new revision under an existing run identity is refused by name,
+     and the way to mean it anyway is a spelling that says it destroys.**
+     `ReplaceDurableRunAsync` clears the stored checkpoint and supersedes
+     the previous attempt with a fresh epoch. It is a second method rather
+     than a flag on the first because what it does is not a variation of
+     declaring; and it does not require the document to differ, because
+     "run this name from the beginning again" is the same destruction seen
+     from the other side.
+  3. **Cross-revision checkpoint migration is deferred**, and the reason is
+     what (1) and (2) cost: together they are one method and one register
+     member, while a migration would need a declared correspondence between
+     two documents' seams — which nodes are the same node across an edit,
+     which stage state survives a changed chain, what a cursor of a source
+     that was replaced means — and that is a design owed its own evidence,
+     not a widening of a comparison. It is deferred until a deployment
+     demands it rather than judged impossible.
+
+  The refusal that carries all three is unchanged from M5.2: same
+  fingerprint and same revision, or nothing. What M5.4 adds beside it is
+  that the refusal is no longer a dead end.
+
+- **Amendment (M5.4): a checkpoint says where, and the register says
+  whether.** ADR 0007 defines a checkpoint as a position and says nothing
+  about a run being over, and M5.3 discovered the consequence by measuring
+  it: a durable run that completed and then lost its activation was
+  indistinguishable from one that died at the same position, so the next
+  activation continued it and re-ran its tail. The fix is deliberately not
+  a sixth member of the checkpoint document — a stored position is a fact
+  about a stream and "this run is finished" is a claim about ownership,
+  which is the coordinator's register by the same reasoning that put the
+  epoch there. So the run grain reports its terminal state (completed or
+  failed; **never cancelled**, because a deactivation cancels the run it
+  was hosting) to its coordinator, the declaration records it, and a later
+  claim answers with the ending instead of a document to continue. **The
+  checkpoint of a finished run is kept, not cleared**: where a run got to
+  is the question asked after it ends, and forgetting it is an explicit
+  operation — `ICheckpointStore.ClearAsync`, or a replacement — rather than
+  something a runtime does on a deployment's behalf.
+
+- **Amendment (M5.4): resume re-runs the catalog discipline, and a
+  refusal there is about resolution rather than about vocabularies being
+  equal.** A resume chooses its host by which silo survived, so a
+  half-upgraded cluster can accept a durable run on one silo and be unable
+  to execute it on the next. The resumed materialization therefore
+  validates against the host's own catalog exactly as a start does, and
+  refuses by name with the stage it cannot resolve — leaving the
+  declaration and the checkpoint where they are, so a later activation on a
+  silo that publishes the vocabulary continues the run. Two silos with
+  different **catalog** fingerprints resume one another's runs fine
+  whenever every stage still resolves: the only fingerprints a resume
+  compares are the checkpoint's and the document's.
 - Every duplicate/loss window this ADR names becomes a measured number
   in an adapter's table before its row advances, which is the exit
   criterion restated as the definition of done.

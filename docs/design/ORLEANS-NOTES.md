@@ -98,6 +98,16 @@ time.
   throws `InconsistentStateException` and the documented consequence is the
   current activation being killed — this is the primitive our
   coordinator/run-ownership fencing builds on.
+- **`InProcessTestCluster` placement helpers (measured in M5.4, both the hard
+  way)**: `MigrateAsync(grain, target)` waits for the grain's **current
+  activation to deactivate**, so asking a grain to migrate to the silo it is
+  already on never returns — a fixture that aims a migration without first
+  reading `GetActivationAddress` hangs on a coin flip. And a silo started to
+  replace a killed one is handed **the killed one's name back** (`Silo_1` dies,
+  `Silo_1` returns), so a target chosen by `SiloName` off the handle list can be
+  a dead address; membership (`IManagementGrain.GetHosts(onlyActive: true)`) is
+  what decides which handle is live. Both are properties of the test host rather
+  than of the runtime, and both belong to any fixture that kills and restores.
 - **Breaking-change watchlist for 7.x-era knowledge**:
   `AddGrainCallFilter` removed (use `AddIncomingGrainCallFilter`);
   failure-detection default dropped 10 min → 90 s (9.0); `[Unordered]` is a

@@ -343,6 +343,25 @@ public sealed class MultiSiloCluster : IAsyncLifetime
             new DurablePipelineOptions { RunId = run, EveryElements = everyElements },
             TestContext.Current.CancellationToken);
 
+    /// <summary>Replaces whatever one durable run identity holds and runs a pipeline under it.</summary>
+    /// <param name="pipeline">The pipeline the identity is to run from now on.</param>
+    /// <param name="run">What the run is called.</param>
+    /// <param name="everyElements">How many elements the replacement admits between checkpoints.</param>
+    /// <returns>The handle of the replacement run.</returns>
+    /// <remarks>
+    /// The destructive spelling, beside the ordinary one so that a test naming either reads as the operation
+    /// it is: this clears the stored checkpoint and supersedes whatever was executing, and the one above
+    /// refuses a changed document rather than acting on it.
+    /// </remarks>
+    internal Task<OrleansRunHandle> ReplaceDurableRunAsync(
+        PipelineDefinition pipeline,
+        string run,
+        int everyElements) =>
+        Host.ReplaceDurableRunAsync(
+            pipeline,
+            new DurablePipelineOptions { RunId = run, EveryElements = everyElements },
+            TestContext.Current.CancellationToken);
+
     /// <summary>Addresses the coordinator of one pipeline.</summary>
     /// <param name="pipeline">The pipeline.</param>
     /// <returns>The coordinator grain.</returns>

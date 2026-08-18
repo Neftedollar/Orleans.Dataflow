@@ -854,6 +854,88 @@ Three consequences follow, and all three are surface rather than folklore:
   epoch from the fencing refusal that names it and carries on; an ordinary handle
   never does, because an ordinary run has no later attempt to follow.
 
+### A run that has ended stays ended
+
+**A durable run reports how it finished, and a later call is told rather than
+asked to guess.** A checkpoint says *where* a run reached and never *whether* it
+is over, so before M5.4 a run that completed and then lost its activation was
+continued and re-ran its tail. Now the attempt tells its coordinator the terminal
+state it reached, the declaration records it, and:
+
+```csharp
+await using (OrleansRunHandle first = await host.MaterializeDurableAsync(pipeline, durable))
+{
+    await first.Completion;                       // the stream ended
+}
+
+await using OrleansRunHandle again = await host.MaterializeDurableAsync(pipeline, durable);
+
+await again.Completion;                           // returns at once; nothing ran a second time
+```
+
+Three things about that are worth stating rather than discovering:
+
+- **Completing and failing end a run; cancelling does not.** A deactivation
+  cancels the run it was hosting, so treating cancellation as an ending would
+  retire a durable run every time its silo recycled. A cancelled durable run is
+  continued by its next activation exactly as a crashed one is.
+- **The stored checkpoint is kept.** What retires a run is the declaration, not
+  the store — where a run got to is the question asked after it ends. Forgetting
+  it is explicit: `ICheckpointStore.ClearAsync`, or a replacement.
+- **A run's results still live only as long as its activation.** A finished run
+  reports its phase to a later caller and not its values; reading a slot after
+  the activation is gone reports the loss, naming the ending rather than
+  suggesting the attempt vanished.
+
+### Replacing a durable run is explicit, and it destroys
+
+`MaterializeDurableAsync` refuses a name that holds a different document. The
+call that means the other thing says so:
+
+```csharp
+await using OrleansRunHandle replacement = await host.ReplaceDurableRunAsync(
+    pipeline,                                     // the revision taking the name over
+    new DurablePipelineOptions { RunId = "nightly-2026-08-18", EveryElements = 1000 });
+```
+
+It **clears the stored checkpoint** — a position taken of the old document cannot
+describe the new one, and migrating it is a recorded deferral rather than
+something a cluster will guess at — and **supersedes the previous attempt with a
+fresh epoch**, so the document runs from the beginning under the name it took
+over.
+
+- **The document does not have to differ.** Replacing a name with the very
+  document it already held is how a finished durable run is run again, and how a
+  failed one is retried; both destroy the same thing, which is why they are one
+  call.
+- **The previous attempt is abandoned by the call's second hop.** The coordinator
+  only fences it — the member that rewrites the register may not await a run
+  grain — but a run grain has one activation cluster-wide, so the activation this
+  call then asks to start is the one hosting the old attempt and disposes its
+  engine first. What is left over is the window between the two hops: a capture
+  taken in it is refused by a store the old attempt no longer holds an ETag for
+  (`CheckpointConflictException`). A replacement is an operator's decision, which
+  is why this is stated rather than smoothed over.
+- **A handle from before a replacement follows the name.** Adoption is
+  forward-only and durable-only, so an old handle takes the replacement's epoch
+  and controls it. Reading a *result* through it is still refused, because the
+  run grain checks the declaring document's fingerprint.
+
+### A resume is validated by the silo that caught it
+
+A resume picks its host by which silo survived, so a half-upgraded cluster can
+accept a durable run on one silo and be unable to execute it on the next. The
+resumed materialization therefore validates against **its own host's** catalog
+exactly as a start does, and refuses with `PipelineRejectedException` naming the
+stage it cannot resolve. The declaration and the checkpoint are untouched, so a
+later activation on a silo that publishes the vocabulary continues the run from
+where it stopped.
+
+Two silos with **different catalog fingerprints** resume one another's runs
+whenever every stage still resolves: a catalog fingerprint is the identity of a
+host's whole vocabulary, and the only fingerprints a resume compares are the
+checkpoint's and the document's.
+
 **What a resume replays is the adapter's own answer**, per adapter, in
 [ADAPTERS.md](../ADAPTERS.md). An Orleans stream source stores the sequence token
 of the element the run delivered and reopens the subscription there, so a durable

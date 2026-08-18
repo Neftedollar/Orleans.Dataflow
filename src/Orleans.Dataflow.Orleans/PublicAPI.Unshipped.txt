@@ -52,8 +52,14 @@ Orleans.Dataflow.Grains.DurableRunClaim.Epoch.get -> long
 Orleans.Dataflow.Grains.DurableRunClaim.Epoch.set -> void
 Orleans.Dataflow.Grains.DurableRunClaim.EveryElements.get -> int?
 Orleans.Dataflow.Grains.DurableRunClaim.EveryElements.set -> void
+Orleans.Dataflow.Grains.DurableRunClaim.FailureMessage.get -> string?
+Orleans.Dataflow.Grains.DurableRunClaim.FailureMessage.set -> void
+Orleans.Dataflow.Grains.DurableRunClaim.FailureType.get -> string?
+Orleans.Dataflow.Grains.DurableRunClaim.FailureType.set -> void
 Orleans.Dataflow.Grains.DurableRunClaim.Interval.get -> System.TimeSpan?
 Orleans.Dataflow.Grains.DurableRunClaim.Interval.set -> void
+Orleans.Dataflow.Grains.DurableRunClaim.Outcome.get -> Orleans.Dataflow.Grains.RunPhase?
+Orleans.Dataflow.Grains.DurableRunClaim.Outcome.set -> void
 Orleans.Dataflow.Grains.DurableRunDeclaration
 Orleans.Dataflow.Grains.DurableRunDeclaration.DurableRunDeclaration() -> void
 Orleans.Dataflow.Grains.DurableRunDeclaration.EveryElements.get -> int?
@@ -74,11 +80,13 @@ Orleans.Dataflow.Grains.IPipelineCoordinatorGrain.CancelRunAsync(string! runId, 
 Orleans.Dataflow.Grains.IPipelineCoordinatorGrain.ClaimDurableRunAsync(string! runId) -> System.Threading.Tasks.Task<Orleans.Dataflow.Grains.DurableRunClaim?>!
 Orleans.Dataflow.Grains.IPipelineCoordinatorGrain.DeclareDurableRunAsync(byte[]! canonicalDocument, Orleans.Dataflow.Grains.DurableRunDeclaration! declaration) -> System.Threading.Tasks.Task<Orleans.Dataflow.Grains.PipelineRunTicket!>!
 Orleans.Dataflow.Grains.IPipelineCoordinatorGrain.GetStatusAsync(string! runId, long epoch) -> System.Threading.Tasks.Task<Orleans.Dataflow.Grains.RunStatusSnapshot!>!
+Orleans.Dataflow.Grains.IPipelineCoordinatorGrain.ReplaceDurableRunAsync(byte[]! canonicalDocument, Orleans.Dataflow.Grains.DurableRunDeclaration! declaration) -> System.Threading.Tasks.Task<Orleans.Dataflow.Grains.PipelineRunTicket!>!
+Orleans.Dataflow.Grains.IPipelineCoordinatorGrain.ReportDurableRunEndedAsync(string! runId, Orleans.Dataflow.Grains.RunStatusSnapshot! terminal) -> System.Threading.Tasks.Task!
 Orleans.Dataflow.Grains.IPipelineCoordinatorGrain.ShutdownRunAsync(string! runId, long epoch) -> System.Threading.Tasks.Task!
 Orleans.Dataflow.Grains.IPipelineCoordinatorGrain.StartRunAsync(byte[]! canonicalDocument) -> System.Threading.Tasks.Task<Orleans.Dataflow.Grains.PipelineRunTicket!>!
 Orleans.Dataflow.Grains.IPipelineRunGrain
 Orleans.Dataflow.Grains.IPipelineRunGrain.CancelAsync(long epoch) -> System.Threading.Tasks.Task!
-Orleans.Dataflow.Grains.IPipelineRunGrain.EnsureStartedAsync() -> System.Threading.Tasks.Task<long>!
+Orleans.Dataflow.Grains.IPipelineRunGrain.EnsureStartedAsync(long declaredEpoch) -> System.Threading.Tasks.Task<long>!
 Orleans.Dataflow.Grains.IPipelineRunGrain.GetResultAsync(long epoch, string! slotName, string! graphFingerprint) -> System.Threading.Tasks.Task<Orleans.Dataflow.Grains.ResultEnvelope!>!
 Orleans.Dataflow.Grains.IPipelineRunGrain.GetStatusAsync(long epoch) -> System.Threading.Tasks.Task<Orleans.Dataflow.Grains.RunStatusSnapshot!>!
 Orleans.Dataflow.Grains.IPipelineRunGrain.ShutdownAsync(long epoch) -> System.Threading.Tasks.Task!
@@ -213,6 +221,7 @@ Orleans.Dataflow.Hosting.OrleansDataflowHost.MaterializeAsync(Orleans.Dataflow.P
 Orleans.Dataflow.Hosting.OrleansDataflowHost.MaterializeDurableAsync(Orleans.Dataflow.PipelineDefinition! pipeline, Orleans.Dataflow.Hosting.DurablePipelineOptions! durable, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task<Orleans.Dataflow.Hosting.OrleansRunHandle!>!
 Orleans.Dataflow.Hosting.OrleansDataflowHost.OrleansDataflowHost(Orleans.IGrainFactory! grains) -> void
 Orleans.Dataflow.Hosting.OrleansDataflowHost.OrleansDataflowHost(Orleans.IGrainFactory! grains, Orleans.Dataflow.Hosting.OrleansDataflowClientOptions! options) -> void
+Orleans.Dataflow.Hosting.OrleansDataflowHost.ReplaceDurableRunAsync(Orleans.Dataflow.PipelineDefinition! pipeline, Orleans.Dataflow.Hosting.DurablePipelineOptions! durable, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task<Orleans.Dataflow.Hosting.OrleansRunHandle!>!
 Orleans.Dataflow.Hosting.OrleansDataflowResults
 Orleans.Dataflow.Hosting.OrleansDataflowSiloBuilderExtensions
 Orleans.Dataflow.Hosting.OrleansRunHandle

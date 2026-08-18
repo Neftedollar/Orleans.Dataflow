@@ -593,19 +593,21 @@ everything published while nothing was listening.
   completes the step and the capture that was due is taken. Asserted, both
   halves, on a quiet stream. A cadence that must fire on an idle source is
   unbuilt.
-- **A durable run is continued by the next activation whatever ended the
-  previous attempt.** A run grain persists nothing, so once its activation is
-  gone nothing distinguishes "died mid-run" from "failed" or from "completed" —
-  the checkpoint is all there is, and a checkpoint says where, never whether. So
-  a durable run that faulted and then lost its activation is resumed and will
-  fault again, and one that *completed* and then lost its activation is resumed
-  and re-runs its tail. Asserted by value rather than left as a caveat: five
-  elements, a capture every two, the run completed and its grain deactivated,
-  and the continued run's log ends `…, 4, 5, 5`. That is at-least-once taken to
-  its conclusion rather than a defect, and it is why a durable run is declared
-  by an author who means it. Reporting the end to the coordinator so that a
-  finished run stops being resumable is the obvious next step and is recorded
-  rather than built.
+- ~~**A durable run is continued by the next activation whatever ended the
+  previous attempt.**~~ **Closed in M5.4** — the finding is kept because it is
+  what shaped the fix. A run grain persists nothing, so once its activation was
+  gone nothing distinguished "died mid-run" from "failed" or from "completed":
+  the checkpoint was all there was, and a checkpoint says where, never whether.
+  So a durable run that faulted and then lost its activation was resumed and
+  faulted again, and one that *completed* was resumed and re-ran its tail —
+  asserted by value rather than left as a caveat, five elements at a capture
+  every two, the continued run's log ending `…, 4, 5, 5`. What that measurement
+  bought was the shape of the answer: **whether a run is over is a claim and
+  belongs in the coordinator's register**, not a sixth member of the checkpoint
+  document. M5.4's section below has the closure and the same test now asserts
+  `…, 4, 5`. The residual is one sentence: a silo that dies between a run ending
+  and the report landing loses the report, and that one run is resumed exactly
+  as this bullet describes.
 - **The stored position of a run that ended is not a number a test may name.** A
   capture the last element made due asks the run to hold; the source's next step
   ends the stream instead of producing one; and whether the hold is reached
@@ -629,7 +631,9 @@ everything published while nothing was listening.
   the same one: nothing here proves that a real superseded activation writes
   late, only that a writer holding a stale ETag is refused and dies.
 - **No cross-revision migration**, unchanged from M5.2: a resume against a
-  different fingerprint or revision is refused by name.
+  different fingerprint or revision is refused by name. **Still true after
+  M5.4**, which priced the alternative rather than building it and gave the
+  refusal an answer to stand beside — a replacement that clears and starts over.
 - **No commit mark on the registered side.** The seam that lets a *provider*
   declare one does not exist, so the crash suite measures its window against the
   cursor rather than against a mark. For the graph it measures on — a source
@@ -639,6 +643,212 @@ everything published while nothing was listening.
 - **One silo hosts one run, still.** Nothing here distributes a run; what
   survives a silo is the run's *position*, and the resumed attempt is a whole run
   on one host exactly as the first was.
+
+## M5.4 — as implemented (revision rules, the finished run, and the upgrade a resume lands in)
+
+Three questions M5.3 left, and they are one question: a checkpoint is addressed
+by `(graph, run)` and describes one document at one revision, so **something
+other than the checkpoint has to say which document a name belongs to, whether
+that name is finished, and whether the host that picked it up can run it at
+all**. All three answers land on the coordinator's register, which already
+persists what a resume reads. No member was added to the checkpoint document and
+no line of its schema, its atomicity boundary, or its refusal policy changed.
+
+### Revision rules, v1: beside, replace, or refuse — never migrate
+
+- **A new revision under a new run identity runs beside the old one.** Nothing
+  was built for this and that is the finding: two names are two checkpoint keys,
+  so two revisions of one pipeline already have two positions, two epochs and
+  two endings. Proved side by side rather than assumed — both alive at once,
+  each log holding only its own document's elements, each checkpoint naming its
+  own fingerprint. The revision is a member of the canonical bytes, so two
+  revisions are two fingerprints; that is asserted on documents differing in
+  nothing else, because everything else rests on it.
+- **A new revision under an existing name is refused by name**, unchanged from
+  M5.3, and the refusal now names the way out.
+- **`ReplaceDurableRunAsync` is the way out, and it is spelled to say it
+  destroys.** It clears the stored checkpoint, mints a fresh epoch that
+  supersedes whatever was executing, and declares the name over the new document
+  with `Claimed` back to false. A second method rather than a flag on the first,
+  because what it does is not a variation of declaring; and **the document does
+  not have to differ** — replacing a name with the very document it held is how
+  a finished durable run is run again, which is the same destruction seen from
+  the other side.
+  The order inside it is the whole crash story and it is chosen rather than
+  incidental: **the store is emptied before the register is rewritten**.
+  Cleared-then-not-recorded leaves a run that restarts from the beginning under
+  the document it already had, which its own at-least-once contract already
+  admits; recorded-then-not-cleared would leave a declaration naming one document
+  beside a checkpoint of another, which is a sticky refusal only a second
+  replacement could clear. Retrying a half-finished replacement is therefore
+  always safe.
+- **Cross-revision checkpoint migration is the recorded deferral**, and ADR
+  0007's consequences carry the verdict and its price: the two rules above cost
+  one method and one register member, while a migration needs a declared
+  correspondence between two documents' seams — which node is the same node
+  across an edit, what a scan's state means when its chain changed, what a cursor
+  of a replaced source means — and that is design owed its own evidence.
+
+The client seam is `OrleansDataflowHost.ReplaceDurableRunAsync(pipeline,
+options)`, beside `MaterializeDurableAsync` and taking the same options, because
+the two differ in exactly one call to the coordinator and in nothing a run does
+afterwards.
+
+### A checkpoint says where; the register now says whether
+
+The M5.3 wart, closed. **The run grain reports the terminal state it reached to
+its coordinator**, the declaration records it, and a later claim answers with the
+ending instead of a document to continue — so the pinned `…, 4, 5, 5` becomes
+`…, 4, 5` with the second materialization reporting completion rather than
+running anything. A failed run is the same story: it reports its failure once and
+a later activation reads it back rather than faulting a second time.
+
+Four decisions inside that, each with its reason:
+
+- **Completing and failing are endings; cancelling is not.** A deactivation
+  cancels the run it was hosting, so accepting cancellation would retire a
+  durable run every time its silo recycled — the exact behavior durability
+  exists to prevent. Refused by name at the coordinator and never sent by the
+  run grain, and asserted through an ordinary `DisposeAsync` as well as against
+  the coordinator directly.
+- **The checkpoint of a finished run is kept, not cleared.** Clearing loses the
+  forensic trail, and where a run got to is the question asked after it ends.
+  Marking the declaration is what retires the run; forgetting the position stays
+  an explicit operation (`ICheckpointStore.ClearAsync`, or a replacement). The
+  test asserts both halves — nothing re-runs, and the cursor is still four.
+- **The report is fenced by the epoch**, exactly as every other epoch-carrying
+  call is. A superseded attempt that finishes late is the case it exists for: its
+  work is over, its claim is not, and what it would be retiring is somebody
+  else's run. Staged directly against the coordinator, with the declaration
+  proved still open afterwards by a continuation that replays the window.
+- **Two paths report, and one of them is ordered.** A status poll that observes
+  a terminal state awaits the report before answering, so **a caller that has
+  seen a durable run end has seen a run the register already records as ended** —
+  without that ordering a client could watch a run finish, recycle the grain, and
+  be handed a resume of the very run it had just watched end. A watcher on the
+  run's own completion task covers the case where nobody polls. Both await the
+  same call, so whichever gets there first is the only one that is made.
+
+**The shape rule is unchanged and was re-checked rather than assumed.** The new
+edge runs run-grain → coordinator, and the member it lands on writes the register
+and calls nobody. So the M5.3 invariant still holds verbatim: nothing that
+touches the register awaits a run grain, and the three passthroughs that do await
+one still touch no state and still interleave. The report is *awaited* rather
+than fire-and-forget precisely because that edge cannot close a cycle; its
+failure is dropped because nothing can act on it, and a run that could not report
+its ending is a run the next activation continues — which is where this milestone
+found it, not a new failure.
+
+### A resume runs the catalog discipline again, on the host that caught it
+
+A resume chooses its host by which silo survived, so a half-upgraded cluster can
+accept a durable run on one silo and be unable to execute it on the next. Both
+halves are now proved on a **mixed-catalog fixture that can also lose a silo** —
+two silos, the stale one named so that it is the sole survivor of a kill and
+every silo started later publishes the current vocabulary, one shared checkpoint
+store, and the failover fixture's surviving coordinator store.
+
+- **Stages missing on the survivor: refused by name, and nothing is consumed.**
+  The resumed materialization validates against its own host's catalog and
+  refuses with the very message a start is refused with — the node, the stage
+  reference, and that the catalog does not register it. The declaration stays,
+  the checkpoint stays at three, and not one element is delivered. **The refusal
+  is remembered on the activation** rather than thrown from the resume path, for
+  the reason the fingerprint refusals are: a poll that re-asked would claim a
+  fresh epoch every time it was answered. Asserted as a fact — the second
+  refusal is the same sentence — and the remembered refusal is retired only by a
+  declaration carrying a newer epoch, which is what makes a replacement land on
+  an activation that is holding one.
+- **Then a silo that can resolve it comes back, and the same declaration
+  continues.** Restored, placed, and resumed from the position the refusal left
+  untouched: `[2,4,6,8,10]` becomes `[2,4,6,8,10,8,10]`, the replay window of the
+  kill, on the new host.
+- **A different catalog fingerprint is not a different document fingerprint.**
+  The other test kills the upgraded silo out from under a document naming nothing
+  the upgrade touched. The coordinator comes back on the stale silo and issues a
+  ticket whose catalog fingerprint is not the dead silo's — the inequality, by
+  value — and the run resumes there anyway. What a resume compares is the
+  checkpoint's fingerprint against the document's; what it needs of a host is
+  that every stage resolves, which is a weaker thing than two vocabularies being
+  equal.
+
+**Where a run starts is decided; where it resumes is observed.** A run grain is
+addressed by its own key, so a test that needs a run to *start* on a named silo
+declares it (a declaration starts nothing), polls its status (a durable run with
+no checkpoint yet activates without starting), migrates the activation, and only
+then asks it to start — the rolling-upgrade fixture's argument for moving a
+coordinator, applied one grain further out. A *resume* is not staged that way and
+deliberately so: the test asks the run to start again, recycling the refusing
+activation between attempts, until one lands somewhere that can build the
+document. That is the operational story rather than a staged one, and it is also
+the only shape that cannot hang — two facts about `MigrateAsync` were measured
+and both bite here: it waits for the current activation to *deactivate*, so
+asking a grain to migrate to the silo it is already on never returns, and a
+silo killed and replaced is handed its own name back, so a target chosen by name
+rather than by membership can be an address nobody answers on.
+
+### M5.4 limits, stated
+
+- **The finished-run story is the cluster's and has no local counterpart, which
+  is correct rather than a gap.** `LocalDataflowHost` spells a resume as its own
+  method, so a local author who runs a finished graph again has *asked* to; the
+  wart existed here because a cluster's resume is activation-driven and nobody
+  asked. What the local plane would need to say the same thing is a register
+  outliving the run, which is exactly the coordinator, and it has none.
+- **A durable run that ended before its first checkpoint reports its ending, and
+  a later activation reached other than through a declaration still answers
+  `NotStarted`.** The ending travels on the declaration rather than in the
+  checkpoint, so a run that never wrote a position is recorded as finished all
+  the same — asserted in its sharpest form, since with nothing in the store there
+  is no fingerprint refusal to stop a second materialization and the log would
+  otherwise hold the stream twice. What the checkpoint gate still costs is the
+  *report* on one path a client does not take: an activation with nothing in the
+  store never asks its coordinator anything, so a bare status poll of such a run
+  answers `NotStarted`, while `MaterializeDurableAsync` always claims and
+  therefore always hears.
+- **A report that does not land is not retried on that activation.** A fenced
+  report will always be fenced, so retrying it would cost one coordinator call
+  per poll forever; an unreachable coordinator leaves the declaration exactly as
+  it was. The cost of either is one resume by a later activation, which is the
+  behavior of the milestone before this one.
+- **A silo that dies between a run ending and the report landing loses the
+  report.** The two facts are genuinely separate writes and nothing here makes
+  them one; what the deployment sees is M5.3's behavior for that run and nothing
+  worse.
+- **The coordinator's half of a replacement fences the previous attempt and does
+  not stop it**, because the member that rewrites the register may not await a
+  run grain. What stops it is the *second* hop: Orleans permits one activation
+  per run grain, so `EnsureStartedAsync` — which now carries the declared epoch,
+  finds itself holding an older one — reaches the very activation hosting the old
+  attempt and disposes its engine before starting the replacement. So a
+  replacement through the host does stop the run; a caller that replaces through
+  the coordinator alone and never starts the replacement leaves the old attempt
+  executing until its next capture is refused by a store it no longer holds an
+  ETag for, or forever if it declared no timing and therefore never captures.
+- **A durable handle follows the name across a replacement.** Adoption is
+  forward-only and durable-only, so a handle from before a replacement adopts the
+  replacement's epoch and carries on controlling it. That is the documented
+  meaning of "a durable handle follows the run rather than the attempt" meeting
+  the fact that a name can change document; the *claim* is what stops being
+  current, and the fencing is asserted at the grain rather than through the
+  handle for exactly that reason. Reading a *result* through such a handle is
+  still refused, because the run grain checks the declaring document's
+  fingerprint.
+- **A replacement is the first coordinator member that waits on the checkpoint
+  store**, so a slow store holds that pipeline's coordinator turn for the length
+  of one read and one clear. It is a *service* and not a grain, so the shape rule
+  is untouched — nothing here can wait on a grain that is waiting on this one —
+  and the cost is bounded by the store's own latency on an operation a deployment
+  performs deliberately. A store implementation that called back into a grain
+  would be a different matter and is that implementation's contract to keep.
+- **Nothing here migrates a checkpoint**, and nothing here compares two
+  documents for compatibility. "Same fingerprint and same revision, or refuse"
+  is still the whole rule; what changed is that the refusal now has an answer
+  beside it.
+- **The mixed-catalog fixture proves a resume onto a silo that cannot resolve a
+  stage.** It does not prove a silo that publishes the stage and cannot *build*
+  it — a missing runtime factory — which the coordinator refuses at declaration
+  time and which no test drives through a resume.
 
 ## Phasing
 

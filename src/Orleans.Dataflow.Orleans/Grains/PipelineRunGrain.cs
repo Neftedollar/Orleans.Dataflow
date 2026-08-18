@@ -28,6 +28,13 @@ namespace Orleans.Dataflow.Grains;
 /// honest answer, because there is no position to continue from.
 /// </para>
 /// <para>
+/// <b>M5.4 adds the one thing a checkpoint could never say: that the run is over.</b> An attempt started
+/// here reports the terminal state it reaches to its coordinator, which writes it onto the declaration — so
+/// a later activation of a finished run is answered "it completed" or "it failed, with this" instead of
+/// being handed a document and a position to continue. Completing and failing are endings and cancelling is
+/// not, because this grain's own deactivation cancels the run it hosts.
+/// </para>
+/// <para>
 /// No method waits for the run. The engine executes on dedicated threads of its own, so the activation's
 /// turn is free the moment a call has done its bookkeeping — which is what makes a status poll answer
 /// during a long run and what keeps a graceful stop from parking a turn on a drain of unbounded length. The
@@ -43,7 +50,10 @@ internal sealed class PipelineRunGrain(DataflowSiloRegistry registry, Serializer
     private GraphFingerprint _fingerprint;
     private IReadOnlyList<ResultSlotId> _slots = [];
     private StoredCheckpoint? _stored;
-    private PipelineResumeRefusedException? _refused;
+    private Exception? _refused;
+    private long _refusedUnder;
+    private RunStatusSnapshot? _ended;
+    private Task? _reporting;
     private GraphId _graph;
     private RunId _identity;
 
@@ -108,23 +118,55 @@ internal sealed class PipelineRunGrain(DataflowSiloRegistry registry, Serializer
     }
 
     /// <inheritdoc/>
-    public async Task<long> EnsureStartedAsync()
+    public async Task<long> EnsureStartedAsync(long declaredEpoch)
     {
-        Refused();
-
-        if (_run is not null)
+        // The declaration this call is driving is compared against whatever this activation is already
+        // holding, and a newer one supersedes it. Ordinarily nothing is newer — a second declaration of a
+        // live run leaves the epoch exactly where it was, so a running attempt answers with its own number
+        // and is not disturbed — and the one operation that does mint a fresher number is a replacement,
+        // which is destructive by definition. So the same comparison serves both: abandon what is here and
+        // take up what the register now says.
+        if (_run is { } hosted)
         {
-            return _epoch;
+            if (declaredEpoch <= _epoch)
+            {
+                return _epoch;
+            }
+
+            await AbandonAsync(hosted);
         }
+        else if (_refused is { } refusal && declaredEpoch <= _refusedUnder)
+        {
+            // The same declaration asking the same question gets the same answer without another claim,
+            // which is what keeps a client that retries from minting an epoch per attempt. A newer
+            // declaration is a different question and falls through to be asked afresh.
+            throw refusal;
+        }
+        else if (_ended is { } ended && declaredEpoch <= _epoch)
+        {
+            return ended.Epoch;
+        }
+
+        _refused = null;
+        _ended = null;
+        _reporting = null;
 
         // Named separately from "no declaration", because the two are different deployment mistakes and a
         // caller fixes them differently. A cluster whose silos do not all register the same store accepts a
         // declaration on one of them and cannot host the run on another — the same deployment-scoped honesty
         // the binding registry has carried since phase 2, reachable one grain further away.
-        if (registry.CheckpointStore is null)
+        if (registry.CheckpointStore is not { } store)
         {
             throw new PipelineRejectedException(
                 $"The run '{this.GetPrimaryKeyString()}' was declared durable and the silo hosting it registers no checkpoint store, so it has nowhere to write a position. Every silo that may host a durable run calls UseCheckpointStore, and over the same store: a cluster whose silos disagree about that accepts a declaration on one host and cannot honor it on another.");
+        }
+
+        // Re-read rather than trusted, because a replacement clears the store after this activation read it
+        // at start-up: continuing from a position the register no longer describes is precisely what the
+        // destructive spelling exists to prevent.
+        if (!_graph.IsDefault && !_identity.IsDefault)
+        {
+            _stored = await store.ReadAsync(_graph, _identity, CancellationToken.None);
         }
 
         if (await StartOrResumeAsync() is not { } epoch)
@@ -143,6 +185,16 @@ internal sealed class PipelineRunGrain(DataflowSiloRegistry registry, Serializer
     {
         await AdoptAsync();
 
+        // A run whose declaration says it is over answers with how it ended, and answers for as long as this
+        // activation lives. Nothing is running, so there is no attempt to describe; what there is, is the
+        // fact its last attempt wrote down before it went away.
+        if (_ended is { } ended)
+        {
+            Fence(epoch);
+
+            return ended;
+        }
+
         if (_run is not { } run)
         {
             return new RunStatusSnapshot { Phase = RunPhase.NotStarted };
@@ -150,7 +202,16 @@ internal sealed class PipelineRunGrain(DataflowSiloRegistry registry, Serializer
 
         Fence(epoch);
 
-        return Describe(run, _epoch);
+        RunStatusSnapshot status = Describe(run, _epoch);
+
+        // Awaited before the answer leaves, so that a caller which has seen a durable run end has seen a run
+        // the register already records as ended. Without that ordering a client could observe completion,
+        // recycle the grain, declare the name again, and be handed a resume of the very run it had just
+        // watched finish — which is the exact hole this milestone closes. It is one call, once per run, on
+        // the poll that observes the ending; every other poll awaits an already-settled task.
+        await ReportEndedAsync(status);
+
+        return status;
     }
 
     /// <inheritdoc/>
@@ -369,7 +430,7 @@ internal sealed class PipelineRunGrain(DataflowSiloRegistry registry, Serializer
     {
         Refused();
 
-        if (_run is not null || _stored is null)
+        if (_run is not null || _ended is not null || _stored is null)
         {
             return;
         }
@@ -406,11 +467,28 @@ internal sealed class PipelineRunGrain(DataflowSiloRegistry registry, Serializer
             return null;
         }
 
-        if (await GrainFactory
-            .GetGrain<IPipelineCoordinatorGrain>(_graph.Value)
-            .ClaimDurableRunAsync(_identity.Value) is not { } claim)
+        if (await Coordinator().ClaimDurableRunAsync(_identity.Value) is not { } claim)
         {
             return null;
+        }
+
+        // The half a checkpoint cannot carry. A stored position says where the run reached and never whether
+        // it is over, so a run that completed and then lost its activation used to be continued and re-run
+        // its tail; the register now says which of the two it is, and a finished run is reported rather than
+        // materialized. The checkpoint is deliberately still there — a cleared one would take the forensic
+        // trail with it — and it is simply no longer a reason to start anything.
+        if (claim.Outcome is { } outcome)
+        {
+            _epoch = claim.Epoch;
+            _ended = new RunStatusSnapshot
+            {
+                Phase = outcome,
+                Epoch = claim.Epoch,
+                FailureType = claim.FailureType,
+                FailureMessage = claim.FailureMessage,
+            };
+
+            return claim.Epoch;
         }
 
         GraphDocument document = Read(claim.CanonicalDocument);
@@ -424,40 +502,42 @@ internal sealed class PipelineRunGrain(DataflowSiloRegistry registry, Serializer
                 out checkpoint,
                 out IReadOnlyList<string> violations))
             {
-                _refused = new PipelineResumeRefusedException(
-                    $"The checkpoint stored for the run '{_identity}' of the graph '{_graph}' is not one this runtime can read, so there is nothing it can continue: {string.Join("; ", violations)}.");
-
-                return claim.Epoch;
+                return Refusing(
+                    new PipelineResumeRefusedException(
+                        $"The checkpoint stored for the run '{_identity}' of the graph '{_graph}' is not one this runtime can read, so there is nothing it can continue: {string.Join("; ", violations)}."),
+                    claim.Epoch);
             }
 
             if (checkpoint!.Graph != fingerprint)
             {
-                _refused = PipelineResumeRefusedException.Mismatched(
-                    _identity.Value,
-                    checkpoint.Graph.ToString(),
-                    fingerprint.ToString());
-
-                return claim.Epoch;
+                return Refusing(
+                    PipelineResumeRefusedException.Mismatched(
+                        _identity.Value,
+                        checkpoint.Graph.ToString(),
+                        fingerprint.ToString()),
+                    claim.Epoch);
             }
 
             if (checkpoint.Revision != document.Revision)
             {
-                _refused = new PipelineResumeRefusedException(
-                    string.Create(
-                        CultureInfo.InvariantCulture,
-                        $"The checkpoint stored for the run '{_identity}' was taken at revision {checkpoint.Revision} and the document this cluster holds for it is revision {document.Revision}. A resume continues the same revision; cross-revision migration is a recorded deferral rather than a silent best effort."))
-                {
-                    StoredFingerprint = checkpoint.Graph.ToString(),
-                    DeclaredFingerprint = fingerprint.ToString(),
-                };
-
-                return claim.Epoch;
+                return Refusing(
+                    new PipelineResumeRefusedException(
+                        string.Create(
+                            CultureInfo.InvariantCulture,
+                            $"The checkpoint stored for the run '{_identity}' was taken at revision {checkpoint.Revision} and the document this cluster holds for it is revision {document.Revision}. A resume continues the same revision; cross-revision migration is a recorded deferral rather than a silent best effort. Replace the run to start the new revision from the beginning, or run it under a run identity of its own."))
+                    {
+                        StoredFingerprint = checkpoint.Graph.ToString(),
+                        DeclaredFingerprint = fingerprint.ToString(),
+                    },
+                    claim.Epoch);
             }
         }
 
+        LocalRun started;
+
         try
         {
-            _run = PipelineMaterializer.StartDurable(
+            started = PipelineMaterializer.StartDurable(
                 document,
                 fingerprint,
                 registry.Catalog,
@@ -476,20 +556,171 @@ internal sealed class PipelineRunGrain(DataflowSiloRegistry registry, Serializer
         }
         catch (InvalidOperationException refusal)
         {
-            // The inner exception is dropped for the reason every refusal here drops one: a refusal has to
-            // survive the hop, and an exception chain is only as serializable as its least prepared link.
-            throw new PipelineRejectedException(refusal.Message);
+            // The M3 catalog discipline, run again at resume time and on this host's own vocabulary. A
+            // rolling upgrade is what makes it bite: the silo that survives a death may publish a catalog
+            // that cannot resolve the very document the dead one was running, and the honest answer is to
+            // refuse by name and leave everything where it is. The declaration stays, the checkpoint stays,
+            // and a later activation on a silo that can resolve the document continues the run.
+            //
+            // Remembered rather than thrown from here, for the reason every other refusal on this path is:
+            // a poll that re-asked would claim a fresh epoch each time it was answered. The inner exception
+            // is dropped because a refusal has to survive the hop, and an exception chain is only as
+            // serializable as its least prepared link.
+            return Refusing(new PipelineRejectedException(refusal.Message), claim.Epoch);
         }
 
+        _run = started;
         _epoch = claim.Epoch;
         _fingerprint = fingerprint;
         _slots = [.. document.ResultSlots.Select(static slot => slot.Id)];
 
+        // Started here, on a grain turn, so that everything after the wait is a grain turn too: an await in
+        // grain code keeps the activation's scheduler, which is what lets the report be an ordinary call from
+        // this grain to its coordinator rather than a message posted from an engine thread.
+        _ = WatchAsync(started, claim.Epoch);
+
         return claim.Epoch;
     }
 
+    /// <summary>Remembers a refusal this activation will answer with until a newer declaration arrives.</summary>
+    /// <param name="refusal">What is wrong, in the words a caller acts on.</param>
+    /// <param name="epoch">The epoch the claim that produced it returned.</param>
+    /// <returns>That same epoch, so a caller of the resume path has one to return.</returns>
+    /// <remarks>
+    /// The epoch is recorded beside the refusal because it is what makes a retry cheap and a replacement
+    /// effective: a caller presenting the same declaration hears the same sentence with no coordinator call
+    /// at all, and a caller presenting a newer one — which only a replacement mints — gets the question
+    /// asked again.
+    /// </remarks>
+    private long Refusing(Exception refusal, long epoch)
+    {
+        _refused = refusal;
+        _refusedUnder = epoch;
+
+        return epoch;
+    }
+
+    /// <summary>Watches one attempt to its end so that its ending is reported even if nobody polls.</summary>
+    /// <param name="run">The attempt this activation started.</param>
+    /// <param name="epoch">The epoch it owns the run under, which is what the report is fenced by.</param>
+    /// <returns>A task that completes once the ending has been reported or found not worth reporting.</returns>
+    /// <remarks>
+    /// <para>
+    /// The second of the two paths that report an ending, and the one that needs no client. A run whose
+    /// declaring client has gone away still ends, and a run that ends unreported is one the next activation
+    /// continues — so the poll path's ordering guarantee is not enough on its own and this covers the rest.
+    /// </para>
+    /// <para>
+    /// <b>The wait keeps the grain's context, because grain code always does.</b> This is started from a grain
+    /// turn, so everything after the await is a turn too, and the report is an ordinary call from this grain
+    /// to its coordinator rather than a message posted from an engine thread.
+    /// </para>
+    /// </remarks>
+    private async Task WatchAsync(LocalRun run, long epoch)
+    {
+        try
+        {
+            await run.Completion;
+        }
+        catch (Exception)
+        {
+            // How the run ended is read from the task below rather than from what it threw.
+        }
+
+        await ReportEndedAsync(Describe(run, epoch));
+    }
+
+    /// <summary>Tells the coordinator that this run has ended, once per activation at most.</summary>
+    /// <param name="terminal">The snapshot this activation read of its own attempt.</param>
+    /// <returns>A task that completes when the report has been delivered, or failed and been dropped.</returns>
+    /// <remarks>
+    /// <para>
+    /// <b>The half a checkpoint cannot write.</b> A checkpoint says where a run reached; whether it is over is
+    /// a claim, and claims live in the coordinator's register. Without this, a durable run that completed and
+    /// then lost its activation was indistinguishable from one that crashed at the same position, so the next
+    /// activation continued it and ran its tail a second time.
+    /// </para>
+    /// <para>
+    /// <b>Only completing and failing are reported.</b> A cancellation is not an ending: this activation's own
+    /// deactivation cancels the run it was hosting, so reporting that would retire a durable run every time
+    /// its silo recycled — which is the behaviour durability exists to prevent.
+    /// </para>
+    /// <para>
+    /// <b>One task, shared by both paths.</b> The watcher and the status poll both arrive here and both await
+    /// the same call, which is what makes "a caller that saw the run end saw a run recorded as ended" true
+    /// regardless of which of the two got here first.
+    /// </para>
+    /// <para>
+    /// <b>It is awaited and its failure is dropped, and both are deliberate.</b> The call is awaited because
+    /// the coordinator writes its register and calls nobody, so this edge cannot close a cycle — the shape
+    /// argument the claim rests on, unchanged. The failure is dropped because nothing here can act on it: a
+    /// fencing refusal means a fresher attempt owns the run and this ending is not the run's, and an
+    /// unreachable coordinator leaves the declaration exactly as it was, which is where this milestone found
+    /// it. A report that failed is not retried on this activation, so what such a run costs is one resume by
+    /// a later one — the behaviour of the milestone before this, rather than a new failure.
+    /// </para>
+    /// </remarks>
+    private Task ReportEndedAsync(RunStatusSnapshot terminal)
+    {
+        if (terminal.Phase is not (RunPhase.Completed or RunPhase.Faulted) ||
+            _graph.IsDefault ||
+            _identity.IsDefault)
+        {
+            return Task.CompletedTask;
+        }
+
+        return _reporting ??= ReportingAsync(terminal);
+    }
+
+    /// <summary>Delivers one ending to the coordinator and swallows whatever comes back.</summary>
+    /// <param name="terminal">The terminal snapshot.</param>
+    /// <returns>A task that never faults.</returns>
+    private async Task ReportingAsync(RunStatusSnapshot terminal)
+    {
+        try
+        {
+            await Coordinator().ReportDurableRunEndedAsync(_identity.Value, terminal);
+        }
+        catch (Exception)
+        {
+            // Reported in the remarks of the caller: nothing here can act on a report that did not land.
+        }
+    }
+
+    /// <summary>Stops the attempt this activation is hosting, because a newer declaration has superseded it.</summary>
+    /// <param name="run">The attempt.</param>
+    /// <returns>A task that completes when its engine has released everything it held.</returns>
+    /// <remarks>
+    /// Awaited rather than requested, which is the opposite of what a cancellation does and is right for the
+    /// opposite reason: a replacement is about to start a second engine over the same run identity, and two
+    /// of them writing one checkpoint key is a race the ETag would resolve by killing one of them. The wait
+    /// is the deactivation path's own, and bounded by the same thing.
+    /// </remarks>
+    private async Task AbandonAsync(LocalRun run)
+    {
+        _run = null;
+
+        await run.DisposeAsync();
+    }
+
+    /// <summary>Addresses the coordinator of the pipeline this run belongs to.</summary>
+    /// <returns>The coordinator grain.</returns>
+    private IPipelineCoordinatorGrain Coordinator() =>
+        GrainFactory.GetGrain<IPipelineCoordinatorGrain>(_graph.Value);
+
     /// <summary>Reports the refusal this activation is holding, if it is holding one.</summary>
-    /// <exception cref="PipelineResumeRefusedException">A resume was refused on this activation.</exception>
+    /// <exception cref="PipelineResumeRefusedException">
+    /// The stored checkpoint is not one this run's document describes.
+    /// </exception>
+    /// <exception cref="PipelineRejectedException">
+    /// This silo's catalog cannot resolve the document the run is a run of.
+    /// </exception>
+    /// <remarks>
+    /// Two kinds of refusal reach here and both are answers about the run rather than about the call, which
+    /// is why they are remembered: a document that is not what the checkpoint describes, and a document this
+    /// host cannot build. A caller fixes them differently — reconcile the document, or reach a silo that
+    /// publishes the vocabulary — so they stay two exception types and are not folded into one.
+    /// </remarks>
     private void Refused()
     {
         if (_refused is { } refusal)
@@ -539,8 +770,14 @@ internal sealed class PipelineRunGrain(DataflowSiloRegistry registry, Serializer
     {
         if (_run is not { } run)
         {
-            throw new PipelineRunLostException(
-                $"No run is active in the grain '{this.GetPrimaryKeyString()}'. Either it was never started, or the activation hosting it was recycled while it was running; phase 1 does not resume a run across a deactivation, and a run's results live only as long as its activation.");
+            // A finished durable run is told apart from a lost attempt, because they send a caller to
+            // different places. "The run ended and its results went with the activation that produced them"
+            // is a fact about this run's history; "no run is active here" is a fact about this grain.
+            throw _ended is { } ended
+                ? new PipelineRunLostException(
+                    $"The durable run '{this.GetPrimaryKeyString()}' ended in the phase '{ended.Phase}' and its declaration records that, so nothing is executing here to answer for it. A run's results live only as long as the activation that produced them; what survives a finished durable run is how it ended and the checkpoint it stopped at.")
+                : new PipelineRunLostException(
+                    $"No run is active in the grain '{this.GetPrimaryKeyString()}'. Either it was never started, or the activation hosting it was recycled while it was running; phase 1 does not resume a run across a deactivation, and a run's results live only as long as its activation.");
         }
 
         Fence(epoch);

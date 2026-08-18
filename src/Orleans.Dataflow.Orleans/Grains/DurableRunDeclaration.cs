@@ -79,6 +79,13 @@ public sealed class DurableRunDeclaration
 /// the run yet and handing out a second number would make the ticket the client is holding stale before
 /// the run had started.
 /// </para>
+/// <para>
+/// <b>A finished run answers a claim with how it ended and nothing to run.</b> Since M5.4 the last attempt
+/// of a durable run reports its terminal state to the coordinator, so a claim can say "there is nothing to
+/// continue here, and here is why" — which is the half a checkpoint cannot carry, because a checkpoint says
+/// where a run reached and never whether it is over. A claim answering that way costs no epoch at all: there
+/// is no attempt to fence when nothing is going to run.
+/// </para>
 /// </remarks>
 [GenerateSerializer]
 public sealed class DurableRunClaim
@@ -99,4 +106,30 @@ public sealed class DurableRunClaim
     /// <summary>Gets or sets how many elements the run admits between checkpoints.</summary>
     [Id(3)]
     public int? EveryElements { get; set; }
+
+    /// <summary>Gets or sets how the run ended, when it has ended.</summary>
+    /// <value>
+    /// <see cref="RunPhase.Completed"/> or <see cref="RunPhase.Faulted"/> for a run whose last attempt
+    /// reported reaching a terminal state, and <see langword="null"/> for one there is still something to
+    /// continue.
+    /// </value>
+    /// <remarks>
+    /// A claiming activation that reads a value here starts nothing and reports this instead. That is the
+    /// whole of "a finished durable run stops being resumable": the checkpoint is still on disk, still
+    /// readable, and no longer a reason to run anything.
+    /// </remarks>
+    [Id(4)]
+    public RunPhase? Outcome { get; set; }
+
+    /// <summary>Gets or sets the CLR type name of the exception that ended the run.</summary>
+    /// <value>The full type name when <see cref="Outcome"/> is <see cref="RunPhase.Faulted"/>; otherwise
+    /// <see langword="null"/>.</value>
+    [Id(5)]
+    public string? FailureType { get; set; }
+
+    /// <summary>Gets or sets the message of the exception that ended the run.</summary>
+    /// <value>The message when <see cref="Outcome"/> is <see cref="RunPhase.Faulted"/>; otherwise
+    /// <see langword="null"/>.</value>
+    [Id(6)]
+    public string? FailureMessage { get; set; }
 }

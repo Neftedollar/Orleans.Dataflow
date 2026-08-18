@@ -209,6 +209,88 @@ internal static class TestPipelines
         return graph.AsPipeline(GraphId.Create(id), GraphRevision.Create(1));
     }
 
+    /// <summary>Builds a recording pipeline with a doubling flow between its source and its sink.</summary>
+    /// <param name="id">The pipeline's identity.</param>
+    /// <param name="count">How many numbers the source emits.</param>
+    /// <param name="log">The log the sink writes to.</param>
+    /// <param name="revision">The revision the document is published under.</param>
+    /// <param name="halt">
+    /// The signal the source raises after its last element instead of ending, or <see langword="null"/> when
+    /// it should end on its own.
+    /// </param>
+    /// <returns>The pipeline.</returns>
+    /// <remarks>
+    /// <para>
+    /// <see cref="Recording"/> with one stage added, and the stage is the point: <c>test/double@v1</c> is
+    /// exactly what the rolling-upgrade fixture's stale catalog does not publish, so this is a durable,
+    /// cursored, log-writing pipeline that one half of a half-upgraded cluster can run and the other half
+    /// cannot. Its log holds the doubles, which is also what tells the two pipelines' logs apart at a glance.
+    /// </para>
+    /// <para>
+    /// The revision is a parameter here and nowhere else because this is the shape the revision rules are
+    /// proved on: two revisions of one pipeline identity are two documents with two fingerprints, since the
+    /// revision is a member of the canonical bytes the fingerprint is taken of.
+    /// </para>
+    /// </remarks>
+    internal static PipelineDefinition RecordingDoubled(
+        string id,
+        int count,
+        string log,
+        int revision = 1,
+        string? halt = null)
+    {
+        StageCatalog catalog = TestVocabulary.Catalog();
+
+        RunnableGraph graph = Source
+            .FromRegistered(
+                RegisteredStage.Source(catalog, TestVocabulary.Range, TestVocabulary.Number),
+                "numbers",
+                halt is null ? TestRangeParameters.Write(count) : TestRangeParameters.Write(count, halt))
+            .Via(
+                RegisteredStage.Flow(catalog, TestVocabulary.Double, TestVocabulary.Number, TestVocabulary.Number),
+                "doubled",
+                TestVocabulary.Empty)
+            .To(
+                RegisteredStage.Sink(catalog, TestVocabulary.Record, TestVocabulary.Number),
+                "recorded",
+                TestRecordParameters.Write(log));
+
+        return graph.AsPipeline(GraphId.Create(id), GraphRevision.Create(revision));
+    }
+
+    /// <summary>Builds a recording pipeline whose middle stage throws at one element.</summary>
+    /// <param name="id">The pipeline's identity.</param>
+    /// <param name="count">How many numbers the source emits.</param>
+    /// <param name="log">The log the sink writes to.</param>
+    /// <param name="failAt">The element the middle stage throws at.</param>
+    /// <returns>The pipeline.</returns>
+    /// <remarks>
+    /// A failing run whose progress can be read afterwards, which <see cref="Failing"/> cannot give: a sum
+    /// resolves nothing when its run faults, so a test asking whether a failed durable run was re-run would
+    /// have nothing to compare. The log holds the elements that got past the failing stage, so running the
+    /// same failure twice is visible as a longer log rather than as an identical exception.
+    /// </remarks>
+    internal static PipelineDefinition RecordingFailing(string id, int count, string log, long failAt)
+    {
+        StageCatalog catalog = TestVocabulary.Catalog();
+
+        RunnableGraph graph = Source
+            .FromRegistered(
+                RegisteredStage.Source(catalog, TestVocabulary.Range, TestVocabulary.Number),
+                "numbers",
+                TestRangeParameters.Write(count))
+            .Via(
+                RegisteredStage.Flow(catalog, TestVocabulary.Fail, TestVocabulary.Number, TestVocabulary.Number),
+                "boom",
+                TestFailParameters.Write(failAt))
+            .To(
+                RegisteredStage.Sink(catalog, TestVocabulary.Record, TestVocabulary.Number),
+                "recorded",
+                TestRecordParameters.Write(log));
+
+        return graph.AsPipeline(GraphId.Create(id), GraphRevision.Create(1));
+    }
+
     /// <summary>Builds a pipeline whose middle stage throws at one element.</summary>
     /// <param name="id">The pipeline's identity.</param>
     /// <param name="count">How many numbers the source emits.</param>
