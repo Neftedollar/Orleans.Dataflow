@@ -67,7 +67,7 @@ internal sealed class LocalRunPlan
         TimeProvider clock,
         IReadOnlyDictionary<NodeId, LocalSourceCursor> cursors,
         IReadOnlyDictionary<NodeId, ILocalDurableState> durableStates,
-        IReadOnlyDictionary<NodeId, LocalMarkingSink> marks)
+        IReadOnlyDictionary<NodeId, ILocalCommitMark> marks)
     {
         Clock = clock;
         Segments = segments;
@@ -195,5 +195,11 @@ internal sealed class LocalRunPlan
 
     /// <summary>Gets the sinks of this plan that declare a commit mark.</summary>
     /// <value>One mark per such sink, keyed by the node that declares it.</value>
-    internal IReadOnlyDictionary<NodeId, LocalMarkingSink> Marks { get; }
+    /// <remarks>
+    /// Two kinds of sink land here and the table knows which is which only through the seam: the
+    /// vocabulary's own marking sink, and a registered sink whose provider declared a
+    /// <see cref="Hosting.DataflowSinkMark"/>. That the second exists is M5.5's change, and the reason the
+    /// value is <see cref="ILocalCommitMark"/> rather than the marking sink itself.
+    /// </remarks>
+    internal IReadOnlyDictionary<NodeId, ILocalCommitMark> Marks { get; }
 }

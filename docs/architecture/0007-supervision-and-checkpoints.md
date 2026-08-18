@@ -141,6 +141,33 @@ resumed-and-continuing elsewhere — because a control can carry an
 outcome without becoming it, which is the tension that deferred it in
 M4.
 
+**Amendment (M5.5): the control wording dissolves — the watch is a
+member of the handle, and there are two endings rather than three.**
+Building it showed the "control" framing answered the right question
+with the wrong noun. What ADR 0002's tension required was only this: a
+thing that exists while the run is running and *resolves* with a failed
+run's outcome instead of faulting with it — which a result slot can
+never be. A control slot delivers that, but a control is a document-
+declared name for reaching *into* a graph (an ingress queue), resolved
+per run and bound by fingerprint; the watch names nothing in any
+document, varies with no graph shape, and is a fact about the run
+itself — so it ships as `RunHandle.WatchTermination` /
+`OrleansRunHandle.WatchTermination`, a `Task<RunEnding>` beside
+`Completion`, with the slot machinery left out of it. The paragraph
+above stands as the record of why the shape is what it is; only the
+noun moved. Two further corrections from building it: **the endings
+are two, not three** — "resumed-and-continuing elsewhere" is not an
+ending, by M5.4's own rule that a checkpoint says where and only the
+register says whether, so a durable run's watch simply keeps waiting
+across resumes and reports the one ending the register eventually
+records; and **cancellation is not an ending either** — the watch of a
+cancelled run cancels rather than resolving, because a watch that
+reported it as a third ending would make "this run is over" true of a
+run a durable deployment is about to continue. On the cluster handle
+the watch additionally *faults* with the lost-run report when no
+ending will ever come, which is the one outcome the local handle
+cannot have.
+
 ## Decision: the failure-injection seam
 
 The crash tests the exit criteria demand cannot be written against luck.

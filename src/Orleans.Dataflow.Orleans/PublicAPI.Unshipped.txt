@@ -174,6 +174,10 @@ Orleans.Dataflow.Grains.RunPhase.Faulted = 3 -> Orleans.Dataflow.Grains.RunPhase
 Orleans.Dataflow.Grains.RunPhase.NotStarted = 0 -> Orleans.Dataflow.Grains.RunPhase
 Orleans.Dataflow.Grains.RunPhase.Running = 1 -> Orleans.Dataflow.Grains.RunPhase
 Orleans.Dataflow.Grains.RunStatusSnapshot
+Orleans.Dataflow.Grains.RunStatusSnapshot.Checkpoints.get -> long
+Orleans.Dataflow.Grains.RunStatusSnapshot.Checkpoints.set -> void
+Orleans.Dataflow.Grains.RunStatusSnapshot.DroppedElements.get -> long
+Orleans.Dataflow.Grains.RunStatusSnapshot.DroppedElements.set -> void
 Orleans.Dataflow.Grains.RunStatusSnapshot.Epoch.get -> long
 Orleans.Dataflow.Grains.RunStatusSnapshot.Epoch.set -> void
 Orleans.Dataflow.Grains.RunStatusSnapshot.FailureMessage.get -> string?
@@ -182,7 +186,13 @@ Orleans.Dataflow.Grains.RunStatusSnapshot.FailureType.get -> string?
 Orleans.Dataflow.Grains.RunStatusSnapshot.FailureType.set -> void
 Orleans.Dataflow.Grains.RunStatusSnapshot.Phase.get -> Orleans.Dataflow.Grains.RunPhase
 Orleans.Dataflow.Grains.RunStatusSnapshot.Phase.set -> void
+Orleans.Dataflow.Grains.RunStatusSnapshot.PoisonElements.get -> long
+Orleans.Dataflow.Grains.RunStatusSnapshot.PoisonElements.set -> void
 Orleans.Dataflow.Grains.RunStatusSnapshot.RunStatusSnapshot() -> void
+Orleans.Dataflow.Grains.RunStatusSnapshot.SupervisedFailures.get -> long
+Orleans.Dataflow.Grains.RunStatusSnapshot.SupervisedFailures.set -> void
+Orleans.Dataflow.Grains.RunStatusSnapshot.TotalCheckpointHold.get -> System.TimeSpan
+Orleans.Dataflow.Grains.RunStatusSnapshot.TotalCheckpointHold.set -> void
 Orleans.Dataflow.Hosting.DataflowPlacement
 Orleans.Dataflow.Hosting.DataflowPlacement.ClusterDefault = 0 -> Orleans.Dataflow.Hosting.DataflowPlacement
 Orleans.Dataflow.Hosting.DataflowPlacement.HashBased = 3 -> Orleans.Dataflow.Hosting.DataflowPlacement
@@ -231,7 +241,9 @@ Orleans.Dataflow.Hosting.OrleansRunHandle.Epoch.get -> long
 Orleans.Dataflow.Hosting.OrleansRunHandle.GetValueAsync<TResult>(Orleans.Dataflow.ResultSlot<TResult> slot, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task<TResult>!
 Orleans.Dataflow.Hosting.OrleansRunHandle.RunId.get -> string!
 Orleans.Dataflow.Hosting.OrleansRunHandle.ShutdownAsync() -> System.Threading.Tasks.Task!
+Orleans.Dataflow.Hosting.OrleansRunHandle.SnapshotAsync() -> System.Threading.Tasks.Task<Orleans.Dataflow.RunSnapshot!>!
 Orleans.Dataflow.Hosting.OrleansRunHandle.Ticket.get -> Orleans.Dataflow.Grains.PipelineRunTicket!
+Orleans.Dataflow.Hosting.OrleansRunHandle.WatchTermination.get -> System.Threading.Tasks.Task<Orleans.Dataflow.RunEnding!>!
 const Orleans.Dataflow.Grains.OrleansDataflowStorage.CoordinatorProviderName = "orleans-dataflow-coordinator" -> string!
 const Orleans.Dataflow.Hosting.OrleansDataflowResults.DefaultMaximumResultBytes = 1048576 -> int
 override Orleans.Dataflow.Adapters.BroadcastElementBinding<T>.ToString() -> string!

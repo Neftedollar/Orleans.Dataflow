@@ -212,7 +212,7 @@ internal static class LocalRunPlanner
         // and keeps "is this run durable" a question about the run rather than about the plan.
         Dictionary<NodeId, LocalSourceCursor> cursors = [];
         Dictionary<NodeId, ILocalDurableState> durableStates = [];
-        Dictionary<NodeId, LocalMarkingSink> marks = [];
+        Dictionary<NodeId, ILocalCommitMark> marks = [];
         Dictionary<NodeId, Arrivals> joined = [];
         HashSet<NodeId> walked = new(document.Nodes.Count);
         Queue<(NodeId Start, int Input, PortId Entry)> branches = new();
@@ -425,6 +425,17 @@ internal static class LocalRunPlanner
                             terminal = LocalTerminal.Provided(runtime.Fold!, runtime.Finish);
                             seedFactory = runtime.Seed;
                             produces = runtime.ProducesResult;
+
+                            // A registered sink declares a commit mark by carrying one, which is the same
+                            // statement a registered source makes with a cursor and the same table it lands
+                            // in. Nothing here advances it: the adapter's own effect is what moves the
+                            // number, and the seed factory closed over this very instance so that the sink
+                            // built for this run marks the mark built for this run.
+                            if (runtime.Mark is { } committed)
+                            {
+                                marks.Add(current, new LocalProvidedMark(committed));
+                            }
+
                             break;
 
                         // A registered junction is planned exactly as a local one, and its legs are its own

@@ -1,3 +1,4 @@
+using System.Globalization;
 using System.Text.Json;
 using Orleans.Dataflow.Definition;
 using Orleans.Dataflow.Hosting;
@@ -61,6 +62,17 @@ internal sealed class AdapterStageFactory : IDataflowStageFactory
 
                 return element;
             });
+        }
+
+        if (node.Stage == AdapterVocabulary.Priced)
+        {
+            // The identity of the joint, arithmetically speaking: the number is carried straight through as
+            // the price's total, so a log of what the sink's callee was handed is a log of what the source
+            // produced and the crash suite's window is a sequence of source elements rather than a
+            // translation of one.
+            return DataflowStageRuntime.Element(static element => new AdapterPrice(
+                string.Create(CultureInfo.InvariantCulture, $"element-{(long)element!}"),
+                (long)element!));
         }
 
         throw new InvalidOperationException(

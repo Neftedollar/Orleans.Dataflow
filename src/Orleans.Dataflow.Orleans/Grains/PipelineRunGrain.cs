@@ -358,7 +358,15 @@ internal sealed class PipelineRunGrain(DataflowSiloRegistry registry, Serializer
     private static RunStatusSnapshot Describe(LocalRun run, long epoch)
     {
         Task completion = run.Completion;
-        RunStatusSnapshot snapshot = new() { Epoch = epoch };
+        RunStatusSnapshot snapshot = new()
+        {
+            Epoch = epoch,
+            DroppedElements = run.DroppedElements,
+            SupervisedFailures = run.SupervisedFailures,
+            PoisonElements = run.PoisonElements,
+            Checkpoints = run.Checkpoints,
+            TotalCheckpointHold = run.CheckpointHold,
+        };
 
         if (!completion.IsCompleted)
         {

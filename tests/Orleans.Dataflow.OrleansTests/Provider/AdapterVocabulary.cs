@@ -138,6 +138,21 @@ internal static class AdapterVocabulary
             static (grains, price, cancellationToken) =>
                 grains.GetGrain<IAdapterLedgerGrain>("ledger").RecordAsync(price, cancellationToken));
 
+    /// <summary>The terminating call that writes every price into a log the test process keeps.</summary>
+    /// <remarks>
+    /// Beside <see cref="Recording"/> rather than instead of it, and the difference is where the evidence
+    /// lives. The recording ledger writes into the shared observations, which one collection's tests reset
+    /// between them; this one writes into a named log, so a test in a different collection — the crash
+    /// suite, which runs against its own cluster and possibly at the same time — has a record nobody else
+    /// touches.
+    /// </remarks>
+    internal static GrainCallSinkBinding<AdapterPrice> Logging { get; } =
+        GrainCallSinkBinding.Create(
+            "log-price",
+            PriceContract,
+            static (grains, price, cancellationToken) =>
+                grains.GetGrain<IAdapterLedgerGrain>("logging").LogAsync(price, cancellationToken));
+
     /// <summary>The terminating call that records a price once the test releases the ledger.</summary>
     internal static GrainCallSinkBinding<AdapterPrice> GatedRecording { get; } =
         GrainCallSinkBinding.Create(
@@ -214,6 +229,18 @@ internal static class AdapterVocabulary
     internal static StageRef Gate { get; } =
         StageRef.Create(Provider, StageId.Create("gate"), StageRef.FirstMajorVersion);
 
+    /// <summary>The flow that turns a test number into a price.</summary>
+    /// <remarks>
+    /// The joint between the test vocabulary and the Orleans adapters, and the only reason it exists: the
+    /// range source is the one source in this suite that declares a cursor, and the terminating grain call
+    /// is the one sink that declares a commit mark, so a test about what a crash does to the pair needs a
+    /// stage that stands between them. Its input port declares the test vocabulary's own contract and its
+    /// output port declares <see cref="OrleansStages.ElementContract"/>, which is the documented way a
+    /// deployment's stage joins an adapter, exercised rather than described.
+    /// </remarks>
+    internal static StageRef Priced { get; } =
+        StageRef.Create(Provider, StageId.Create("priced"), StageRef.FirstMajorVersion);
+
     /// <summary>The same counting sink, on the port contract the .NET push adapters declare.</summary>
     /// <remarks>
     /// One stage per element contract is the documented cost of a specification declaring one contract per
@@ -268,6 +295,13 @@ internal static class AdapterVocabulary
                 [],
                 [ResultPortSpecification.Create(PortId.Create("total"), Total.Reference)],
                 CountParameters,
+                []),
+            StageSpecification.Create(
+                Priced,
+                [InputPortSpecification.Create(PortId.Create("in"), TestVocabulary.Number.Reference)],
+                [OutputPortSpecification.Create(PortId.Create("out"), OrleansStages.ElementContract)],
+                [],
+                TestVocabulary.NoParameters,
                 []),
         ]);
 

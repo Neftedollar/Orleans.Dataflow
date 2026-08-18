@@ -2710,10 +2710,134 @@ different fingerprint or revision is refused by name, and migrating a checkpoint
 across a changed document is M5's later phase or a recorded deferral.
 
 **No per-run monitor.** `Checkpoints` and `CheckpointHold` are internal beside
-the other counters, for the reason those are.
+the other counters, for the reason those are. **It arrived in M5.5** as
+`RunHandle.Snapshot()`, one reading of exactly these counters and nothing more;
+see the M5.5 section below.
 
 **One composition of each kind is proven and the general statement is not.** A
 durable scope beside a supervision scope, a durable scope over a chain of five
 admitted shapes, a marking sink behind a batch, and a capture during an author's
 pause are measured; a durable scope on a junction leg, inside a cycle, or in
 front of a merge-map are unasserted.
+
+## M5.5 (the watch, the monitor, telemetry, and the sink's mark) — as implemented
+
+The last M5 phase adds the ways a run is *read* — an ending as a value, a
+snapshot of counters, a meter and spans for the deployments that subscribe —
+and the one seam the checkpoint model still owed: a registered sink that can
+say what it has committed. Nothing here touches how an element moves.
+
+### WatchTermination: the ending as a value
+
+`RunHandle.WatchTermination` is a `Task<RunEnding>` that **resolves** when the
+run completes or fails and **cancels** when the run is cancelled. It is the
+affordance ADR 0007 named and the shape ADR 0002's tension asked for: a result
+slot resolves at the end of a run and *carries* the run's outcome — it faults
+when the run fails — so a slot typed "how it ended" could never resolve to
+"failed". A member of the handle can, because it is not a result: a failed
+run's watch resolves with `RunEnding.Failed(type, message)` as a fact to read,
+while `Completion` goes on rethrowing the very exception instance for the
+callers who want the run's failure to be their own.
+
+Three decisions inside that sentence:
+
+- **Two endings and no more.** Completing and failing end a run; cancelling
+  abandons one. The watch of a cancelled run cancels rather than resolving,
+  because a watch that reported cancellation as a third ending would make
+  "this run is over" true of a run a durable deployment is about to continue —
+  the same rule M5.4's coordinator already enforces when it refuses a
+  cancellation as a report of an ending. An `OperationCanceledException` thrown
+  by an author's own stage while the run's token is untouched is a failure like
+  any other and reports as one.
+- **The failure travels as its type name and its message**, because that is
+  the one shape both hosts can fill; the instance stays on `Completion`.
+- **The watch is the run's own task, not a wrapper.** `LocalRun` keeps a
+  second `TaskCompletionSource<RunEnding>` and settles it in `Settle`
+  immediately *before* the completion task, so a caller that has awaited
+  `Completion` reads a settled ending synchronously — the two can never be
+  observed in disagreement, and reading the property starts nothing.
+
+### Snapshot: one reading of the counters the run already keeps
+
+`RunHandle.Snapshot()` returns a `RunSnapshot`: a status
+(`Running`/`Completed`/`Failed`/`Canceled` — four members where `RunEndingKind`
+has two, because a snapshot answers "where is it" and an ending answers "how
+did it end") and the five counters the run has kept since their phases
+introduced them — dropped elements, supervised failures, poison elements,
+checkpoints written, and the total checkpoint hold. It is the monitor the
+earlier phases deferred to, in its honest v1 shape: **a reading of existing
+state, taken at a moment, with no new instrumentation inside any stage**. The
+counters are read one after another while the run may still be moving, so a
+snapshot is a reading and not a consistent cut; each individual number is
+exact. Per-scope resolution — which scope dropped what — remains the recorded
+M5.1 deferral, and the type's own documentation says so rather than implying
+resolution that does not exist.
+
+### Telemetry: the meter reads what the snapshot reads
+
+One meter and one activity source, both named `Orleans.Dataflow`, published
+from the engine so that a silo emits without being asked. The design rule is
+the same as the snapshot's: **no new instrumentation on the element path**.
+
+- The cumulative instruments are *observable*: on each collection they sum
+  every live run's counters with the totals settled runs folded into a
+  per-graph accumulator when they ended, under one gate so a run mid-handoff
+  is counted exactly once. That is what keeps the readings monotonic — the
+  property a counter must have — and what makes the cost of an uncollected
+  meter exactly zero.
+- The eager emissions are one event per run start, one per run end (emitted in
+  `Settle` *before* the completion task transitions, so a caller that awaited
+  completion deterministically finds the ending counted), and one histogram
+  sample per checkpoint hold — all cold paths. Every hold is sampled,
+  including one that skipped its write because the run was over: the
+  histogram measures what holds cost, not how many writes succeeded.
+- Tags are bounded. Everything carries `dataflow.graph` — the document
+  fingerprint, whose cardinality is the number of graph shapes a deployment
+  runs — plus `dataflow.run.outcome` on the ended counter and
+  `dataflow.run.resumed` on the started one. A run's identity is deliberately
+  not a metric tag; it belongs to activities.
+- The `dataflow.run` activity spans the run from launch to settle, with the
+  caller's ambient activity as its parent and the caller's `Activity.Current`
+  put back before materialization returns, because the span outlives the call
+  that started it. Segment threads capture their execution context between
+  those two points, so author code tracing inside a stage parents under the
+  run. Status is `Ok`, `Error(message)`, or unset for a cancelled run, with
+  the outcome as a tag either way.
+- **Telemetry never fails a run.** Every emission swallows everything; a
+  listener that throws is a broken observer, and a run that died of being
+  observed would be a worse defect than any lost sample.
+
+### The sink's mark, now a seam
+
+M5.2 built the mark into the vocabulary's own marking sink; M5.5 gives a
+registered sink the same voice. `DataflowStageRuntime.Terminal(seed, fold,
+finish, producesResult, mark)` takes a `DataflowSinkMark` — two members, `Mark`
+and `RestoreTo` — and the planner lands it in the very table the marking sink
+occupies, behind an internal `ILocalCommitMark` seam so the capture loop and
+the resume cannot tell the two apart. The contract is the cursor's mirror with
+one deliberate difference: a cursor is advanced *by the run*, because delivery
+through a segment is a fact only the run knows; a mark is advanced *by the
+adapter*, because when an effect became real is a fact only the effect's owner
+knows. The engine reads a mark at a capture and restores one at a resume, and
+never advances one. The requirement the seam cannot check is stated on it:
+the mark advances after the effect and never before — a leading mark turns a
+duplicate window into a loss window, a lagging one widens replay and loses
+nothing, so lagging is the direction to lean when the two moments cannot be
+separated exactly.
+
+### What this phase does not do
+
+**No per-scope observability.** One `SupervisedFailures` for the whole run,
+per M5.1's recorded deferral; the snapshot and the meter both say so.
+
+**No counter survives its attempt in a cluster.** The Orleans register records
+outcomes, not diagnostics; the continuous record is the metrics pipeline's.
+Stated and tested on the Orleans side (see ORLEANS-RUNTIME.md M5.5).
+
+**No run identity in the engine's telemetry.** The engine does not know one;
+the Orleans host tags its materialize span with it, and grain-call tracing
+carries grain identity where a deployment enables it.
+
+**The two-writes window stands.** A run can end and die before its ending is
+reported to the register; the watch converges on the truth through the same
+poll the completion does. M5.4's not-proven list already records it.

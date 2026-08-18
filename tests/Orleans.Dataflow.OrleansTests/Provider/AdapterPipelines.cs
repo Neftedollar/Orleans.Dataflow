@@ -177,6 +177,58 @@ internal static class AdapterPipelines
         return graph.AsPipeline(GraphId.Create(id), GraphRevision.Create(1));
     }
 
+    /// <summary>Builds the pipeline the commit-mark crash test measures on: a cursored source into a
+    /// terminating grain call.</summary>
+    /// <param name="id">The pipeline's identity.</param>
+    /// <param name="count">How many numbers the source emits.</param>
+    /// <param name="halt">The signal the source raises after its last element instead of ending.</param>
+    /// <param name="gate">The signal the source waits for before one named element.</param>
+    /// <param name="gateAt">The element the source waits at.</param>
+    /// <returns>The pipeline.</returns>
+    /// <remarks>
+    /// <para>
+    /// The only shape in this suite that has both halves of a checkpoint: the test vocabulary's range source
+    /// declares a <em>cursor</em>, and the Orleans terminating grain call declares a <em>commit mark</em>. The
+    /// stage between them exists to join their port contracts and does nothing else — a number becomes the
+    /// total of a price and keeps its value — so the callee's log and the source's positions are the same
+    /// numbers and a duplicate window is a sequence rather than an arithmetic claim.
+    /// </para>
+    /// <para>
+    /// <b>The bound on calls in flight is one, and that is load-bearing.</b> A mark counts replies that have
+    /// been observed, and the window's queue observes the oldest reply when it makes room for a new call, so
+    /// a wider bound would let answered calls go uncounted and a capture taken then would store a low-water
+    /// number. One makes the mark exactly "the calls whose replies have come back", which is the arrangement
+    /// a test may name numbers in.
+    /// </para>
+    /// </remarks>
+    internal static PipelineDefinition MarkedFeed(
+        string id,
+        int count,
+        string halt,
+        string gate,
+        int gateAt)
+    {
+        RunnableGraph graph = Source
+            .FromRegistered(
+                RegisteredStage.Source(TestVocabulary.Catalog(), TestVocabulary.Range, TestVocabulary.Number),
+                "numbers",
+                TestRangeParameters.Write(count, halt, gate, gateAt))
+            .Via(
+                RegisteredStage.Flow(
+                    AdapterVocabulary.Catalog(),
+                    AdapterVocabulary.Priced,
+                    TestVocabulary.Number,
+                    OrleansStages.Element<AdapterPrice>()),
+                "priced",
+                TestVocabulary.Empty)
+            .To(
+                OrleansStages.GrainCallSink(AdapterVocabulary.Logging),
+                "logged",
+                OrleansStages.GrainCallSinkParameters(AdapterVocabulary.Logging, maxInFlight: 1));
+
+        return graph.AsPipeline(GraphId.Create(id), GraphRevision.Create(1));
+    }
+
     /// <summary>Builds a pipeline that reads a grain enumeration, prices it by key, and records the prices.</summary>
     /// <param name="id">The pipeline's identity.</param>
     /// <param name="call">The keyed pricing call to make.</param>

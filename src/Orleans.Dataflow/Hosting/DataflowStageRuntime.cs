@@ -208,6 +208,63 @@ public sealed class DataflowStageRuntime
         return new DataflowStageRuntime(StageRuntime.Terminal(seed, fold, finish, producesResult));
     }
 
+    /// <summary>Creates the runtime of a terminal stage that knows what it has committed.</summary>
+    /// <param name="seed">The maker of this run's initial state, invoked once per run.</param>
+    /// <param name="fold">The fold over the accumulated state and one element.</param>
+    /// <param name="finish">
+    /// The projection of the final state into the value a result slot resolves, or <see langword="null"/>
+    /// when the accumulated state is already that value.
+    /// </param>
+    /// <param name="producesResult">
+    /// Whether the final state is offered to a result slot the document declares over this stage.
+    /// </param>
+    /// <param name="mark">The commit mark this sink declares, built fresh for this node and this run.</param>
+    /// <returns>The runtime.</returns>
+    /// <exception cref="ArgumentNullException">
+    /// <paramref name="seed"/>, <paramref name="fold"/>, or <paramref name="mark"/> is
+    /// <see langword="null"/>.
+    /// </exception>
+    /// <remarks>
+    /// <para>
+    /// The sink half of what a durable run needs, and the mirror of the cursor overload above: this sink's
+    /// mark enters a checkpoint and a resume hands it back before the run's first element. Everything else —
+    /// one state per run, one fold per element, the projection — is unchanged, because a mark is a thing a
+    /// sink <em>says</em> rather than a different way of ending a stream.
+    /// </para>
+    /// <para>
+    /// <b>The fold and the mark are the provider's two halves of one object</b> and this seam does not join
+    /// them for it. Nothing here advances anything: the engine calls the fold and reads the mark, and when
+    /// the number between those two moves is the adapter's own business — after an acknowledgement lands,
+    /// after a transaction commits, after a flush returns. That is deliberately unlike the cursor, whose
+    /// delivery only the run can see; here the run can see only that a fold returned, which for an adapter
+    /// with work in flight is not the same event as a commit.
+    /// </para>
+    /// <para>
+    /// A sink that declares one takes on a requirement the engine cannot check and the adapter must state:
+    /// the mark advances <em>after</em> the effect and never before it. A mark that led its effect would make
+    /// a resume skip an element whose commit never happened, turning a duplicate window into a loss window. A
+    /// mark that lags — because an effect is still in flight when a capture reads it — costs a wider replay
+    /// and loses nothing, which is the direction to lean when the two moments cannot be separated exactly.
+    /// </para>
+    /// <para>
+    /// Where a provider cannot say what it committed, it declares no mark and its table row says so, exactly
+    /// as a source with no cursor resumes from now.
+    /// </para>
+    /// </remarks>
+    public static DataflowStageRuntime Terminal(
+        Func<object?> seed,
+        Func<object?, object?, object?> fold,
+        Func<object?, object?>? finish,
+        bool producesResult,
+        DataflowSinkMark mark)
+    {
+        ArgumentNullException.ThrowIfNull(seed);
+        ArgumentNullException.ThrowIfNull(fold);
+        ArgumentNullException.ThrowIfNull(mark);
+
+        return new DataflowStageRuntime(StageRuntime.Terminal(seed, fold, finish, producesResult, mark));
+    }
+
     /// <summary>Creates the runtime of a fan-out that delivers every element to every live leg.</summary>
     /// <returns>The runtime.</returns>
     /// <remarks>

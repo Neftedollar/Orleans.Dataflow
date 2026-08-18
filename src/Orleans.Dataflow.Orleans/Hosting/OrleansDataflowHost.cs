@@ -1,5 +1,7 @@
+using System.Diagnostics;
 using System.Globalization;
 using Orleans.Dataflow.Definition;
+using Orleans.Dataflow.Diagnostics;
 using Orleans.Dataflow.Grains;
 using Orleans.Dataflow.Identity;
 using Orleans.Dataflow.Serialization;
@@ -81,17 +83,32 @@ public sealed class OrleansDataflowHost
     {
         ArgumentNullException.ThrowIfNull(pipeline);
 
-        byte[] canonical = GraphDocumentSerializer.Serialize(pipeline.Document);
+        using Activity? activity = DataflowDiagnostics.Materializing(
+            pipeline.Fingerprint.ToString(),
+            durable: false);
 
-        PipelineRunTicket ticket = await _grains
-            .GetGrain<IPipelineCoordinatorGrain>(pipeline.Id.Value)
-            .StartRunAsync(canonical)
-            .WaitAsync(cancellationToken)
-            .ConfigureAwait(false);
+        try
+        {
+            byte[] canonical = GraphDocumentSerializer.Serialize(pipeline.Document);
 
-        IPipelineRunGrain run = _grains.GetGrain<IPipelineRunGrain>($"{ticket.GraphId}/{ticket.RunId}");
+            PipelineRunTicket ticket = await _grains
+                .GetGrain<IPipelineCoordinatorGrain>(pipeline.Id.Value)
+                .StartRunAsync(canonical)
+                .WaitAsync(cancellationToken)
+                .ConfigureAwait(false);
 
-        return new OrleansRunHandle(run, ticket, pipeline.Fingerprint, _options.PollInterval, durable: false);
+            IPipelineRunGrain run = _grains.GetGrain<IPipelineRunGrain>($"{ticket.GraphId}/{ticket.RunId}");
+
+            DataflowDiagnostics.Materialized(activity, ticket.RunId);
+
+            return new OrleansRunHandle(run, ticket, pipeline.Fingerprint, _options.PollInterval, durable: false);
+        }
+        catch (Exception refused)
+        {
+            DataflowDiagnostics.MaterializeFailed(activity, refused);
+
+            throw;
+        }
     }
 
     /// <summary>Materializes a pipeline into a running run that can outlive the silo hosting it.</summary>
@@ -148,22 +165,39 @@ public sealed class OrleansDataflowHost
 
         Guard(durable);
 
-        byte[] canonical = GraphDocumentSerializer.Serialize(pipeline.Document);
+        using Activity? activity = DataflowDiagnostics.Materializing(
+            pipeline.Fingerprint.ToString(),
+            durable: true);
 
-        PipelineRunTicket declared = await _grains
-            .GetGrain<IPipelineCoordinatorGrain>(pipeline.Id.Value)
-            .DeclareDurableRunAsync(
-                canonical,
-                new DurableRunDeclaration
-                {
-                    RunId = durable.RunId,
-                    Interval = durable.Interval,
-                    EveryElements = durable.EveryElements,
-                })
-            .WaitAsync(cancellationToken)
-            .ConfigureAwait(false);
+        try
+        {
+            byte[] canonical = GraphDocumentSerializer.Serialize(pipeline.Document);
 
-        return await StartAsync(pipeline, declared, cancellationToken).ConfigureAwait(false);
+            PipelineRunTicket declared = await _grains
+                .GetGrain<IPipelineCoordinatorGrain>(pipeline.Id.Value)
+                .DeclareDurableRunAsync(
+                    canonical,
+                    new DurableRunDeclaration
+                    {
+                        RunId = durable.RunId,
+                        Interval = durable.Interval,
+                        EveryElements = durable.EveryElements,
+                    })
+                .WaitAsync(cancellationToken)
+                .ConfigureAwait(false);
+
+            OrleansRunHandle handle = await StartAsync(pipeline, declared, cancellationToken).ConfigureAwait(false);
+
+            DataflowDiagnostics.Materialized(activity, handle.RunId);
+
+            return handle;
+        }
+        catch (Exception refused)
+        {
+            DataflowDiagnostics.MaterializeFailed(activity, refused);
+
+            throw;
+        }
     }
 
     /// <summary>Destroys what a durable run identity holds and runs a document under it from the beginning.</summary>
@@ -219,22 +253,39 @@ public sealed class OrleansDataflowHost
 
         Guard(durable);
 
-        byte[] canonical = GraphDocumentSerializer.Serialize(pipeline.Document);
+        using Activity? activity = DataflowDiagnostics.Materializing(
+            pipeline.Fingerprint.ToString(),
+            durable: true);
 
-        PipelineRunTicket declared = await _grains
-            .GetGrain<IPipelineCoordinatorGrain>(pipeline.Id.Value)
-            .ReplaceDurableRunAsync(
-                canonical,
-                new DurableRunDeclaration
-                {
-                    RunId = durable.RunId,
-                    Interval = durable.Interval,
-                    EveryElements = durable.EveryElements,
-                })
-            .WaitAsync(cancellationToken)
-            .ConfigureAwait(false);
+        try
+        {
+            byte[] canonical = GraphDocumentSerializer.Serialize(pipeline.Document);
 
-        return await StartAsync(pipeline, declared, cancellationToken).ConfigureAwait(false);
+            PipelineRunTicket declared = await _grains
+                .GetGrain<IPipelineCoordinatorGrain>(pipeline.Id.Value)
+                .ReplaceDurableRunAsync(
+                    canonical,
+                    new DurableRunDeclaration
+                    {
+                        RunId = durable.RunId,
+                        Interval = durable.Interval,
+                        EveryElements = durable.EveryElements,
+                    })
+                .WaitAsync(cancellationToken)
+                .ConfigureAwait(false);
+
+            OrleansRunHandle handle = await StartAsync(pipeline, declared, cancellationToken).ConfigureAwait(false);
+
+            DataflowDiagnostics.Materialized(activity, handle.RunId);
+
+            return handle;
+        }
+        catch (Exception refused)
+        {
+            DataflowDiagnostics.MaterializeFailed(activity, refused);
+
+            throw;
+        }
     }
 
     /// <summary>Drives the second hop of a durable materialization and composes the handle.</summary>

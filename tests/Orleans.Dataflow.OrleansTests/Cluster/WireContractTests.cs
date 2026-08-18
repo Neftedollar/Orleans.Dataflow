@@ -69,6 +69,35 @@ public sealed class WireContractTests(DataflowCluster cluster)
     }
 
     [Fact]
+    public void AStatusSnapshotRoundTripsTheCountersAMonitorReads()
+    {
+        // The members M5.5 added, pinned the way the four before them are. A counter without an [Id] is a
+        // hard failure and a counter that was never given one is a silent zero at the far end — which is
+        // indistinguishable from a run that dropped nothing — so every one of them is given a value nothing
+        // else here uses and read back.
+        RunStatusSnapshot status = new()
+        {
+            Phase = RunPhase.Running,
+            Epoch = 11L,
+            DroppedElements = 17L,
+            SupervisedFailures = 5L,
+            PoisonElements = 3L,
+            Checkpoints = 41L,
+            TotalCheckpointHold = TimeSpan.FromMilliseconds(1234),
+        };
+
+        RunStatusSnapshot round = RoundTrip(status);
+
+        Assert.Equal(RunPhase.Running, round.Phase);
+        Assert.Equal(11L, round.Epoch);
+        Assert.Equal(17L, round.DroppedElements);
+        Assert.Equal(5L, round.SupervisedFailures);
+        Assert.Equal(3L, round.PoisonElements);
+        Assert.Equal(41L, round.Checkpoints);
+        Assert.Equal(TimeSpan.FromMilliseconds(1234), round.TotalCheckpointHold);
+    }
+
+    [Fact]
     public void AResultEnvelopeRoundTripsThroughTheSerializerWithItsValue()
     {
         ResultEnvelope envelope = new()

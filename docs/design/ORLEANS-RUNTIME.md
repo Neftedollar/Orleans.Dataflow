@@ -850,6 +850,109 @@ rather than by membership can be an address nobody answers on.
   it — a missing runtime factory — which the coordinator refuses at declaration
   time and which no test drives through a resume.
 
+## M5.5 — as implemented (the watch and the snapshot over the wire, the grain-call sink's mark, and what a silo emits)
+
+The local half of this phase is LOCAL-RUNTIME.md's M5.5 section; what this one
+records is what the network changes about each piece, which is the same thing
+it changed about completion in phase 1: not the meaning, but how faithfully
+the meaning can be reported.
+
+### The watch over the wire
+
+`OrleansRunHandle.WatchTermination` is the same affordance with the same two
+endings, translated from the poll loop `Completion` already runs — reading
+either property starts the one shared loop. A completed run resolves
+`Completed`; a failed one resolves `Failed` carrying the type-name/message
+pair the status poll carries, which is the same pair a
+`PipelineRunFailedException` from `Completion` exposes, read instead of
+thrown; a cancelled run's watch cancels.
+
+**A lost run has no ending, and the watch says so by faulting.** An ordinary
+run whose activation was recycled mid-run — or a durable one that died before
+its first capture — never reached a terminal state and never will, so the
+watch faults with `PipelineRunLostException`: the report that no ending will
+come. Resolving would claim an ending the run never had; staying pending would
+claim one is still coming. A fencing refusal an ordinary handle cannot adopt
+faults it the same way, because an ending that belongs to somebody else's
+claim is not this handle's to report. A durable run that has captured never
+reports the loss, for M5.3's reason: the poll that would discover it is the
+call that resumes it.
+
+### The snapshot over the wire
+
+`OrleansRunHandle.SnapshotAsync()` is one grain call per reading — unlike the
+watch it neither starts nor joins the poll loop, so a monitor sampling on its
+own schedule costs exactly the calls it makes. The wire type
+(`RunStatusSnapshot`) now carries the five counters beside the phase, filled
+by the run grain from the engine it hosts; polling a durable run whose
+activation is gone resumes it, exactly as any other call does, and a run
+reported `NotStarted` throws the same `PipelineRunLostException` the results
+path throws, because a run that is gone has no state to read.
+
+**The counters describe the answering attempt, and that is a stated
+asymmetry.** A durable run's ending observed while its activation lived
+reports that attempt's final counters; the same ending re-read after the
+activation is gone comes from the coordinator's register, which records
+outcomes and not diagnostics, so those counters read zero. The register stays
+an outcome protocol on purpose — every field added to it widens a fenced,
+ETag'd correctness surface for the benefit of a number the metrics pipeline
+was already fed continuously while the attempt lived.
+
+### The grain-call sink's mark
+
+The terminating awaited-grain-call adapter is the proof vehicle for the M5.5
+sink seam, because it is the one Orleans sink with an acknowledgement to point
+at: the awaited reply, exactly as its M3 table row states. Its mark is
+`{"acknowledged":n}` — how many calls have been answered — advanced in the
+window's settle path *after* the reply is awaited and never on a throw, so a
+stored mark describes acknowledged work only. It can lag by up to the declared
+`maxInFlight`, because a reply is counted when the window's queue reaches it
+rather than when it lands; lagging widens a resume's replay and never narrows
+it, and a bound of one makes the mark exact, which is the arrangement the
+crash suite measures. A restored mark continues across a resume, so the number
+is the run's rather than the attempt's. What it says stops at the adapter's
+own acknowledgement boundary: an answered invocation, nothing the grain did
+behind the reply — a deployment that needs "answered" to mean "written down"
+puts the write in front of the reply, which is the callee's contract.
+
+### What a silo emits, and what only a client does
+
+The meter and the run span live in the engine, so **a silo hosting runs emits
+both without registration** beyond the deployment's own
+`AddMeter("Orleans.Dataflow")` / `AddSource("Orleans.Dataflow")`. The client's
+own contribution is the `dataflow.materialize` span over the start
+conversation — the one place a run identity is known before the cluster
+answers is after it answers, so the span gains `dataflow.run.id` on success
+and an error status on refusal. Run identities stay off metric tags on both
+sides; a graph fingerprint is the only dimension, for the cardinality reason
+the local section states.
+
+### M5.5 limits, stated
+
+- **A lost-run watch is as prompt as the poll**, no more: the loss is
+  discovered by the poll loop, so a watch on a lost run faults within one
+  interval plus the cluster's own convergence, not at the instant the silo
+  died.
+- **Three of the five counters are structurally zero over the wire today**,
+  and the tests assert the two that move rather than pretending otherwise.
+  Supervision and drop-policy declarations are `local/*` vocabulary, every
+  local specification declares `Nondeployable`, and `AsPipeline` refuses such
+  a document — so `SupervisedFailures` and `PoisonElements` cannot be nonzero
+  in a pipeline until a registered supervision vocabulary exists. And
+  `DroppedElements` under-reports for the adapters that keep a private
+  ingress (stream, broadcast, observer, reminder): their queues count drops
+  inside the adapter, and no seam folds those into the run's counter yet
+  (verified by measurement — two dropped pushes, a reading of zero). Both are
+  recorded deferrals, stated on the snapshot type itself.
+- **The ended counter counts attempts a client or silo process observed
+  ending.** A run whose ending happened and whose process died before Settle
+  finished emitting counted nothing; the two-writes window above already
+  records the shape of that honesty.
+- **The snapshot is not a consistent cut** across counters, on either host,
+  and the wire adds one hop of staleness the local reading does not have.
+- **No per-scope counters travel**, because none exist: the M5.1 deferral is
+  visible in the wire type on purpose.
+
 ## Phasing
 
 1. **Hosting + coordinator + run grain** — DI registration, the

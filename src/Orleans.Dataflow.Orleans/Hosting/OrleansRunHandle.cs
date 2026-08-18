@@ -33,6 +33,7 @@ public sealed class OrleansRunHandle : IAsyncDisposable
     private readonly TimeSpan _pollInterval;
     private readonly bool _durable;
     private readonly Lazy<Task> _completion;
+    private readonly Lazy<Task<RunEnding>> _watch;
     private long _epoch;
 
     /// <summary>Initializes a new instance of the <see cref="OrleansRunHandle"/> class.</summary>
@@ -58,6 +59,7 @@ public sealed class OrleansRunHandle : IAsyncDisposable
         _durable = durable;
         _epoch = ticket.Epoch;
         _completion = new Lazy<Task>(WatchAsync, LazyThreadSafetyMode.ExecutionAndPublication);
+        _watch = new Lazy<Task<RunEnding>>(WatchTerminationAsync, LazyThreadSafetyMode.ExecutionAndPublication);
 
         Ticket = ticket;
     }
@@ -125,6 +127,97 @@ public sealed class OrleansRunHandle : IAsyncDisposable
     /// </para>
     /// </remarks>
     public Task Completion => _completion.Value;
+
+    /// <summary>Gets a task that resolves with how this run ended.</summary>
+    /// <value>
+    /// A task that resolves with <see cref="RunEnding.Completed"/> when the stream ended or was drained by
+    /// a graceful shutdown, resolves with a <see cref="RunEndingKind.Failed"/> ending carrying the
+    /// failure's type name and message when the run failed, and cancels when the run was cancelled.
+    /// </value>
+    /// <remarks>
+    /// <para>
+    /// The same affordance as <see cref="RunHandle.WatchTermination"/> and the same rules: a failed run's
+    /// watch <em>resolves</em> with the failure as a fact to read, where <see cref="Completion"/> faults
+    /// with it; cancellation is not an ending, so the watch of a cancelled run cancels rather than
+    /// resolving; and reading this property is what starts the polling, exactly as reading
+    /// <see cref="Completion"/> is — the two share one poll loop.
+    /// </para>
+    /// <para>
+    /// <b>A lost run has no ending, and the watch says so by faulting.</b> When the activation hosting an
+    /// ordinary run is recycled mid-run — or a durable one dies before its first capture — no terminal
+    /// state was ever reached and none will be reported, so this task faults with
+    /// <see cref="PipelineRunLostException"/>: the report that no ending will come. Resolving would claim
+    /// an ending the run never had; staying pending would claim one is still coming. It faults with
+    /// <see cref="PipelineFencingException"/> for the same reason when an ordinary run's identity turns out
+    /// to be claimed by somebody else's work, which this handle has no right to report an ending for.
+    /// </para>
+    /// <para>
+    /// The ending carries the failure the run itself reported over the wire — the type name and message a
+    /// status poll carries — so it is the same pair a <see cref="PipelineRunFailedException"/> from
+    /// <see cref="Completion"/> exposes, read instead of thrown.
+    /// </para>
+    /// </remarks>
+    public Task<RunEnding> WatchTermination => _watch.Value;
+
+    /// <summary>Takes one reading of this run's observable state.</summary>
+    /// <returns>A task carrying the reading: status and the answering attempt's counters.</returns>
+    /// <exception cref="PipelineRunLostException">
+    /// The run is no longer active in the cluster and left nothing to continue, so there is no state to
+    /// read.
+    /// </exception>
+    /// <remarks>
+    /// <para>
+    /// The remote counterpart of <see cref="RunHandle.Snapshot"/>, and one grain call per reading: unlike
+    /// <see cref="Completion"/> it neither starts nor joins the poll loop, so a monitor sampling a run on
+    /// its own schedule costs exactly the calls it makes. Polling a durable run that lost its activation
+    /// resumes it, exactly as any other call to it does.
+    /// </para>
+    /// <para>
+    /// The counters describe the attempt that answered. A durable run's ending observed while its
+    /// activation still lived reports that attempt's final counters; the same ending re-read after the
+    /// activation is gone comes from the coordinator's register, which records outcomes and not
+    /// diagnostics, so the counters there read zero. The continuous record is the metrics pipeline's.
+    /// </para>
+    /// </remarks>
+    public async Task<RunSnapshot> SnapshotAsync()
+    {
+        RunStatusSnapshot status;
+
+        try
+        {
+            status = await _run.GetStatusAsync(Epoch).ConfigureAwait(false);
+        }
+        catch (PipelineFencingException refused)
+        {
+            if (!Adopt(refused))
+            {
+                throw;
+            }
+
+            status = await _run.GetStatusAsync(Epoch).ConfigureAwait(false);
+        }
+
+        return status.Phase switch
+        {
+            RunPhase.NotStarted => throw new PipelineRunLostException(
+                $"The run '{RunId}' is no longer active in the cluster, so there is no state to read. The activation hosting it was recycled and left nothing to continue."),
+            _ => new RunSnapshot
+            {
+                Status = status.Phase switch
+                {
+                    RunPhase.Completed => RunSnapshotStatus.Completed,
+                    RunPhase.Faulted => RunSnapshotStatus.Failed,
+                    RunPhase.Canceled => RunSnapshotStatus.Canceled,
+                    _ => RunSnapshotStatus.Running,
+                },
+                DroppedElements = status.DroppedElements,
+                SupervisedFailures = status.SupervisedFailures,
+                PoisonElements = status.PoisonElements,
+                Checkpoints = status.Checkpoints,
+                TotalCheckpointHold = status.TotalCheckpointHold,
+            },
+        };
+    }
 
     /// <summary>Resolves one result this run's pipeline declares.</summary>
     /// <typeparam name="TResult">The type this process binds to the slot's result contract.</typeparam>
@@ -315,40 +408,83 @@ public sealed class OrleansRunHandle : IAsyncDisposable
     }
 
     /// <summary>Takes over the epoch a fencing refusal named, when this handle is entitled to.</summary>
-    /// <param name="refused">The refusal, which carries the epoch the run is currently claimed under.</param>
-    /// <returns><see langword="true"/> when this handle adopted a newer epoch and the call is worth retrying.</returns>
+    /// <param name="refused">The refusal, which carries the run's current epoch and the one the call sent.</param>
+    /// <returns><see langword="true"/> when the call is worth retrying under the epoch this handle now holds.</returns>
     /// <remarks>
     /// <para>
     /// Only a durable handle adopts, and only forward. A durable run is named by its author and a resume is
     /// that same run continuing under a fresh claim, so a refusal naming a higher epoch is this run's own
     /// later attempt and following it is the whole point of a handle that outlives a silo. An ordinary run
     /// has no later attempt, so a refusal there names somebody else and adopting it would be taking over
-    /// work this handle never started.
+    /// work this handle never started. The adoption is a compare-exchange loop rather than an exchange, so
+    /// two of this handle's own paths adopting concurrently can only move the number forward.
     /// </para>
     /// <para>
-    /// A refusal naming the epoch this handle already carries is not adopted, because retrying would then
-    /// be a loop; a refusal naming zero is not adopted either, since zero is what a grain with no run at all
-    /// reports and there is nothing there to claim.
+    /// <b>A refusal can also answer a call this handle itself has already moved past</b>, and that one is
+    /// retried without adopting anything. The paths of one handle race each other by design — the poll loop
+    /// adopts a resumed attempt's epoch while a control call is in flight carrying the old one — and the
+    /// refusal that call earns names an epoch at or behind the one this handle now holds, sent by a call
+    /// that carried less. Rethrowing it would report a foreign claim on a run this handle legitimately
+    /// follows; retrying with the number already held is not following anybody new, and it terminates —
+    /// the retried call carries the held epoch, so it either passes the fence or earns a refusal whose
+    /// caller epoch equals what is held, which is not retried again.
+    /// </para>
+    /// <para>
+    /// A refusal whose caller epoch is the one this handle holds is a genuine answer about ownership and is
+    /// not adopted: retrying it unchanged would be a loop. A refusal naming zero falls out the same way,
+    /// since zero is what a grain with no run at all reports and there is nothing there to claim.
     /// </para>
     /// </remarks>
     private bool Adopt(PipelineFencingException refused)
     {
-        long held = Interlocked.Read(ref _epoch);
-
-        if (!_durable || refused.CurrentEpoch <= held)
+        if (!_durable)
         {
             return false;
         }
 
-        _ = Interlocked.Exchange(ref _epoch, refused.CurrentEpoch);
+        while (true)
+        {
+            long held = Interlocked.Read(ref _epoch);
 
-        return true;
+            if (refused.CurrentEpoch <= held)
+            {
+                return refused.CallerEpoch < held;
+            }
+
+            if (Interlocked.CompareExchange(ref _epoch, refused.CurrentEpoch, held) == held)
+            {
+                return true;
+            }
+        }
     }
 
     /// <summary>Returns a one-line diagnostic summary of this run.</summary>
     /// <returns>Text of the form <c>run 4f1c9a2b… of orders (epoch 3)</c>.</returns>
     /// <remarks>The method never throws and makes no call, so it is safe in any log line.</remarks>
     public override string ToString() => $"run {RunId} of {Ticket.GraphId} (epoch {Ticket.Epoch})";
+
+    /// <summary>Awaits the run's completion and translates its outcome into an ending.</summary>
+    /// <returns>The ending; the task cancels when the run was cancelled.</returns>
+    /// <remarks>
+    /// Only <see cref="PipelineRunFailedException"/> is translated, because it is the only outcome that
+    /// <em>is</em> an ending. A cancellation propagates so this task cancels with it, and a
+    /// <see cref="PipelineRunLostException"/> or <see cref="PipelineFencingException"/> propagates so this
+    /// task faults with it: a lost attempt and a foreign claim are runs whose ending this handle cannot
+    /// report, which is a different fact from either ending.
+    /// </remarks>
+    private async Task<RunEnding> WatchTerminationAsync()
+    {
+        try
+        {
+            await Completion.ConfigureAwait(false);
+
+            return RunEnding.Completed;
+        }
+        catch (PipelineRunFailedException failed)
+        {
+            return RunEnding.Failed(failed.FailureType, failed.FailureMessage);
+        }
+    }
 
     /// <summary>Polls the run until it reaches a terminal state, and reports which one.</summary>
     /// <returns>A task carrying the run's outcome.</returns>

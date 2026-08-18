@@ -1,4 +1,5 @@
 using Orleans.Dataflow.Definition;
+using Orleans.Dataflow.Diagnostics;
 using Orleans.Dataflow.Hosting;
 using Orleans.Dataflow.Identity;
 using Orleans.Dataflow.Serialization;
@@ -113,9 +114,10 @@ internal sealed class LocalCheckpointer
     /// <summary>Gets how long this run has been held by its captures in total.</summary>
     /// <value>The sum of every hold, measured on the run's clock.</value>
     /// <remarks>
-    /// One number for the whole run rather than one per capture, for the reason
-    /// <see cref="LocalRun.DroppedElements"/> is one number: what this pins is that the cost is observable
-    /// at all, and a per-capture breakdown is a monitor's shape.
+    /// One number for the whole run, for the reason <see cref="LocalRun.DroppedElements"/> is one number:
+    /// what this pins is that the cost is observable at all. The per-capture breakdown exists too, as the
+    /// checkpoint-hold histogram the capture path records sample by sample; this member is the sum a
+    /// snapshot reads.
     /// </remarks>
     internal TimeSpan Held => TimeSpan.FromTicks(Interlocked.Read(ref _heldTicks));
 
@@ -308,7 +310,13 @@ internal sealed class LocalCheckpointer
         }
         finally
         {
-            _ = Interlocked.Add(ref _heldTicks, _clock.GetElapsedTime(started).Ticks);
+            TimeSpan held = _clock.GetElapsedTime(started);
+
+            _ = Interlocked.Add(ref _heldTicks, held.Ticks);
+
+            // Every hold is recorded, including one whose write failed or was skipped because the run was
+            // over: what the histogram measures is how long captures held the run, not how many succeeded.
+            DataflowDiagnostics.CheckpointHeld(_fingerprint, held);
 
             _ = _pause.Release(LocalHold.Checkpoint);
         }

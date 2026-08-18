@@ -1,3 +1,5 @@
+using System.Globalization;
+using System.Text.Json;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Options;
 using Orleans.BroadcastChannel;
@@ -378,9 +380,17 @@ internal sealed class OrleansStageFactory(
     /// <param name="node">The node.</param>
     /// <returns>The runtime.</returns>
     /// <remarks>
+    /// <para>
     /// The window is created per run by the seed factory, which is what the factory shape exists for: a
     /// window handed over as a value would be one set of in-flight calls that two runs of one pipeline both
     /// wrote into.
+    /// </para>
+    /// <para>
+    /// <b>The mark is built here and the window closes over it</b>, which is the seam's own instruction that
+    /// a fold and its mark are the provider's two halves of one object. One mark per node per
+    /// materialization, exactly as a cursor is, so a checkpoint of two runs of one pipeline never confuses
+    /// their acknowledgements.
+    /// </para>
     /// </remarks>
     private DataflowStageRuntime GrainCallSink(StageNode node)
     {
@@ -394,8 +404,16 @@ internal sealed class OrleansStageFactory(
             throw Unregistered(node, "grain call sink", declaration.Call);
         }
 
+        GrainCallSinkMark mark = new();
+
         return DataflowStageRuntime.Terminal(
-            () => new GrainCallWindow(call!, grains, declaration.Call, declaration.MaxInFlight, declaration.Timeout),
+            () => new GrainCallWindow(
+                call!,
+                grains,
+                declaration.Call,
+                declaration.MaxInFlight,
+                declaration.Timeout,
+                mark),
             static (state, element) =>
             {
                 ((GrainCallWindow)state!).Submit(element);
@@ -408,7 +426,8 @@ internal sealed class OrleansStageFactory(
 
                 return null;
             },
-            producesResult: false);
+            producesResult: false,
+            mark);
     }
 
     /// <summary>Builds the grain enumeration source.</summary>
@@ -1020,6 +1039,7 @@ internal sealed class OrleansStageFactory(
 /// <param name="name">The call's name, for a timeout's diagnosis.</param>
 /// <param name="maxInFlight">The greatest number of calls in flight at once.</param>
 /// <param name="timeout">The per-call timeout, or <see langword="null"/>.</param>
+/// <param name="mark">The commit mark this stage declares, which one settled call advances.</param>
 /// <remarks>
 /// <para>
 /// A terminal in this engine is a synchronous fold on the last segment's own thread, so the bound is kept
@@ -1035,13 +1055,28 @@ internal sealed class OrleansStageFactory(
 /// flight are abandoned with the run, and their outcomes are read by the continuation that keeps them from
 /// resurfacing as unobserved exceptions.
 /// </para>
+/// <para>
+/// <b>The mark advances where a call is settled, which is where the acknowledgement is.</b> An awaited reply
+/// is this adapter's acknowledgement boundary, so the number a checkpoint stores is how many replies have
+/// come back — not how many elements the fold was handed, which is what the cursor already says. A call that
+/// throws never advances it, so the mark always describes work that finished, and a call still in flight at
+/// a capture is simply not counted yet.
+/// </para>
+/// <para>
+/// <b>The mark therefore lags by up to the declared bound and never leads.</b> A reply is <em>observed</em>
+/// when the queue reaches it rather than when it lands, so a window of five may hold four answered calls the
+/// mark has not counted, and a capture taken then stores the low-water number. That widens a resume's replay
+/// and cannot narrow it, which is the safe direction; a bound of one makes the two coincide exactly, which
+/// is the arrangement the crash suite measures on.
+/// </para>
 /// </remarks>
 internal sealed class GrainCallWindow(
     IGrainCallSinkEntry call,
     IGrainFactory grains,
     string name,
     int maxInFlight,
-    TimeSpan? timeout)
+    TimeSpan? timeout,
+    GrainCallSinkMark mark)
 {
     private readonly Queue<Task> _inFlight = new();
 
@@ -1087,9 +1122,91 @@ internal sealed class GrainCallWindow(
         }
     }
 
-    /// <summary>Observes one finished call, raising what it raised.</summary>
+    /// <summary>Observes one finished call, raising what it raised and marking it if it answered.</summary>
     /// <param name="pending">The call.</param>
-    private static void Settle(Task pending) => pending.GetAwaiter().GetResult();
+    /// <remarks>
+    /// The order is the commit mark's whole contract: the reply is waited for, and only a reply that arrived
+    /// advances the mark. A call that threw leaves the number where it was, so what a checkpoint stores is
+    /// acknowledged work and never attempted work.
+    /// </remarks>
+    private void Settle(Task pending)
+    {
+        pending.GetAwaiter().GetResult();
+
+        mark.Acknowledged();
+    }
+}
+
+/// <summary>
+/// The commit mark of a terminating grain call: how many of its calls have been acknowledged.
+/// </summary>
+/// <remarks>
+/// <para>
+/// ADR 0007's sink half for the one Orleans adapter that has an acknowledgement to point at. The awaited
+/// reply is this adapter's acknowledgement boundary — stated in its table row since M3 — so the mark counts
+/// replies, and a checkpoint carrying it says how much of the stream this sink has provably delivered rather
+/// than how much of it the run reached.
+/// </para>
+/// <para>
+/// <b>What it does not say</b> is anything about what the callee did behind the reply. An awaited call
+/// acknowledges that method invocation and nothing the grain may have started afterwards, so a mark here is
+/// exactly as strong as the adapter's own acknowledgement and no stronger. A deployment that needs a mark to
+/// mean "written down" puts the write in front of the reply, which is the callee's contract and not this
+/// adapter's to promise.
+/// </para>
+/// <para>
+/// The grammar is <c>{"acknowledged":n}</c>, which is this adapter's own and nobody else's to read — the
+/// same rule the stream source's position follows. The count is restored across a resume, so it is the run's
+/// number rather than the attempt's.
+/// </para>
+/// </remarks>
+internal sealed class GrainCallSinkMark : DataflowSinkMark
+{
+    /// <summary>The member of this mark holding how many calls have been acknowledged.</summary>
+    internal const string AcknowledgedMember = "acknowledged";
+
+    private long _acknowledged;
+
+    /// <summary>Gets how many of this sink's calls have been acknowledged.</summary>
+    /// <value>The running count across the run and every resume of it.</value>
+    internal long Count => Interlocked.Read(ref _acknowledged);
+
+    /// <inheritdoc/>
+    public override CanonicalJsonValue Mark =>
+        CanonicalJsonValue.Parse(string.Create(
+            CultureInfo.InvariantCulture,
+            $"{{\"{AcknowledgedMember}\":{Interlocked.Read(ref _acknowledged)}}}"));
+
+    /// <summary>Records that one more call has answered.</summary>
+    /// <remarks>
+    /// Called from the segment's own thread, after the reply has been waited for. Interlocked because the
+    /// capture loop reads the number from its own thread while the run is held quiescent, and a quiescence
+    /// that happens to close a race is not the same thing as there being no race.
+    /// </remarks>
+    internal void Acknowledged() => Interlocked.Increment(ref _acknowledged);
+
+    /// <inheritdoc/>
+    public override void RestoreTo(CanonicalJsonValue mark)
+    {
+        JsonElement declared = mark.IsDefault ? throw Unreadable(mark) : mark.ToElement();
+
+        if (declared.ValueKind is not JsonValueKind.Object ||
+            !declared.TryGetProperty(AcknowledgedMember, out JsonElement acknowledged) ||
+            acknowledged.ValueKind is not JsonValueKind.Number ||
+            !acknowledged.TryGetInt64(out long value) ||
+            value < 0)
+        {
+            throw Unreadable(mark);
+        }
+
+        _acknowledged = value;
+    }
+
+    /// <summary>Builds the failure a mark this sink cannot read produces.</summary>
+    /// <param name="mark">The mark as the checkpoint carried it.</param>
+    /// <returns>The exception.</returns>
+    private static InvalidOperationException Unreadable(CanonicalJsonValue mark) =>
+        new($"The checkpoint carries the mark {mark} for a terminating grain call, and such a sink's mark is an object with an '{AcknowledgedMember}' member holding a count of zero or more acknowledged calls. The checkpoint was written by a different graph or by hand.");
 }
 
 /// <summary>

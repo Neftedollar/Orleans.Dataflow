@@ -48,6 +48,7 @@ internal sealed class StageRuntime
     /// <param name="splitting">The splitting strategy, for a fan-out.</param>
     /// <param name="joining">The joining strategy, for a fan-in.</param>
     /// <param name="cursor">The cursor a source declares, or <see langword="null"/> for one that declares none.</param>
+    /// <param name="mark">The commit mark a terminal declares, or <see langword="null"/> for one that declares none.</param>
     private StageRuntime(
         StageRuntimeShape shape,
         StageSourceOpener? opener,
@@ -61,9 +62,11 @@ internal sealed class StageRuntime
         bool producesResult,
         LocalFanOut? splitting = null,
         LocalFanIn? joining = null,
-        Hosting.DataflowSourceCursor? cursor = null)
+        Hosting.DataflowSourceCursor? cursor = null,
+        Hosting.DataflowSinkMark? mark = null)
     {
         Cursor = cursor;
+        Mark = mark;
         Shape = shape;
         Opener = opener;
         Map = map;
@@ -145,6 +148,19 @@ internal sealed class StageRuntime
     /// every other adapter gives: it resumes from now, stated in its own table row rather than generalized.
     /// </remarks>
     internal Hosting.DataflowSourceCursor? Cursor { get; }
+
+    /// <summary>Gets the commit mark a terminal declares.</summary>
+    /// <value>
+    /// The provider's mark for a sink that declares one; <see langword="null"/> for every other shape and
+    /// for a sink that contributes nothing to a checkpoint.
+    /// </value>
+    /// <remarks>
+    /// The mirror of <see cref="Cursor"/> on the other end of the graph, and its absence is the answer every
+    /// other adapter gives: it says nothing about what it committed, stated in its own table row rather than
+    /// generalized. Nothing in the engine advances it — an adapter's effect is what moves the number — so
+    /// this member is read at a capture and written at a resume and never in between.
+    /// </remarks>
+    internal Hosting.DataflowSinkMark? Mark { get; }
 
     /// <summary>Creates the runtime of a source stage.</summary>
     /// <param name="opener">The opener of one enumeration, invoked once per run at the first pull.</param>
@@ -233,6 +249,9 @@ internal sealed class StageRuntime
     /// the state is already that value.
     /// </param>
     /// <param name="producesResult">Whether a document may declare a result slot over this terminal.</param>
+    /// <param name="mark">
+    /// The commit mark this sink declares, or <see langword="null"/> for a sink that declares none.
+    /// </param>
     /// <returns>The runtime.</returns>
     /// <exception cref="ArgumentNullException">
     /// <paramref name="seed"/> or <paramref name="fold"/> is <see langword="null"/>.
@@ -241,7 +260,8 @@ internal sealed class StageRuntime
         Func<object?> seed,
         Func<object?, object?, object?> fold,
         Func<object?, object?>? finish,
-        bool producesResult)
+        bool producesResult,
+        Hosting.DataflowSinkMark? mark = null)
     {
         ArgumentNullException.ThrowIfNull(seed);
         ArgumentNullException.ThrowIfNull(fold);
@@ -256,7 +276,11 @@ internal sealed class StageRuntime
             seed,
             fold,
             finish,
-            producesResult);
+            producesResult,
+            splitting: null,
+            joining: null,
+            cursor: null,
+            mark);
     }
 
     /// <summary>Creates the runtime of a splitting junction.</summary>

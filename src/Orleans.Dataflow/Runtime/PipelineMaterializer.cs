@@ -96,7 +96,7 @@ internal static class PipelineMaterializer
             runIdentity,
             TimeProvider.System);
 
-        return LocalRun.Start(plan, fingerprint, PipelineNonce, durable: null, cancellationToken);
+        return LocalRun.Start(plan, fingerprint, PipelineNonce, durable: null, resumed: false, cancellationToken);
     }
 
     /// <summary>Validates a document against a host and starts a run of it that writes checkpoints.</summary>
@@ -190,6 +190,7 @@ internal static class PipelineMaterializer
                     started.Faulted,
                     started.StopToken)
                 : null,
+            resumed: checkpoint is not null,
             cancellationToken);
     }
 

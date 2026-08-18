@@ -1,7 +1,9 @@
 using System.Collections;
 using System.Collections.Concurrent;
+using System.Diagnostics;
 using System.Threading.Channels;
 using Orleans.Dataflow.Definition;
+using Orleans.Dataflow.Diagnostics;
 using Orleans.Dataflow.Identity;
 
 namespace Orleans.Dataflow.Runtime;
@@ -84,6 +86,7 @@ internal sealed class LocalRun
     private readonly LocalPause _pause;
     private readonly LocalRunContext _context;
     private readonly TaskCompletionSource _completion = new(TaskCreationOptions.RunContinuationsAsynchronously);
+    private readonly TaskCompletionSource<RunEnding> _termination = new(TaskCreationOptions.RunContinuationsAsynchronously);
     private readonly TaskCompletionSource<object?>?[] _results;
     private readonly Dictionary<ResultSlotId, Task<object?>> _controls;
     private readonly Lock _gate = new();
@@ -103,6 +106,7 @@ internal sealed class LocalRun
     private bool _cancellationReleased;
     private volatile bool _shutdownRequested;
     private readonly LocalCheckpointer? _checkpointer;
+    private Activity? _activity;
 
     /// <summary>Initializes a new instance of the <see cref="LocalRun"/> class.</summary>
     /// <param name="plan">The compiled plan this run executes.</param>
@@ -210,18 +214,30 @@ internal sealed class LocalRun
     /// <value>A task that completes, faults, or cancels exactly once, and never before the run has stopped.</value>
     internal Task Completion => _completion.Task;
 
+    /// <summary>Gets the task that reports how this run ended, as a value rather than as an outcome.</summary>
+    /// <value>
+    /// A task that resolves with <see cref="RunEnding.Completed"/> or with a failure's type and message, and
+    /// that cancels when the run was cancelled.
+    /// </value>
+    /// <remarks>
+    /// It exists from the moment the run does, which is what makes it a control rather than a result, and it
+    /// is settled inside <see cref="Settle"/> immediately before <see cref="Completion"/> — so a caller
+    /// holding both never sees the completion transition while the watch is still pending.
+    /// </remarks>
+    internal Task<RunEnding> Termination => _termination.Task;
+
     /// <summary>Gets the number of elements this run's buffers have discarded.</summary>
     /// <value>
     /// The running count across every boundary, which stays zero for a run whose buffers all keep their
     /// elements.
     /// </value>
     /// <remarks>
-    /// A drop is never silent, and this counter is what makes that true today: an overflow policy that
-    /// discards elements says how many it discarded. It is deliberately one number for the whole run
-    /// rather than one per boundary, because a per-boundary breakdown is a monitor's shape and monitors are
-    /// a later checkpoint; the contract this pins is that dropping is observable at all. Elements abandoned
-    /// upstream of a completed stream are not drops and are not counted: nothing discarded them, the stream
-    /// they were travelling to had ended.
+    /// A drop is never silent, and this counter is what makes that true: an overflow policy that discards
+    /// elements says how many it discarded. It is deliberately one number for the whole run rather than one
+    /// per boundary — the monitor that ships (a snapshot of this number) reports the run, and a per-boundary
+    /// breakdown is the finer monitor that remains a recorded deferral; the contract this pins is that
+    /// dropping is observable at all. Elements abandoned upstream of a completed stream are not drops and
+    /// are not counted: nothing discarded them, the stream they were travelling to had ended.
     /// </remarks>
     internal long DroppedElements
     {
@@ -247,12 +263,12 @@ internal sealed class LocalRun
     /// a failure and for a graph that declares none.
     /// </value>
     /// <remarks>
-    /// A supervised failure is never silent, and this counter is what makes that true today: a scope that
-    /// drops an element says how many it dropped, so "resume" and "nothing went wrong" are two different
-    /// readings rather than one. One number for the whole run rather than one per scope, for the reason
-    /// <see cref="DroppedElements"/> is one number: a per-scope breakdown is a monitor's shape and monitors
-    /// are a later checkpoint. A retrying scope counts once per failed attempt, because an attempt that
-    /// failed is a failure the scope swallowed.
+    /// A supervised failure is never silent, and this counter is what makes that true: a scope that drops
+    /// an element says how many it dropped, so "resume" and "nothing went wrong" are two different readings
+    /// rather than one. One number for the whole run rather than one per scope, for the reason
+    /// <see cref="DroppedElements"/> is one number: the shipped monitor reports the run, and a per-scope
+    /// breakdown is the finer monitor that remains a recorded deferral. A retrying scope counts once per
+    /// failed attempt, because an attempt that failed is a failure the scope swallowed.
     /// </remarks>
     internal long SupervisedFailures => Interlocked.Read(ref _supervised);
 
@@ -278,6 +294,11 @@ internal sealed class LocalRun
     /// The checkpointing to start beside the run, over the run itself; <see langword="null"/> for a run that
     /// writes nothing.
     /// </param>
+    /// <param name="resumed">
+    /// Whether this run continues a stored position rather than beginning fresh. Telemetry only: the run
+    /// executes identically either way, because what a resume changes is what the plan's seams were handed
+    /// before this call.
+    /// </param>
     /// <param name="cancellationToken">The caller's token, which cancels the run.</param>
     /// <returns>The started run.</returns>
     /// <remarks>
@@ -291,11 +312,12 @@ internal sealed class LocalRun
         GraphFingerprint graph,
         Guid authoringNonce,
         Func<LocalRun, LocalCheckpointer>? durable,
+        bool resumed,
         CancellationToken cancellationToken)
     {
         LocalRun run = new(plan, graph, authoringNonce, durable, cancellationToken);
 
-        run.Launch();
+        run.Launch(resumed);
 
         return run;
     }
@@ -475,6 +497,7 @@ internal sealed class LocalRun
             _ => Interlocked.Increment(ref _dropped));
 
     /// <summary>Starts every segment of the plan, each on a thread of its own.</summary>
+    /// <param name="resumed">Whether this run continues a stored position, for the telemetry it opens.</param>
     /// <remarks>
     /// <para>
     /// A dedicated thread rather than a pooled one, because a segment calls synchronous author delegates
@@ -487,39 +510,56 @@ internal sealed class LocalRun
     /// anything starts, so its segments observe the end of the stream at their first look and its source is
     /// never touched at all.
     /// </para>
+    /// <para>
+    /// The run's activity is opened before the segments start and the caller's ambient one is put back
+    /// before this method returns, because the run span outlives the call that started it. The segment
+    /// threads capture their execution context between those two points, so author code running inside a
+    /// stage parents whatever it traces under the run rather than under wherever the caller happened to be.
+    /// </para>
     /// </remarks>
-    private void Launch()
+    private void Launch(bool resumed)
     {
-        for (int index = 0; index < _plan.CompletesAtStart.Count; index++)
+        Activity? ambient = Activity.Current;
+
+        _activity = DataflowDiagnostics.RunStarted(this, resumed);
+
+        try
         {
-            Complete(_plan.CompletesAtStart[index]);
-        }
+            for (int index = 0; index < _plan.CompletesAtStart.Count; index++)
+            {
+                Complete(_plan.CompletesAtStart[index]);
+            }
 
-        // Before any segment starts, so that a stage measuring "since the run started" measures from the
-        // moment the run was built rather than from the moment its thread happened to be scheduled. Both
-        // hooks are safe here: a window that closes before its segment runs leaves it stopped at its first
-        // look, and a timeout that fires first cancels a run that has not pulled anything. A valve is
-        // attached by the same walk and for the same reason — what it needs is the run's waits.
-        for (int index = 0; index < _plan.Segments.Count; index++)
+            // Before any segment starts, so that a stage measuring "since the run started" measures from the
+            // moment the run was built rather than from the moment its thread happened to be scheduled. Both
+            // hooks are safe here: a window that closes before its segment runs leaves it stopped at its first
+            // look, and a timeout that fires first cancels a run that has not pulled anything. A valve is
+            // attached by the same walk and for the same reason — what it needs is the run's waits.
+            for (int index = 0; index < _plan.Segments.Count; index++)
+            {
+                Attach(_plan.Segments[index], index);
+            }
+
+            for (int index = 0; index < _plan.Segments.Count; index++)
+            {
+                int segment = index;
+
+                _ = Task.Factory.StartNew(
+                    () => Execute(segment),
+                    CancellationToken.None,
+                    TaskCreationOptions.LongRunning | TaskCreationOptions.DenyChildAttach,
+                    TaskScheduler.Default);
+            }
+
+            // After the segments, so that the first interval of a timed capture is measured from a run that is
+            // already moving; and on the thread pool rather than on a dedicated thread, because this loop awaits
+            // and never calls an author's code.
+            _ = _checkpointer?.RunAsync();
+        }
+        finally
         {
-            Attach(_plan.Segments[index], index);
+            Activity.Current = ambient;
         }
-
-        for (int index = 0; index < _plan.Segments.Count; index++)
-        {
-            int segment = index;
-
-            _ = Task.Factory.StartNew(
-                () => Execute(segment),
-                CancellationToken.None,
-                TaskCreationOptions.LongRunning | TaskCreationOptions.DenyChildAttach,
-                TaskScheduler.Default);
-        }
-
-        // After the segments, so that the first interval of a timed capture is measured from a run that is
-        // already moving; and on the thread pool rather than on a dedicated thread, because this loop awaits
-        // and never calls an author's code.
-        _ = _checkpointer?.RunAsync();
     }
 
     /// <summary>Runs one segment to its end and reports how it ended to the run.</summary>
@@ -3107,16 +3147,28 @@ internal sealed class LocalRun
             }
         }
 
+        // Telemetry before the completion transition, so that a caller which has awaited completion reads
+        // metrics that already include this ending. The counters are final here — the segments are done and
+        // the capture loop was stopped above — and the call swallows everything, because this method must
+        // not throw and a run must never die of being observed.
+        DataflowDiagnostics.RunEnded(this, _activity, failure, canceled);
+
+        // The watch settles first, so a caller that has awaited completion reads a settled ending. The
+        // ending resolves for a failure — that is the affordance — and cancels for a cancellation, because
+        // cancelling abandons a run rather than ending one.
         if (failure is { } outcome)
         {
+            _termination.TrySetResult(RunEnding.Failed(outcome.GetType().FullName, outcome.Message));
             _completion.TrySetException(outcome);
         }
         else if (canceled)
         {
+            _termination.TrySetCanceled(_token);
             _completion.TrySetCanceled(_token);
         }
         else
         {
+            _termination.TrySetResult(RunEnding.Completed);
             _completion.TrySetResult();
         }
     }

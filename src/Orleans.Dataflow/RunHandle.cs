@@ -35,9 +35,14 @@ namespace Orleans.Dataflow;
 /// concurrently with any other member. Two callers awaiting one result observe one outcome.
 /// </para>
 /// <para>
-/// <b>What this checkpoint does not do.</b> There is no abort distinct from cancellation and no lifecycle
-/// state vocabulary beyond <see cref="IsPaused"/>; the elements a buffer discarded are counted but not yet
-/// exposed, because what an author will read them through is a monitor; and nothing here consults a clock.
+/// <b>Watching and reading.</b> <see cref="WatchTermination"/> is the run's ending as a value: a task that
+/// resolves with a <see cref="RunEnding"/> when the run completes or fails, and cancels when the run is
+/// cancelled, because cancellation abandons a run rather than ending one. <see cref="Snapshot"/> is the
+/// monitor: one reading of where the run is and what its counters have reached.
+/// </para>
+/// <para>
+/// <b>What this checkpoint does not do.</b> There is no abort distinct from cancellation, and nothing here
+/// consults a clock.
 /// </para>
 /// </remarks>
 public sealed class RunHandle : IAsyncDisposable
@@ -70,34 +75,65 @@ public sealed class RunHandle : IAsyncDisposable
     /// </remarks>
     public Task Completion => _run.Completion;
 
+    /// <summary>Gets a task that resolves with how this run ended.</summary>
+    /// <value>
+    /// A task that resolves with <see cref="RunEnding.Completed"/> when the source ended or a shutdown was
+    /// asked for, resolves with a <see cref="RunEndingKind.Failed"/> ending when a stage or the source
+    /// threw, and cancels when the run was cancelled.
+    /// </value>
+    /// <remarks>
+    /// <para>
+    /// The reading beside the throwing. <see cref="Completion"/> takes the run's outcome on: awaiting it
+    /// rethrows the failure, which is the right shape for code that treats a failed run as its own failure.
+    /// This task <em>resolves</em> with the outcome instead — a failed run's watch completes successfully,
+    /// carrying the failure's type name and message as facts to read — which is the right shape for code
+    /// that reacts to endings: a coordinator restarting whatever ends, a log line, a metric. ADR 0007 names
+    /// this affordance <c>WatchTermination</c>, and ADR 0002 explains why it is a member of the handle and
+    /// not a result slot: a slot resolves at the end of a run and carries the run's outcome, so a slot
+    /// typed "how it ended" could never resolve to "failed".
+    /// </para>
+    /// <para>
+    /// Cancellation is not an ending — it abandons a run rather than finishing one — so the watch of a
+    /// cancelled run cancels rather than resolving. The watch therefore never disagrees with
+    /// <see cref="Completion"/>: both resolve, both fault-or-report the same failure, or both cancel.
+    /// </para>
+    /// <para>
+    /// The failure travels as its CLR type name and message rather than as the exception instance, because
+    /// this is the one shape a clustered host can also fill; the instance itself is on
+    /// <see cref="Completion"/>, unwrapped. The watch is the run's own task rather than a wrapper over
+    /// completion, and it settles immediately <em>before</em> completion does: a caller that has awaited
+    /// <see cref="Completion"/> reads a settled ending here, never a pending one. Reading this property
+    /// starts nothing and keeps nothing alive.
+    /// </para>
+    /// </remarks>
+    public Task<RunEnding> WatchTermination => _run.Termination;
+
     /// <summary>Gets the number of elements this run's buffers have discarded.</summary>
     /// <value>The running count across every boundary of the graph.</value>
     /// <remarks>
-    /// Internal for now, and deliberately so. The contract a drop policy carries is that dropping is
-    /// observable rather than silent, and this is what makes that true today; what an author will read it
-    /// through is a monitor, which is a later checkpoint with a shape of its own. Publishing a bare counter
-    /// now would fix that shape by accident.
+    /// Internal, and deliberately so. The contract a drop policy carries is that dropping is observable
+    /// rather than silent; what an author reads it through is <see cref="Snapshot"/>, and the counter
+    /// itself stays internal so the reading has exactly one public shape.
     /// </remarks>
     internal long DroppedElements => _run.DroppedElements;
 
     /// <summary>Gets the number of failures this run's supervision scopes have contained.</summary>
     /// <value>The running count across every scope of the graph.</value>
     /// <remarks>
-    /// Internal for now and for the reason <see cref="DroppedElements"/> is: the contract a supervision
-    /// policy carries is that a swallowed failure is observable rather than silent, and this is what makes
-    /// that true today; what an author will read it through is a monitor, which is a later checkpoint with a
-    /// shape of its own.
+    /// Internal for the reason <see cref="DroppedElements"/> is: the contract a supervision policy carries
+    /// is that a swallowed failure is observable rather than silent, and <see cref="Snapshot"/> is what an
+    /// author reads it through.
     /// </remarks>
     internal long SupervisedFailures => _run.SupervisedFailures;
 
     /// <summary>Gets the number of elements this run's retrying scopes have given up on.</summary>
     /// <value>The running count of elements that used every attempt they were given.</value>
-    /// <remarks>Internal for now, beside <see cref="SupervisedFailures"/> and for the same reason.</remarks>
+    /// <remarks>Internal beside <see cref="SupervisedFailures"/> and for the same reason.</remarks>
     internal long PoisonElements => _run.PoisonElements;
 
     /// <summary>Gets how many checkpoints this run has written.</summary>
     /// <value>The count of accepted writes; zero for a run with no declared checkpoint timing.</value>
-    /// <remarks>Internal for now, beside the other counters and for the same reason: a monitor is its shape.</remarks>
+    /// <remarks>Internal beside the other counters and for the same reason: <see cref="Snapshot"/> is its shape.</remarks>
     internal long Checkpoints => _run.Checkpoints;
 
     /// <summary>Gets how long this run has been held by its checkpoints in total.</summary>
@@ -107,6 +143,35 @@ public sealed class RunHandle : IAsyncDisposable
     /// other counters, and read by the suite so that the sentence is a number rather than a claim.
     /// </remarks>
     internal TimeSpan CheckpointHold => _run.CheckpointHold;
+
+    /// <summary>Takes one reading of this run's observable state.</summary>
+    /// <returns>The reading: status and counters at the moment of the call.</returns>
+    /// <remarks>
+    /// <para>
+    /// The monitor. Callable at any point in the run's life, from any thread, and never throwing; a run
+    /// that has ended reports its final counters forever.
+    /// </para>
+    /// <para>
+    /// The counters are read one after another while the run may be moving, so a snapshot is a reading and
+    /// not a consistent cut: an element supervised between two of the reads lands in one counter and not
+    /// yet in another. Each individual counter is exact.
+    /// </para>
+    /// </remarks>
+    public RunSnapshot Snapshot() => new()
+    {
+        Status = _run.Completion.Status switch
+        {
+            TaskStatus.RanToCompletion => RunSnapshotStatus.Completed,
+            TaskStatus.Faulted => RunSnapshotStatus.Failed,
+            TaskStatus.Canceled => RunSnapshotStatus.Canceled,
+            _ => RunSnapshotStatus.Running,
+        },
+        DroppedElements = _run.DroppedElements,
+        SupervisedFailures = _run.SupervisedFailures,
+        PoisonElements = _run.PoisonElements,
+        Checkpoints = _run.Checkpoints,
+        TotalCheckpointHold = _run.CheckpointHold,
+    };
 
     /// <summary>Resolves one result this run's graph declares.</summary>
     /// <typeparam name="TResult">The type of the declared result.</typeparam>

@@ -140,6 +140,8 @@ Orleans.Dataflow.Hosting.DataflowRunTokens.RunToken.get -> System.Threading.Canc
 Orleans.Dataflow.Hosting.DataflowRunTokens.RunToken.init -> void
 Orleans.Dataflow.Hosting.DataflowRunTokens.StopToken.get -> System.Threading.CancellationToken
 Orleans.Dataflow.Hosting.DataflowRunTokens.StopToken.init -> void
+Orleans.Dataflow.Hosting.DataflowSinkMark
+Orleans.Dataflow.Hosting.DataflowSinkMark.DataflowSinkMark() -> void
 Orleans.Dataflow.Hosting.DataflowSourceCursor
 Orleans.Dataflow.Hosting.DataflowSourceCursor.DataflowSourceCursor() -> void
 Orleans.Dataflow.Hosting.DataflowStageRequest
@@ -279,6 +281,13 @@ Orleans.Dataflow.RetryExhaustion
 Orleans.Dataflow.RetryExhaustion.Fail = 0 -> Orleans.Dataflow.RetryExhaustion
 Orleans.Dataflow.RetryExhaustion.RestartStage = 2 -> Orleans.Dataflow.RetryExhaustion
 Orleans.Dataflow.RetryExhaustion.Resume = 1 -> Orleans.Dataflow.RetryExhaustion
+Orleans.Dataflow.RunEnding
+Orleans.Dataflow.RunEnding.FailureMessage.get -> string?
+Orleans.Dataflow.RunEnding.FailureType.get -> string?
+Orleans.Dataflow.RunEnding.Kind.get -> Orleans.Dataflow.RunEndingKind
+Orleans.Dataflow.RunEndingKind
+Orleans.Dataflow.RunEndingKind.Completed = 0 -> Orleans.Dataflow.RunEndingKind
+Orleans.Dataflow.RunEndingKind.Failed = 1 -> Orleans.Dataflow.RunEndingKind
 Orleans.Dataflow.RunHandle
 Orleans.Dataflow.RunHandle.Completion.get -> System.Threading.Tasks.Task!
 Orleans.Dataflow.RunHandle.DisposeAsync() -> System.Threading.Tasks.ValueTask
@@ -287,6 +296,29 @@ Orleans.Dataflow.RunHandle.IsPaused.get -> bool
 Orleans.Dataflow.RunHandle.PauseAsync(System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task!
 Orleans.Dataflow.RunHandle.ResumeAsync() -> System.Threading.Tasks.Task!
 Orleans.Dataflow.RunHandle.ShutdownAsync() -> System.Threading.Tasks.ValueTask
+Orleans.Dataflow.RunHandle.Snapshot() -> Orleans.Dataflow.RunSnapshot!
+Orleans.Dataflow.RunHandle.WatchTermination.get -> System.Threading.Tasks.Task<Orleans.Dataflow.RunEnding!>!
+Orleans.Dataflow.RunSnapshot
+Orleans.Dataflow.RunSnapshot.<Clone>$() -> Orleans.Dataflow.RunSnapshot!
+Orleans.Dataflow.RunSnapshot.Checkpoints.get -> long
+Orleans.Dataflow.RunSnapshot.Checkpoints.init -> void
+Orleans.Dataflow.RunSnapshot.DroppedElements.get -> long
+Orleans.Dataflow.RunSnapshot.DroppedElements.init -> void
+Orleans.Dataflow.RunSnapshot.Equals(Orleans.Dataflow.RunSnapshot? other) -> bool
+Orleans.Dataflow.RunSnapshot.PoisonElements.get -> long
+Orleans.Dataflow.RunSnapshot.PoisonElements.init -> void
+Orleans.Dataflow.RunSnapshot.RunSnapshot() -> void
+Orleans.Dataflow.RunSnapshot.Status.get -> Orleans.Dataflow.RunSnapshotStatus
+Orleans.Dataflow.RunSnapshot.Status.init -> void
+Orleans.Dataflow.RunSnapshot.SupervisedFailures.get -> long
+Orleans.Dataflow.RunSnapshot.SupervisedFailures.init -> void
+Orleans.Dataflow.RunSnapshot.TotalCheckpointHold.get -> System.TimeSpan
+Orleans.Dataflow.RunSnapshot.TotalCheckpointHold.init -> void
+Orleans.Dataflow.RunSnapshotStatus
+Orleans.Dataflow.RunSnapshotStatus.Canceled = 3 -> Orleans.Dataflow.RunSnapshotStatus
+Orleans.Dataflow.RunSnapshotStatus.Completed = 1 -> Orleans.Dataflow.RunSnapshotStatus
+Orleans.Dataflow.RunSnapshotStatus.Failed = 2 -> Orleans.Dataflow.RunSnapshotStatus
+Orleans.Dataflow.RunSnapshotStatus.Running = 0 -> Orleans.Dataflow.RunSnapshotStatus
 Orleans.Dataflow.RunnableGraph
 Orleans.Dataflow.RunnableGraph.AsPipeline(Orleans.Dataflow.Identity.GraphId id, Orleans.Dataflow.Identity.GraphRevision revision) -> Orleans.Dataflow.PipelineDefinition!
 Orleans.Dataflow.RunnableGraph.Control<TControl>(string! name) -> Orleans.Dataflow.ResultSlot<TControl>
@@ -437,6 +469,8 @@ Orleans.Dataflow.UnfoldStep<TState, T>.Value.init -> void
 Orleans.Dataflow.ValveMode
 Orleans.Dataflow.ValveMode.Closed = 1 -> Orleans.Dataflow.ValveMode
 Orleans.Dataflow.ValveMode.Open = 0 -> Orleans.Dataflow.ValveMode
+abstract Orleans.Dataflow.Hosting.DataflowSinkMark.Mark.get -> Orleans.Dataflow.Serialization.CanonicalJsonValue
+abstract Orleans.Dataflow.Hosting.DataflowSinkMark.RestoreTo(Orleans.Dataflow.Serialization.CanonicalJsonValue mark) -> void
 abstract Orleans.Dataflow.Hosting.DataflowSourceCursor.Delivered() -> void
 abstract Orleans.Dataflow.Hosting.DataflowSourceCursor.Position.get -> Orleans.Dataflow.Serialization.CanonicalJsonValue
 abstract Orleans.Dataflow.Hosting.DataflowSourceCursor.RestoreTo(Orleans.Dataflow.Serialization.CanonicalJsonValue position) -> void
@@ -480,7 +514,11 @@ override Orleans.Dataflow.ResultContract<TResult>.GetHashCode() -> int
 override Orleans.Dataflow.ResultContract<TResult>.ToString() -> string!
 override Orleans.Dataflow.ResultSlot<TResult>.GetHashCode() -> int
 override Orleans.Dataflow.ResultSlot<TResult>.ToString() -> string!
+override Orleans.Dataflow.RunEnding.ToString() -> string!
 override Orleans.Dataflow.RunHandle.ToString() -> string!
+override Orleans.Dataflow.RunSnapshot.Equals(object? obj) -> bool
+override Orleans.Dataflow.RunSnapshot.GetHashCode() -> int
+override Orleans.Dataflow.RunSnapshot.ToString() -> string!
 override Orleans.Dataflow.RunnableGraph.ToString() -> string!
 override Orleans.Dataflow.Sink<T>.ToString() -> string!
 override Orleans.Dataflow.SinkFactory<T>.ToString() -> string!
@@ -545,6 +583,7 @@ static Orleans.Dataflow.Hosting.DataflowStageRuntime.Partition(System.Func<objec
 static Orleans.Dataflow.Hosting.DataflowStageRuntime.Source(System.Func<Orleans.Dataflow.Hosting.DataflowRunTokens, System.Collections.Generic.IAsyncEnumerable<object?>!>! open) -> Orleans.Dataflow.Hosting.DataflowStageRuntime!
 static Orleans.Dataflow.Hosting.DataflowStageRuntime.Source(System.Func<Orleans.Dataflow.Hosting.DataflowRunTokens, System.Collections.Generic.IAsyncEnumerable<object?>!>! open, Orleans.Dataflow.Hosting.DataflowSourceCursor! cursor) -> Orleans.Dataflow.Hosting.DataflowStageRuntime!
 static Orleans.Dataflow.Hosting.DataflowStageRuntime.Terminal(System.Func<object?>! seed, System.Func<object?, object?, object?>! fold, System.Func<object?, object?>? finish, bool producesResult) -> Orleans.Dataflow.Hosting.DataflowStageRuntime!
+static Orleans.Dataflow.Hosting.DataflowStageRuntime.Terminal(System.Func<object?>! seed, System.Func<object?, object?, object?>! fold, System.Func<object?, object?>? finish, bool producesResult, Orleans.Dataflow.Hosting.DataflowSinkMark! mark) -> Orleans.Dataflow.Hosting.DataflowStageRuntime!
 static Orleans.Dataflow.Hosting.DataflowStageRuntime.Unzip(System.Collections.Generic.IReadOnlyList<System.Func<object?, object?>!>! parts) -> Orleans.Dataflow.Hosting.DataflowStageRuntime!
 static Orleans.Dataflow.Hosting.DataflowStageRuntime.Zip(System.Func<object?[]!, object?>! combine) -> Orleans.Dataflow.Hosting.DataflowStageRuntime!
 static Orleans.Dataflow.Hosting.StoredCheckpoint.operator !=(Orleans.Dataflow.Hosting.StoredCheckpoint left, Orleans.Dataflow.Hosting.StoredCheckpoint right) -> bool
@@ -565,6 +604,10 @@ static Orleans.Dataflow.ResultContract<TResult>.operator !=(Orleans.Dataflow.Res
 static Orleans.Dataflow.ResultContract<TResult>.operator ==(Orleans.Dataflow.ResultContract<TResult> left, Orleans.Dataflow.ResultContract<TResult> right) -> bool
 static Orleans.Dataflow.ResultSlot<TResult>.operator !=(Orleans.Dataflow.ResultSlot<TResult> left, Orleans.Dataflow.ResultSlot<TResult> right) -> bool
 static Orleans.Dataflow.ResultSlot<TResult>.operator ==(Orleans.Dataflow.ResultSlot<TResult> left, Orleans.Dataflow.ResultSlot<TResult> right) -> bool
+static Orleans.Dataflow.RunEnding.Completed.get -> Orleans.Dataflow.RunEnding!
+static Orleans.Dataflow.RunEnding.Failed(string? failureType, string? failureMessage) -> Orleans.Dataflow.RunEnding!
+static Orleans.Dataflow.RunSnapshot.operator !=(Orleans.Dataflow.RunSnapshot? left, Orleans.Dataflow.RunSnapshot? right) -> bool
+static Orleans.Dataflow.RunSnapshot.operator ==(Orleans.Dataflow.RunSnapshot? left, Orleans.Dataflow.RunSnapshot? right) -> bool
 static Orleans.Dataflow.Sink.Aggregate<T, TState>(TState seed, System.Func<TState, T, TState>! folder) -> Orleans.Dataflow.SinkWithResult<T, TState>!
 static Orleans.Dataflow.Sink.AggregateAsync<T, TState>(TState seed, System.Func<TState, T, System.Threading.CancellationToken, System.Threading.Tasks.Task<TState>!>! folder) -> Orleans.Dataflow.SinkWithResult<T, TState>!
 static Orleans.Dataflow.Sink.Collect<T>(Orleans.Dataflow.CollectOptions! options) -> Orleans.Dataflow.SinkWithResult<T, System.Collections.Generic.IReadOnlyList<T>!>!

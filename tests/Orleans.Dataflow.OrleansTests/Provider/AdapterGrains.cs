@@ -219,6 +219,18 @@ public interface IAdapterLedgerGrain : IGrainWithStringKey
     /// <param name="cancellationToken">The caller's token.</param>
     /// <returns>A task that completes when the price has been recorded.</returns>
     Task RecordGatedAsync(AdapterPrice price, CancellationToken cancellationToken);
+
+    /// <summary>Writes one price into the log the test process keeps.</summary>
+    /// <param name="price">The price.</param>
+    /// <param name="cancellationToken">The caller's token.</param>
+    /// <returns>A task that completes when the price has been written down.</returns>
+    /// <remarks>
+    /// The log rather than the shared observations, so that a test in its own collection can read what this
+    /// grain was handed without racing another collection's resets. It is also what makes the record outlive
+    /// the silo the grain happened to be hosted on, which is the whole point of asking a callee what it saw
+    /// after a crash.
+    /// </remarks>
+    Task LogAsync(AdapterPrice price, CancellationToken cancellationToken);
 }
 
 /// <summary>The ledger grain.</summary>
@@ -231,6 +243,19 @@ public sealed class AdapterLedgerGrain : Grain, IAdapterLedgerGrain
 {
     /// <summary>The signal the gated ledger waits for.</summary>
     internal const string GateSignal = "adapter-ledger-release";
+
+    /// <summary>The log the logging ledger writes every price it is handed into.</summary>
+    internal const string Log = "adapter-ledger-log";
+
+    /// <inheritdoc/>
+    public Task LogAsync(AdapterPrice price, CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(price);
+
+        TestDeliveries.Record(Log, price.Total);
+
+        return Task.CompletedTask;
+    }
 
     /// <inheritdoc/>
     public Task RecordAsync(AdapterPrice price, CancellationToken cancellationToken)

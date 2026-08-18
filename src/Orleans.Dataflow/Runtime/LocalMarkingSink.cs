@@ -35,7 +35,7 @@ namespace Orleans.Dataflow.Runtime;
 /// that reset would make a second crash's checkpoint describe less work than the first's.
 /// </para>
 /// </remarks>
-internal sealed class LocalMarkingSink(Action<object?> callback)
+internal sealed class LocalMarkingSink(Action<object?> callback) : ILocalCommitMark
 {
     /// <summary>The member of this sink's mark holding how many elements it has committed.</summary>
     internal const string CommittedMember = "committed";
@@ -52,7 +52,11 @@ internal sealed class LocalMarkingSink(Action<object?> callback)
 
     /// <summary>Gets how far this sink has committed, as a checkpoint carries it.</summary>
     /// <value>The mark, as a canonical value only this sink has to understand.</value>
-    internal CanonicalJsonValue Mark =>
+    /// <remarks>
+    /// Reached through <see cref="ILocalCommitMark"/> by the capture loop, which since M5.5 holds a seam
+    /// rather than this class: a registered sink declares a mark of its own and lands in the very same table.
+    /// </remarks>
+    public CanonicalJsonValue Mark =>
         CanonicalJsonValue.Parse(string.Create(
             CultureInfo.InvariantCulture,
             $"{{\"{CommittedMember}\":{Interlocked.Read(ref _committed)}}}"));
@@ -74,7 +78,7 @@ internal sealed class LocalMarkingSink(Action<object?> callback)
     /// <summary>Takes back a mark this sink reported earlier.</summary>
     /// <param name="mark">The mark, as a checkpoint carried it.</param>
     /// <exception cref="InvalidOperationException">The value is not a mark this sink understands.</exception>
-    internal void Restore(CanonicalJsonValue mark)
+    public void Restore(CanonicalJsonValue mark)
     {
         JsonElement declared = mark.IsDefault ? throw Unreadable(mark) : mark.ToElement();
 

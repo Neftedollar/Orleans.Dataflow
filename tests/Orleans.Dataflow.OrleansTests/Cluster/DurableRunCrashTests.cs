@@ -484,6 +484,140 @@ public sealed class DurableRunCrashTests(MultiSiloCluster cluster) : IAsyncLifet
         await handle.DisposeAsync();
     }
 
+    [Fact]
+    public async Task TheCommitMarkOfATerminatingGrainCallBoundsTheDuplicateWindowAndContinuesAcrossTheResume()
+    {
+        const string Run = "marked";
+        const string Gate = "durable-marked-gate";
+        const string Halt = "durable-marked-halted";
+
+        TestDeliveries.Clear(AdapterLedgerGrain.Log);
+
+        // The one pipeline in this suite with both halves of a checkpoint: a cursored source, and a sink
+        // whose acknowledgement is an awaited grain reply. Twelve elements at a capture every three, and the
+        // source waits before its eighth so the kill lands at a position this test chose rather than at
+        // whichever one the machine reached.
+        PipelineDefinition pipeline = AdapterPipelines.MarkedFeed(
+            "durable-marked",
+            count: 12,
+            halt: Halt,
+            gate: Gate,
+            gateAt: 8);
+
+        OrleansRunHandle handle = await cluster.MaterializeDurableAsync(pipeline, Run, everyElements: 3);
+
+        await TestSignals.Reached($"{Gate}-reached");
+
+        // Seven calls have been made and the source has parked at the gate. The seventh is waited for rather
+        // than asserted outright, because the sink starts a call and does not wait for its reply until it
+        // needs room for the next one: when the source reaches the gate the seventh call is in flight, so
+        // the callee may not have run yet. Waiting for it is waiting for a fact — the call was started and
+        // the callee is alive — and the sequence below is then exact rather than nearly exact.
+        await Poll.UntilAsync(
+            () => TestDeliveries.Of(AdapterLedgerGrain.Log).Count == 7,
+            "the seventh call reached the callee");
+
+        Assert.Equal([1L, 2L, 3L, 4L, 5L, 6L, 7L], TestDeliveries.Of(AdapterLedgerGrain.Log));
+        Assert.Equal(6L, await StoredCursorAsync(pipeline, Run));
+
+        // The mark lags the cursor by exactly one, and the one is the call still in flight. A capture is
+        // taken at the element that reached the bound, so the sink has been handed that element and its
+        // reply has not been waited for yet; with a bound of one call in flight, "waited for" is the whole
+        // difference between the two numbers. A mark that led the cursor — a sink counting elements it was
+        // handed rather than replies it received — would report six here and would be claiming an
+        // acknowledgement nobody gave.
+        Assert.Equal(5L, await StoredMarkAsync(pipeline, Run));
+
+        _ = await cluster.KillHostOfAsync(cluster.Run(handle));
+
+        // Released after the kill, so the attempt that dies is the one that stopped at the gate and the
+        // attempt that runs on is the resumed one.
+        TestSignals.Raise(Gate);
+
+        Task completion = handle.Completion;
+
+        await Deadline.Within(TestSignals.Reached(Halt), "the resumed attempt reached the end of the stream");
+
+        // The last call of the resumed attempt is in flight for the reason the seventh was above, so the
+        // thirteenth record is waited for before the sequence is named.
+        await Poll.UntilAsync(
+            () => TestDeliveries.Of(AdapterLedgerGrain.Log).Count == 13,
+            "every call of both attempts reached the callee");
+
+        // The duplicate window, as a sequence rather than a total: the resume reopens at the stored cursor,
+        // so the seventh element — delivered once already, and after the last capture — is delivered a
+        // second time, and nothing else is. The window is the elements between the stored position and the
+        // crash, which is exactly what at-least-once between commit points means.
+        Assert.Equal(
+            [1L, 2L, 3L, 4L, 5L, 6L, 7L, 7L, 8L, 9L, 10L, 11L, 12L],
+            TestDeliveries.Of(AdapterLedgerGrain.Log));
+
+        // And the mark is the run's number rather than the attempt's. The resumed attempt was handed the five
+        // acknowledgements the first one had written down and counted its own on top of them: five restored
+        // plus the replies for elements seven through eleven, which is ten. Had the mark restarted with the
+        // attempt this would read five, and a reader would conclude the run had committed half of what it
+        // had.
+        //
+        // Ten and not eleven, which is the honest part. The mark now lags the cursor by two rather than by
+        // the one call in flight: the first attempt did receive the reply for its seventh element, and that
+        // acknowledgement was made after its last capture, so nothing wrote it down and it died with the
+        // attempt. A mark is what was *stored*, and a crash costs the acknowledgements made since the last
+        // capture exactly as it costs the elements delivered since it. Undercounting is the safe direction —
+        // it widens a replay and can never narrow one — and it is the direction this seam is built to fail
+        // in.
+        Assert.Equal(12L, await StoredCursorAsync(pipeline, Run));
+        Assert.Equal(10L, await StoredMarkAsync(pipeline, Run));
+
+        // Waited for before the stop, exactly as the first test in this file waits for it. A resume claims a
+        // fresh epoch and this handle follows the run rather than the attempt, so a control call issued while
+        // the poll loop is still learning the new number carries the old one and is refused. Asking for the
+        // adoption first makes the stop a statement about a drain rather than about a race.
+        await Poll.UntilAsync(
+            () => handle.Epoch > handle.Ticket.Epoch,
+            "the handle adopted the epoch the resumed attempt claimed");
+
+        await handle.ShutdownAsync();
+        await Deadline.Within(completion, $"the resumed run {handle.RunId} drained and completed");
+    }
+
+    /// <summary>Reads the commit mark the store currently holds for one durable run.</summary>
+    /// <param name="pipeline">The pipeline the run belongs to.</param>
+    /// <param name="run">What the run is called.</param>
+    /// <returns>How many of the sink's calls had been acknowledged when the snapshot was taken.</returns>
+    /// <remarks>
+    /// Read out of the store rather than off the sink, for the reason the cursor is: what a resume restores
+    /// is what was written down, and a number read from a live adapter would only say what that adapter
+    /// believes. The grammar is the terminating grain call's own — an object with an <c>acknowledged</c>
+    /// member — and parsing it here rather than importing the adapter's parser is what makes this a check of
+    /// the document a deployment would find in its store.
+    /// </remarks>
+    private async Task<long> StoredMarkAsync(PipelineDefinition pipeline, string run)
+    {
+        StoredCheckpoint? stored = await cluster.Checkpoints.ReadAsync(
+            GraphId.Create(pipeline.Id.Value),
+            RunId.Create(run),
+            Token);
+
+        Assert.NotNull(stored);
+        Assert.True(
+            LocalCheckpointDocument.TryRead(
+                stored!.Value.Document,
+                out LocalCheckpoint? checkpoint,
+                out IReadOnlyList<string> violations),
+            $"The stored checkpoint for '{run}' does not read: {string.Join("; ", violations)}.");
+
+        Assert.Single(checkpoint!.Marks);
+
+        foreach (KeyValuePair<NodeId, CanonicalJsonValue> mark in checkpoint.Marks)
+        {
+            return mark.Value.ToElement().GetProperty("acknowledged").GetInt64();
+        }
+
+        throw new InvalidOperationException(string.Create(
+            CultureInfo.InvariantCulture,
+            $"The checkpoint of '{run}' carries no mark, which the assertion above has already refused."));
+    }
+
     /// <summary>Reads the cursor the store currently holds for one durable run.</summary>
     /// <param name="pipeline">The pipeline the run belongs to.</param>
     /// <param name="run">What the run is called.</param>

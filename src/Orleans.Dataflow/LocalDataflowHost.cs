@@ -184,7 +184,13 @@ public sealed class LocalDataflowHost
             _binder,
             string.Create(CultureInfo.InvariantCulture, $"local/{Guid.NewGuid():n}"),
             _clock);
-        LocalRun run = LocalRun.Start(plan, graph.Fingerprint, graph.AuthoringNonce, durable: null, cancellationToken);
+        LocalRun run = LocalRun.Start(
+            plan,
+            graph.Fingerprint,
+            graph.AuthoringNonce,
+            durable: null,
+            resumed: false,
+            cancellationToken);
 
         return new ValueTask<RunHandle>(new RunHandle(run));
     }
@@ -374,6 +380,7 @@ public sealed class LocalDataflowHost
                     started.Faulted,
                     started.StopToken)
                 : null,
+            resumed: checkpoint is not null,
             cancellationToken);
 
         return new RunHandle(run);

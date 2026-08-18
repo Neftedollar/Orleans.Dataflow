@@ -167,9 +167,18 @@ public sealed class MultiSiloCluster : IAsyncLifetime
 
             _ = silo.Configure<ClusterMembershipOptions>(Tune);
 
+            // The adapter catalog is registered beside the plain one for exactly one stage of it: the joint
+            // that lets the cursored test source feed the terminating grain call, which is the only pair in
+            // this suite that declares both halves of a checkpoint. Nothing else here uses an adapter, and
+            // no provider a failover test would have to reason about is configured — no streams, no
+            // reminders, no broadcast channels — so what the registration adds is a vocabulary entry and a
+            // grain call, not a second set of moving parts.
             _ = silo.AddOrleansDataflow(dataflow => dataflow
                 .AddCatalog(TestVocabulary.Catalog())
                 .AddFactory(TestVocabulary.Provider, new TestStageFactory())
+                .AddCatalog(AdapterVocabulary.Catalog())
+                .AddFactory(AdapterVocabulary.Provider, new AdapterStageFactory())
+                .AddGrainCallSink(AdapterVocabulary.Logging)
                 .UseCheckpointStore(_ => Checkpoints)
                 .UsePlacement(DataflowPlacement.Random, DataflowPlacement.Random));
         });

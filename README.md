@@ -42,10 +42,13 @@ long count = await run.GetValueAsync(processed, cancellationToken);
 Underneath: stable identifiers, the immutable graph document with structural
 validation, canonical serialization with golden fixtures, graph
 fingerprints, stage catalog contracts, and a graph compiler with stable
-diagnostic rules. Not yet here: buffered/parallel operators, junctions, any
-Orleans execution, supervision, or durability — the
+diagnostic rules. On top of that, as of M5: the full operator and junction
+vocabulary, Orleans execution with fenced run lifecycle, supervision scopes,
+durable runs with checkpoint resume across silo death, and OpenTelemetry.
+Not yet here: the F# frontend and the 1.0 qualification pass — the
 [capability matrix](docs/CAPABILITY-MATRIX.md) tracks honest per-capability
-status, and the [roadmap](docs/ROADMAP.md) orders the work ahead.
+status, the [roadmap](docs/ROADMAP.md) orders the work ahead, and
+[operations](docs/OPERATIONS.md) is the deployment runbook.
 
 ## Development policy before 1.0.0
 
