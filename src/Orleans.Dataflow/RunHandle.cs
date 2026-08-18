@@ -80,6 +80,21 @@ public sealed class RunHandle : IAsyncDisposable
     /// </remarks>
     internal long DroppedElements => _run.DroppedElements;
 
+    /// <summary>Gets the number of failures this run's supervision scopes have contained.</summary>
+    /// <value>The running count across every scope of the graph.</value>
+    /// <remarks>
+    /// Internal for now and for the reason <see cref="DroppedElements"/> is: the contract a supervision
+    /// policy carries is that a swallowed failure is observable rather than silent, and this is what makes
+    /// that true today; what an author will read it through is a monitor, which is a later checkpoint with a
+    /// shape of its own.
+    /// </remarks>
+    internal long SupervisedFailures => _run.SupervisedFailures;
+
+    /// <summary>Gets the number of elements this run's retrying scopes have given up on.</summary>
+    /// <value>The running count of elements that used every attempt they were given.</value>
+    /// <remarks>Internal for now, beside <see cref="SupervisedFailures"/> and for the same reason.</remarks>
+    internal long PoisonElements => _run.PoisonElements;
+
     /// <summary>Resolves one result this run's graph declares.</summary>
     /// <typeparam name="TResult">The type of the declared result.</typeparam>
     /// <param name="slot">The slot, as closing the graph produced it.</param>

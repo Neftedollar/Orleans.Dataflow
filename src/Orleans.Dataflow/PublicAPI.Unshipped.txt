@@ -79,6 +79,8 @@ Orleans.Dataflow.Flow<TIn, TOut>.Skip(int count) -> Orleans.Dataflow.Flow<TIn, T
 Orleans.Dataflow.Flow<TIn, TOut>.SkipWhile(System.Func<TOut, bool>! predicate) -> Orleans.Dataflow.Flow<TIn, TOut>!
 Orleans.Dataflow.Flow<TIn, TOut>.SkipWithin(System.TimeSpan window) -> Orleans.Dataflow.Flow<TIn, TOut>!
 Orleans.Dataflow.Flow<TIn, TOut>.Sliding(int size, int step) -> Orleans.Dataflow.Flow<TIn, System.Collections.Generic.IReadOnlyList<TOut>!>!
+Orleans.Dataflow.Flow<TIn, TOut>.Supervised<TNext>(Orleans.Dataflow.SupervisionOptions! options, Orleans.Dataflow.Flow<TOut, TNext>! scope) -> Orleans.Dataflow.Flow<TIn, TNext>!
+Orleans.Dataflow.Flow<TIn, TOut>.Supervised<TNext>(Orleans.Dataflow.SupervisionOptions! options, Orleans.Dataflow.Flow<TOut, TNext>! scope, TNext fallback) -> Orleans.Dataflow.Flow<TIn, TNext>!
 Orleans.Dataflow.Flow<TIn, TOut>.Take(int count) -> Orleans.Dataflow.Flow<TIn, TOut>!
 Orleans.Dataflow.Flow<TIn, TOut>.TakeThrough(System.Func<TOut, bool>! predicate) -> Orleans.Dataflow.Flow<TIn, TOut>!
 Orleans.Dataflow.Flow<TIn, TOut>.TakeWhile(System.Func<TOut, bool>! predicate) -> Orleans.Dataflow.Flow<TIn, TOut>!
@@ -238,6 +240,10 @@ Orleans.Dataflow.ResultSlot<TResult>.Graph.get -> Orleans.Dataflow.Definition.Gr
 Orleans.Dataflow.ResultSlot<TResult>.Id.get -> Orleans.Dataflow.Identity.ResultSlotId
 Orleans.Dataflow.ResultSlot<TResult>.IsDefault.get -> bool
 Orleans.Dataflow.ResultSlot<TResult>.ResultSlot() -> void
+Orleans.Dataflow.RetryExhaustion
+Orleans.Dataflow.RetryExhaustion.Fail = 0 -> Orleans.Dataflow.RetryExhaustion
+Orleans.Dataflow.RetryExhaustion.RestartStage = 2 -> Orleans.Dataflow.RetryExhaustion
+Orleans.Dataflow.RetryExhaustion.Resume = 1 -> Orleans.Dataflow.RetryExhaustion
 Orleans.Dataflow.RunHandle
 Orleans.Dataflow.RunHandle.Completion.get -> System.Threading.Tasks.Task!
 Orleans.Dataflow.RunHandle.DisposeAsync() -> System.Threading.Tasks.ValueTask
@@ -315,6 +321,8 @@ Orleans.Dataflow.Source<T>.Skip(int count) -> Orleans.Dataflow.Source<T>!
 Orleans.Dataflow.Source<T>.SkipWhile(System.Func<T, bool>! predicate) -> Orleans.Dataflow.Source<T>!
 Orleans.Dataflow.Source<T>.SkipWithin(System.TimeSpan window) -> Orleans.Dataflow.Source<T>!
 Orleans.Dataflow.Source<T>.Sliding(int size, int step) -> Orleans.Dataflow.Source<System.Collections.Generic.IReadOnlyList<T>!>!
+Orleans.Dataflow.Source<T>.Supervised<TOut>(Orleans.Dataflow.SupervisionOptions! options, Orleans.Dataflow.Flow<T, TOut>! scope) -> Orleans.Dataflow.Source<TOut>!
+Orleans.Dataflow.Source<T>.Supervised<TOut>(Orleans.Dataflow.SupervisionOptions! options, Orleans.Dataflow.Flow<T, TOut>! scope, TOut fallback) -> Orleans.Dataflow.Source<TOut>!
 Orleans.Dataflow.Source<T>.Take(int count) -> Orleans.Dataflow.Source<T>!
 Orleans.Dataflow.Source<T>.TakeThrough(System.Func<T, bool>! predicate) -> Orleans.Dataflow.Source<T>!
 Orleans.Dataflow.Source<T>.TakeWhile(System.Func<T, bool>! predicate) -> Orleans.Dataflow.Source<T>!
@@ -343,6 +351,23 @@ Orleans.Dataflow.StreamTimeoutException
 Orleans.Dataflow.StreamTimeoutException.StreamTimeoutException() -> void
 Orleans.Dataflow.StreamTimeoutException.StreamTimeoutException(string! message) -> void
 Orleans.Dataflow.StreamTimeoutException.StreamTimeoutException(string! message, System.Exception! innerException) -> void
+Orleans.Dataflow.SupervisionForm
+Orleans.Dataflow.SupervisionForm.Recover = 3 -> Orleans.Dataflow.SupervisionForm
+Orleans.Dataflow.SupervisionForm.RestartStage = 1 -> Orleans.Dataflow.SupervisionForm
+Orleans.Dataflow.SupervisionForm.Resume = 0 -> Orleans.Dataflow.SupervisionForm
+Orleans.Dataflow.SupervisionForm.Retry = 2 -> Orleans.Dataflow.SupervisionForm
+Orleans.Dataflow.SupervisionOptions
+Orleans.Dataflow.SupervisionOptions.<Clone>$() -> Orleans.Dataflow.SupervisionOptions!
+Orleans.Dataflow.SupervisionOptions.Backoff.get -> System.Collections.Generic.IReadOnlyList<System.TimeSpan>!
+Orleans.Dataflow.SupervisionOptions.Backoff.init -> void
+Orleans.Dataflow.SupervisionOptions.Equals(Orleans.Dataflow.SupervisionOptions? other) -> bool
+Orleans.Dataflow.SupervisionOptions.Form.get -> Orleans.Dataflow.SupervisionForm
+Orleans.Dataflow.SupervisionOptions.Form.init -> void
+Orleans.Dataflow.SupervisionOptions.MaxAttempts.get -> int
+Orleans.Dataflow.SupervisionOptions.MaxAttempts.init -> void
+Orleans.Dataflow.SupervisionOptions.OnExhaustion.get -> Orleans.Dataflow.RetryExhaustion
+Orleans.Dataflow.SupervisionOptions.OnExhaustion.init -> void
+Orleans.Dataflow.SupervisionOptions.SupervisionOptions() -> void
 Orleans.Dataflow.ThrottleMode
 Orleans.Dataflow.ThrottleMode.Enforcing = 1 -> Orleans.Dataflow.ThrottleMode
 Orleans.Dataflow.ThrottleMode.Shaping = 0 -> Orleans.Dataflow.ThrottleMode
@@ -420,6 +445,9 @@ override Orleans.Dataflow.Sink<T>.ToString() -> string!
 override Orleans.Dataflow.SinkFactory<T>.ToString() -> string!
 override Orleans.Dataflow.SinkWithResult<TIn, TResult>.ToString() -> string!
 override Orleans.Dataflow.Source<T>.ToString() -> string!
+override Orleans.Dataflow.SupervisionOptions.Equals(object? obj) -> bool
+override Orleans.Dataflow.SupervisionOptions.GetHashCode() -> int
+override Orleans.Dataflow.SupervisionOptions.ToString() -> string!
 override Orleans.Dataflow.ThrottleOptions.Equals(object? obj) -> bool
 override Orleans.Dataflow.ThrottleOptions.GetHashCode() -> int
 override Orleans.Dataflow.ThrottleOptions.ToString() -> string!
@@ -525,6 +553,8 @@ static Orleans.Dataflow.Source.Tick(System.TimeSpan initialDelay, System.TimeSpa
 static Orleans.Dataflow.Source.Unfold<TState, T>(TState seed, Orleans.Dataflow.UnfoldGenerator<TState, T>! generator) -> Orleans.Dataflow.Source<T>!
 static Orleans.Dataflow.Source.UnfoldAsync<TState, T>(TState seed, Orleans.Dataflow.AsyncUnfoldGenerator<TState, T>! generator) -> Orleans.Dataflow.Source<T>!
 static Orleans.Dataflow.Source.UnzipTo<TLeft, TRight>(this Orleans.Dataflow.Source<(TLeft Left, TRight Right)>! source, Orleans.Dataflow.Branch<TLeft>! left, Orleans.Dataflow.Branch<TRight>! right) -> Orleans.Dataflow.RunnableGraph!
+static Orleans.Dataflow.SupervisionOptions.operator !=(Orleans.Dataflow.SupervisionOptions? left, Orleans.Dataflow.SupervisionOptions? right) -> bool
+static Orleans.Dataflow.SupervisionOptions.operator ==(Orleans.Dataflow.SupervisionOptions? left, Orleans.Dataflow.SupervisionOptions? right) -> bool
 static Orleans.Dataflow.ThrottleOptions.operator !=(Orleans.Dataflow.ThrottleOptions? left, Orleans.Dataflow.ThrottleOptions? right) -> bool
 static Orleans.Dataflow.ThrottleOptions.operator ==(Orleans.Dataflow.ThrottleOptions? left, Orleans.Dataflow.ThrottleOptions? right) -> bool
 static Orleans.Dataflow.UnfoldStep<TState, T>.operator !=(Orleans.Dataflow.UnfoldStep<TState, T> left, Orleans.Dataflow.UnfoldStep<TState, T> right) -> bool

@@ -30,9 +30,14 @@ namespace Orleans.Dataflow.Authoring;
 /// <para>
 /// What that payload is <em>not</em> is a nested document. There are no identities, no ports, and no edges:
 /// a group flow is a chain fused per key, so its order is the array's order and there is nothing else to
-/// state. A stage that could not be fused per key is refused here by name — the list is
+/// state. A stage that could not be fused per key is refused by name — the list is
 /// <see cref="LocalVocabulary.RunsInsideAGroup"/> and the refusal says which stage broke it — which is the
 /// same refusal the authoring surface raises, spoken by the reader the runtime itself uses.
+/// </para>
+/// <para>
+/// The array itself is <see cref="LocalInnerChain"/>'s, because a supervision scope carries a chain the same
+/// way and for the same reason. What is this payload's own is the two numbers around it and the words a
+/// keyed stage uses for its chain, which <see cref="LocalInnerChain.Words.GroupFlow"/> holds.
 /// </para>
 /// </remarks>
 internal static class LocalGroupByParameters
@@ -45,12 +50,6 @@ internal static class LocalGroupByParameters
 
     /// <summary>The payload member holding the stages one key's substream is made of.</summary>
     internal const string GroupMember = "group";
-
-    /// <summary>The member of a group stage naming which shape it is.</summary>
-    internal const string StageMember = "stage";
-
-    /// <summary>The member of a group stage carrying the payload that shape reads.</summary>
-    internal const string ParametersMember = "parameters";
 
     /// <summary>Gets the check the <c>group-by</c> stage applies to a node's parameter payload.</summary>
     internal static IStageParameterValidator Validator { get; } = new PayloadValidator();
@@ -65,16 +64,9 @@ internal static class LocalGroupByParameters
 
         _ = text.Append(CultureInfo.InvariantCulture, $"{{\"{MaxActiveKeysMember}\":{options.MaxActiveKeys}")
             .Append(CultureInfo.InvariantCulture, $",\"{PolicyMember}\":\"{Spell(options.OverflowPolicy)}\"")
-            .Append(CultureInfo.InvariantCulture, $",\"{GroupMember}\":[");
+            .Append(CultureInfo.InvariantCulture, $",\"{GroupMember}\":");
 
-        for (int stage = 0; stage < group.Count; stage++)
-        {
-            _ = text.Append(stage == 0 ? string.Empty : ",")
-                .Append(CultureInfo.InvariantCulture, $"{{\"{StageMember}\":\"{group[stage].Stage}\"")
-                .Append(CultureInfo.InvariantCulture, $",\"{ParametersMember}\":{group[stage].Parameters}}}");
-        }
-
-        return CanonicalJsonValue.Parse(text.Append("]}").ToString());
+        return CanonicalJsonValue.Parse(LocalInnerChain.Write(text, group).Append('}').ToString());
     }
 
     /// <summary>Renders one active-key overflow policy the way a payload spells it.</summary>
@@ -105,7 +97,7 @@ internal static class LocalGroupByParameters
     internal static bool TryRead(
         CanonicalJsonValue parameters,
         out GroupByOptions? options,
-        out IReadOnlyList<LocalGroupStage> group,
+        out IReadOnlyList<LocalInnerStage> group,
         out IReadOnlyList<string> violations)
     {
         options = null;
@@ -128,7 +120,11 @@ internal static class LocalGroupByParameters
             out int maxActiveKeys);
 
         read &= TryReadPolicy(payload, found, out ActiveKeyOverflowPolicy policy);
-        read &= TryReadGroup(payload, found, out IReadOnlyList<LocalGroupStage> stages);
+        read &= LocalInnerChain.TryRead(
+            payload,
+            LocalInnerChain.Words.GroupFlow,
+            found,
+            out IReadOnlyList<LocalInnerStage> stages);
 
         LocalParameterPayload.ReportUnknownMembers(
             payload,
@@ -196,160 +192,6 @@ internal static class LocalGroupByParameters
         }
     }
 
-    /// <summary>Reads the member that has to be the chain one key's substream is made of.</summary>
-    /// <param name="payload">The payload object.</param>
-    /// <param name="violations">The list one lower-case sentence fragment is added to per violation.</param>
-    /// <param name="group">
-    /// When this method returns <see langword="true"/>, the stages in flow order; otherwise empty.
-    /// </param>
-    /// <returns><see langword="true"/> when the member is an array of stages that fuse per key.</returns>
-    /// <remarks>
-    /// An empty array is legal and is the identity group flow: every key's substream passes its elements
-    /// through untouched, which is a keyed stage that costs a key table and does nothing else. Refusing it
-    /// would be refusing <see cref="Flow.For{T}"/>, which is a value an author can compose.
-    /// </remarks>
-    private static bool TryReadGroup(
-        JsonElement payload,
-        List<string> violations,
-        out IReadOnlyList<LocalGroupStage> group)
-    {
-        group = [];
-
-        if (!payload.TryGetProperty(GroupMember, out JsonElement declared))
-        {
-            violations.Add(LocalParameterPayload.DescribeMissing(GroupMember));
-
-            return false;
-        }
-
-        if (declared.ValueKind is not JsonValueKind.Array)
-        {
-            violations.Add(LocalParameterPayload.DescribeWrongKind(
-                GroupMember,
-                declared,
-                "an array of the stages one key's substream is made of"));
-
-            return false;
-        }
-
-        List<LocalGroupStage> stages = [];
-        bool read = true;
-        int position = 0;
-
-        foreach (JsonElement stage in declared.EnumerateArray())
-        {
-            position++;
-
-            if (TryReadStage(stage, position, violations, out LocalGroupStage element))
-            {
-                stages.Add(element);
-            }
-            else
-            {
-                read = false;
-            }
-        }
-
-        group = read ? stages : [];
-
-        return read;
-    }
-
-    /// <summary>Reads one entry of the group flow as the shape it names and the payload that shape reads.</summary>
-    /// <param name="declared">The entry.</param>
-    /// <param name="position">Its one-based position in the group flow, for the diagnostic.</param>
-    /// <param name="violations">The list one lower-case sentence fragment is added to per violation.</param>
-    /// <param name="stage">
-    /// When this method returns <see langword="true"/>, the stage; otherwise an unspecified value.
-    /// </param>
-    /// <returns><see langword="true"/> when the entry names a shape that fuses per key and carries a payload that shape accepts.</returns>
-    /// <remarks>
-    /// The payload of a group stage is checked by the very validator its own shape declares, so a
-    /// <c>take</c> inside a group flow refuses a count of minus one in the same sentence a <c>take</c>
-    /// standing on its own would, and a shape added to the vocabulary needs nothing here.
-    /// </remarks>
-    private static bool TryReadStage(
-        JsonElement declared,
-        int position,
-        List<string> violations,
-        out LocalGroupStage stage)
-    {
-        stage = default;
-
-        if (declared.ValueKind is not JsonValueKind.Object)
-        {
-            violations.Add(Describe(position, "is not an object, and a group stage is an object"));
-
-            return false;
-        }
-
-        if (!declared.TryGetProperty(StageMember, out JsonElement named) ||
-            named.ValueKind is not JsonValueKind.String)
-        {
-            violations.Add(Describe(position, $"has no '{StageMember}' member naming which stage it is"));
-
-            return false;
-        }
-
-        string text = named.GetString()!;
-
-        if (!LocalVocabulary.TryReadStage(text, out LocalStageKind kind))
-        {
-            violations.Add(Describe(position, $"names '{text}', and no local stage is called that"));
-
-            return false;
-        }
-
-        if (!LocalVocabulary.RunsInsideAGroup(kind))
-        {
-            violations.Add(Describe(
-                position,
-                $"names '{text}', and a group flow runs fused per key, so it holds element stages only"));
-
-            return false;
-        }
-
-        if (!declared.TryGetProperty(ParametersMember, out JsonElement parameters))
-        {
-            violations.Add(Describe(position, $"has no '{ParametersMember}' member"));
-
-            return false;
-        }
-
-        List<string> unknown = [];
-
-        LocalParameterPayload.ReportUnknownMembers(declared, [StageMember, ParametersMember], unknown);
-
-        if (unknown.Count > 0)
-        {
-            violations.Add(Describe(position, $"carries members a group stage does not: {string.Join("; ", unknown)}"));
-
-            return false;
-        }
-
-        CanonicalJsonValue payload = CanonicalJsonValue.FromElement(parameters);
-        IReadOnlyList<string> refused =
-            LocalVocabulary.ParameterValidatorOf(kind)?.Validate(payload) ?? [];
-
-        if (refused.Count > 0)
-        {
-            violations.Add(Describe(position, $"carries parameters '{text}' refuses: {string.Join("; ", refused)}"));
-
-            return false;
-        }
-
-        stage = new LocalGroupStage(kind, payload);
-
-        return true;
-    }
-
-    /// <summary>Words one violation about one stage of the group flow.</summary>
-    /// <param name="position">The one-based position in the group flow.</param>
-    /// <param name="complaint">What is wrong with it, read after the position.</param>
-    /// <returns>The violation fragment.</returns>
-    private static string Describe(int position, string complaint) =>
-        string.Create(CultureInfo.InvariantCulture, $"stage {position} of the member '{GroupMember}' {complaint}");
-
     /// <summary>The parameter check of the <c>group-by</c> stage.</summary>
     private sealed class PayloadValidator : IStageParameterValidator
     {
@@ -358,7 +200,7 @@ internal static class LocalGroupByParameters
             TryRead(
                 parameters,
                 out GroupByOptions? _,
-                out IReadOnlyList<LocalGroupStage> _,
+                out IReadOnlyList<LocalInnerStage> _,
                 out IReadOnlyList<string> violations)
                 ? []
                 : violations;

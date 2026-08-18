@@ -755,6 +755,63 @@ internal static class LocalDelegateAdapter
             group);
     }
 
+    /// <summary>Reads a fault point's binding as the two things it binds.</summary>
+    /// <param name="behavior">The bound pair, in that order.</param>
+    /// <returns>
+    /// The factory of what to throw, over the one-based position of the arrival, and the factory of the
+    /// typed control an author receives — the second of which is <see langword="null"/> for an occurrence
+    /// that exposes no control, which is every fault point standing inside a supervision scope.
+    /// </returns>
+    /// <exception cref="InvalidOperationException"><paramref name="behavior"/> is not such a pair.</exception>
+    /// <remarks>
+    /// The one binding in this vocabulary whose second half is legitimately absent. A control is resolved by
+    /// the node that produces it, and the stages of an inner chain are not nodes; the arming a fault point
+    /// inside a scope was declared with is the whole of what it needs, so the facade it would be reached
+    /// through is not built.
+    /// </remarks>
+    internal static (Func<long, Exception> Fault, Func<LocalFaultPoint, object>? Facade) FaultPoint(
+        object? behavior)
+    {
+        const LocalStageKind Kind = LocalStageKind.FaultPoint;
+        const string Expected = "pair of a Func<long, Exception> and the factory of its typed control";
+
+        if (behavior is not object?[] { Length: 2 } pair ||
+            pair[0] is not Func<long, Exception> fault ||
+            (pair[1] is not null && pair[1] is not Func<LocalFaultPoint, object>))
+        {
+            throw Mismatch(behavior, Kind, Expected);
+        }
+
+        return (fault, pair[1] as Func<LocalFaultPoint, object>);
+    }
+
+    /// <summary>Reads a supervision scope's binding as the two things it binds.</summary>
+    /// <param name="behavior">The bound pair, in that order.</param>
+    /// <returns>
+    /// The element a recovering scope emits — boxed, meaningless for the other three forms, and legitimately
+    /// <see langword="null"/> — and the occurrences the scope's chain is made of.
+    /// </returns>
+    /// <exception cref="InvalidOperationException"><paramref name="behavior"/> is not such a pair.</exception>
+    /// <remarks>
+    /// The second stage of this vocabulary that binds another stage's binding, and it carries the
+    /// occurrences whole for the reason a keyed stage does: the planner needs each one's kind to check it
+    /// against what the document says the chain is, and a list of bare delegates could not be checked
+    /// against anything.
+    /// </remarks>
+    internal static (object? Fallback, IReadOnlyList<LocalStageDescriptor> Scope) Supervised(object? behavior)
+    {
+        const LocalStageKind Kind = LocalStageKind.Supervised;
+        const string Expected = "pair of the fallback element and the stages of the scope";
+
+        if (behavior is not object?[] { Length: 2 } pair ||
+            pair[1] is not IReadOnlyList<LocalStageDescriptor> scope)
+        {
+            throw Mismatch(behavior, Kind, Expected);
+        }
+
+        return (pair[0], scope);
+    }
+
     /// <summary>Bridges a channel reader into the boxed vocabulary a pull loop speaks.</summary>
     /// <param name="behavior">The bound <c>ChannelReader&lt;T&gt;</c>.</param>
     /// <returns>The bridge.</returns>

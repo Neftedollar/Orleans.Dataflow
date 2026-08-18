@@ -37,11 +37,15 @@ namespace Orleans.Dataflow.Runtime;
 /// Reports to the segment that owns this stage that there may be work, as an asynchronous callback finishing
 /// does.
 /// </param>
+/// <param name="supervised">Records that a scope of this run contained one failure.</param>
+/// <param name="poisoned">Records that a retrying scope of this run gave up on one element.</param>
 internal sealed class LocalStageAttachment(
     LocalRunContext context,
     Action complete,
     Action<Exception> fail,
-    Action wake)
+    Action wake,
+    Action supervised,
+    Action poisoned)
 {
     /// <summary>The longest due time a timer of the system clock accepts.</summary>
     /// <remarks>
@@ -97,6 +101,23 @@ internal sealed class LocalStageAttachment(
     /// Safe from any thread, and a signal to a segment that has already stopped is discarded.
     /// </remarks>
     internal void Wake() => wake();
+
+    /// <summary>Records that a scope of this run contained one failure.</summary>
+    /// <remarks>
+    /// The fourth hook, and the one M5.1 needed: a policy that drops an element is a policy that has to say
+    /// how often it did, or "resume" would be indistinguishable from "nothing went wrong". Counted per
+    /// failure a scope intercepted, which for the retrying form means once per failed attempt — the number
+    /// answers "how much did this run swallow", and an attempt that failed was swallowed.
+    /// </remarks>
+    internal void Supervised() => supervised();
+
+    /// <summary>Records that a retrying scope of this run gave up on one element.</summary>
+    /// <remarks>
+    /// A poison element in ADR 0007's own words: one that exhausted its attempts. Counted beside — never
+    /// instead of — <see cref="Supervised"/>, because the two answer different questions, and one number
+    /// could not answer both.
+    /// </remarks>
+    internal void Poisoned() => poisoned();
 
     /// <summary>Creates a disarmed timer on the run's clock.</summary>
     /// <param name="callback">What to run when it fires.</param>

@@ -432,4 +432,29 @@ internal enum LocalStageKind
     /// result port.
     /// </summary>
     SinkProbe,
+
+    /// <summary>
+    /// Passes every element through and throws where its declared arming says to; one input port, one
+    /// output port, and one control result port.
+    /// </summary>
+    /// <remarks>
+    /// The failure-injection seam of ADR 0007. It is a shape of this vocabulary because the vocabulary is
+    /// one closed set and a document has to be able to name what it is running — exactly as
+    /// <see cref="SinkProbe"/> is — and the only spelling an author can reach it through lives in the
+    /// testing package. Its control port is the one in this vocabulary an occurrence may leave unbound: a
+    /// fault point standing inside a supervision scope is not a node and has nothing to declare a slot on,
+    /// and its arming already says everything a test needs it to do.
+    /// </remarks>
+    FaultPoint,
+
+    /// <summary>
+    /// Owns the execution of a declared chain and answers its failures by a declared policy; one input port
+    /// and one output port.
+    /// </summary>
+    /// <remarks>
+    /// The supervision scope of ADR 0007, and the second shape of this vocabulary whose payload carries
+    /// other stages. It reads the run's clock, because the retrying form waits between attempts, which is
+    /// why it is an attached stage rather than a plain element one.
+    /// </remarks>
+    Supervised,
 }

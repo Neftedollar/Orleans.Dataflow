@@ -1,4 +1,18 @@
 #nullable enable
+Orleans.Dataflow.Testing.FaultInjectedException
+Orleans.Dataflow.Testing.FaultInjectedException.Arrival.get -> long
+Orleans.Dataflow.Testing.FaultInjectedException.FaultInjectedException() -> void
+Orleans.Dataflow.Testing.FaultInjectedException.FaultInjectedException(string! message) -> void
+Orleans.Dataflow.Testing.FaultInjectedException.FaultInjectedException(string! message, System.Exception! innerException) -> void
+Orleans.Dataflow.Testing.FaultPointMode
+Orleans.Dataflow.Testing.FaultPointMode.Always = 2 -> Orleans.Dataflow.Testing.FaultPointMode
+Orleans.Dataflow.Testing.FaultPointMode.Never = 0 -> Orleans.Dataflow.Testing.FaultPointMode
+Orleans.Dataflow.Testing.FaultPointMode.Once = 1 -> Orleans.Dataflow.Testing.FaultPointMode
+Orleans.Dataflow.Testing.IFaultPoint
+Orleans.Dataflow.Testing.IFaultPoint.Arm(Orleans.Dataflow.Testing.FaultPointMode mode, long firstFailure = 1) -> void
+Orleans.Dataflow.Testing.IFaultPoint.Disarm() -> void
+Orleans.Dataflow.Testing.IFaultPoint.ElementsSeen.get -> long
+Orleans.Dataflow.Testing.IFaultPoint.FaultsThrown.get -> long
 Orleans.Dataflow.Testing.ISinkProbe<T>
 Orleans.Dataflow.Testing.ISinkProbe<T>.ExpectCompletedAsync(System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.ValueTask
 Orleans.Dataflow.Testing.ISinkProbe<T>.ExpectFailedAsync(System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.ValueTask<System.Exception!>
@@ -30,6 +44,7 @@ Orleans.Dataflow.Testing.TestClock.PendingTimers.get -> int
 Orleans.Dataflow.Testing.TestClock.TestClock() -> void
 Orleans.Dataflow.Testing.TestClock.TestClock(System.DateTimeOffset start) -> void
 Orleans.Dataflow.Testing.TestClock.WaitForTimersAsync(int count, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task!
+Orleans.Dataflow.Testing.TestFlow
 Orleans.Dataflow.Testing.TestSink
 Orleans.Dataflow.Testing.TestSource
 override Orleans.Dataflow.Testing.ProviderConformance.ToString() -> string!
@@ -43,5 +58,9 @@ static Orleans.Dataflow.Testing.ProviderConformance.Checks.get -> System.Collect
 static Orleans.Dataflow.Testing.ProviderConformance.Create(Orleans.Dataflow.Identity.ProviderId provider, Orleans.Dataflow.Definition.IStageCatalog! catalog, Orleans.Dataflow.Hosting.IDataflowStageFactory! factory, System.Collections.Generic.IEnumerable<Orleans.Dataflow.Testing.ProviderStageSample!>! samples) -> Orleans.Dataflow.Testing.ProviderConformance!
 static Orleans.Dataflow.Testing.ProviderStageSample.Create(Orleans.Dataflow.Identity.StageRef stage, Orleans.Dataflow.Serialization.CanonicalJsonValue parameters) -> Orleans.Dataflow.Testing.ProviderStageSample!
 static Orleans.Dataflow.Testing.ProviderStageSample.Create(Orleans.Dataflow.Identity.StageRef stage, Orleans.Dataflow.Serialization.CanonicalJsonValue parameters, System.Collections.Generic.IEnumerable<string!>! optionalMembers) -> Orleans.Dataflow.Testing.ProviderStageSample!
+static Orleans.Dataflow.Testing.TestFlow.FaultPoint<T>(Orleans.Dataflow.Testing.FaultPointMode mode, int firstFailure) -> Orleans.Dataflow.Flow<T, T>!
+static Orleans.Dataflow.Testing.TestFlow.FaultPoint<T>(Orleans.Dataflow.Testing.FaultPointMode mode, int firstFailure, System.Func<long, System.Exception!>! fault) -> Orleans.Dataflow.Flow<T, T>!
+static Orleans.Dataflow.Testing.TestFlow.FaultPoint<T>(string! controlName, Orleans.Dataflow.Testing.FaultPointMode mode, int firstFailure) -> Orleans.Dataflow.Flow<T, T>!
+static Orleans.Dataflow.Testing.TestFlow.FaultPoint<T>(string! controlName, Orleans.Dataflow.Testing.FaultPointMode mode, int firstFailure, System.Func<long, System.Exception!>! fault) -> Orleans.Dataflow.Flow<T, T>!
 static Orleans.Dataflow.Testing.TestSink.Probe<T>(string! controlName) -> Orleans.Dataflow.Sink<T>!
 static Orleans.Dataflow.Testing.TestSource.Probe<T>(string! controlName) -> Orleans.Dataflow.Source<T>!

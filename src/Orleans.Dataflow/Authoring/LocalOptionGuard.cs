@@ -312,9 +312,185 @@ internal static class LocalOptionGuard
         return refused.Count == 0
             ? group
             : throw new ArgumentException(
-                $"A group flow runs fused per key, so it holds element stages only: {string.Join(", ", refused)}. An asynchronous stage, a buffer, a junction, and a stage that reads the clock each want a segment, a channel, or a run of their own, and one per key is not something a fused stage can hold. A flattening stage and a nested group-by are refused for this operator's own reasons, which are stated in the documentation.",
+                $"A group flow runs fused per key, so it holds element stages only: {string.Join(", ", refused)}. An asynchronous stage, a buffer, a junction, and a stage that reads the clock each want a segment, a channel, or a run of their own, and one per key is not something a fused stage can hold. A flattening stage, a nested group-by, a supervision scope, and a fault point are refused for this operator's own reasons, which are stated in the documentation.",
                 parameterName);
     }
+
+    /// <summary>Checks that every stage of a supervision scope is one the scope can own the execution of.</summary>
+    /// <param name="stages">The occurrences the author's scope flow contributes, in flow order.</param>
+    /// <param name="parameterName">The name of the operator's parameter the flow arrived in.</param>
+    /// <returns>The same stages, as the descriptors the scope instantiates.</returns>
+    /// <exception cref="ArgumentException">
+    /// At least one stage of the flow is not one a scope can execute element by element, is a registered
+    /// occurrence, or declares a runtime control.
+    /// </exception>
+    /// <remarks>
+    /// <para>
+    /// The keyed stage's own check read over a different admitted list, with the same rule about naming
+    /// <em>every</em> offending stage and the same wording as the payload reader's, so a hand-written
+    /// document and an authored one are refused for the same reason in the same words.
+    /// </para>
+    /// <para>
+    /// The one refusal that is this check's alone is a stage declaring a runtime <b>control</b>. A control is
+    /// resolved by the node that produces it, and the stages of a scope's chain are not nodes; a fault point
+    /// belongs inside a scope and is admitted, but the spelling that names a control belongs at a node of its
+    /// own. Refusing it here is what keeps a declared slot from being one nothing could ever resolve.
+    /// </para>
+    /// </remarks>
+    internal static IReadOnlyList<LocalStageDescriptor> Scope(
+        IReadOnlyList<StageOccurrence> stages,
+        string parameterName)
+    {
+        LocalStageDescriptor[] scope = new LocalStageDescriptor[stages.Count];
+        List<string> refused = [];
+        List<string> named = [];
+
+        for (int stage = 0; stage < stages.Count; stage++)
+        {
+            if (stages[stage] is not LocalStageDescriptor descriptor ||
+                !LocalVocabulary.RunsInsideAScope(descriptor.Kind))
+            {
+                refused.Add(string.Create(
+                    CultureInfo.InvariantCulture,
+                    $"'{stages[stage].Stage}' at position {stage + 1}"));
+            }
+            else if (descriptor.ControlSlot is { } control)
+            {
+                named.Add(string.Create(
+                    CultureInfo.InvariantCulture,
+                    $"'{stages[stage].Stage}' at position {stage + 1} declaring the control '{control}'"));
+            }
+            else
+            {
+                scope[stage] = descriptor;
+            }
+        }
+
+        if (refused.Count > 0)
+        {
+            throw new ArgumentException(
+                $"A supervision scope owns the execution of its chain element by element, so it holds element stages only: {string.Join(", ", refused)}. An asynchronous stage, a buffer, a junction, and a stage that reads the clock each want a segment, a channel, or a run of their own. A flattening stage is refused because its sequence is read after the scope has returned, so a failure inside it would fall outside the scope it appears to be in; a nested scope and a group-by are refused as this version's honesty, and both are stated in the documentation.",
+                parameterName);
+        }
+
+        return named.Count == 0
+            ? scope
+            : throw new ArgumentException(
+                $"A supervision scope's stages are not nodes of the document, so nothing could resolve a runtime control declared on one: {string.Join(", ", named)}. Place the control-bearing spelling before or after the scope, or use the spelling that declares no control inside it.",
+                parameterName);
+    }
+
+    /// <summary>Checks the options of a supervision scope.</summary>
+    /// <param name="options">The options the author supplied, already known to be non-null.</param>
+    /// <param name="parameterName">The name of the operator's parameter the options arrived in.</param>
+    /// <param name="recovering">Whether the operator's spelling is the one that carries a fallback.</param>
+    /// <returns>The same options.</returns>
+    /// <exception cref="ArgumentOutOfRangeException">
+    /// <see cref="SupervisionOptions.Form"/> is not a declared member of its enumeration,
+    /// <see cref="SupervisionOptions.MaxAttempts"/> is below one,
+    /// <see cref="SupervisionOptions.OnExhaustion"/> is not a declared member of its enumeration, or a rung
+    /// of <see cref="SupervisionOptions.Backoff"/> is negative.
+    /// </exception>
+    /// <exception cref="ArgumentException">
+    /// A retry-only member is set on a form that does not retry, the backoff ladder is <see langword="null"/>,
+    /// or the form and the spelling disagree about the fallback.
+    /// </exception>
+    /// <remarks>
+    /// <para>
+    /// The retry-only members are refused on the other three forms rather than ignored, because a number
+    /// nothing reads is a number a reader of the document would have to guess about. The check is on the
+    /// values and not on whether the author wrote them, so the defaults compose: a resuming scope declared
+    /// with nothing but its form passes, and one declared with three attempts does not.
+    /// </para>
+    /// <para>
+    /// The fallback is checked against the form in both directions, because the two spellings are what
+    /// separate a scope that emits an element from one that drops it, and a scope whose declared form did not
+    /// match the arguments it was given would be a graph doing something the call site does not read as.
+    /// </para>
+    /// </remarks>
+    internal static SupervisionOptions Supervision(
+        SupervisionOptions options,
+        string parameterName,
+        bool recovering)
+    {
+        if (LocalSupervisionParameters.Spell(options.Form) is null)
+        {
+            throw new ArgumentOutOfRangeException(
+                parameterName,
+                options.Form,
+                string.Create(
+                    CultureInfo.InvariantCulture,
+                    $"The value {(int)options.Form} is not a declared {nameof(SupervisionForm)}, so there is no answer for a failure inside the scope. The declared forms are {nameof(SupervisionForm.Resume)}, {nameof(SupervisionForm.RestartStage)}, {nameof(SupervisionForm.Retry)}, and {nameof(SupervisionForm.Recover)}."));
+        }
+
+        if (recovering != (options.Form is SupervisionForm.Recover))
+        {
+            throw new ArgumentException(
+                recovering
+                    ? $"This spelling carries the fallback element a recovering scope emits, so its {nameof(SupervisionOptions.Form)} must be {nameof(SupervisionForm.Recover)} and is {options.Form}. The other three forms drop the failing element and have nothing to emit in its place."
+                    : $"A scope whose {nameof(SupervisionOptions.Form)} is {nameof(SupervisionForm.Recover)} emits a declared fallback element, and this spelling carries none. Use the overload that takes the fallback beside the scope.",
+                parameterName);
+        }
+
+        ArgumentNullException.ThrowIfNull(options.Backoff, parameterName);
+
+        if (options.Form is not SupervisionForm.Retry)
+        {
+            return options.MaxAttempts is 1 &&
+                options.Backoff.Count is 0 &&
+                options.OnExhaustion is RetryExhaustion.Fail
+                ? options
+                : throw new ArgumentException(
+                    $"A scope whose {nameof(SupervisionOptions.Form)} is {options.Form} never re-offers an element, so {nameof(SupervisionOptions.MaxAttempts)}, {nameof(SupervisionOptions.Backoff)}, and {nameof(SupervisionOptions.OnExhaustion)} say nothing about what it does and are refused rather than written into a document nothing would read them from.",
+                    parameterName);
+        }
+
+        if (options.MaxAttempts < 1)
+        {
+            throw new ArgumentOutOfRangeException(
+                parameterName,
+                options.MaxAttempts,
+                $"A retrying scope offers an element at least once, so {nameof(SupervisionOptions.MaxAttempts)} must be 1 or more. The count is attempts and not re-offers, so 1 means the exhaustion answer is applied to the first failure.");
+        }
+
+        if (LocalSupervisionParameters.Spell(options.OnExhaustion) is null)
+        {
+            throw new ArgumentOutOfRangeException(
+                parameterName,
+                options.OnExhaustion,
+                string.Create(
+                    CultureInfo.InvariantCulture,
+                    $"The value {(int)options.OnExhaustion} is not a declared {nameof(RetryExhaustion)}, so there is no answer for an element that used every attempt. The declared answers are {nameof(RetryExhaustion.Fail)}, {nameof(RetryExhaustion.Resume)}, and {nameof(RetryExhaustion.RestartStage)}."));
+        }
+
+        for (int rung = 0; rung < options.Backoff.Count; rung++)
+        {
+            if (options.Backoff[rung] < TimeSpan.Zero)
+            {
+                throw new ArgumentOutOfRangeException(
+                    parameterName,
+                    options.Backoff[rung],
+                    string.Create(
+                        CultureInfo.InvariantCulture,
+                        $"Rung {rung + 1} of {nameof(SupervisionOptions.Backoff)} is negative, and a wait before a re-offer is zero or more. A rung of zero means the re-offer happens at once, which is the ordinary shape of a first rung."));
+            }
+        }
+
+        return options;
+    }
+
+    /// <summary>Checks the arming of a fault point.</summary>
+    /// <param name="firstFailure">The one-based position of the first failing arrival.</param>
+    /// <param name="parameterName">The name of the factory's parameter the position arrived in.</param>
+    /// <returns>The same position.</returns>
+    /// <exception cref="ArgumentOutOfRangeException"><paramref name="firstFailure"/> is below one.</exception>
+    internal static int FaultPosition(int firstFailure, string parameterName) =>
+        firstFailure >= 1
+            ? firstFailure
+            : throw new ArgumentOutOfRangeException(
+                parameterName,
+                firstFailure,
+                "A fault point counts the arrivals it has seen from one, so the position of the first failing arrival is 1 or more.");
 
     /// <summary>Checks the options of a collecting sink.</summary>
     /// <param name="options">The options the author supplied, already known to be non-null.</param>

@@ -832,6 +832,71 @@ internal sealed class LocalStageDescriptor : StageOccurrence
     internal static LocalStageDescriptor SinkProbe(ResultSlotId controlSlot, Type controlType, object facade) =>
         new(LocalStageKind.SinkProbe, facade, seed: null, LocalVocabulary.EmptyParameters, controlSlot, controlType);
 
+    /// <summary>Creates a stage that throws where its declared arming says to.</summary>
+    /// <param name="mode">The validated mode.</param>
+    /// <param name="firstFailure">The validated one-based position of the first failing arrival.</param>
+    /// <param name="fault">The factory of what to throw, over the one-based position of the arrival.</param>
+    /// <param name="controlSlot">
+    /// The validated name the control is declared under, or <see langword="null"/> for an occurrence that
+    /// exposes none.
+    /// </param>
+    /// <param name="controlType">The closed type of the control an author receives, when there is one.</param>
+    /// <returns>The descriptor.</returns>
+    /// <remarks>
+    /// <para>
+    /// The arming is payload and what is thrown is binding, which is this vocabulary's usual split read over
+    /// an unusual stage: when a fault point throws changes the stream a graph produces and belongs in the
+    /// fingerprint, and an exception is a value of a type no local document names.
+    /// </para>
+    /// <para>
+    /// The one occurrence in this vocabulary whose control slot is optional. A fault point standing inside a
+    /// supervision scope is not a node — the stages of an inner chain have no identity — so there is nothing
+    /// for a slot to name; its declared arming is the whole of what such an occurrence needs, and the
+    /// authoring surface refuses a control-bearing one there rather than declaring a slot nothing could
+    /// resolve.
+    /// </para>
+    /// </remarks>
+    internal static LocalStageDescriptor FaultPoint(
+        LocalFaultMode mode,
+        int firstFailure,
+        object fault,
+        ResultSlotId? controlSlot,
+        Type? controlType) =>
+        new(
+            LocalStageKind.FaultPoint,
+            fault,
+            seed: null,
+            LocalFaultPointParameters.Write(mode, firstFailure),
+            controlSlot,
+            controlType);
+
+    /// <summary>Creates a stage that answers the failures of the chain it owns.</summary>
+    /// <param name="options">The validated policy.</param>
+    /// <param name="fallback">
+    /// The element a recovering scope emits, boxed by the caller; <see langword="null"/> and meaningless for
+    /// every other form, and legitimately <see langword="null"/> for a nullable element type.
+    /// </param>
+    /// <param name="scope">The validated stages of the scope's chain, in flow order.</param>
+    /// <returns>The descriptor.</returns>
+    /// <remarks>
+    /// The second descriptor whose payload carries other descriptors' payloads, and it makes the same split
+    /// <see cref="GroupBy"/> makes, read over a policy instead of over a key: which form the scope takes, how
+    /// many attempts one element gets, how long it waits, what exhaustion costs, and <em>which stages the
+    /// chain is</em> are configuration a document states; what each of those stages does and what a
+    /// recovering scope emits are behavior. The binding holds the descriptors themselves rather than only
+    /// their delegates, because the runtime needs both halves of each of them and reading the payload against
+    /// the binding is what makes the two planes agree.
+    /// </remarks>
+    internal static LocalStageDescriptor Supervised(
+        SupervisionOptions options,
+        object? fallback,
+        IReadOnlyList<LocalStageDescriptor> scope) =>
+        new(
+            LocalStageKind.Supervised,
+            new object?[] { fallback, scope },
+            seed: null,
+            LocalSupervisionParameters.Write(options, scope));
+
     /// <summary>Returns a one-line diagnostic summary of this occurrence.</summary>
     /// <returns>The stage reference text, such as <c>local:select@1</c>.</returns>
     /// <remarks>The bound behavior is deliberately not rendered: a closure has no useful text form.</remarks>

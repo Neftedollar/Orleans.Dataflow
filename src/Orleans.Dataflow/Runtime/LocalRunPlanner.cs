@@ -425,8 +425,20 @@ internal static class LocalRunPlanner
                         declaration.Parameters,
                         descriptor.Behavior,
                         descriptor.Seed,
-                        $"the node '{declaration.Id}'") is { } fusible)
+                        $"the node '{declaration.Id}'",
+                        out LocalFaultPoint? point) is { } fusible)
                 {
+                    // A fault point is the one fused shape that may also produce a control, and it is the
+                    // one occurrence in this vocabulary that may decline to. An occurrence with a facade
+                    // registers here exactly as a valve does; one without — every fault point inside a
+                    // supervision scope — registers nothing, and a document that declared a slot for it is
+                    // refused where every unclaimed slot is.
+                    if (point is not null &&
+                        LocalDelegateAdapter.FaultPoint(descriptor.Behavior).Facade is { } facade)
+                    {
+                        controls.Add(current, (Queue: null, facade(point)));
+                    }
+
                     Fuse(fusible());
                 }
                 else
@@ -582,6 +594,9 @@ internal static class LocalRunPlanner
 
                         case LocalStageKind.GroupBy when !first && !last:
                             Fuse(Keyed(declaration, descriptor));
+                            break;
+                        case LocalStageKind.Supervised when !first && !last:
+                            Fuse(Scope(declaration, descriptor));
                             break;
                         case LocalStageKind.MergeMap when !first && !last:
                             // A boundary of its own, like an asynchronous stage and for a stronger version
@@ -1806,6 +1821,12 @@ internal static class LocalRunPlanner
     /// <param name="behavior">The delegate, comparer, or projection the binding states for it.</param>
     /// <param name="seed">The initial state, for the shapes that carry one.</param>
     /// <param name="what">What carries the two halves, for the diagnostic.</param>
+    /// <param name="point">
+    /// The run's fault point when the shape is one — the object every instance the factory hands back
+    /// shares — and <see langword="null"/> for every other shape. It is answered here rather than reached
+    /// for afterwards because a caller that has to register a control needs the very object the factory
+    /// closed over, and building a second one would give the control and the stage two different counters.
+    /// </param>
     /// <returns>
     /// A factory of fresh instances, or <see langword="null"/> when the shape is not one that fuses as an
     /// element stage.
@@ -1833,8 +1854,11 @@ internal static class LocalRunPlanner
         CanonicalJsonValue parameters,
         object? behavior,
         object? seed,
-        string what)
+        string what,
+        out LocalFaultPoint? point)
     {
+        point = null;
+
         switch (kind)
         {
             case LocalStageKind.Select:
@@ -1927,6 +1951,21 @@ internal static class LocalRunPlanner
                 return () => LocalElementStage.Sliding(size, step, freeze);
             }
 
+            case LocalStageKind.FaultPoint:
+            {
+                (LocalFaultMode mode, int firstFailure) = Faulting(parameters, what);
+                LocalFaultPoint armed = new(mode, firstFailure, LocalDelegateAdapter.FaultPoint(behavior).Fault);
+
+                // The one shape here whose factory closes over an object rather than only over values, and
+                // the reason is the one thing a fault point promises: a test declares which arrival throws,
+                // and a supervision scope that restarts its stages must not turn that into "which arrival
+                // since the last restart". The object is the run's, made once; every instance the factory
+                // hands back is a window onto it.
+                point = armed;
+
+                return () => LocalElementStage.FaultPoint(armed);
+            }
+
             default:
                 return null;
         }
@@ -1960,7 +1999,7 @@ internal static class LocalRunPlanner
         if (!LocalGroupByParameters.TryRead(
             node.Parameters,
             out GroupByOptions? options,
-            out IReadOnlyList<LocalGroupStage> declared,
+            out IReadOnlyList<LocalInnerStage> declared,
             out IReadOnlyList<string> violations))
         {
             throw Foreign(
@@ -1996,7 +2035,8 @@ internal static class LocalRunPlanner
                     declared[stage].Parameters,
                     bound[stage].Behavior,
                     bound[stage].Seed,
-                    what) ??
+                    what,
+                    out LocalFaultPoint? _) ??
                 throw Foreign(
                     $"{what} is an occurrence of the stage '{bound[stage].Stage}', and a group flow runs fused per key, so it holds element stages only");
         }
@@ -2008,6 +2048,104 @@ internal static class LocalRunPlanner
             comparer,
             group);
     }
+
+    /// <summary>Builds a supervision scope from what the document says it is and what the binding says it does.</summary>
+    /// <param name="node">The node as the document declares it.</param>
+    /// <param name="descriptor">The occurrence, which carries the fallback and the chain.</param>
+    /// <returns>The stage.</returns>
+    /// <exception cref="InvalidOperationException">
+    /// The payload is not a scope payload, the binding is not a scope's pair, or the two planes disagree
+    /// about what the chain is.
+    /// </exception>
+    /// <remarks>
+    /// <para>
+    /// A keyed stage's builder read over a policy instead of over a key, and it checks the same two things
+    /// for the same reasons: the document states which stages the chain is made of and what each of them is
+    /// configured with, the binding states what each of them does, and neither is trusted to imply the
+    /// other. The disagreements are reported apart because they are different mistakes — a chain of a
+    /// different length is a document and a binding built from two different graphs, and a different shape
+    /// at the same position is one graph whose halves were edited apart — and both are unreachable through
+    /// the authoring API, which writes the payload from the very descriptors it binds.
+    /// </para>
+    /// <para>
+    /// <b>Everything this method can refuse is refused before the run's first element.</b> That is the
+    /// engine's own line between a failure a scope answers for and one it does not: a malformed payload, a
+    /// chain holding a shape a scope cannot execute, and two planes describing different graphs are
+    /// machinery failures, and machinery fails materialization rather than becoming a supervised event
+    /// inside a run that started.
+    /// </para>
+    /// </remarks>
+    private static LocalAttachedStage Scope(StageNode node, LocalStageDescriptor descriptor)
+    {
+        if (!LocalSupervisionParameters.TryRead(
+            node.Parameters,
+            out SupervisionOptions? options,
+            out IReadOnlyList<LocalInnerStage> declared,
+            out IReadOnlyList<string> violations))
+        {
+            throw Foreign(
+                $"the supervision scope '{node.Id}' carries parameters this runtime cannot read: {string.Join("; ", violations)}");
+        }
+
+        (object? fallback, IReadOnlyList<LocalStageDescriptor> bound) =
+            LocalDelegateAdapter.Supervised(descriptor.Behavior);
+
+        if (bound.Count != declared.Count)
+        {
+            throw Foreign(
+                $"the supervision scope '{node.Id}' declares a chain of {declared.Count} stages and is bound to one of {bound.Count}");
+        }
+
+        Func<LocalElementStage>[] scope = new Func<LocalElementStage>[declared.Count];
+
+        for (int stage = 0; stage < scope.Length; stage++)
+        {
+            string what = string.Create(
+                CultureInfo.InvariantCulture,
+                $"stage {stage + 1} of the scope of the supervised stage '{node.Id}'");
+
+            if (bound[stage].Kind != declared[stage].Kind)
+            {
+                throw Foreign(
+                    $"{what} is declared as '{LocalVocabulary.StageOf(declared[stage].Kind)}' and bound as '{bound[stage].Stage}'");
+            }
+
+            scope[stage] =
+                Fusible(
+                    declared[stage].Kind,
+                    declared[stage].Parameters,
+                    bound[stage].Behavior,
+                    bound[stage].Seed,
+                    what,
+                    out LocalFaultPoint? _) ??
+                throw Foreign(
+                    $"{what} is an occurrence of the stage '{bound[stage].Stage}', and a scope owns the execution of its chain element by element, so it holds element stages only");
+        }
+
+        return LocalAttachedStages.Supervised(
+            new LocalSupervisionPolicy(
+                options!.Form,
+                options.MaxAttempts,
+                options.Backoff,
+                options.OnExhaustion),
+            fallback,
+            scope);
+    }
+
+    /// <summary>Reads a fault point's payload as the arming it declares.</summary>
+    /// <param name="parameters">The payload.</param>
+    /// <param name="what">What carries it, for the diagnostic.</param>
+    /// <returns>When the stage throws, and which arrival is the first to do it.</returns>
+    /// <exception cref="InvalidOperationException">The payload is not a fault-point payload.</exception>
+    private static (LocalFaultMode Mode, int FirstFailure) Faulting(CanonicalJsonValue parameters, string what) =>
+        LocalFaultPointParameters.TryRead(
+            parameters,
+            out LocalFaultMode mode,
+            out int firstFailure,
+            out IReadOnlyList<string> violations)
+            ? (mode, firstFailure)
+            : throw Foreign(
+                $"{what} carries parameters this runtime cannot read: {string.Join("; ", violations)}");
 
     /// <summary>Reads a distinct node's payload as the key bound it declares.</summary>
     /// <param name="parameters">The payload.</param>

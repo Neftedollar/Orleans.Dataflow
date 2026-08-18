@@ -298,6 +298,129 @@ public sealed class Source<T>
             LocalOptionGuard.Group(group.Stages, nameof(group)))));
     }
 
+    /// <summary>Extends this source with a scope that answers the failures raised inside it.</summary>
+    /// <typeparam name="TOut">The element type the scope produces.</typeparam>
+    /// <param name="options">The form, and the retrying form's attempts, ladder, and exhaustion answer.</param>
+    /// <param name="scope">The flow the scope owns the per-element execution of.</param>
+    /// <returns>A new source of what the scope emits; this one is unchanged.</returns>
+    /// <exception cref="ArgumentNullException">
+    /// <paramref name="options"/> or <paramref name="scope"/> is <see langword="null"/>.
+    /// </exception>
+    /// <exception cref="ArgumentOutOfRangeException">
+    /// <see cref="SupervisionOptions.Form"/> or <see cref="SupervisionOptions.OnExhaustion"/> is not a
+    /// declared member of its enumeration, <see cref="SupervisionOptions.MaxAttempts"/> is below one, or a
+    /// rung of <see cref="SupervisionOptions.Backoff"/> is negative.
+    /// </exception>
+    /// <exception cref="ArgumentException">
+    /// <see cref="SupervisionOptions.Form"/> is <see cref="SupervisionForm.Recover"/>, which needs the
+    /// overload that carries a fallback; a retry-only member is set on a form that does not retry; or
+    /// <paramref name="scope"/> holds a stage a scope cannot execute, or one declaring a runtime control.
+    /// </exception>
+    /// <remarks>
+    /// <para>
+    /// <b>Supervision is a scope, and a scope is a stage</b> (ADR 0007). The flow is declared once, the
+    /// scope owns one instance of it, and a failure raised inside that instance is answered by the declared
+    /// form instead of failing the run. Everything outside the scope is untouched: the engine's own rule
+    /// since M2 — a failure fails the run — is the default and stays the default, and a scope is the
+    /// declared exception to it.
+    /// </para>
+    /// <para>
+    /// <b>The four forms.</b> <see cref="SupervisionForm.Resume"/> drops the failing element and keeps the
+    /// scope's stage state, so a scan inside it goes on counting from where it was.
+    /// <see cref="SupervisionForm.RestartStage"/> drops the element and rebuilds every stage inside the
+    /// scope from its seed, so that scan starts again. <see cref="SupervisionForm.Retry"/> offers the
+    /// element to the scope again, up to <see cref="SupervisionOptions.MaxAttempts"/> times, waiting the
+    /// declared ladder's rung on the run's clock between attempts, and applies
+    /// <see cref="SupervisionOptions.OnExhaustion"/> to an element that used them all.
+    /// <see cref="SupervisionForm.Recover"/> is the fourth and takes the other overload, because it emits an
+    /// element rather than dropping one.
+    /// </para>
+    /// <para>
+    /// <b>A retry re-offers to the scope's first stage</b>, which is what "the element is offered to the
+    /// scope again" means for a chain the scope owns whole: a stateful stage inside a retrying scope
+    /// therefore sees the element once per attempt. That is why the exhaustion answer can escalate to
+    /// <see cref="RetryExhaustion.RestartStage"/>, and it is the reason to keep a retrying scope small.
+    /// </para>
+    /// <para>
+    /// <b>What a scope does not catch.</b> A cancellation is not a failure and no policy weakens it. A
+    /// failure raised outside every scope fails the run, unchanged. And a failure of the machinery rather
+    /// than of an author's stage — a payload this runtime cannot read, a chain holding a shape a scope
+    /// cannot execute, two planes describing different graphs — is refused at materialization, before the
+    /// run has an element to supervise. So is a failure raised while a stream is <em>ending</em>: the
+    /// residue walk has no failing element to drop and nothing to re-offer, so it travels to the run like
+    /// any unsupervised failure.
+    /// </para>
+    /// <para>
+    /// <b>The scope holds element stages only.</b> It owns the execution of its chain element by element, so
+    /// an asynchronous stage, a buffer, a junction, and a stage that reads the clock are refused where the
+    /// flow is composed, by a message naming each of them. A flattening stage is refused for a reason of
+    /// this operator's own: its sequence is read by the run <em>after</em> the scope's own method has
+    /// returned, so a failure raised while it was enumerated would fall outside the scope it appears to be
+    /// inside. A nested scope and a <c>GroupBy</c> are refused as this version's honesty.
+    /// </para>
+    /// <para>
+    /// <b>The policy is in the document.</b> <c>local-supervision-parameters@v1</c> carries the form, the
+    /// retrying form's three numbers, and one entry per stage of the chain with that stage's own reference
+    /// and payload, so two graphs supervised differently have different fingerprints. No form names an
+    /// exception type: a policy filtering by type would need CLR names in a document, which the definition
+    /// plane forbids, so a scope supervises every failure inside it alike.
+    /// </para>
+    /// </remarks>
+    public Source<TOut> Supervised<TOut>(SupervisionOptions options, Flow<T, TOut> scope)
+    {
+        ArgumentNullException.ThrowIfNull(options);
+        ArgumentNullException.ThrowIfNull(scope);
+
+        return new Source<TOut>(Shape.Append(LocalStageDescriptor.Supervised(
+            LocalOptionGuard.Supervision(options, nameof(options), recovering: false),
+            fallback: null,
+            LocalOptionGuard.Scope(scope.Stages, nameof(scope)))));
+    }
+
+    /// <summary>Extends this source with a scope that recovers with a declared element.</summary>
+    /// <typeparam name="TOut">The element type the scope produces.</typeparam>
+    /// <param name="options">The form, which must be <see cref="SupervisionForm.Recover"/>.</param>
+    /// <param name="scope">The flow the scope owns the per-element execution of.</param>
+    /// <param name="fallback">The element the scope emits when a failure ends its stream.</param>
+    /// <returns>A new source of what the scope emits; this one is unchanged.</returns>
+    /// <exception cref="ArgumentNullException">
+    /// <paramref name="options"/> or <paramref name="scope"/> is <see langword="null"/>.
+    /// </exception>
+    /// <exception cref="ArgumentException">
+    /// <see cref="SupervisionOptions.Form"/> is not <see cref="SupervisionForm.Recover"/>, a retry-only
+    /// member is set, or <paramref name="scope"/> holds a stage a scope cannot execute.
+    /// </exception>
+    /// <remarks>
+    /// <para>
+    /// <b>The fallback then completion, and that boundary is the point.</b> The first failure inside the
+    /// scope emits <paramref name="fallback"/> downstream and ends the scope's stream <em>successfully</em>:
+    /// everything above the scope stops, everything below it drains, and the run reports success. Nothing is
+    /// retried and nothing is dropped, because the stream this scope was producing is over.
+    /// </para>
+    /// <para>
+    /// <b>Recovering with an alternate source is a different capability</b> and is deliberately not a knob
+    /// on this one: switching sources is a decision about a section of the graph rather than about one
+    /// stage's stream, and keeping the two boundaries distinct is what lets each be stated.
+    /// </para>
+    /// <para>
+    /// The fallback is a value of an element type no local document names, so it travels in the binding
+    /// table exactly as the element of <see cref="Source.Single{T}"/> does — which is the local half of ADR
+    /// 0007's split; the canonical-constant half belongs to the registered vocabulary, where element
+    /// contracts are real. Everything <see cref="Supervised{TOut}(SupervisionOptions, Flow{T, TOut})"/> says
+    /// about what a scope does not catch and what its chain may hold holds here unchanged.
+    /// </para>
+    /// </remarks>
+    public Source<TOut> Supervised<TOut>(SupervisionOptions options, Flow<T, TOut> scope, TOut fallback)
+    {
+        ArgumentNullException.ThrowIfNull(options);
+        ArgumentNullException.ThrowIfNull(scope);
+
+        return new Source<TOut>(Shape.Append(LocalStageDescriptor.Supervised(
+            LocalOptionGuard.Supervision(options, nameof(options), recovering: true),
+            fallback,
+            LocalOptionGuard.Scope(scope.Stages, nameof(scope)))));
+    }
+
     /// <summary>Extends this source with a stage that drops an element equal to the one before it.</summary>
     /// <returns>A new source; this one is unchanged.</returns>
     /// <remarks>

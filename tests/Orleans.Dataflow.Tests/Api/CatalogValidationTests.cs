@@ -184,6 +184,7 @@ public sealed class CatalogValidationTests
                 LocalStage("distinct"),
                 LocalStage("empty"),
                 LocalStage("failed"),
+                LocalStage("fault-point"),
                 LocalStage("first"),
                 LocalStage("first-or-default"),
                 LocalStage("fold"),
@@ -226,6 +227,7 @@ public sealed class CatalogValidationTests
                 LocalStage("skip-while"),
                 LocalStage("skip-within"),
                 LocalStage("sliding"),
+                LocalStage("supervised"),
                 LocalStage("take"),
                 LocalStage("take-through"),
                 LocalStage("take-while"),
@@ -423,6 +425,7 @@ public sealed class CatalogValidationTests
                 ["distinct"] = "local-distinct-parameters",
                 ["empty"] = "local-parameters",
                 ["failed"] = "local-parameters",
+                ["fault-point"] = "local-fault-point-parameters",
                 ["first"] = "local-parameters",
                 ["first-or-default"] = "local-parameters",
                 ["fold"] = "local-parameters",
@@ -465,6 +468,7 @@ public sealed class CatalogValidationTests
                 ["skip-while"] = "local-parameters",
                 ["skip-within"] = "local-duration-parameters",
                 ["sliding"] = "local-window-parameters",
+                ["supervised"] = "local-supervision-parameters",
                 ["take"] = "local-count-parameters",
                 ["take-through"] = "local-parameters",
                 ["take-while"] = "local-parameters",
@@ -551,7 +555,7 @@ public sealed class CatalogValidationTests
                         // fold: the identity says which shape produced the value, and awaiting is not a
                         // different shape. Nothing is renamed and no identity is added.
                         "fold" or "fold-async" => ("result", "local-fold-result"),
-                        "queue" or "sink-probe" or "valve" => ("control", "local-control"),
+                        "fault-point" or "queue" or "sink-probe" or "valve" => ("control", "local-control"),
                         _ => ("result", "local-result"),
                     };
 
@@ -585,6 +589,7 @@ public sealed class CatalogValidationTests
                 ["distinct"] = 0,
                 ["empty"] = 0,
                 ["failed"] = 0,
+                ["fault-point"] = 1,
                 ["first"] = 1,
                 ["first-or-default"] = 1,
                 ["fold"] = 1,
@@ -627,6 +632,7 @@ public sealed class CatalogValidationTests
                 ["skip-while"] = 0,
                 ["skip-within"] = 0,
                 ["sliding"] = 0,
+                ["supervised"] = 0,
                 ["take"] = 0,
                 ["take-through"] = 0,
                 ["take-while"] = 0,

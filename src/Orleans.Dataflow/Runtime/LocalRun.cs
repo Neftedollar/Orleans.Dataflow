@@ -96,6 +96,8 @@ internal sealed class LocalRun
     private readonly LocalWakeup?[] _wakeups;
     private int _running;
     private long _dropped;
+    private long _supervised;
+    private long _poisoned;
     private Exception? _failure;
     private volatile bool _canceled;
     private bool _cancellationReleased;
@@ -219,6 +221,35 @@ internal sealed class LocalRun
             return dropped;
         }
     }
+
+    /// <summary>Gets the number of failures this run's supervision scopes have contained.</summary>
+    /// <value>
+    /// The running count across every scope of the graph, which stays zero for a run whose scopes never see
+    /// a failure and for a graph that declares none.
+    /// </value>
+    /// <remarks>
+    /// A supervised failure is never silent, and this counter is what makes that true today: a scope that
+    /// drops an element says how many it dropped, so "resume" and "nothing went wrong" are two different
+    /// readings rather than one. One number for the whole run rather than one per scope, for the reason
+    /// <see cref="DroppedElements"/> is one number: a per-scope breakdown is a monitor's shape and monitors
+    /// are a later checkpoint. A retrying scope counts once per failed attempt, because an attempt that
+    /// failed is a failure the scope swallowed.
+    /// </remarks>
+    internal long SupervisedFailures => Interlocked.Read(ref _supervised);
+
+    /// <summary>Gets the number of elements this run's retrying scopes have given up on.</summary>
+    /// <value>
+    /// The running count of elements that used every attempt they were given, whatever the exhaustion
+    /// answer then did with them.
+    /// </value>
+    /// <remarks>
+    /// ADR 0007's poison element, counted as such. Beside <see cref="SupervisedFailures"/> rather than
+    /// folded into it, because the two answer different questions — how much did this run swallow, and how
+    /// many elements did it eventually give up on — and one number could not answer both. It moves for the
+    /// failing answer too, so a run that failed after exhausting its retries is distinguishable from one
+    /// that failed on its first element.
+    /// </remarks>
+    internal long PoisonElements => Interlocked.Read(ref _poisoned);
 
     /// <summary>Compiles nothing and starts everything: builds a run of a plan and sets its segments going.</summary>
     /// <param name="plan">The compiled plan.</param>
@@ -544,7 +575,13 @@ internal sealed class LocalRun
 
                 LocalWakeup latch = _wakeups[index]!;
 
-                attachment ??= new LocalStageAttachment(_context, () => Complete(index), Fail, latch.Signal);
+                attachment ??= new LocalStageAttachment(
+                    _context,
+                    () => Complete(index),
+                    Fail,
+                    latch.Signal,
+                    () => Interlocked.Increment(ref _supervised),
+                    () => Interlocked.Increment(ref _poisoned));
 
                 attached.Attach(attachment);
             }

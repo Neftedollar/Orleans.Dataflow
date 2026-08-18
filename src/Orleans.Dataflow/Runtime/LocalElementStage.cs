@@ -167,6 +167,16 @@ internal abstract class LocalElementStage
         IReadOnlyList<Func<LocalElementStage>> group) =>
         new Keyed(maxActiveKeys, evicting, key, comparer, group);
 
+    /// <summary>Creates a stage that passes every element through and throws where it is armed to.</summary>
+    /// <param name="point">The run's fault point, which a test declared the arming of and may re-arm.</param>
+    /// <returns>The stage.</returns>
+    /// <remarks>
+    /// The stage is one line and the fault point is where everything lives, which is the point: the object
+    /// is made once when the plan is built and every instance of this stage shares it, so a supervision
+    /// scope rebuilding its stages does not reset the counting a test declared.
+    /// </remarks>
+    internal static LocalElementStage FaultPoint(LocalFaultPoint point) => new Faulting(point);
+
     /// <summary>Pushes one element through this stage.</summary>
     /// <param name="element">The element arriving from upstream.</param>
     /// <param name="result">
@@ -249,6 +259,27 @@ internal abstract class LocalElementStage
         internal override LocalStageOutcome Apply(object? element, out object? result)
         {
             result = selector(element);
+
+            return LocalStageOutcome.Emit;
+        }
+    }
+
+    /// <summary>A stage that passes every element through and throws where it is armed to.</summary>
+    /// <param name="point">The run's fault point.</param>
+    /// <remarks>
+    /// The failure-injection seam is an ordinary stage of an ordinary chain, which is the whole of what ADR
+    /// 0007 asked for: an injected fault is part of the graph under test rather than a hook reaching into
+    /// the engine, and what it throws travels exactly where an author's own throw would — to the run loop,
+    /// or to the supervision scope this stage stands inside.
+    /// </remarks>
+    private sealed class Faulting(LocalFaultPoint point) : LocalElementStage
+    {
+        /// <inheritdoc/>
+        internal override LocalStageOutcome Apply(object? element, out object? result)
+        {
+            point.Pass();
+
+            result = element;
 
             return LocalStageOutcome.Emit;
         }

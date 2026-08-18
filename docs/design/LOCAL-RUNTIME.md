@@ -2158,3 +2158,253 @@ travelling through the lower one's table.
 **And the whole of it is the local runtime.** No keyed stage has been
 materialized through a silo, and every graph carrying one is `nondeployable`
 because it is a lambda-bound local stage.
+
+## M5.1 (the injection seam and local supervision scopes) — as implemented
+
+The first phase of M5, and the one ADR 0007 said had to come first: the tests
+for a policy cannot be written against luck, so the failure-injection seam
+lands before anything it is used to prove.
+
+The shape is: **supervision is a scope, and a scope is a stage.** A
+`local/supervised@v1` node carries a policy and the chain it answers for, in
+its payload, exactly as a keyed stage carries its group flow. No `StageNode`
+schema change, no per-node annotation, no Abstractions change — and the
+consequence a reader should hold onto is that a supervision policy is a fact of
+the document and of the fingerprint taken over it, which is what makes it a
+policy a cluster could one day honor rather than a runtime flag.
+
+### The injection seam is a stage, not a hook
+
+`local/fault-point@v1` is an ordinary element stage of the local vocabulary
+whose payload is its **arming** — `mode` (`never`, `once`, `always`) and
+`firstFailure`, a one-based arrival — and whose binding is what it throws. It
+sits in the core vocabulary for the reason `local/sink-probe@v1` does: the
+vocabulary is one closed set and a document has to be able to name what it is
+running. Every spelling an author can reach it through lives in the Testing
+package (`TestFlow.FaultPoint<T>`), and so does the public arming vocabulary
+(`FaultPointMode`), so the shipping package publishes no words for injecting
+faults.
+
+**The arming is declared rather than only armed at run time, and that is not a
+convenience.** A run starts as soon as it is materialized, so a test that could
+arm only through a resolved control would be racing the very elements it wanted
+to fail. The declared arming makes "fail the second element" a fact of the graph;
+the control (`IFaultPoint`) is for re-arming a run whose elements a test is
+already pacing through a source probe, and for reading `ElementsSeen` and
+`FaultsThrown`. Re-arming counts from the *next* arrival where the declared
+arming counts from the first of the run, which is the reading a test wants in
+both places.
+
+**A fault point's counter is not stage state.** The `LocalFaultPoint` is built
+once when the plan is built and every instance of the stage shares it, so a
+scope that restarts its stages does not turn "fail the second arrival" into
+"fail the second arrival since the last restart". A retry's re-offer is an
+arrival of its own, which is what makes "the scope really did retry" a number
+rather than an inference.
+
+**It is the one occurrence in this vocabulary whose control slot is optional.**
+A fault point inside a scope is not a node — the stages of an inner chain have
+no identity — so there is nothing for a slot to name; the authoring surface
+refuses the control-bearing spelling there by name rather than declaring a slot
+nothing could resolve. The cost is stated rather than hidden: a fault point
+inside a scope cannot be re-armed or read at run time, and its declared arming
+is the whole of what it does.
+
+### Four forms, one stage, one method
+
+`Resume`, `RestartStage`, `Retry`, and `Recover` are one attached stage whose
+`Apply` is a retry loop every other form leaves on its first pass. The walk
+through the scope's chain is `LocalRun.Advance` read one level down — the
+keyed stage's substream walk with one instance instead of one per key — and the
+emissions go into a list the run reads after the method has returned, so
+nothing re-enters the run and this is a stage rather than a pump.
+
+- **`Resume`** drops the failing element and keeps everything the chain was
+  holding. A scan inside the scope goes on counting; a half-filled batch stays
+  open.
+- **`RestartStage`** drops the element and rebuilds every stage of the chain
+  from the very factories a fresh run builds them from, which is the group-by's
+  per-key instantiation machinery reused rather than reinvented. A restarted
+  scope is indistinguishable from one that has just started.
+- **`Retry`** re-offers the element **to the scope's first stage**, up to
+  `MaxAttempts`, waiting the declared ladder's rung on the run's clock between
+  attempts, and applies `OnExhaustion` — `Fail` (the default), `Resume`, or
+  `RestartStage` — to an element that used them all. Re-offering to the first
+  stage is the declared semantics and the reason to keep a retrying scope small:
+  a stateful stage inside one sees the element once per attempt, which the suite
+  asserts by value rather than footnoting.
+- **`Recover`** emits a declared fallback and ends the scope's stream
+  *successfully*: everything above the scope stops, everything below it drains,
+  the result slots resolve, and the run reports success. Recovering with an
+  **alternate source** is a different capability with a boundary of its own and
+  is deliberately not a knob here.
+
+The pair of tests that carries the milestone is `Resume` against
+`RestartStage`: the same graph over the same elements with the same injected
+failure, one enumeration member apart, producing `[1, 4, 8]` and `[1, 3, 7]`.
+A test that counted elements would pass for both.
+
+### The backoff ladder, and no jitter in v1
+
+The ladder is an explicit `TimeSpan` array in the payload
+(`backoffTicks`, in ticks, like every other duration this vocabulary carries),
+not a base and a factor: a ladder is what a document can state exactly, so a
+reader sees the waits the run will take and no reader has to reproduce an
+arithmetic nobody wrote down. **The last rung repeats**, so a ladder shorter
+than the attempt count reads as "and then this long every time"; an empty ladder
+means every re-offer happens at once. A rung of **zero is admitted**, which is
+the one place this vocabulary's duration rule bends — "try again now" is the
+ordinary shape of a first rung, where a delay of no time describes an operator
+that should have been left out.
+
+**There is no jitter in v1, and the reason is stated rather than deferred
+silently.** ADR 0007 says the ladder is "jittered by the runtime"; jitter
+answers a question a per-element retry inside one run of one process does not
+ask — it spreads a *fleet's* restarts, and there is no fleet here — and adding a
+random source would make the one thing this phase has to prove, that the waits
+are exactly what the document says, a statistical claim instead of an asserted
+one. The payload's shape admits jitter later without a document change, and the
+restart-section row is where the herd is real. Recorded as a deferral.
+
+The waits go through the checkpoint-5 wait discipline unchanged: reported idle
+for their duration, released by both stops, and followed by a park. So a pause
+during a backoff takes effect at once and holds the re-offer however far the
+clock is then advanced; a shutdown releases the wait and the re-offer happens
+without the rest of the rung being paid, so the element in hand is delivered;
+and a cancellation is raised and abandons it. All three are asserted on a clock
+the test moves by hand.
+
+### What a scope does not catch, and where the engine drew each line
+
+Four lines, and each is a different kind of claim.
+
+- **A failure outside every scope fails the run**, unchanged since M2. Proved as
+  a *contrast*: one graph with the fault point inside the scope's chain and one
+  with it a stage earlier, identical in everything else, ending contained and
+  failed respectively. The same holds below a scope and on a junction leg beside
+  one.
+- **A cancellation is not a failure and no form weakens it.** The scope catches
+  `OperationCanceledException` only to rethrow it. A scope that caught
+  cancellation would turn a stop into a stream that would not stop.
+- **A failure of the machinery rather than of an author's stage is a refusal at
+  materialization.** A payload this runtime cannot read, a chain holding a shape
+  a scope cannot execute, and two planes describing different chains are all
+  `InvalidOperationException` before the run has an element to supervise. That
+  is the engine's line: everything a scope can answer for happens *inside*
+  `Apply`, after the plan was accepted.
+- **A failure raised while a stream is ending is not supervised.** The residue
+  walk — the scope's own, and the run's — has no failing element to drop,
+  nothing to re-offer, and no fallback question to ask, so it travels to the run
+  like any unsupervised failure. This is v1's honesty rather than an oversight,
+  and the test that says so injects the failure exactly there, in a batch's
+  projection of the partial group it hands over.
+
+### The chain holds element stages only, and that is v1's honesty
+
+`RunsInsideAScope` is the group flow's list plus the fault point, and the two
+differences are the whole of what a scope is against what a keyed stage is: a
+scope owns **one** instance of its chain rather than one per key, so a fault
+point's arrival counter means what a test wrote down.
+
+Three shapes are refused for reasons of this operator's own:
+
+- **A flattening stage**, and this is the sharpest one. What a scope hands the
+  run for a `SelectMany` is a sequence the run reads *after* the scope's own
+  method has returned, so a failure raised while it was enumerated would happen
+  **outside the scope it appears to be inside** — supervision that silently did
+  not apply, which is worse than a refusal.
+- **A nested scope.** A policy inside a policy has a contract of its own to
+  state — which answer wins, what a restart of the outer one does to the inner
+  one's state — and it is not this one.
+- **A `GroupBy`.** A key table whose reset is a scope's business is a second
+  feature, and it is not this one. The composition that is *not* refused is the
+  useful one: a keyed stage beside a scope rather than inside it.
+
+**A scope is refused inside a group flow**, and by the clause a group flow has
+always had rather than by a new one: a scope reads the run's clock, so one
+instance per key of it is not something a fused stage can hold. A fault point is
+refused there too, because one counter per key is not what "fail the second
+element" means to the test that wrote it.
+
+### The document states the policy and the chain
+
+`local-supervision-parameters@v1` carries `form`, `scope` — one entry per stage
+with that stage's own reference and payload, `LocalInnerChain`'s array, shared
+with the keyed stage — and, **only for the retrying form**, `maxAttempts`,
+`backoffTicks`, and `onExhaustion`. A fixed shape would have been easier to read
+and would have been a lie: an attempt count on a scope that resumes is a number
+nothing reads, and a reader finding one would have to guess whether the graph
+was generated wrong or the engine was ignoring it. So the admitted member list
+is a function of the form, the authoring guard refuses a retry-only member on
+the other three, and the unknown-member report refuses a hand-written document
+that carries one.
+
+What is **not** in the payload is the fallback a recovering scope emits. It is a
+value of an element type no local document names, so it travels in the binding
+table exactly as `Source.Single`'s element does; ADR 0007's other half of that
+split — a canonical constant, deployable by construction — belongs to the
+registered vocabulary, where element contracts are real.
+
+**No form names an exception type.** A policy filtering by type would need CLR
+names in a document, which the definition plane forbids, or a declared failure
+taxonomy, which is real design work owed its own evidence. V1 supervises every
+failure inside the scope alike; the taxonomy is a recorded deferral.
+
+One refactoring came with all this. `LocalGroupByParameters` no longer owns the
+inner-chain encoding: it is `LocalInnerChain`, read by both the keyed stage and
+the scope, with a `Words` value carrying what each owner calls its chain and
+which shapes it admits. The refusals stay in each owner's own vocabulary — a
+group flow "runs fused per key", a scope "owns the execution of its chain
+element by element" — spoken by the reader the runtime itself uses, so a
+hand-written document and an authored one are refused in the same words.
+
+### Counting is what makes a dropped element observable
+
+Two counters beside `DroppedElements`, both internal for the reason that one is:
+what an author will read them through is a monitor, and publishing a bare
+counter now would fix that shape by accident.
+
+- **`SupervisedFailures`** — every failure a scope intercepted, which for the
+  retrying form means once per *failed attempt*. It answers "how much did this
+  run swallow", and an attempt that failed was swallowed.
+- **`PoisonElements`** — ADR 0007's poison element counted as such: an element
+  that used every attempt it was given, whatever the exhaustion answer then did
+  with it. It moves for the failing answer too, so a run that failed after
+  exhausting its retries is distinguishable from one that failed on its first
+  element.
+
+Two numbers rather than one, because they answer different questions and one
+number could not answer both.
+
+### What this phase does not do
+
+**Nothing durable.** No checkpoints, no cursors, no commit marks, no resume, and
+no storage contract — those are M5's next phases, and nothing here writes
+anything anywhere.
+
+**Nothing distributed.** Every graph carrying a scope or a fault point is
+`nondeployable`, because it is a lambda-bound local stage; no scope has been
+materialized through a silo and no crash test exists yet. The seam ADR 0007
+describes as "named seams a test arms to throw *or to kill the host*" is here in
+its throwing half only.
+
+**No restart-section form.** Restarting a source, flow, or sink *section* with a
+budget is the coarser-grained row and is untouched; so is
+`WatchTermination`, which ADR 0007 returns to the control-slot machinery in a
+later phase.
+
+**No exception-type filter**, as above, and no per-scope observability: the two
+counters are per run, so a graph with three scopes reports one number for all of
+them.
+
+**One composition of each kind is proven and the general statement is not.** A
+scope on a junction leg, two scopes in one chain, a scope below a keyed stage,
+and a fault point inside a scope driving all of it are measured; a scope inside
+a cycle, under a partition, or in front of a merge-map are unasserted.
+
+**The "several residues as the scope's own stream ends" path is implemented and
+not observed.** The element vocabulary has an emit-and-complete and no
+emit-many-and-complete, and the scope asks for the completion through the
+attachment instead — the walk a window's timer already takes. No chain the scope
+admits has been shown to produce that case, and the branch is recorded as
+defensive rather than tested.

@@ -264,6 +264,80 @@ public sealed class Flow<TIn, TOut>
                 LocalOptionGuard.Group(group.Stages, nameof(group)))));
     }
 
+    /// <summary>Extends this flow with a scope that answers the failures raised inside it.</summary>
+    /// <typeparam name="TNext">The element type the scope produces.</typeparam>
+    /// <param name="options">The form, and the retrying form's attempts, ladder, and exhaustion answer.</param>
+    /// <param name="scope">The flow the scope owns the per-element execution of.</param>
+    /// <returns>A new flow; this one is unchanged.</returns>
+    /// <exception cref="ArgumentNullException">
+    /// <paramref name="options"/> or <paramref name="scope"/> is <see langword="null"/>.
+    /// </exception>
+    /// <exception cref="ArgumentOutOfRangeException">
+    /// <see cref="SupervisionOptions.Form"/> or <see cref="SupervisionOptions.OnExhaustion"/> is not a
+    /// declared member of its enumeration, <see cref="SupervisionOptions.MaxAttempts"/> is below one, or a
+    /// rung of <see cref="SupervisionOptions.Backoff"/> is negative.
+    /// </exception>
+    /// <exception cref="ArgumentException">
+    /// <see cref="SupervisionOptions.Form"/> is <see cref="SupervisionForm.Recover"/>, which needs the
+    /// overload that carries a fallback; a retry-only member is set on a form that does not retry; or
+    /// <paramref name="scope"/> holds a stage a scope cannot execute, or one declaring a runtime control.
+    /// </exception>
+    /// <remarks>
+    /// The scope is declared once and owns one instance of it; a failure raised inside it is answered by the
+    /// declared form instead of failing the run, while everything outside it keeps the engine's own rule. A
+    /// cancellation is never caught, a failure outside every scope still fails the run, and a failure of the
+    /// machinery is refused at materialization rather than supervised.
+    /// <see cref="Source{T}.Supervised{TOut}(SupervisionOptions, Flow{T, TOut})"/> states all of it in full,
+    /// and everything there holds here.
+    /// </remarks>
+    public Flow<TIn, TNext> Supervised<TNext>(SupervisionOptions options, Flow<TOut, TNext> scope)
+    {
+        ArgumentNullException.ThrowIfNull(options);
+        ArgumentNullException.ThrowIfNull(scope);
+
+        return new Flow<TIn, TNext>(LocalStageChain.Append(
+            Stages,
+            LocalStageDescriptor.Supervised(
+                LocalOptionGuard.Supervision(options, nameof(options), recovering: false),
+                fallback: null,
+                LocalOptionGuard.Scope(scope.Stages, nameof(scope)))));
+    }
+
+    /// <summary>Extends this flow with a scope that recovers with a declared element.</summary>
+    /// <typeparam name="TNext">The element type the scope produces.</typeparam>
+    /// <param name="options">The form, which must be <see cref="SupervisionForm.Recover"/>.</param>
+    /// <param name="scope">The flow the scope owns the per-element execution of.</param>
+    /// <param name="fallback">The element the scope emits when a failure ends its stream.</param>
+    /// <returns>A new flow; this one is unchanged.</returns>
+    /// <exception cref="ArgumentNullException">
+    /// <paramref name="options"/> or <paramref name="scope"/> is <see langword="null"/>.
+    /// </exception>
+    /// <exception cref="ArgumentException">
+    /// <see cref="SupervisionOptions.Form"/> is not <see cref="SupervisionForm.Recover"/>, a retry-only
+    /// member is set, or <paramref name="scope"/> holds a stage a scope cannot execute.
+    /// </exception>
+    /// <remarks>
+    /// The first failure inside the scope emits <paramref name="fallback"/> and ends the scope's stream
+    /// successfully, so everything above it stops and everything below it drains.
+    /// <see cref="Source{T}.Supervised{TOut}(SupervisionOptions, Flow{T, TOut}, TOut)"/> states all of it in
+    /// full, and everything there holds here.
+    /// </remarks>
+    public Flow<TIn, TNext> Supervised<TNext>(
+        SupervisionOptions options,
+        Flow<TOut, TNext> scope,
+        TNext fallback)
+    {
+        ArgumentNullException.ThrowIfNull(options);
+        ArgumentNullException.ThrowIfNull(scope);
+
+        return new Flow<TIn, TNext>(LocalStageChain.Append(
+            Stages,
+            LocalStageDescriptor.Supervised(
+                LocalOptionGuard.Supervision(options, nameof(options), recovering: true),
+                fallback,
+                LocalOptionGuard.Scope(scope.Stages, nameof(scope)))));
+    }
+
     /// <summary>Extends this flow with a stage that drops an element equal to the one before it.</summary>
     /// <returns>A new flow; this one is unchanged.</returns>
     /// <remarks>

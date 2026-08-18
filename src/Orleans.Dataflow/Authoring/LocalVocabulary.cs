@@ -383,6 +383,14 @@ internal static class LocalVocabulary
     internal static readonly StageRef SinkProbe =
         StageRef.Create(Provider, StageId.Create("sink-probe"), StageRef.FirstMajorVersion);
 
+    /// <summary>The stage reference of a stage that throws where its declared arming says to.</summary>
+    internal static readonly StageRef FaultPoint =
+        StageRef.Create(Provider, StageId.Create("fault-point"), StageRef.FirstMajorVersion);
+
+    /// <summary>The stage reference of a stage that answers the failures of the chain it owns.</summary>
+    internal static readonly StageRef Supervised =
+        StageRef.Create(Provider, StageId.Create("supervised"), StageRef.FirstMajorVersion);
+
     /// <summary>The one element contract every local port declares.</summary>
     /// <remarks>
     /// One opaque contract for every local element type is the honest encoding of a graph whose element
@@ -553,6 +561,29 @@ internal static class LocalVocabulary
     internal static readonly ContractReference GroupedWeightedParameterContract =
         ContractReference.Create(
             ContractId.Create("local-grouped-weighted-parameters"),
+            ContractReference.FirstMajorVersion);
+
+    /// <summary>The parameter contract a fault point declares.</summary>
+    /// <remarks>
+    /// When the stage throws and which arrival is the first to do it are configuration and are written
+    /// down; what it throws is behavior and is not, for the reason the element a <c>single</c> source emits
+    /// is not. <see cref="LocalFaultPointParameters"/> owns the shape.
+    /// </remarks>
+    internal static readonly ContractReference FaultPointParameterContract =
+        ContractReference.Create(
+            ContractId.Create("local-fault-point-parameters"),
+            ContractReference.FirstMajorVersion);
+
+    /// <summary>The parameter contract a supervision scope declares.</summary>
+    /// <remarks>
+    /// The form, the retrying form's attempts, ladder, and exhaustion answer, and <em>which stages the
+    /// scope is</em> are configuration a document states; the delegates inside that chain and the fallback a
+    /// recovering scope emits are behavior and are not.
+    /// <see cref="LocalSupervisionParameters"/> owns the shape.
+    /// </remarks>
+    internal static readonly ContractReference SupervisionParameterContract =
+        ContractReference.Create(
+            ContractId.Create("local-supervision-parameters"),
             ContractReference.FirstMajorVersion);
 
     /// <summary>The parameter contract a collecting sink declares.</summary>
@@ -790,6 +821,8 @@ internal static class LocalVocabulary
         LocalStageKind.Collect => Collect,
         LocalStageKind.ToChannel => ToChannel,
         LocalStageKind.SinkProbe => SinkProbe,
+        LocalStageKind.FaultPoint => FaultPoint,
+        LocalStageKind.Supervised => Supervised,
         _ => throw new ArgumentOutOfRangeException(nameof(kind)),
     };
 
@@ -829,6 +862,8 @@ internal static class LocalVocabulary
             LocalStageKind.SkipWithin => DurationParameterContract,
         LocalStageKind.Distinct => DistinctParameterContract,
         LocalStageKind.GroupBy => GroupByParameterContract,
+        LocalStageKind.FaultPoint => FaultPointParameterContract,
+        LocalStageKind.Supervised => SupervisionParameterContract,
         LocalStageKind.Collect => CollectParameterContract,
         LocalStageKind.Interleave => InterleaveParameterContract,
         LocalStageKind.FromEnumerable or
@@ -897,6 +932,8 @@ internal static class LocalVocabulary
             _ when contract == RangeParameterContract => LocalRangeParameters.Validator,
             _ when contract == DistinctParameterContract => LocalDistinctParameters.Validator,
             _ when contract == GroupByParameterContract => LocalGroupByParameters.Validator,
+            _ when contract == FaultPointParameterContract => LocalFaultPointParameters.Validator,
+            _ when contract == SupervisionParameterContract => LocalSupervisionParameters.Validator,
             _ when contract == WindowParameterContract => LocalWindowParameters.Validator,
             _ when contract == GroupedWithinParameterContract => LocalGroupedWithinParameters.Validator,
             _ when contract == GroupedWeightedParameterContract => LocalGroupedWeightedParameters.Validator,
@@ -971,6 +1008,8 @@ internal static class LocalVocabulary
             LocalStageKind.TakeWithin or
             LocalStageKind.SkipWithin or
             LocalStageKind.Throttle or
+            LocalStageKind.FaultPoint or
+            LocalStageKind.Supervised or
             LocalStageKind.Valve => LocalStagePlace.Operator,
         LocalStageKind.Broadcast or
             LocalStageKind.Balance or
@@ -1017,6 +1056,13 @@ internal static class LocalVocabulary
     /// promise. And <see cref="LocalStageKind.GroupBy"/> inside a group flow would be a second bound and a
     /// second key table per key of the first, which is a real feature and is not this one.
     /// </para>
+    /// <para>
+    /// Two shapes added in M5.1 are refused here too. A <see cref="LocalStageKind.Supervised"/> scope reads
+    /// the run's clock, so it falls under the clause above that refuses every stage wanting a run of its
+    /// own. A <see cref="LocalStageKind.FaultPoint"/> counts the arrivals it has seen, and one counter per
+    /// key is not what "fail the second element" means to the test that wrote it; refusing it by name is
+    /// honest, and a fault point placed before or after a keyed stage says exactly what it meant.
+    /// </para>
     /// </remarks>
     internal static bool RunsInsideAGroup(LocalStageKind kind) => kind switch
     {
@@ -1034,6 +1080,30 @@ internal static class LocalVocabulary
             LocalStageKind.Sliding => true,
         _ => false,
     };
+
+    /// <summary>Reports whether an occurrence of <paramref name="kind"/> may stand inside a supervision scope.</summary>
+    /// <param name="kind">The stage shape.</param>
+    /// <returns><see langword="true"/> for the shapes a scope can own the per-element execution of.</returns>
+    /// <remarks>
+    /// <para>
+    /// The group flow's list plus the fault point, and the two differences are the whole of what a scope is
+    /// against what a keyed stage is. A scope owns <b>one</b> instance of its chain rather than one per key,
+    /// so a fault point's arrival counter means what a test wrote down; and a scope has to be able to see a
+    /// failure raised inside it, which is what rules the remaining shapes out for a reason of this
+    /// operator's own rather than of their machinery.
+    /// </para>
+    /// <para>
+    /// <see cref="LocalStageKind.SelectMany"/> is the sharpest of those. What a scope hands the run for a
+    /// flattening stage is a sequence the run reads <em>after</em> the scope's own method has returned, so a
+    /// failure raised while that sequence is enumerated would happen outside the scope it appears to be
+    /// inside — supervision that silently did not apply, which is worse than a refusal. A nested
+    /// <see cref="LocalStageKind.Supervised"/> and a <see cref="LocalStageKind.GroupBy"/> are refused as
+    /// this version's honesty: a policy inside a policy and a key table whose reset is a scope's business
+    /// are each a real feature with a contract to state, and neither is this one.
+    /// </para>
+    /// </remarks>
+    internal static bool RunsInsideAScope(LocalStageKind kind) =>
+        kind is LocalStageKind.FaultPoint || RunsInsideAGroup(kind);
 
     /// <summary>Recovers the shape a stage reference names, when this vocabulary declares one.</summary>
     /// <param name="stage">The reference as a document spells it, such as <c>local/take@v1</c>.</param>
@@ -1190,7 +1260,8 @@ internal static class LocalVocabulary
                 LocalStageKind.Collect => ResultPortSpecification.Create(ResultPort, ResultContract),
             LocalStageKind.Queue or
                 LocalStageKind.Valve or
-                LocalStageKind.SinkProbe => ResultPortSpecification.Create(ControlPort, ControlContract),
+                LocalStageKind.SinkProbe or
+                LocalStageKind.FaultPoint => ResultPortSpecification.Create(ControlPort, ControlContract),
             _ => null,
         };
     }

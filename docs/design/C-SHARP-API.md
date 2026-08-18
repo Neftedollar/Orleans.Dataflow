@@ -560,6 +560,147 @@ have different fingerprints. The delegates — the key function, the key type's
 equality, and everything inside the flow — stay in the binding table, where
 every behavior stays.
 
+## Supervision
+
+The M5.1 operator is two members on `Source<T>` and `Flow<TIn,TOut>`, mirrored
+per the ADR 0004 discipline, and it is the second one that takes a *flow* as an
+argument:
+
+| Spelling | What it does | What it takes |
+|---|---|---|
+| `Supervised(options, scope)` | owns the per-element execution of `scope` and answers its failures by the declared form | `SupervisionOptions` and a `Flow<T,TOut>` |
+| `Supervised(options, scope, fallback)` | the same, for `SupervisionForm.Recover`, which emits an element rather than dropping one | the above plus a `TOut` |
+
+The name is a participle for the reason `Grouped`, `Sliding`, and
+`GroupedWithin` are: it reads as "this stream, supervised by this policy, over
+this flow". Two spellings rather than one with an optional argument, because
+the fallback is what separates a scope that emits an element from one that drops
+one — and each spelling refuses the other's forms by name, so a call site cannot
+declare `Recover` and forget to say what it recovers with.
+
+**Supervision is a scope, and a scope is a stage.** The flow is declared once,
+the scope owns one instance of it, and a failure raised inside that instance is
+answered by the declared form instead of failing the run. Everything outside the
+scope keeps the engine's own rule: a failure fails the run, which is the default
+and stays the default.
+
+**The four forms.**
+
+- `Resume` drops the failing element and keeps the scope's stage state, so a
+  `Scan` inside it goes on counting and a half-filled `Grouped` stays open.
+- `RestartStage` drops the element and rebuilds every stage inside the scope
+  from its seed. What "reset" means is exact because the chain is declared: a
+  scan returns to its seed, a distinct forgets its keys, a batch abandons its
+  open group.
+- `Retry` offers the element to the scope again, up to `MaxAttempts` (counted
+  including the first), waiting the `Backoff` ladder's rung on the run's clock
+  between attempts, and applies `OnExhaustion` — `Fail` (the default), `Resume`,
+  or `RestartStage` — to an element that used them all.
+- `Recover` emits the fallback and ends the scope's stream **successfully**:
+  everything above stops, everything below drains, the result slots resolve, and
+  the run reports success. Recovering with an *alternate source* is a different
+  capability with a boundary of its own and is deliberately not a knob here.
+
+**A retry re-offers to the scope's first stage.** That is what "the element is
+offered to the scope again" means for a chain the scope owns whole, so a
+stateful stage inside a retrying scope sees the element once per attempt. It is
+the reason to keep a retrying scope small, and the reason the exhaustion answer
+can escalate to `RestartStage`.
+
+**The backoff ladder is explicit and the last rung repeats.** `Backoff` is an
+`IReadOnlyList<TimeSpan>` in attempt order; a ladder shorter than the attempt
+count reads as "and then this long every time", and an empty one means every
+re-offer happens at once. A rung of zero is legal, unlike every other duration
+in this vocabulary, because "try again now" is the ordinary shape of a first
+rung. **There is no jitter in this version**: jitter spreads a fleet's restarts
+and a per-element retry inside one run has no fleet, and a random source would
+make "the waits are exactly what the document says" a statistical claim instead
+of an asserted one. The waits take the same bracket every wait here takes — a
+pause takes effect at once and holds the re-offer, a shutdown releases the wait
+and the element is delivered without the rest of the rung being paid, and a
+cancellation abandons it.
+
+**The retry members are refused on the other three forms.** `MaxAttempts`,
+`Backoff`, and `OnExhaustion` say nothing about a scope that never re-offers, so
+setting one on `Resume` is an `ArgumentException` rather than a number written
+into a document nothing would read it from.
+
+**What a scope does not catch**, and each of these is stated rather than
+discovered:
+
+- A **cancellation** is not a failure and no form weakens it.
+- A failure **outside** every scope fails the run, unchanged — including one on
+  a sibling junction leg, and one a stage below the scope raises.
+- A failure of the **machinery** rather than of an author's stage — a payload
+  the runtime cannot read, a chain holding a shape a scope cannot execute, two
+  planes describing different chains — is refused at materialization, before the
+  run has an element to supervise.
+- A failure raised while a stream is **ending** is not supervised: the residue
+  walk has no failing element to drop and nothing to re-offer, so it travels to
+  the run like any unsupervised failure.
+
+**The scope holds element stages only, and that is this version's honesty.** It
+owns the execution of its chain element by element, so an asynchronous stage, a
+buffer, a junction, and a stage that reads the clock are refused where the flow
+is composed, by an `ArgumentException` naming every offending stage and its
+position. `SelectMany` is refused for a reason of this operator's own: its
+sequence is read by the run *after* the scope's own method has returned, so a
+failure raised while it was enumerated would fall outside the scope it appears
+to be inside. A nested scope and a `GroupBy` are refused as recorded deferrals,
+and a scope is itself refused inside a group flow, because a scope reads the run's
+clock and one instance per key of that is not something a fused stage can hold.
+
+**The policy is in the document.** `local-supervision-parameters@v1` carries
+`form`, `scope` — one entry per stage with that stage's own reference and
+payload — and, only for the retrying form, `maxAttempts`, `backoffTicks`, and
+`onExhaustion`. Two graphs supervised differently have different fingerprints.
+The fallback a recovering scope emits is not there: it is a value of an element
+type no local document names, so it travels in the binding table exactly as
+`Source.Single`'s element does. **No form names an exception type** — a policy
+filtering by type would need CLR names in a document, which the definition plane
+forbids — so a scope supervises every failure inside it alike; a declared failure
+taxonomy is a recorded deferral.
+
+**Counting.** A supervised failure is never silent: the run counts every failure
+its scopes intercepted and, separately, every element a retrying scope gave up on
+(ADR 0007's *poison element*). Both are internal for the reason the dropped-element
+counter is — what an author will read them through is a monitor, which is a later
+checkpoint with a shape of its own.
+
+## Testing: failure injection
+
+`Orleans.Dataflow.Testing.TestFlow.FaultPoint<T>(...)` is ADR 0007's injection
+seam, and it is an **ordinary stage a document names** rather than a hook into
+the engine: it validates against the catalog, it changes the fingerprint, and it
+composes anywhere an element stage stands — including inside a supervision
+scope, which is what makes a scope's own tests deterministic.
+
+| Spelling | What it does |
+|---|---|
+| `FaultPoint<T>(mode, firstFailure)` | throws where its declared arming says to, exposing no control |
+| `FaultPoint<T>(mode, firstFailure, fault)` | the same, throwing what a factory over the arrival answers |
+| `FaultPoint<T>(controlName, mode, firstFailure)` | the same, exposing an `IFaultPoint` under a name |
+| `FaultPoint<T>(controlName, mode, firstFailure, fault)` | both |
+
+The arming is `FaultPointMode` — `Never`, `Once`, `Always` — and a one-based
+*arrival*. It is declared in the graph rather than only set through the control
+because a run starts as soon as it is materialized: a test that had to resolve a
+control first would be racing the elements it wanted to fail. The control is for
+re-arming a run whose elements a test is pacing through a source probe, and for
+reading `ElementsSeen` and `FaultsThrown`; re-arming counts from the *next*
+arrival, where the declared arming counts from the first of the run.
+
+**A retry's re-offer is an arrival of its own**, so a scope that offered one
+element three times leaves three in `ElementsSeen` — which is what makes "the
+scope really did retry" a number rather than an inference. The counter belongs
+to the run, not to the stage instance, so a scope that restarts its stages does
+not reset it.
+
+**The control-bearing spelling is refused inside a scope**, by name: the stages
+of a scope's chain are not nodes of the document, so a slot declared on one
+would be a slot nothing could resolve. Use the spelling without a control there —
+its declared arming is the whole of what such a fault point does.
+
 ## Delegates and deployability
 
 Lambda-based operators (`Select(x => ...)`) construct graphs that carry the
