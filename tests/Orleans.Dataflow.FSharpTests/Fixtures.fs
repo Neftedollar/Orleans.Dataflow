@@ -127,6 +127,40 @@ module internal Fixtures =
             return value
         }
 
+    /// <summary>Runs a closed graph to its end and answers the results of two of its slots.</summary>
+    /// <remarks>
+    /// What a junction graph needs and a chain never does: a fan-out declares one result per result-bearing
+    /// branch, so the question a test asks is what two branches produced rather than what one terminal did.
+    /// Both values are read from the one run, because two runs would be two answers to a question about one.
+    /// </remarks>
+    let bothResultsOf
+        (first: Orleans.Dataflow.ResultSlot<'First>)
+        (second: Orleans.Dataflow.ResultSlot<'Second>)
+        (graph: Orleans.Dataflow.RunnableGraph)
+        : Task<'First * 'Second> =
+        task {
+            let! run = host.MaterializeAsync(graph, token ())
+            let! firstValue = run.GetValueAsync(first, token ())
+            let! secondValue = run.GetValueAsync(second, token ())
+
+            do! run.Completion
+            do! run.DisposeAsync()
+
+            return firstValue, secondValue
+        }
+
+    /// <summary>The collecting terminal every behavior assertion about a branch's elements is made through.</summary>
+    /// <remarks>
+    /// A function rather than a value, because a value of this shape would need to be generalized by hand and
+    /// says nothing more for it. The bound is generous and every test here is far below it.
+    /// </remarks>
+    let collecting () : SinkWithResult<'T, IReadOnlyList<'T>> =
+        Sink.collect (Orleans.Dataflow.CollectOptions(MaxElements = 256))
+
+    /// <summary>The same collecting terminal, spelled in the other frontend.</summary>
+    let collectingCSharp () : Orleans.Dataflow.SinkWithResult<'T, IReadOnlyList<'T>> =
+        Orleans.Dataflow.Sink.Collect<'T>(Orleans.Dataflow.CollectOptions(MaxElements = 256))
+
     /// <summary>Builds an asynchronous sequence over a fixed list of elements.</summary>
     /// <remarks>
     /// A completed unbounded channel is the shortest honest <see cref="T:System.Collections.Generic.IAsyncEnumerable`1"/>

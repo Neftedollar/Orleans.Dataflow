@@ -10,6 +10,8 @@
     <Compile Include="Bindings.fs" />
     <Compile Include="Flow.fs" />
     <Compile Include="Sink.fs" />
+    <Compile Include="Branch.fs" />
+    <Compile Include="Fork.fs" />
     <Compile Include="Source.fs" />
   </ItemGroup>
   <ItemGroup>

@@ -19,9 +19,15 @@ builds against it. The phase order:
    families, filtering/choosing, batching, timing, rate, deduplication,
    supervision and durable-scope spellings, per the C# vocabulary and this
    document's naming rules.
-3. **M7.3 — junctions and the `Graph` module**: typed branches over the
-   fragment algebra, the nine junctions, `Fork` diamonds, cycles through
-   `GraphFragmentComposer.Wire`.
+3. **M7.3 — junctions and branching** (done 2026-08-19): typed `Branch`
+   and `Fork` values over the shape algebra, the nine junctions, taps,
+   and diamonds. The `Graph` module this list once promised was
+   deliberately not created: every local junction is a function of a
+   source or of a branch, exactly where the C# facade puts it, and a
+   `Graph` namespace would be a second place to look for the same
+   operations. Cycles stay algebra-only by the standing decision;
+   fragment spellings are revisited with the registered vocabulary in
+   M7.4 if a consumer appears.
 4. **M7.4 — runs and hosts**: `RunHandle` (completion, watch, snapshot,
    pause), durable options, the Orleans host, registered-stage spellings.
 5. **M7.5 — examples, docs authored as F#, and the M7 exit review.**

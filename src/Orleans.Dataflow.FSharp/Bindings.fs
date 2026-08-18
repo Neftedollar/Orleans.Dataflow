@@ -4,17 +4,19 @@ open System
 open System.Collections.Generic
 open System.Threading
 open System.Threading.Tasks
+open Orleans.Dataflow.Identity
 
 // Orleans.Dataflow itself is deliberately not opened here either: see the note in Source.fs.
 
-/// <summary>The two conversions this package makes more than once, written down once.</summary>
+/// <summary>The conversions and checks this package makes more than once, written down once.</summary>
 /// <remarks>
 /// <para>
 /// Everything else in this package is a wrapping so thin it is the operator: an F# function becomes the
-/// <see cref="T:System.Func`2"/> the descriptor stores and nothing happens in between. These two are the
-/// exceptions, and both are exceptions for the same reason — the runtime's delegate adapter names a shape
-/// F# has no direct spelling of, so a conversion has to exist somewhere. Writing them here rather than at
-/// every use site is what keeps the answer one answer.
+/// <see cref="T:System.Func`2"/> the descriptor stores and nothing happens in between. The two conversions
+/// are the exceptions, and both are exceptions for the same reason — the runtime's delegate adapter names a
+/// shape F# has no direct spelling of, so a conversion has to exist somewhere. Writing them here rather than
+/// at every use site is what keeps the answer one answer, which is why the one check two different closing
+/// calls both make lives here too.
 /// </para>
 /// <para>
 /// This module is internal. Neither conversion is a concept an author composes with, and exposing them
@@ -22,6 +24,27 @@ open System.Threading.Tasks
 /// </para>
 /// </remarks>
 module internal Bindings =
+
+    /// <summary>Checks the name a result is to be declared under.</summary>
+    /// <param name="parameterName">The name of the closing call's own parameter the name arrived in.</param>
+    /// <param name="slotName">The name the author supplied.</param>
+    /// <returns>The validated identifier.</returns>
+    /// <exception cref="T:System.ArgumentException">
+    /// <paramref name="slotName"/> is not a valid single-segment identifier.
+    /// </exception>
+    /// <remarks>
+    /// Two calls declare a result — the one that closes a graph and the one that ends a branch — and they
+    /// are in two files, so the check is here rather than duplicated in both. The caller's parameter name is
+    /// passed rather than inferred: inferring it would name this function's own parameter, and the author
+    /// wrote the closing call's.
+    /// </remarks>
+    let slotId (parameterName: string) (slotName: string) : ResultSlotId =
+        match ResultSlotId.TryCreate slotName with
+        | true, id -> id
+        | false, _ ->
+            invalidArg
+                parameterName
+                $"The slot name '{slotName}' is not a valid identifier segment. A result slot is named by a single lowercase segment, such as 'total'."
 
     /// <summary>Starts an asynchronous computation as the task an asynchronous stage awaits.</summary>
     /// <param name="computation">The author's computation.</param>

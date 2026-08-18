@@ -796,6 +796,301 @@ module Source =
     let durable (scope: Flow<'In, 'Out>) (source: Source<'In>) : Source<'Out> =
         via (Flow.durable scope) source
 
+    /// <summary>Reads one branch as the leg a composition works over.</summary>
+    /// <remarks>
+    /// The bridge from the typed branch value to the untyped leg. It exists because the legs of one junction
+    /// can carry unlike element types — an unzip's do — so the list a composition walks cannot be typed by
+    /// any one of them. A leg carries exactly the three things composition needs: the occurrences, the name
+    /// of the result the leg declares, and the binding waiting for the graph that will fill it.
+    /// </remarks>
+    let private legOf (branch: Branch<'T>) : BranchLeg =
+        match branch.Result with
+        | ValueSome(name, binding) -> BranchLeg(branch.Stages, Nullable name, binding)
+        | ValueNone -> BranchLeg(branch.Stages, Nullable<ResultSlotId>(), null)
+
+    /// <summary>Reads the branches of a fan-out call as legs, having checked how many there are.</summary>
+    /// <remarks>
+    /// The bound is the shared vocabulary's, so the numbers cannot drift; the sentence is restated rather
+    /// than called because the guard that owns it is typed to the C# facade's own branch value, and reaching
+    /// it would mean building one of those from an F# branch. That is the detour through the fluent types
+    /// this package exists not to take. Nothing downstream restates the bound, so a divergence here would
+    /// show as a call this frontend accepts and the other refuses — which is what the arity parity case
+    /// asserts.
+    /// </remarks>
+    let private legsOf (parameterName: string) (branches: Branch<'T> list) : IReadOnlyList<BranchLeg> =
+        let legs = branches |> List.map legOf |> List.toArray
+
+        if legs.Length < LocalVocabulary.MinFanOut || legs.Length > LocalVocabulary.MaxFanOut then
+            invalidArg
+                parameterName
+                $"A fan-out junction has between {LocalVocabulary.MinFanOut} and {LocalVocabulary.MaxFanOut} branches, and this call has {legs.Length}. One branch is a chain written the long way, none is a discarding sink, and more than {LocalVocabulary.MaxFanOut} is past the legs a local junction declares."
+
+        legs :> IReadOnlyList<BranchLeg>
+
+    /// <summary>Closes a source into a graph through a fan-out junction and its legs.</summary>
+    /// <remarks>
+    /// Every terminal fan-out funnels through here, which is what makes a broadcast, a balance, a partition,
+    /// and an unzip one operation with four junction stages rather than four implementations: what differs is
+    /// the occurrence and the leg ports, and the slot each result-bearing leg asks for is the same arithmetic
+    /// in all of them. That arithmetic is the shared guard's, not this package's.
+    /// </remarks>
+    let private fanOutTo
+        (junction: LocalStageDescriptor)
+        (legs: IReadOnlyList<PortId>)
+        (branches: IReadOnlyList<BranchLeg>)
+        (source: Source<'T>)
+        : Orleans.Dataflow.RunnableGraph =
+        let position = source.State.Stages.Count
+        let shape = source.State.Split(junction, legs, LocalJunctionGuard.Chains branches)
+
+        LocalGraphBuilder.Close(shape, LocalJunctionGuard.Slots(position, branches))
+
+    /// <summary>Splits a source into the two legs every non-terminal fan-out has.</summary>
+    /// <remarks>
+    /// A fork, its merging sibling, and a tap are all this shape. A leg with no occurrences of its own leaves
+    /// the junction's own leg port open, which is how a tap keeps the main line flowing and how a fork
+    /// through the identity flow costs no stage at all.
+    /// </remarks>
+    let private splitInto
+        (junction: LocalStageDescriptor)
+        (left: IReadOnlyList<StageOccurrence>)
+        (right: IReadOnlyList<StageOccurrence>)
+        (source: Source<'T>)
+        : LocalGraphShape =
+        source.State.Split(junction, LocalJunctionGuard.FanOutPorts LocalVocabulary.MinFanOut, [| left; right |])
+
+    /// <summary>Sends every element the junction accepts to one branch, and continues with what is left.</summary>
+    /// <remarks>
+    /// The tap and its predicate-routed sibling are one composition over two junctions. A result the branch
+    /// declares is carried on the shape rather than answered here: the call does not close a graph, so there
+    /// is no graph yet for the slot to belong to, and the request travels until something closes it.
+    /// </remarks>
+    let private tapping (junction: LocalStageDescriptor) (side: Branch<'T>) (source: Source<'T>) : Source<'T> =
+        let shape = splitInto junction LocalStageChain.Empty side.Stages source
+
+        Source<'T>(
+            match side.Result with
+            | ValueSome(name, binding) -> shape.Declaring(LocalSlotRequest(name, shape.Stages.Count - 1, binding))
+            | ValueNone -> shape)
+
+    /// <summary>Joins a source and others into one through a fan-in junction.</summary>
+    /// <remarks>
+    /// The receiver's occurrences come first and the arguments' follow in order, so the numbering of a join
+    /// is the order it was written in and the junction's input ports follow that same order: the source the
+    /// call was written on reaches <c>in-0</c>, the first argument <c>in-1</c>, and so on.
+    /// </remarks>
+    let private joinedWith
+        (junction: LocalStageDescriptor)
+        (others: LocalGraphShape list)
+        (source: Source<'T>)
+        : Source<'Out> =
+        let placed =
+            others |> List.fold (fun (shape: LocalGraphShape) other -> shape.Union other) source.State
+
+        Source<'Out>(placed.Combine(junction, LocalJunctionGuard.FanInPorts(List.length others + 1)))
+
+    /// <summary>Joins a source with another, emitting from whichever of the two has an element.</summary>
+    /// <param name="other">The source to merge with, which is unchanged.</param>
+    /// <param name="source">The source being joined, which is unchanged.</param>
+    /// <returns>A source of both streams' elements.</returns>
+    /// <remarks>
+    /// The elements of one input keep their order relative to each other and nothing is promised about how
+    /// the two interleave: a merge emits what has arrived. The merged stream ends when both inputs have.
+    /// Merging four streams is <c>merge d (merge3 b c a)</c>, and that is honestly two junctions rather than
+    /// one — merge semantics are associative, but the two documents are distinct and fingerprint differently.
+    /// </remarks>
+    let merge (other: Source<'T>) (source: Source<'T>) : Source<'T> =
+        joinedWith (LocalStageDescriptor.Merge()) [ other.State ] source
+
+    /// <summary>Joins a source with two others, emitting from whichever of the three has an element.</summary>
+    /// <param name="second">The second source, which is unchanged.</param>
+    /// <param name="third">The third source, which is unchanged.</param>
+    /// <param name="source">The source being joined, which is unchanged.</param>
+    /// <returns>A source of all three streams' elements.</returns>
+    /// <remarks>
+    /// One junction with three inputs rather than two junctions, which is a different document from
+    /// <c>merge c (merge b a)</c> and is the one to write when the three streams are peers. Three is where
+    /// the arities stop, exactly as they do in the other frontend: wider merges chain, and a chain says what
+    /// it is. The digit is in the name because this package spells one operation per name and never overloads
+    /// one.
+    /// </remarks>
+    let merge3 (second: Source<'T>) (third: Source<'T>) (source: Source<'T>) : Source<'T> =
+        joinedWith (LocalStageDescriptor.Merge()) [ second.State; third.State ] source
+
+    /// <summary>Follows a source with another, emitting the second only after the first has ended.</summary>
+    /// <param name="next">The source to emit after this one, which is unchanged.</param>
+    /// <param name="source">The source emitted first, which is unchanged.</param>
+    /// <returns>A source of this stream followed by that one.</returns>
+    /// <remarks>
+    /// The ordered fan-in: every element of <paramref name="source"/> is emitted, in order, before the first
+    /// element of <paramref name="next"/> is asked for. That is a difference in when the later input is
+    /// pulled at all and not only in the order elements come out — a concat holds its later inputs untouched
+    /// until their turn.
+    /// </remarks>
+    let concat (next: Source<'T>) (source: Source<'T>) : Source<'T> =
+        joinedWith (LocalStageDescriptor.Concat()) [ next.State ] source
+
+    /// <summary>Joins a source with another by taking a declared number of elements from each in turn.</summary>
+    /// <param name="other">The source to interleave with, which is unchanged.</param>
+    /// <param name="segmentSize">How many elements to take from one input before moving to the next.</param>
+    /// <param name="source">The source being joined, which is unchanged.</param>
+    /// <returns>A source of both streams' elements in a fixed rotation.</returns>
+    /// <exception cref="T:System.ArgumentOutOfRangeException"><paramref name="segmentSize"/> is below one.</exception>
+    /// <remarks>
+    /// The deterministic fan-in: unlike a merge, the output order is decided by the rotation and not by which
+    /// input happened to have an element. An input that ends is dropped from the rotation and the remaining
+    /// ones carry on, so a shorter stream does not end the join. The segment size is the one number a
+    /// junction writes into its document, so it changes the fingerprint.
+    /// </remarks>
+    let interleave (other: Source<'T>) (segmentSize: int) (source: Source<'T>) : Source<'T> =
+        joinedWith
+            (LocalStageDescriptor.Interleave(LocalOptionGuard.SegmentSize(segmentSize, nameof segmentSize)))
+            [ other.State ]
+            source
+
+    /// <summary>Joins a source with another through a function of one element from each.</summary>
+    /// <param name="other">The source to join with, which is unchanged.</param>
+    /// <param name="combine">The function building one element from one element of each input.</param>
+    /// <param name="source">The source being joined, which is unchanged.</param>
+    /// <returns>A source of one element per element from each input.</returns>
+    /// <remarks>
+    /// Positional and lockstep: the first element of each input builds the first row, the second of each the
+    /// second, and the joined stream ends as soon as either input does — whatever the other still had.
+    /// Building the row here rather than pairing first is what keeps a join that immediately projects from
+    /// allocating a pair only to take it apart again.
+    /// </remarks>
+    let zipWith (other: Source<'T2>) (combine: 'T -> 'T2 -> 'Out) (source: Source<'T>) : Source<'Out> =
+        joinedWith
+            (LocalStageDescriptor.Zip(LocalRowCombiner.Of(Func<'T, 'T2, 'Out> combine)))
+            [ other.State ]
+            source
+
+    /// <summary>Joins a source with another into a stream of pairs.</summary>
+    /// <param name="other">The source to pair with, which is unchanged.</param>
+    /// <param name="source">The source being joined, which is unchanged.</param>
+    /// <returns>A source of one pair per element from each input.</returns>
+    /// <remarks>
+    /// The same lockstep join, with the pair built by the tuple. Its members are named by the order the
+    /// inputs were written in, and it is a struct tuple because that is the very
+    /// <see cref="T:System.ValueTuple`2"/> the other frontend's zip produces — so one graph authored in
+    /// either language carries one element type as well as one document, and a zipped stream can be unzipped
+    /// again without a conversion in between.
+    /// </remarks>
+    let zip (other: Source<'T2>) (source: Source<'T>) : Source<struct ('T * 'T2)> =
+        zipWith other (fun first second -> struct (first, second)) source
+
+    /// <summary>Joins a source with another by combining each arrival with the other's latest element.</summary>
+    /// <param name="other">The source to join with, which is unchanged.</param>
+    /// <param name="combine">The function building one element from the latest element of each input.</param>
+    /// <param name="source">The source being joined, which is unchanged.</param>
+    /// <returns>A source of one element per arrival once both inputs have produced.</returns>
+    /// <remarks>
+    /// Not a lockstep join and deliberately a different word for it: nothing is emitted until both inputs
+    /// have produced at least once, and after that every arrival on either side emits a row built from it and
+    /// from whatever the other side last produced. A fast input therefore produces many rows against one slow
+    /// element, which is the point — this is the join for a stream against a setting, not for two streams of
+    /// matching rows. There is one form because the other frontend has one: a row is always the author's to
+    /// build.
+    /// </remarks>
+    let combineLatest (other: Source<'T2>) (combine: 'T -> 'T2 -> 'Out) (source: Source<'T>) : Source<'Out> =
+        joinedWith
+            (LocalStageDescriptor.CombineLatest(LocalRowCombiner.Of(Func<'T, 'T2, 'Out> combine)))
+            [ other.State ]
+            source
+
+    /// <summary>Emits another source's elements before this one's.</summary>
+    /// <param name="head">The source to emit first, which is unchanged.</param>
+    /// <param name="source">The source emitted second, which is unchanged.</param>
+    /// <returns>A source of that stream followed by this one.</returns>
+    /// <remarks>
+    /// <c>prepend b a</c> is <c>concat a b</c> and is exactly that document, junction and all: this is the
+    /// spelling for when the stream being extended is the one already in hand, which is what a pipeline of
+    /// operators leaves an author holding. Everything <see cref="M:Orleans.Dataflow.FSharp.Source.concat``1"/>
+    /// promises therefore holds here, including the one that costs something — the later input's source is
+    /// running and parked in its own bounded channel while the earlier one plays out.
+    /// </remarks>
+    let prepend (head: Source<'T>) (source: Source<'T>) : Source<'T> =
+        joinedWith (LocalStageDescriptor.Concat()) [ source.State ] head
+
+    /// <summary>Emits another source's elements after this one's.</summary>
+    /// <param name="tail">The source to emit last, which is unchanged.</param>
+    /// <param name="source">The source emitted first, which is unchanged.</param>
+    /// <returns>A source of this stream followed by that one.</returns>
+    /// <remarks>
+    /// The same junction <see cref="M:Orleans.Dataflow.FSharp.Source.concat``1"/> builds, under the name the
+    /// sequence-edit vocabulary uses, and deliberately the same document rather than a second one. Which word
+    /// to write is a question of what the author is saying — joining two streams, or extending one. A fixed
+    /// run of elements is <c>append (Source.ofSeq [ … ]) source</c>, which is the document the other
+    /// frontend's element overload builds and is why there is no second name for it here.
+    /// </remarks>
+    let append (tail: Source<'T>) (source: Source<'T>) : Source<'T> =
+        concat tail source
+
+    /// <summary>Sends every element to a branch as well, and continues.</summary>
+    /// <param name="side">The branch to tap into, which is unchanged.</param>
+    /// <param name="source">The source being tapped, which is unchanged.</param>
+    /// <returns>A source of the same elements.</returns>
+    /// <remarks>
+    /// The tap, and broadcast sugar underneath: a junction with the main line on its first leg and the branch
+    /// on its second, so every element reaches both. What that costs is the broadcast's own rule — an element
+    /// is delivered to every leg, so a branch that stops consuming holds the main line up. A tap is not a
+    /// fire-and-forget side effect. A branch that declares a result is welcome here: the result is carried
+    /// until the graph is closed and declared then, beside whatever the main line declares.
+    /// </remarks>
+    let alsoTo (side: Branch<'T>) (source: Source<'T>) : Source<'T> =
+        tapping (LocalStageDescriptor.Broadcast()) side source
+
+    /// <summary>Sends the elements a predicate accepts to a branch, and continues with the rest.</summary>
+    /// <param name="predicate">The test deciding which elements leave the main line.</param>
+    /// <param name="side">The branch the accepted elements go to, which is unchanged.</param>
+    /// <param name="source">The source being diverted, which is unchanged.</param>
+    /// <returns>A source of the elements the predicate rejected.</returns>
+    /// <remarks>
+    /// Partition sugar, and the two-legged partition exactly: the accepted elements go to the branch and
+    /// nothing else does, so unlike a tap this junction never duplicates an element. It is the shape a
+    /// validation stage wants — the rejects to a dead-letter sink, everything else onward. What it costs is
+    /// the partition's own rule: the junction holds one element and waits for the leg that element belongs
+    /// on, so a diverted element the branch is slow to take holds the main line up for exactly as long.
+    /// </remarks>
+    let divertTo (predicate: 'T -> bool) (side: Branch<'T>) (source: Source<'T>) : Source<'T> =
+        tapping
+            (LocalStageDescriptor.Partition(Func<'T, int>(fun element -> if predicate element then 1 else 0)))
+            side
+            source
+
+    /// <summary>Sends every element down two flows at once, to be rejoined.</summary>
+    /// <param name="left">The first derivation, which is unchanged.</param>
+    /// <param name="right">The second derivation, which is unchanged.</param>
+    /// <param name="source">The source being forked, which is unchanged.</param>
+    /// <returns>The fork, which is closed by one of the <c>Fork</c> module's own functions.</returns>
+    /// <remarks>
+    /// The one shape a pipeline cannot express: the same element travels two paths and the paths meet again.
+    /// Every element is broadcast to both flows, so the two derived streams advance together — which is what
+    /// makes <see cref="M:Orleans.Dataflow.FSharp.Fork.zip``2"/> a join that needs no buffer between the
+    /// halves. The fork has two open ends and no way to close a graph, so a program that builds one has to
+    /// rejoin it.
+    /// </remarks>
+    let fork (left: Flow<'T, 'T1>) (right: Flow<'T, 'T2>) (source: Source<'T>) : Fork<'T1, 'T2> =
+        Fork<'T1, 'T2>(splitInto (LocalStageDescriptor.Broadcast()) left.Stages right.Stages source)
+
+    /// <summary>Sends every element down two flows at once and takes whichever result arrives first.</summary>
+    /// <param name="left">The first derivation, which is unchanged.</param>
+    /// <param name="right">The second derivation, which is unchanged.</param>
+    /// <param name="source">The source being forked, which is unchanged.</param>
+    /// <returns>A source of both derivations' elements.</returns>
+    /// <remarks>
+    /// The unordered rejoin, and the shape a race is written in: one element in produces two elements out —
+    /// one per path — in whatever order the paths finish. That is a merge and not a zip, so the two
+    /// derivations of one element are not paired and nothing waits for the slower path before emitting the
+    /// faster one. <see cref="M:Orleans.Dataflow.FSharp.Source.fork``3"/> is the rejoin for when the two
+    /// derivations belong together.
+    /// </remarks>
+    let forkMerge (left: Flow<'T, 'Out>) (right: Flow<'T, 'Out>) (source: Source<'T>) : Source<'Out> =
+        let diamond = splitInto (LocalStageDescriptor.Broadcast()) left.Stages right.Stages source
+
+        Source<'Out>(
+            diamond.Combine(LocalStageDescriptor.Merge(), LocalJunctionGuard.FanInPorts LocalVocabulary.MinFanIn))
+
     /// <summary>Closes a source with a sink that declares no result.</summary>
     /// <param name="sink">The terminal consuming the stream.</param>
     /// <param name="source">The source being closed, which is unchanged.</param>
@@ -822,14 +1117,7 @@ module Source =
         (sink: SinkWithResult<'T, 'Result>)
         (source: Source<'T>)
         : Orleans.Dataflow.RunnableGraph * Orleans.Dataflow.ResultSlot<'Result> =
-        let slotId =
-            match ResultSlotId.TryCreate(slotName) with
-            | true, id -> id
-            | false, _ ->
-                invalidArg
-                    (nameof slotName)
-                    $"The slot name '{slotName}' is not a valid identifier segment. A result slot is named by a single lowercase segment, such as 'total'."
-
+        let slotId = Bindings.slotId (nameof slotName) slotName
         let closed = source.State.Concat sink.Stages
 
         let graph =
@@ -838,3 +1126,126 @@ module Source =
                 [| LocalSlotRequest(slotId, closed.Stages.Count - 1, null) |])
 
         graph, Orleans.Dataflow.ResultSlot<'Result>.Create(slotId, graph.Fingerprint, graph.AuthoringNonce)
+
+    /// <summary>Closes a source by delivering every element to every branch.</summary>
+    /// <param name="branches">The branches, in the order they are wired to the junction's legs.</param>
+    /// <param name="source">The source being closed, which is unchanged.</param>
+    /// <returns>The closed graph, ready to materialize.</returns>
+    /// <exception cref="T:System.ArgumentException">
+    /// There are fewer than two branches or more than the eight a local junction declares legs for, or two
+    /// branches declare a result under one name.
+    /// </exception>
+    /// <remarks>
+    /// <para>
+    /// A closing call, exactly as <see cref="M:Orleans.Dataflow.FSharp.Source.toSink``1"/> is: the branches
+    /// end in terminals, so nothing is left open. Every element reaches every branch, which means a branch
+    /// that stops consuming holds up all of them — a broadcast asks each leg for room before it pulls, and
+    /// that is the bounded memory this junction buys.
+    /// </para>
+    /// <para>
+    /// Branch order is argument order and is identity-bearing: the first branch's occurrences are numbered
+    /// before the second's, so swapping two elements of the list builds a different document with a different
+    /// fingerprint. That is the same rule reordering a pipeline follows. The slots of result-bearing branches
+    /// are already in the author's hand, because a branch names its result where its terminal is written, so
+    /// nothing is answered here but the graph.
+    /// </para>
+    /// </remarks>
+    let broadcastTo (branches: Branch<'T> list) (source: Source<'T>) : Orleans.Dataflow.RunnableGraph =
+        let legs = legsOf (nameof branches) branches
+
+        fanOutTo (LocalStageDescriptor.Broadcast()) (LocalJunctionGuard.FanOutPorts legs.Count) legs source
+
+    /// <summary>Closes a source by delivering each element to one branch that has room.</summary>
+    /// <param name="branches">The branches, in the order they are wired to the junction's legs.</param>
+    /// <param name="source">The source being closed, which is unchanged.</param>
+    /// <returns>The closed graph, ready to materialize.</returns>
+    /// <exception cref="T:System.ArgumentException">
+    /// There are fewer than two branches or more than the eight a local junction declares legs for, or two
+    /// branches declare a result under one name.
+    /// </exception>
+    /// <remarks>
+    /// Every element goes to exactly one branch and which one is not defined: a balance hands an element to
+    /// whichever leg is ready for it, which is what makes it the junction for spreading work rather than for
+    /// classifying it. The branches are usually the same pipeline written twice, and nothing requires them to
+    /// be.
+    /// </remarks>
+    let balanceTo (branches: Branch<'T> list) (source: Source<'T>) : Orleans.Dataflow.RunnableGraph =
+        let legs = legsOf (nameof branches) branches
+
+        fanOutTo (LocalStageDescriptor.Balance()) (LocalJunctionGuard.FanOutPorts legs.Count) legs source
+
+    /// <summary>Closes a source by sending each element to the branch a function names.</summary>
+    /// <param name="router">The function answering the zero-based position of the branch for an element.</param>
+    /// <param name="branches">The branches, in the order the router's answers index them.</param>
+    /// <param name="source">The source being closed, which is unchanged.</param>
+    /// <returns>The closed graph, ready to materialize.</returns>
+    /// <exception cref="T:System.ArgumentException">
+    /// There are fewer than two branches or more than the eight a local junction declares legs for, or two
+    /// branches declare a result under one name.
+    /// </exception>
+    /// <remarks>
+    /// <para>
+    /// The classifying fan-out: the router sees the element and answers which branch it belongs on, so the
+    /// branches are the classes and their order is the numbering the router answers in. Every element goes to
+    /// exactly one branch, so unlike a broadcast this junction never duplicates and unlike a balance it is
+    /// completely determined by the element.
+    /// </para>
+    /// <para>
+    /// An answer outside the wired branches faults the run when it happens, not when the graph is built: how
+    /// many branches an occurrence has is stated by its edges, and a function is not something a document can
+    /// check. The router never enters the document either, which is why a partitioned graph is
+    /// <c>nondeployable</c>.
+    /// </para>
+    /// </remarks>
+    let partitionTo
+        (router: 'T -> int)
+        (branches: Branch<'T> list)
+        (source: Source<'T>)
+        : Orleans.Dataflow.RunnableGraph =
+        let legs = legsOf (nameof branches) branches
+
+        fanOutTo
+            (LocalStageDescriptor.Partition(Func<'T, int> router))
+            (LocalJunctionGuard.FanOutPorts legs.Count)
+            legs
+            source
+
+    /// <summary>Closes a source of pairs by sending each half of every pair to a branch of its own.</summary>
+    /// <param name="left">The branch the left halves take, which is unchanged.</param>
+    /// <param name="right">The branch the right halves take, which is unchanged.</param>
+    /// <param name="source">The source of pairs being closed, which is unchanged.</param>
+    /// <returns>The closed graph, ready to materialize.</returns>
+    /// <exception cref="T:System.ArgumentException">Both branches declare a result under one name.</exception>
+    /// <remarks>
+    /// <para>
+    /// The one fan-out whose legs are differently typed, and the reason its arity is fixed at two rather than
+    /// open like a broadcast's: the halves of a pair are two, and each one's type is a type argument. Both
+    /// halves of every pair are delivered, so this junction is a broadcast in its flow control — a branch that
+    /// stops consuming holds the other one up — and a split in its elements.
+    /// </para>
+    /// <para>
+    /// The pair is a struct tuple, which is the row
+    /// <see cref="M:Orleans.Dataflow.FSharp.Source.zip``2"/> and the other frontend's own zip both produce, so
+    /// a zipped stream unzips again with nothing in between. It costs something and the cost is worth
+    /// stating: a source of ordinary F# tuples is a source of a different CLR type and does not fit here, so
+    /// a stream of pairs meant to be unzipped is written <c>struct (left, right)</c> at whatever built it.
+    /// That is the price of one element type across the two frontends, and of not allocating a reference
+    /// tuple per row only to take it apart again. The two projections are ordinary functions of a pair and
+    /// never enter the document, which is what makes the halves' element types the compiler's business rather
+    /// than the graph compiler's.
+    /// </para>
+    /// </remarks>
+    let unzipTo
+        (left: Branch<'Left>)
+        (right: Branch<'Right>)
+        (source: Source<struct ('Left * 'Right)>)
+        : Orleans.Dataflow.RunnableGraph =
+        let legs = [| legOf left; legOf right |] :> IReadOnlyList<BranchLeg>
+
+        fanOutTo
+            (LocalStageDescriptor.Unzip(
+                Func<struct ('Left * 'Right), 'Left>(fun struct (first, _) -> first),
+                Func<struct ('Left * 'Right), 'Right>(fun struct (_, second) -> second)))
+            [| LocalVocabulary.LeftPort; LocalVocabulary.RightPort |]
+            legs
+            source

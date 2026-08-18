@@ -12,6 +12,8 @@
     <Compile Include="OperatorParityTests.fs" />
     <Compile Include="OperatorBehaviorTests.fs" />
     <Compile Include="TimingBehaviorTests.fs" />
+    <Compile Include="JunctionParityTests.fs" />
+    <Compile Include="JunctionBehaviorTests.fs" />
   </ItemGroup>
   <ItemGroup>
     <PackageReference Include="FSharp.Core" />
