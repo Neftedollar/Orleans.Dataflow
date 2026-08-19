@@ -137,6 +137,73 @@ public sealed class TeardownTests(DataflowCluster cluster)
     }
 
     [Fact]
+    public async Task CancellingTheRunReachesAGrainCallAlreadyInFlightInTheSink()
+    {
+        AdapterObservations.Reset();
+
+        PipelineDefinition pipeline = AdapterPipelines.PricedFeed(
+            "teardown-sink-call",
+            AdapterVocabulary.Feed,
+            AdapterVocabulary.Pricing,
+            sink: AdapterVocabulary.CancellableRecording);
+
+        OrleansRunHandle handle = await cluster.Host.MaterializeAsync(pipeline, Token);
+
+        // The sink has handed its callee a call that nothing in this suite can answer, so at this moment the
+        // run is provably holding one grain call in flight at its terminal — and the segment's own thread is
+        // blocked on it, which is what a terminal's window does to keep its bound with no scheduler.
+        await TestSignals.Reached(AdapterLedgerGrain.CancellableEntered);
+
+        Task disposal = handle.DisposeAsync().AsTask();
+
+        // The claim, and it is about the callee rather than about the run: the grain observed the token its
+        // caller handed it being cancelled. Until M8.4 closed it, a terminal received no run context at all —
+        // DataflowStageRuntime.Terminal took a Func<object?> and had no parameter a token could arrive
+        // through — so the window submitted every call with CancellationToken.None and nothing a cancelled
+        // run did could raise this signal. Reverting that one argument makes this wait time out.
+        await TestSignals.Reached(AdapterLedgerGrain.CancellableCancelled);
+
+        // And the cancellation is what released the blocked thread: the run reaches a terminal state, and
+        // the callee is no longer holding anything, so nothing is left running behind this test.
+        await Deadline.Within(disposal, "disposal to return");
+
+        Assert.True(handle.Completion.IsCompleted);
+        Assert.Equal(0, AdapterObservations.InFlight);
+    }
+
+    [Fact]
+    public async Task AGracefulShutdownStillDrainsAGrainCallSinkRatherThanAbandoningIt()
+    {
+        AdapterObservations.Reset();
+
+        PipelineDefinition pipeline = AdapterPipelines.PricedFeed(
+            "teardown-sink-drain",
+            AdapterVocabulary.Feed,
+            AdapterVocabulary.Pricing,
+            sink: AdapterVocabulary.DrainingRecording);
+
+        await using OrleansRunHandle handle = await cluster.Host.MaterializeAsync(pipeline, Token);
+
+        // This callee watches the token it was handed, so the shutdown below is asked for at the one moment
+        // where cancelling the sink's call would be observable rather than merely different in principle.
+        await TestSignals.Reached(AdapterLedgerGrain.DrainEntered);
+
+        await handle.ShutdownAsync();
+
+        // The other half of which token a sink carries, and the reason it is the run token rather than the
+        // stop token: a shutdown stops production and lets everything already admitted reach the terminal,
+        // so a call in flight here must survive it. Released after the shutdown was asked for, every element
+        // still reaches the ledger and the run still ends cleanly; carrying the stop token instead, this
+        // call is cancelled the instant the shutdown lands and the elements behind it are lost.
+        TestSignals.Raise(AdapterLedgerGrain.DrainRelease);
+
+        await Deadline.Within(handle.Completion, "the run to drain and complete");
+
+        Assert.Equal(TaskStatus.RanToCompletion, handle.Completion.Status);
+        Assert.Equal(4, AdapterObservations.Recorded.Count);
+    }
+
+    [Fact]
     public async Task DisposingTwiceIsStillHarmless()
     {
         const string Log = "teardown-twice-log";

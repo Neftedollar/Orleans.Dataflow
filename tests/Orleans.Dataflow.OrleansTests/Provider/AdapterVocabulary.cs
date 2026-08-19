@@ -161,6 +161,33 @@ internal static class AdapterVocabulary
             static (grains, price, cancellationToken) =>
                 grains.GetGrain<IAdapterLedgerGrain>("ledger").RecordGatedAsync(price, cancellationToken));
 
+    /// <summary>The terminating call whose callee parks until the run that made it is cancelled.</summary>
+    /// <remarks>
+    /// Its own grain key rather than the shared ledger's, because this callee never answers and a test that
+    /// left one parked in the ledger every other sink test also calls would be a test that changed what
+    /// those tests measure.
+    /// </remarks>
+    internal static GrainCallSinkBinding<AdapterPrice> CancellableRecording { get; } =
+        GrainCallSinkBinding.Create(
+            "cancellable-record-price",
+            PriceContract,
+            static (grains, price, cancellationToken) =>
+                grains.GetGrain<IAdapterLedgerGrain>("cancellable")
+                    .RecordUntilCancelledAsync(price, cancellationToken));
+
+    /// <summary>The terminating call whose callee watches its token and is released by the test instead.</summary>
+    /// <remarks>
+    /// <see cref="CancellableRecording"/>'s opposite number: both callees are cooperative, and what differs
+    /// is which way a test releases them. This one is what a graceful shutdown must <em>not</em> cancel.
+    /// </remarks>
+    internal static GrainCallSinkBinding<AdapterPrice> DrainingRecording { get; } =
+        GrainCallSinkBinding.Create(
+            "draining-record-price",
+            PriceContract,
+            static (grains, price, cancellationToken) =>
+                grains.GetGrain<IAdapterLedgerGrain>("draining")
+                    .RecordWhenReleasedAsync(price, cancellationToken));
+
     /// <summary>The enumeration that yields four orders and ends.</summary>
     internal static GrainEnumerableBinding<AdapterOrder> Feed { get; } =
         GrainEnumerableBinding.Create(

@@ -386,6 +386,16 @@ internal sealed class OrleansStageFactory(
     /// wrote into.
     /// </para>
     /// <para>
+    /// <b>The seed factory is also where this stage learns which run it is ending</b>, and it is the only
+    /// place it could: a terminal's fold is synchronous and is handed a state and an element, so the moment
+    /// the state is made is the one seam through which the run's tokens reach a sink. The window closes over
+    /// <see cref="DataflowRunTokens.RunToken"/> and carries it into every call, which is what makes
+    /// cancelling a run reach a call already in flight here — the same token the three grain-call flow
+    /// stages above receive per element. The stop token is deliberately not the one taken: a graceful
+    /// shutdown drains into this sink, and a call abandoned on that token would drop the very element the
+    /// shutdown was letting through.
+    /// </para>
+    /// <para>
     /// <b>The mark is built here and the window closes over it</b>, which is the seam's own instruction that
     /// a fold and its mark are the provider's two halves of one object. One mark per node per
     /// materialization, exactly as a cursor is, so a checkpoint of two runs of one pipeline never confuses
@@ -407,13 +417,14 @@ internal sealed class OrleansStageFactory(
         GrainCallSinkMark mark = new();
 
         return DataflowStageRuntime.Terminal(
-            () => new GrainCallWindow(
+            tokens => new GrainCallWindow(
                 call!,
                 grains,
                 declaration.Call,
                 declaration.MaxInFlight,
                 declaration.Timeout,
-                mark),
+                mark,
+                tokens.RunToken),
             static (state, element) =>
             {
                 ((GrainCallWindow)state!).Submit(element);
@@ -1040,6 +1051,10 @@ internal sealed class OrleansStageFactory(
 /// <param name="maxInFlight">The greatest number of calls in flight at once.</param>
 /// <param name="timeout">The per-call timeout, or <see langword="null"/>.</param>
 /// <param name="mark">The commit mark this stage declares, which one settled call advances.</param>
+/// <param name="runToken">
+/// The run's own token, which every call this window makes carries. It reaches here through the seed
+/// factory, which is the one seam a terminal has.
+/// </param>
 /// <remarks>
 /// <para>
 /// A terminal in this engine is a synchronous fold on the last segment's own thread, so the bound is kept
@@ -1070,18 +1085,22 @@ internal sealed class OrleansStageFactory(
 /// is the arrangement the crash suite measures on.
 /// </para>
 /// <para>
-/// <b>The calls this window makes carry no run token, and that is a limit of the seam rather than a choice
-/// made here.</b> Every other grain call this provider builds is an asynchronous element stage, which the
-/// engine hands the run's token per element, and every one of them threads it. A terminal is handed a seed
-/// factory and a fold, and neither is given the run's tokens — <c>DataflowStageRuntime.Terminal</c> has no
-/// parameter that could carry them and the engine's own <c>LocalTerminal.Provided</c> drops the run context
-/// it is called with. So a call in flight here is bounded by the stage's declared timeout when it has one
-/// and by Orleans' response timeout when it has not, and by nothing else: cancelling the run does not reach
-/// it. Nor could a later hook repair it — the engine's terminal-closing callback runs from the code that
-/// settles a run, and a run does not settle until every segment has stopped, so a thread already blocked
-/// here is exactly the thread that would have to be released for the hook to be reached. What closes this
-/// gap is the seed factory receiving the run's tokens; until it does, the honest statement is this one, and
-/// <c>GOAL.md</c>'s claim that cancellation reaches in-flight asynchronous work reads as one path short.
+/// <b>The calls this window makes carry the run's token, and it arrives through the seed factory.</b> Every
+/// other grain call this provider builds is an asynchronous element stage, which the engine hands the run's
+/// token per element; a terminal is handed a seed factory and a fold, and the fold sees only a state and an
+/// element, so the state is where a token for a sink's own work has to live. The overload this stage is
+/// built with hands that factory the run's <c>DataflowRunTokens</c>, the window closes over the run token,
+/// and cancelling the run therefore reaches a call already in flight here — which is what makes
+/// <c>GOAL.md</c>'s claim about in-flight asynchronous work true of every grain-call path rather than of
+/// three of the four.
+/// </para>
+/// <para>
+/// The run token and not the stop token, for the reason the grain enumeration source takes the run token
+/// too: a graceful shutdown drains, and this sink is what it drains into. A call abandoned because a
+/// shutdown was requested would drop the element the shutdown was letting through. So a call here ends when
+/// its callee answers, when the stage's declared timeout expires, when Orleans' response timeout does, or
+/// when the run is cancelled or fails — and a cancelled call is what releases the thread blocked in
+/// <see cref="Settle"/>, which nothing else could do while the call was outstanding.
 /// </para>
 /// </remarks>
 internal sealed class GrainCallWindow(
@@ -1090,17 +1109,18 @@ internal sealed class GrainCallWindow(
     string name,
     int maxInFlight,
     TimeSpan? timeout,
-    GrainCallSinkMark mark)
+    GrainCallSinkMark mark,
+    CancellationToken runToken)
 {
     private readonly Queue<Task> _inFlight = new();
 
     /// <summary>Submits one element, waiting first if the bound is already reached.</summary>
     /// <param name="element">The element.</param>
     /// <remarks>
-    /// The token is <see cref="CancellationToken.None"/> because a terminal is given no other one, which the
-    /// class remark states in full. It is spelled out here rather than left implied so that a reader who
-    /// compares this call with the three above it sees a seam that has no token to offer rather than a path
-    /// that declined the one it had.
+    /// The token is the run's, taken at the moment this window was seeded and carried into every call, so
+    /// this path reads exactly like the three grain-call flow stages that are handed one per element. The
+    /// wait for room above it is not cancellable and does not need to be: it is a wait for a call this same
+    /// token cancels, so cancelling the run releases it through the call it is waiting for.
     /// </remarks>
     internal void Submit(object? element)
     {
@@ -1118,7 +1138,7 @@ internal sealed class GrainCallWindow(
             },
             name,
             timeout,
-            CancellationToken.None);
+            runToken);
 
         // Observed the moment it is started, not only when it is waited for. A run that faults on one call
         // abandons the rest, and an abandoned task that faults later would otherwise resurface as an
@@ -1156,7 +1176,8 @@ internal sealed class GrainCallWindow(
     /// continuation, so the only way to make the reply happen before the next element is admitted is to hold
     /// the thread the segment was given for exactly this. The stream sink beside this one blocks the same
     /// way for the same reason. What the block costs is stated where it is paid: the thread is released when
-    /// the call answers, and nothing else releases it.
+    /// the call settles, which is when the callee answers, when a declared timeout expires, or when the run
+    /// is cancelled and the token the call carries ends it.
     /// </para>
     /// </remarks>
     private void Settle(Task pending)

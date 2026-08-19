@@ -56,7 +56,7 @@ internal sealed class StageRuntime
         Func<object?, CancellationToken, ValueTask<object?>>? callback,
         int maxConcurrency,
         bool ordered,
-        Func<object?>? seed,
+        Func<StageRunTokens, object?>? seed,
         Func<object?, object?, object?>? fold,
         Func<object?, object?>? finish,
         bool producesResult,
@@ -108,12 +108,21 @@ internal sealed class StageRuntime
     /// <summary>Gets the maker of a terminal's initial state.</summary>
     /// <value>The factory for <see cref="StageRuntimeShape.Terminal"/>; otherwise <see langword="null"/>.</value>
     /// <remarks>
+    /// <para>
     /// A factory rather than a value, because a plan is built once and a run's state has to be its own:
     /// a terminal that accumulates into a mutable object would otherwise be one object two runs both
     /// wrote into. This is the same rule <see cref="LocalEnding.SeedFactory"/> states for the local
     /// collecting sink, applied to every provider terminal without asking the provider to know it.
+    /// </para>
+    /// <para>
+    /// It receives the opening run's tokens for the same reason <see cref="StageSourceOpener"/> does, and
+    /// they are the same tokens: a terminal that holds asynchronous work of its own — an awaited grain call,
+    /// a write that has not landed — has nowhere else to learn that the run was cancelled, because a fold is
+    /// synchronous and is handed only a state and an element. A terminal with nothing to abandon ignores
+    /// them, exactly as most sources ignore theirs.
+    /// </para>
     /// </remarks>
-    internal Func<object?>? Seed { get; }
+    internal Func<StageRunTokens, object?>? Seed { get; }
 
     /// <summary>Gets the fold a terminal applies to every element that reaches it.</summary>
     /// <value>The fold for <see cref="StageRuntimeShape.Terminal"/>; otherwise <see langword="null"/>.</value>
@@ -242,7 +251,7 @@ internal sealed class StageRuntime
     }
 
     /// <summary>Creates the runtime of a terminal stage.</summary>
-    /// <param name="seed">The maker of this run's initial state.</param>
+    /// <param name="seed">The maker of this run's initial state, invoked under that run's tokens.</param>
     /// <param name="fold">The fold over the state and one element.</param>
     /// <param name="finish">
     /// The projection of the final state into the value a slot resolves, or <see langword="null"/> when
@@ -257,7 +266,7 @@ internal sealed class StageRuntime
     /// <paramref name="seed"/> or <paramref name="fold"/> is <see langword="null"/>.
     /// </exception>
     internal static StageRuntime Terminal(
-        Func<object?> seed,
+        Func<StageRunTokens, object?> seed,
         Func<object?, object?, object?> fold,
         Func<object?, object?>? finish,
         bool producesResult,
@@ -390,11 +399,11 @@ internal enum StageRuntimeShape
 }
 
 /// <summary>
-/// The two tokens a registered source is opened under.
+/// The two tokens a registered source is opened under, and a registered terminal is seeded under.
 /// </summary>
 /// <param name="RunToken">
 /// Cancelled when the run is cancelled and when anything in the run fails. A source that abandons its
-/// work observes this one.
+/// work observes this one, and so does a terminal that holds work of its own.
 /// </param>
 /// <param name="StopToken">
 /// Cancelled for everything <paramref name="RunToken"/> is cancelled for, and additionally when a
@@ -415,10 +424,18 @@ internal enum StageRuntimeShape
 /// delays a stop until its next yield, which is the documented cooperative rule and not an oversight.
 /// </para>
 /// <para>
+/// The same pair reaches a registered terminal through its seed factory, and that is the one seam a
+/// terminal has: its fold is synchronous and receives a state and an element, so a sink holding an awaited
+/// call could otherwise never learn that the run it belongs to was cancelled. The seed is made while the
+/// run is being built — after its tokens exist and before any segment has started — so what a sink closes
+/// over is the live pair rather than a copy taken later.
+/// </para>
+/// <para>
 /// The identity travels with the tokens rather than with the node, and the distinction is the seam's:
 /// a <see cref="StageRuntimeRequest"/> is answered once per materialization and says what a stage is,
 /// while these are handed over once per run and say which run is opening it. A factory therefore still
-/// receives no run identity — the run announces itself when it asks the source to open.
+/// receives no run identity — the run announces itself when it asks a source to open or a terminal to
+/// seed.
 /// </para>
 /// </remarks>
 internal readonly record struct StageRunTokens(

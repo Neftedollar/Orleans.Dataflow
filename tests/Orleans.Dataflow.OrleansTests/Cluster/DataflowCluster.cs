@@ -115,6 +115,8 @@ public sealed class DataflowCluster : IAsyncLifetime
                 .AddKeyedGrainCall(AdapterVocabulary.FailingKeyedPricing)
                 .AddGrainCallSink(AdapterVocabulary.Recording)
                 .AddGrainCallSink(AdapterVocabulary.GatedRecording)
+                .AddGrainCallSink(AdapterVocabulary.CancellableRecording)
+                .AddGrainCallSink(AdapterVocabulary.DrainingRecording)
                 .AddGrainEnumerable(AdapterVocabulary.Feed)
                 .AddGrainEnumerable(AdapterVocabulary.KeyedFeed)
                 .AddGrainEnumerable(AdapterVocabulary.EndlessFeed)

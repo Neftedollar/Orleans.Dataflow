@@ -36,7 +36,11 @@ internal sealed class LocalEnding
     /// The maker of the terminal's initial state, for a terminal whose state is mutable.
     /// </param>
     /// <param name="slot">The result slot the terminal's final state resolves, or <see langword="null"/>.</param>
-    internal LocalEnding(int segment, object? seed, Func<object?>? seedFactory, ResultSlotId? slot)
+    internal LocalEnding(
+        int segment,
+        object? seed,
+        Func<LocalRunContext, object?>? seedFactory,
+        ResultSlotId? slot)
     {
         Segment = segment;
         Seed = seed;
@@ -59,10 +63,16 @@ internal sealed class LocalEnding
 
     /// <summary>Gets the maker of the terminal's initial state, when the state cannot be shared.</summary>
     /// <value>
-    /// The factory for a collecting sink, whose state is a list a run appends to; <see langword="null"/>
-    /// for every terminal whose seed is a value two runs may hold at once.
+    /// The factory for a collecting sink, whose state is a list a run appends to, and for every registered
+    /// terminal; <see langword="null"/> for every terminal whose seed is a value two runs may hold at once.
     /// </value>
-    internal Func<object?>? SeedFactory { get; }
+    /// <remarks>
+    /// It is handed the run's own context, which is what lets a state that holds asynchronous work close
+    /// over the tokens that abandon it. A terminal's fold is synchronous and sees only a state and an
+    /// element, so the moment the state is made is the only moment such a sink could learn which run it
+    /// belongs to. Every state that is merely a fresh container ignores the argument.
+    /// </remarks>
+    internal Func<LocalRunContext, object?>? SeedFactory { get; }
 
     /// <summary>Gets the result slot the terminal's final state resolves.</summary>
     /// <value>

@@ -220,6 +220,32 @@ public interface IAdapterLedgerGrain : IGrainWithStringKey
     /// <returns>A task that completes when the price has been recorded.</returns>
     Task RecordGatedAsync(AdapterPrice price, CancellationToken cancellationToken);
 
+    /// <summary>Parks on a release nothing raises, so that only the caller's token can end the call.</summary>
+    /// <param name="price">The price, which is never recorded because this call never gets that far.</param>
+    /// <param name="cancellationToken">The caller's token.</param>
+    /// <returns>A task that never completes successfully.</returns>
+    /// <remarks>
+    /// The instrument for the one claim about a terminating grain call that no other callee here can make:
+    /// whether the run's cancellation reaches a call this sink already has in flight. Every other held call
+    /// in this suite is released by a signal the test raises, so a test using one could not tell a call the
+    /// run cancelled from a call the test let go. This one has nothing to release it, so a call that ends at
+    /// all ended because its caller's token crossed the hop.
+    /// </remarks>
+    Task RecordUntilCancelledAsync(AdapterPrice price, CancellationToken cancellationToken);
+
+    /// <summary>Records one price once the test releases it, giving up if its caller's token is cancelled.</summary>
+    /// <param name="price">The price.</param>
+    /// <param name="cancellationToken">The caller's token.</param>
+    /// <returns>A task that completes when the price has been recorded.</returns>
+    /// <remarks>
+    /// The other half of <see cref="RecordUntilCancelledAsync"/>'s instrument, and it measures the opposite
+    /// claim: a callee that <em>would</em> abandon its work if its caller cancelled, held while a graceful
+    /// shutdown is asked for. A shutdown drains into a sink rather than abandoning it, so this call must not
+    /// be cancelled by one — and a sink built on the stop token instead of the run token is exactly what
+    /// would cancel it.
+    /// </remarks>
+    Task RecordWhenReleasedAsync(AdapterPrice price, CancellationToken cancellationToken);
+
     /// <summary>Writes one price into the log the test process keeps.</summary>
     /// <param name="price">The price.</param>
     /// <param name="cancellationToken">The caller's token.</param>
@@ -243,6 +269,26 @@ public sealed class AdapterLedgerGrain : Grain, IAdapterLedgerGrain
 {
     /// <summary>The signal the gated ledger waits for.</summary>
     internal const string GateSignal = "adapter-ledger-release";
+
+    /// <summary>The signal the cancellable ledger raises once a call has reached it.</summary>
+    internal const string CancellableEntered = "adapter-ledger-cancellable-entered";
+
+    /// <summary>The signal the cancellable ledger raises when its caller's token is cancelled.</summary>
+    internal const string CancellableCancelled = "adapter-ledger-cancellable-cancelled";
+
+    /// <summary>The signal the cancellable ledger waits for, which nothing in this suite ever raises.</summary>
+    /// <remarks>
+    /// Named rather than left as a literal because its whole meaning is that it is unraised: a reader who
+    /// searches this suite for it finds exactly one mention, which is the proof that the wait below has no
+    /// way out but the token.
+    /// </remarks>
+    internal const string CancellableRelease = "adapter-ledger-cancellable-release";
+
+    /// <summary>The signal the draining ledger raises once a call has reached it.</summary>
+    internal const string DrainEntered = "adapter-ledger-drain-entered";
+
+    /// <summary>The signal the draining ledger waits for, which the test raises after asking for a shutdown.</summary>
+    internal const string DrainRelease = "adapter-ledger-drain-release";
 
     /// <summary>The log the logging ledger writes every price it is handed into.</summary>
     internal const string Log = "adapter-ledger-log";
@@ -273,6 +319,56 @@ public sealed class AdapterLedgerGrain : Grain, IAdapterLedgerGrain
         try
         {
             await TestSignals.Reached(GateSignal);
+
+            AdapterObservations.Recorded.Enqueue(price);
+        }
+        finally
+        {
+            AdapterObservations.Left();
+        }
+    }
+
+    /// <inheritdoc/>
+    public async Task RecordUntilCancelledAsync(AdapterPrice price, CancellationToken cancellationToken)
+    {
+        AdapterObservations.Entered();
+
+        // Raised before the wait, so a test that has observed it knows the call is inside this grain rather
+        // than still on its way to it.
+        TestSignals.Raise(CancellableEntered);
+
+        try
+        {
+            await TestSignals.Reached(CancellableRelease).WaitAsync(cancellationToken);
+
+            AdapterObservations.Recorded.Enqueue(price);
+        }
+        catch (OperationCanceledException)
+        {
+            // The whole measurement. Nothing raises the release, so reaching here means the token this call
+            // was handed was cancelled and the cancellation crossed the hop from the run that made the call.
+            TestSignals.Raise(CancellableCancelled);
+
+            throw;
+        }
+        finally
+        {
+            AdapterObservations.Left();
+        }
+    }
+
+    /// <inheritdoc/>
+    public async Task RecordWhenReleasedAsync(AdapterPrice price, CancellationToken cancellationToken)
+    {
+        AdapterObservations.Entered();
+
+        TestSignals.Raise(DrainEntered);
+
+        try
+        {
+            // Cooperative on purpose. This callee would abandon its work if its caller cancelled, so a run
+            // whose sink carried the stop token would lose the element the shutdown was letting through.
+            await TestSignals.Reached(DrainRelease).WaitAsync(cancellationToken);
 
             AdapterObservations.Recorded.Enqueue(price);
         }

@@ -339,7 +339,7 @@ internal static class LocalRunPlanner
             LocalBoundary? pending = null;
             LocalTerminal? terminal = null;
             object? seed = null;
-            Func<object?>? seedFactory = null;
+            Func<LocalRunContext, object?>? seedFactory = null;
             bool produces = false;
             List<int> inputs = input < 0 ? [] : [input];
             NodeId current = start;
@@ -421,9 +421,20 @@ internal static class LocalRunPlanner
                                 runtime.Ordered);
                             break;
                         case StageRuntimeShape.Terminal when last && !first:
+                        {
                             Settle();
+
+                            Func<StageRunTokens, object?> make = runtime.Seed!;
+
                             terminal = LocalTerminal.Provided(runtime.Fold!, runtime.Finish);
-                            seedFactory = runtime.Seed;
+
+                            // The one place a terminal can be told which run it is ending, and the mirror of
+                            // what the source arm above does with its opener: the identity is this
+                            // compilation's and the tokens are the run's, so a sink that holds work of its
+                            // own closes over the very pair that abandons it. A sink with nothing in flight
+                            // ignores the argument, exactly as most sources ignore theirs.
+                            seedFactory = context =>
+                                make(new StageRunTokens(runIdentity, context.RunToken, context.StopToken));
                             produces = runtime.ProducesResult;
 
                             // A registered sink declares a commit mark by carrying one, which is the same
@@ -437,6 +448,7 @@ internal static class LocalRunPlanner
                             }
 
                             break;
+                        }
 
                         // A registered junction is planned exactly as a local one, and its legs are its own
                         // specification's output ports in the catalog's canonical order rather than the
@@ -840,7 +852,7 @@ internal static class LocalRunPlanner
                             terminal = LocalTerminal.Collecting(
                                 Collected(declaration),
                                 LocalDelegateAdapter.Freeze(descriptor.Behavior, descriptor.Kind));
-                            seedFactory = static () => new List<object?>();
+                            seedFactory = static _ => new List<object?>();
                             produces = true;
                             break;
                         case LocalStageKind.ToChannel when last:
@@ -2536,7 +2548,7 @@ internal static class LocalRunPlanner
     private readonly record struct Sink(
         int Segment,
         object? Seed,
-        Func<object?>? SeedFactory,
+        Func<LocalRunContext, object?>? SeedFactory,
         NodeId Node,
         bool Produces);
 

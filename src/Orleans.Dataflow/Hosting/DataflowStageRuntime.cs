@@ -205,7 +205,63 @@ public sealed class DataflowStageRuntime
         ArgumentNullException.ThrowIfNull(seed);
         ArgumentNullException.ThrowIfNull(fold);
 
-        return new DataflowStageRuntime(StageRuntime.Terminal(seed, fold, finish, producesResult));
+        return new DataflowStageRuntime(StageRuntime.Terminal(_ => seed(), fold, finish, producesResult));
+    }
+
+    /// <summary>Creates the runtime of a terminal stage that knows which run it is ending.</summary>
+    /// <param name="seed">
+    /// The maker of this run's initial state, invoked once per run under that run's tokens.
+    /// </param>
+    /// <param name="fold">The fold over the accumulated state and one element.</param>
+    /// <param name="finish">
+    /// The projection of the final state into the value a result slot resolves, or <see langword="null"/>
+    /// when the accumulated state is already that value.
+    /// </param>
+    /// <param name="producesResult">
+    /// Whether the final state is offered to a result slot the document declares over this stage.
+    /// </param>
+    /// <returns>The runtime.</returns>
+    /// <exception cref="ArgumentNullException">
+    /// <paramref name="seed"/> or <paramref name="fold"/> is <see langword="null"/>.
+    /// </exception>
+    /// <remarks>
+    /// <para>
+    /// The symmetric affordance to <see cref="Source(Func{DataflowRunTokens, IAsyncEnumerable{object?}})"/>,
+    /// and it exists for the one thing a terminal cannot otherwise do. A fold is synchronous and is handed a
+    /// state and an element, so a sink that keeps asynchronous work of its own — an awaited grain call, a
+    /// write that has not landed — has no seam through which the run's cancellation could reach it. The
+    /// state is where such work lives, so the moment the state is made is where the tokens belong.
+    /// </para>
+    /// <para>
+    /// The seed is invoked while the run is being built: after its tokens exist and before any segment has
+    /// started, so what the state closes over is the live pair rather than a token that will be replaced.
+    /// <see cref="DataflowRunTokens.RunToken"/> is the one a sink's own work should carry — it is cancelled
+    /// when the run is cancelled and when anything in it fails, and it is exactly the token an asynchronous
+    /// element stage's callback receives. <see cref="DataflowRunTokens.StopToken"/> is additionally
+    /// cancelled by a graceful shutdown, which asks a run to <em>drain</em>: a sink that abandoned its work
+    /// on that token would leave the elements a shutdown was meant to deliver unfinished.
+    /// </para>
+    /// <para>
+    /// Everything else is the plain overload's: one state per run, one fold per element, the projection, and
+    /// the rule that a result crossing a grain boundary must satisfy Orleans serialization. A terminal with
+    /// nothing in flight ignores what it is handed, exactly as most sources ignore theirs.
+    /// </para>
+    /// </remarks>
+    public static DataflowStageRuntime Terminal(
+        Func<DataflowRunTokens, object?> seed,
+        Func<object?, object?, object?> fold,
+        Func<object?, object?>? finish,
+        bool producesResult)
+    {
+        ArgumentNullException.ThrowIfNull(seed);
+        ArgumentNullException.ThrowIfNull(fold);
+
+        return new DataflowStageRuntime(
+            StageRuntime.Terminal(
+                tokens => seed(new DataflowRunTokens(tokens.RunIdentity, tokens.RunToken, tokens.StopToken)),
+                fold,
+                finish,
+                producesResult));
     }
 
     /// <summary>Creates the runtime of a terminal stage that knows what it has committed.</summary>
@@ -262,7 +318,56 @@ public sealed class DataflowStageRuntime
         ArgumentNullException.ThrowIfNull(fold);
         ArgumentNullException.ThrowIfNull(mark);
 
-        return new DataflowStageRuntime(StageRuntime.Terminal(seed, fold, finish, producesResult, mark));
+        return new DataflowStageRuntime(StageRuntime.Terminal(_ => seed(), fold, finish, producesResult, mark));
+    }
+
+    /// <summary>
+    /// Creates the runtime of a terminal stage that knows which run it is ending and what it has committed.
+    /// </summary>
+    /// <param name="seed">
+    /// The maker of this run's initial state, invoked once per run under that run's tokens.
+    /// </param>
+    /// <param name="fold">The fold over the accumulated state and one element.</param>
+    /// <param name="finish">
+    /// The projection of the final state into the value a result slot resolves, or <see langword="null"/>
+    /// when the accumulated state is already that value.
+    /// </param>
+    /// <param name="producesResult">
+    /// Whether the final state is offered to a result slot the document declares over this stage.
+    /// </param>
+    /// <param name="mark">The commit mark this sink declares, built fresh for this node and this run.</param>
+    /// <returns>The runtime.</returns>
+    /// <exception cref="ArgumentNullException">
+    /// <paramref name="seed"/>, <paramref name="fold"/>, or <paramref name="mark"/> is
+    /// <see langword="null"/>.
+    /// </exception>
+    /// <remarks>
+    /// The two additions to the plain terminal, together, because a sink that has work in flight is exactly
+    /// the sink that has an acknowledgement to point at: the tokens say when to abandon that work and the
+    /// mark says how much of it answered. Both halves are stated where they belong — the token rule under
+    /// <see cref="Terminal(Func{DataflowRunTokens, object?}, Func{object?, object?, object?}, Func{object?, object?}?, bool)"/>
+    /// and the mark's contract under
+    /// <see cref="Terminal(Func{object?}, Func{object?, object?, object?}, Func{object?, object?}?, bool, DataflowSinkMark)"/> —
+    /// and nothing about either changes by being asked for at once.
+    /// </remarks>
+    public static DataflowStageRuntime Terminal(
+        Func<DataflowRunTokens, object?> seed,
+        Func<object?, object?, object?> fold,
+        Func<object?, object?>? finish,
+        bool producesResult,
+        DataflowSinkMark mark)
+    {
+        ArgumentNullException.ThrowIfNull(seed);
+        ArgumentNullException.ThrowIfNull(fold);
+        ArgumentNullException.ThrowIfNull(mark);
+
+        return new DataflowStageRuntime(
+            StageRuntime.Terminal(
+                tokens => seed(new DataflowRunTokens(tokens.RunIdentity, tokens.RunToken, tokens.StopToken)),
+                fold,
+                finish,
+                producesResult,
+                mark));
     }
 
     /// <summary>Creates the runtime of a fan-out that delivers every element to every live leg.</summary>
@@ -416,7 +521,7 @@ public sealed class DataflowStageRuntime
 }
 
 /// <summary>
-/// The two tokens a registered source is opened under.
+/// The two tokens a registered source is opened under, and a registered terminal is seeded under.
 /// </summary>
 /// <param name="RunToken">
 /// Cancelled when the run is cancelled and when anything in the run fails. This is the token a provider's
@@ -440,6 +545,12 @@ public sealed class DataflowStageRuntime
 /// run and resolves nothing; shutdown stops production and lets everything already admitted flow to the
 /// terminal, so an aggregate resolves its slot with the state it accumulated. A source that watches only
 /// the first token is correct but blunt: it turns every shutdown into a wait for its next yield.
+/// </para>
+/// <para>
+/// <b>Which end of the graph is being handed them decides which of the two to watch.</b> A source is the
+/// thing a shutdown stops, so it watches both and tells them apart. A terminal is the thing a shutdown
+/// drains <em>into</em>, so a sink's own work carries <see cref="RunToken"/> and nothing else: abandoning
+/// on <see cref="StopToken"/> would drop exactly the elements a graceful stop set out to deliver.
 /// </para>
 /// <para>
 /// The identity travels here rather than on <see cref="DataflowStageRequest"/>, and the distinction

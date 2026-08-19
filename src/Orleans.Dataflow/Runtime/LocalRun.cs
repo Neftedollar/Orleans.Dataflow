@@ -151,11 +151,17 @@ internal sealed class LocalRun
         // One state and one settled slot per ending, because a graph may stop in several places and each
         // of them folds its own elements. A run still ends once and in one state; what is per ending is
         // what was accumulated on the way there.
+        //
+        // The context is handed to the factory, and it exists by now: this run's cancellation source, its
+        // stopping source, and the context over the two are all built above this loop, so a state made here
+        // closes over the run's real tokens rather than over anything provisional. That is the whole seam a
+        // terminal has — its fold is synchronous and sees only a state and an element — so a sink that keeps
+        // asynchronous work of its own learns which run it belongs to here or nowhere.
         for (int index = 0; index < plan.Endings.Count; index++)
         {
             LocalEnding ending = plan.Endings[index];
 
-            _states[index] = ending.SeedFactory is { } make ? make() : ending.Seed;
+            _states[index] = ending.SeedFactory is { } make ? make(_context) : ending.Seed;
             _results[index] = ending.Slot is null
                 ? null
                 : new TaskCompletionSource<object?>(TaskCreationOptions.RunContinuationsAsynchronously);

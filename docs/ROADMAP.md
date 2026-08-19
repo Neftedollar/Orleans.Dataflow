@@ -428,12 +428,20 @@ with a status claiming that buffers and time were unimplemented, and the run
 loop's eight-way nested ternary became a switch — verified across all 128
 combinations of its decision space rather than by reading.
 
-Named and not closed: the grain-call sink is the one grain-call path with no
-token to thread, because a terminal's seed factory receives no run context —
-the fix needs a public overload and is recorded rather than silently carried;
-coordinator states are still created per caller-chosen graph identity; and a
-claim still hands the canonical document to any caller, which is the trust
-verdict rather than an oversight.
+The one code gap the review named was closed straight after, and closing it
+corrected the instruction that opened it. A terminal may now receive the run's
+tokens exactly as a source already could — the symmetric affordance was simply
+missing — so the grain-call sink threads a token like the other three
+grain-call paths, and GOAL.md's claim that cancellation reaches in-flight
+asynchronous work holds on all four. The instruction said to pass the stop
+token; building both variants and measuring showed that would cancel a sink
+call during a *graceful* shutdown, which is the one ending that must drain
+through a sink. The existing suite could not tell the two apart, so the test
+that distinguishes them was written rather than assumed.
+
+Still open, and deliberately: coordinator states are created per caller-chosen
+graph identity, and a claim hands the canonical document to any caller — both
+are the single-trust-domain verdict rather than oversights.
 
 Deliverables:
 
