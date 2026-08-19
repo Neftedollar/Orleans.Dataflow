@@ -35,11 +35,22 @@ namespace Orleans.Dataflow.ClusterTests.Cluster;
 /// payload has no member for one.
 /// </para>
 /// <para>
-/// <b>Why these assertions and not others.</b> The exactly-once tests assert a permutation rather than a
-/// sequence — that is the property the credit accounting rests on, and it is true whatever the ordering
-/// turns out to be. The verdict test asserts the reordering itself, so that an Orleans version which starts
-/// ordering pipelined calls fails a test and sends somebody back to these notes, rather than silently making
-/// a design decision look arbitrary. Neither failure would be a defect in this repository.
+/// <b>Why the reordering is measured and not asserted.</b> Every assertion here is about a permutation
+/// rather than a sequence — each call arrives exactly once, whatever order it arrives in — because that is
+/// the property the credit accounting rests on and the only one anything promises. The reordering itself is
+/// counted and not asserted, and the reason is worth stating: <b>an absence of guarantee cannot be asserted
+/// by observing it</b>. Orleans does not promise ordering, and it does not promise disorder either, so a
+/// test demanding that some round arrive out of order is demanding a scheduling accident. It was asserted
+/// once, with a margin computed from a measured per-round rate — and the margin was measured on one machine
+/// and did not transfer: on other hardware every round arrived in order and a green build turned red for a
+/// reason its own message described as "not a defect". A test whose failure is documented as harmless must
+/// not be able to fail a build.
+/// </para>
+/// <para>
+/// What was lost with the assertion is a canary for an Orleans version that begins to order pipelined
+/// calls, and it is worth being precise about how little that was: the keyed stage keeps one call in flight
+/// per key, so its ordering is a property of its own credit protocol and holds whichever way the transport
+/// behaves. The canary guarded a note rather than a behaviour.
 /// </para>
 /// <para>
 /// <b>What this does not prove.</b> One silo, so every hop here is local delivery and no connection is ever
@@ -59,15 +70,13 @@ public sealed class KeyedOrderingProbeTests(DataflowCluster cluster)
     /// </remarks>
     private const int Calls = 200;
 
-    /// <summary>How many rounds the verdict is taken over.</summary>
+    /// <summary>How many rounds the measurement is taken over.</summary>
     /// <remarks>
-    /// One reordered round is enough to pass, because the claim being recorded is "this can happen" and a
-    /// probe that demanded it happen every time would be asserting a stronger fact than was observed. The
-    /// count is set by the failure side rather than the success side: a single round arrives in send order
-    /// roughly two times in five — measured across suite runs, not assumed from the first session, where
-    /// every round happened to reorder — so five rounds failed spuriously about once in seventy suite runs.
-    /// Twenty puts the odds of all rounds landing in order below one in ten million, which is the margin a
-    /// probe needs to mean "Orleans changed" rather than "the scheduler had a calm morning".
+    /// Twenty is enough for the count to say something about the machine it ran on, and small enough that
+    /// the whole probe stays a fraction of a second. Nothing depends on the number any more: it sets the
+    /// resolution of a measurement rather than the margin of an assertion, which is what it used to be and
+    /// what made this file fail on hardware whose scheduler behaves differently from the one the margin was
+    /// computed on.
     /// </remarks>
     private const int Rounds = 20;
 
@@ -118,19 +127,17 @@ public sealed class KeyedOrderingProbeTests(DataflowCluster cluster)
     }
 
     [Fact]
-    public async Task PipelinedCallsDoNotArriveInTheOrderTheyWereSent()
+    public async Task PipelinedCallsArriveExactlyOnceInEveryRoundHoweverTheyAreOrdered()
     {
-        // The verdict, asserted rather than merely recorded, so that a version of Orleans which begins to
-        // order pipelined calls fails here and sends somebody to the notes above. Both shapes are asked
-        // because the adapter's caller is a client rather than a grain, and a runtime could plausibly treat
-        // the two differently.
-        Assert.True(
-            await AnyRoundReorderedAsync(async label => (await PumpFromGrainAsync(label)).Arrivals),
-            $"A grain caller's {Calls} pipelined calls arrived in send order in all {Rounds} rounds. Orleans promises no such thing, so this is a change in observed behavior rather than a defect: re-read the keyed adapter's as-implemented notes before relying on it.");
-
-        Assert.True(
-            await AnyRoundReorderedAsync(async label => (await PumpFromClientAsync(label)).Arrivals),
-            $"A client caller's {Calls} pipelined calls arrived in send order in all {Rounds} rounds. The same note applies: the keyed stage does not depend on it either way.");
+        // Both shapes are asked because the adapter's caller is a client rather than a grain, and a runtime
+        // could plausibly treat the two differently.
+        // What is asserted is the permutation, in every round of both shapes: whatever order the calls
+        // arrive in, each one arrives once. That is the property the credit accounting rests on, and unlike
+        // the ordering it is a promise rather than an observation. Each round checks it and the count comes
+        // back, so a round lost to an early return or a swallowed failure fails here rather than passing
+        // quietly.
+        Assert.Equal(Rounds, await RoundsCheckedAsync(async label => (await PumpFromGrainAsync(label)).Arrivals));
+        Assert.Equal(Rounds, await RoundsCheckedAsync(async label => (await PumpFromClientAsync(label)).Arrivals));
     }
 
     [Fact]
@@ -154,19 +161,22 @@ public sealed class KeyedOrderingProbeTests(DataflowCluster cluster)
     /// <summary>Runs several rounds and says whether any of them arrived out of send order.</summary>
     /// <param name="round">Pumps one round and returns the arrivals.</param>
     /// <returns><see langword="true"/> when at least one round was reordered.</returns>
-    private static async Task<bool> AnyRoundReorderedAsync(Func<string, Task<List<int>>> round)
+    private static async Task<int> RoundsCheckedAsync(Func<string, Task<List<int>>> round)
     {
+        int checkedRounds = 0;
+
         for (int attempt = 0; attempt < Rounds; attempt++)
         {
             List<int> arrivals = await round(string.Create(CultureInfo.InvariantCulture, $"verdict-{attempt}"));
 
-            if (!arrivals.SequenceEqual(Enumerable.Range(0, Calls)))
-            {
-                return true;
-            }
+            // The permutation, which is the part that is a promise: every call arrived, and each of them
+            // once, whatever order they came in.
+            Assert.Equal(Enumerable.Range(0, Calls), [.. arrivals.Order()]);
+
+            checkedRounds++;
         }
 
-        return false;
+        return checkedRounds;
     }
 
     /// <summary>Pumps one run of calls from a caller grain at a callee nothing else addresses.</summary>
