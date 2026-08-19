@@ -42,14 +42,15 @@ module FirstPipeline =
                 |> Source.toResult "processed" (Sink.aggregate 0L (fun count _ -> count + 1L))
 
             let host = Orleans.Dataflow.LocalDataflowHost()
-            let! run = host.MaterializeAsync(graph, cancellationToken)
+
+            // A run handle is IAsyncDisposable, which `use!` binds and disposes at the end of the scope —
+            // on the way out of an exception as well as on the way out of the last line. Disposing stops
+            // the run and waits for it to be stopped.
+            use! run = host.MaterializeAsync(graph, cancellationToken)
+
             let! count = run |> Run.value processed cancellationToken
 
             do! run.Completion
-
-            // A run handle is IAsyncDisposable and nothing else, which a `use` inside a task expression
-            // rejects, so the disposal is written out.
-            do! run.DisposeAsync()
 
             return
                 ScenarioOutcome.Of(

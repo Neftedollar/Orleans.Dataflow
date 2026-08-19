@@ -16,10 +16,10 @@ open Xunit
 /// one.
 /// </para>
 /// <para>
-/// Handles are disposed with an explicit trailing <c>DisposeAsync</c> rather than <c>use</c>, because the
-/// task expression's <c>use</c> does not accept a type that is only <c>IAsyncDisposable</c>. Every run
-/// here completes on its own before the disposal — nothing gates mid-stream — so the trailing call is a
-/// release rather than a stop, and a test that fails its assertion leaks nothing that is still moving.
+/// A handle is <see cref="T:System.IAsyncDisposable"/>, which <c>use!</c> binds and disposes at the end of
+/// its scope — on the way out of a failed assertion as well as on the way out of the last line. Disposing
+/// stops the run and waits for it to be stopped; every run here has completed on its own before the scope
+/// ends, so the disposal is a release rather than a stop.
 /// </para>
 /// </remarks>
 type MaterializationTests() =
@@ -37,7 +37,7 @@ type MaterializationTests() =
                 |> Source.filter (fun value -> value % 2 = 0)
                 |> Source.toResult "total" (Sink.aggregate 0L (fun state value -> state + int64 value))
 
-            let! run = host.MaterializeAsync(graph, token ())
+            use! run = host.MaterializeAsync(graph, token ())
 
             let! sum = run.GetValueAsync(total, token ())
 
@@ -46,8 +46,6 @@ type MaterializationTests() =
 
             do! run.Completion
             Assert.Equal(Orleans.Dataflow.RunSnapshotStatus.Completed, run.Snapshot().Status)
-
-            do! run.DisposeAsync()
         }
 
     [<Fact>]
@@ -59,12 +57,10 @@ type MaterializationTests() =
                 Source.ofSeq [ 3; 1; 4; 1; 5 ]
                 |> Source.toSink (Sink.forEach observed.Add)
 
-            let! run = host.MaterializeAsync(graph, token ())
+            use! run = host.MaterializeAsync(graph, token ())
             do! run.Completion
 
             Assert.Equal<int>([ 3; 1; 4; 1; 5 ], observed)
-
-            do! run.DisposeAsync()
         }
 
     [<Fact>]
@@ -77,7 +73,7 @@ type MaterializationTests() =
                 |> Source.map (fun value -> if value = 3 then raise failure else value)
                 |> Source.toSink Sink.ignore
 
-            let! run = host.MaterializeAsync(graph, token ())
+            use! run = host.MaterializeAsync(graph, token ())
 
             let! thrown = Assert.ThrowsAsync<System.InvalidOperationException>(fun () -> run.Completion)
 
@@ -88,8 +84,6 @@ type MaterializationTests() =
 
             Assert.Equal(Orleans.Dataflow.RunEndingKind.Failed, ending.Kind)
             Assert.Equal(typeof<System.InvalidOperationException>.FullName, ending.FailureType)
-
-            do! run.DisposeAsync()
         }
 
     [<Fact>]
@@ -99,15 +93,12 @@ type MaterializationTests() =
                 Source.ofSeq [ 1; 2; 3 ]
                 |> Source.toResult "total" (Sink.aggregate 0 (fun state value -> state + value))
 
-            let! first = host.MaterializeAsync(graph, token ())
-            let! second = host.MaterializeAsync(graph, token ())
+            use! first = host.MaterializeAsync(graph, token ())
+            use! second = host.MaterializeAsync(graph, token ())
 
             let! firstSum = first.GetValueAsync(total, token ())
             let! secondSum = second.GetValueAsync(total, token ())
 
             Assert.Equal(6, firstSum)
             Assert.Equal(6, secondSum)
-
-            do! first.DisposeAsync()
-            do! second.DisposeAsync()
         }

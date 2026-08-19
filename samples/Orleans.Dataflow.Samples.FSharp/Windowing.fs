@@ -62,11 +62,10 @@ module Windowing =
                 |> Source.groupedWithin groupSize window
                 |> Source.toResult "batches" (Sink.collect (Orleans.Dataflow.CollectOptions(MaxElements = 32)))
 
-            let! batchRun = host.MaterializeAsync(batched, cancellationToken)
+            use! batchRun = host.MaterializeAsync(batched, cancellationToken)
             let! groups = batchRun |> Run.value batches cancellationToken
 
             do! batchRun.Completion
-            do! batchRun.DisposeAsync()
 
             graphs.Add(GraphReading.Of("grouped-within", batched))
             observations.Add(Observation.Of("groups-emitted", groups.Count))
@@ -92,7 +91,7 @@ module Windowing =
             graphs.Add(GraphReading.Of("bounded-keys", keyed))
             observations.Add(Observation.Of("declared-max-active-regions", maxActiveRegions))
 
-            let! keyedRun = host.MaterializeAsync(keyed, cancellationToken)
+            use! keyedRun = host.MaterializeAsync(keyed, cancellationToken)
 
             let refusal =
                 task {
@@ -105,8 +104,6 @@ module Windowing =
                 }
 
             let! message = refusal
-
-            do! keyedRun.DisposeAsync()
 
             observations.Add(Observation.Of("regions-in-the-feed", orders |> Seq.map _.Region |> Seq.distinct |> Seq.length))
             observations.Add(Observation.Of("bounded-keys-refusal", message))

@@ -97,11 +97,10 @@ module internal Fixtures =
                     "collected"
                     (Sink.collect (Orleans.Dataflow.CollectOptions(MaxElements = 256)))
 
-            let! run = host.MaterializeAsync(graph, token ())
+            use! run = host.MaterializeAsync(graph, token ())
             let! values = run.GetValueAsync(collected, token ())
 
             do! run.Completion
-            do! run.DisposeAsync()
 
             return values
         }
@@ -109,20 +108,18 @@ module internal Fixtures =
     /// <summary>Runs a closed graph to its end on the shared host.</summary>
     let runToEnd (graph: Orleans.Dataflow.RunnableGraph) : Task =
         task {
-            let! run = host.MaterializeAsync(graph, token ())
+            use! run = host.MaterializeAsync(graph, token ())
 
             do! run.Completion
-            do! run.DisposeAsync()
         }
 
     /// <summary>Runs a closed graph to its end and answers the result of one slot.</summary>
     let resultOf (slot: Orleans.Dataflow.ResultSlot<'Result>) (graph: Orleans.Dataflow.RunnableGraph) : Task<'Result> =
         task {
-            let! run = host.MaterializeAsync(graph, token ())
+            use! run = host.MaterializeAsync(graph, token ())
             let! value = run.GetValueAsync(slot, token ())
 
             do! run.Completion
-            do! run.DisposeAsync()
 
             return value
         }
@@ -139,12 +136,11 @@ module internal Fixtures =
         (graph: Orleans.Dataflow.RunnableGraph)
         : Task<'First * 'Second> =
         task {
-            let! run = host.MaterializeAsync(graph, token ())
+            use! run = host.MaterializeAsync(graph, token ())
             let! firstValue = run.GetValueAsync(first, token ())
             let! secondValue = run.GetValueAsync(second, token ())
 
             do! run.Completion
-            do! run.DisposeAsync()
 
             return firstValue, secondValue
         }

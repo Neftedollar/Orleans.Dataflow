@@ -107,9 +107,8 @@ await resumed.Completion;
 
 ```fsharp
 let host = LocalDataflowHost()
-let! run = host.MaterializeAsync graph
+use! run = host.MaterializeAsync graph
 do! run.Completion
-do! run.DisposeAsync()
 ```
 
 `LocalDataflowHost` is a C# type; F# calls it directly. There is no F# wrapper,

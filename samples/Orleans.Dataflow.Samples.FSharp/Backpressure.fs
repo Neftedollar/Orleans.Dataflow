@@ -63,7 +63,7 @@ module Backpressure =
                             gate.Wait())
                     )
 
-                let! run = host.MaterializeAsync(graph, cancellationToken)
+                use! run = host.MaterializeAsync(graph, cancellationToken)
 
                 // Everything has now been offered to a buffer that could hold three of it, and the sink is
                 // still standing on the first element it was given.
@@ -74,8 +74,6 @@ module Backpressure =
                 do! run.Completion
 
                 let snapshot = run.Snapshot()
-
-                do! run.DisposeAsync()
 
                 graphs.Add(GraphReading.Of(name, graph))
                 observations.Add(Observation.Of($"{name}/orders-the-sink-saw", String.concat " " kept))

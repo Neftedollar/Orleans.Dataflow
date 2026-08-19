@@ -50,7 +50,7 @@ let graph, processed =
     |> Source.map OrderDocument.ofEvent
     |> Source.toResult "processed" (Sink.aggregate 0L (fun count _ -> count + 1L))
 
-let! run = LocalDataflowHost().MaterializeAsync(graph, cancellationToken)
+use! run = LocalDataflowHost().MaterializeAsync(graph, cancellationToken)
 let! count = run |> Run.value processed cancellationToken
 ```
 

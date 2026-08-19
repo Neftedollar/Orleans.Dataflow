@@ -146,11 +146,14 @@ let main _ =
 
     task {
         let host = Orleans.Dataflow.LocalDataflowHost()
-        let! run = host.MaterializeAsync(graph, CancellationToken.None)
+
+        // `use!` binds what the await produced and disposes it when this expression ends,
+        // including when it ends because something threw. Disposing stops the run and waits for it.
+        use! run = host.MaterializeAsync(graph, CancellationToken.None)
+
         let! sum = run |> Run.value total CancellationToken.None
 
         do! run.Completion
-        do! run.DisposeAsync()
 
         printfn "total:       %d" sum
         printfn "fingerprint: %O" graph.Fingerprint

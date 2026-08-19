@@ -20,8 +20,9 @@ open Xunit
 /// <para>
 /// Nothing here reads a clock. The operators configured by a duration are asserted where their other bound
 /// closes them — a weight, a count — or in the timing suite, which measures on a clock a test moves by hand.
-/// Handles are disposed with a trailing <c>DisposeAsync</c> rather than <c>use</c>, because the task
-/// expression's <c>use</c> does not accept a type that is only <c>IAsyncDisposable</c>.
+/// Handles are bound with <c>use!</c>: a handle is <see cref="T:System.IAsyncDisposable"/>, and <c>use!</c>
+/// disposes it at the end of the scope, on the failing path as well as the passing one. The one exception is
+/// the cancellation test below, which starts the disposal itself because the disposal is its subject.
 /// </para>
 /// </remarks>
 type OperatorBehaviorTests() =
@@ -222,6 +223,9 @@ type OperatorBehaviorTests() =
                     })
                 |> Source.toSink Sink.ignore
 
+            // Written out rather than bound with `use!`: the disposal is the subject here, not the cleanup.
+            // It is started while the workflow is parked, and what is observed is what the workflow does
+            // between that start and the await below — an order `use!` could not express.
             let! run = host.MaterializeAsync(graph, token ())
 
             // The computation is inside its own await with nothing to complete it, which is the one state a
@@ -446,7 +450,7 @@ type OperatorBehaviorTests() =
                 |> Source.valve "gate" Orleans.Dataflow.ValveMode.Closed
                 |> Source.toSink (Sink.forEach observed.Add)
 
-            let! run = host.MaterializeAsync(graph, token ())
+            use! run = host.MaterializeAsync(graph, token ())
 
             let! gate = run.GetValueAsync(graph.Control<Orleans.Dataflow.IValve>("gate"), token ())
 
@@ -457,8 +461,6 @@ type OperatorBehaviorTests() =
             do! run.Completion
 
             Assert.Equal<int>([ 1; 2; 3 ], observed)
-
-            do! run.DisposeAsync()
         }
 
     [<Fact>]
@@ -696,12 +698,10 @@ type OperatorBehaviorTests() =
 
             let graph = (Source.failed failure: Source<int>) |> Source.toSink Sink.ignore
 
-            let! run = host.MaterializeAsync(graph, token ())
+            use! run = host.MaterializeAsync(graph, token ())
             let! thrown = Assert.ThrowsAsync<InvalidOperationException>(fun () -> run.Completion)
 
             Assert.Same(failure, thrown)
-
-            do! run.DisposeAsync()
         }
 
     [<Fact>]
@@ -757,7 +757,7 @@ type OperatorBehaviorTests() =
                 (Source.queue (bounded 8) "ingress": Source<int>)
                 |> Source.toSink (Sink.forEach observed.Add)
 
-            let! run = host.MaterializeAsync(graph, token ())
+            use! run = host.MaterializeAsync(graph, token ())
 
             let! ingress =
                 run.GetValueAsync(graph.Control<Orleans.Dataflow.IIngressQueue<int>>("ingress"), token ())
@@ -771,6 +771,4 @@ type OperatorBehaviorTests() =
             do! run.Completion
 
             Assert.Equal<int>([ 1; 2; 3 ], observed)
-
-            do! run.DisposeAsync()
         }

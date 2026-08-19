@@ -50,12 +50,11 @@ module Junctions =
                 |> Source.broadcastTo [ largeBranch; northBranch ]
 
             let host = Orleans.Dataflow.LocalDataflowHost()
-            let! run = host.MaterializeAsync(graph, cancellationToken)
+            use! run = host.MaterializeAsync(graph, cancellationToken)
             let! largeOrders = run |> Run.value largeSlot cancellationToken
             let! northOrders = run |> Run.value northSlot cancellationToken
 
             do! run.Completion
-            do! run.DisposeAsync()
 
             return
                 ScenarioOutcome.Of(

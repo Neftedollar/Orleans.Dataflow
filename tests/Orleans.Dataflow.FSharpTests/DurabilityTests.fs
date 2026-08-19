@@ -108,6 +108,9 @@ type DurabilityTests() =
                 Assert.ThrowsAsync<System.InvalidOperationException>(fun () -> attempt.Completion)
                 :> Task
 
+            // Written out rather than bound with `use!`, and the order is the test: the crashed attempt has to
+            // be gone before the store is read and before the resume below takes the same run identity up, and
+            // `use!` would hold it to the end of this expression.
             do! attempt.DisposeAsync()
 
             // A checkpoint exists, under the run's own identity: a local graph is anonymous, so what separates
@@ -118,10 +121,9 @@ type DurabilityTests() =
             // The attempt delivered eight elements before the ninth killed it.
             Assert.Equal<int>([ 1..8 ], first)
 
-            let! continued = host.MaterializeFromCheckpointAsync(resumed, durable store "replay" 3, token ())
+            use! continued = host.MaterializeFromCheckpointAsync(resumed, durable store "replay" 3, token ())
 
             do! continued.Completion
-            do! continued.DisposeAsync()
 
             // The source reopened at the stored cursor, which the element bound put at six: the resumed
             // attempt starts at element seven and runs the stream out.
@@ -161,6 +163,8 @@ type DurabilityTests() =
                 Assert.ThrowsAsync<System.InvalidOperationException>(fun () -> attempt.Completion)
                 :> Task
 
+            // Written out rather than bound with `use!`, for the reason the replay test gives: the mark is read
+            // out of the store between this attempt and the resume that takes the same run identity up.
             do! attempt.DisposeAsync()
 
             Assert.Equal<int>([ 1..8 ], firstCommitted)
@@ -173,11 +177,10 @@ type DurabilityTests() =
 
             Assert.Equal(6L, storedBefore)
 
-            let! continued =
+            use! continued =
                 host.MaterializeFromCheckpointAsync(marked secondCommitted 0, durable store "marked" 3, token ())
 
             do! continued.Completion
-            do! continued.DisposeAsync()
 
             Assert.Equal<int>([ 7..12 ], secondCommitted)
 
@@ -198,7 +201,7 @@ type DurabilityTests() =
             let options =
                 Orleans.Dataflow.DurableRunOptions(Store = store, RunId = RunId.Create "untimed")
 
-            let! run = host.MaterializeDurableAsync(committing observed 0, options, token ())
+            use! run = host.MaterializeDurableAsync(committing observed 0, options, token ())
 
             do! run.Completion
 
@@ -206,8 +209,6 @@ type DurabilityTests() =
             // element bound has nothing that could make a capture due.
             Assert.Equal(0, store.Count)
             Assert.Equal<int>([ 1..12 ], observed)
-
-            do! run.DisposeAsync()
         }
 
     [<Fact>]
@@ -219,13 +220,15 @@ type DurabilityTests() =
             let refused =
                 Assert.ThrowsAsync<System.InvalidOperationException>(fun () ->
                     task {
-                        let! run =
+                        // Never bound: the store knows no such run. `use!` is still the shape a caller who
+                        // did get a handle would want.
+                        use! _run =
                             host.MaterializeFromCheckpointAsync(
                                 committing observed 0,
                                 durable store "never-ran" 3,
                                 token ())
 
-                        do! run.DisposeAsync()
+                        ()
                     }
                     :> Task)
 

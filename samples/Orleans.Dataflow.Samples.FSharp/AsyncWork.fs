@@ -78,10 +78,9 @@ module AsyncWork =
                         |> mapping
                         |> Source.toSink (Sink.forEach (fun (document: OrderDocument) -> arrived.Add document.OrderId))
 
-                    let! run = host.MaterializeAsync(graph, cancellationToken)
+                    use! run = host.MaterializeAsync(graph, cancellationToken)
 
                     do! run.Completion
-                    do! run.DisposeAsync()
 
                     let inFeedOrder =
                         Seq.forall2 (fun (order: OrderEvent) (seen: string) -> order.OrderId = seen) orders arrived

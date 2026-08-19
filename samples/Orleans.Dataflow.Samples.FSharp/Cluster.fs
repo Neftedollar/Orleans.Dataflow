@@ -67,7 +67,7 @@ module Cluster =
             let pipeline = graph |> Pipeline.define lineage revision
             let accepted = pipeline.ResultSlot("accepted", SampleVocabulary.TallyContract)
 
-            let! run = sample.Cluster.MaterializeAsync(pipeline, cancellationToken)
+            use! run = sample.Cluster.MaterializeAsync(pipeline, cancellationToken)
 
             // Watching termination is how a client learns a remote run is over: the handle answers with the
             // ending the run reached rather than with an exception, so a completed run and a failed one are
@@ -75,8 +75,6 @@ module Cluster =
             let! ending = run.WatchTermination
             let! tally = run.GetValueAsync(accepted, cancellationToken)
             let! snapshot = run.SnapshotAsync cancellationToken
-
-            do! run.DisposeAsync()
 
             return
                 ScenarioOutcome.Of(

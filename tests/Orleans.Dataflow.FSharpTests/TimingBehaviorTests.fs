@@ -46,7 +46,7 @@ type TimingBehaviorTests() =
                 |> Source.groupedWithin 10 second
                 |> Source.toSink (Sink.forEach observed.Add)
 
-            let! run = host.MaterializeAsync(graph, token ())
+            use! run = host.MaterializeAsync(graph, token ())
             let! ingress = ingressOf graph run
 
             let! outcome = ingress.OfferAsync(1, token ())
@@ -62,7 +62,6 @@ type TimingBehaviorTests() =
 
             ingress.Complete()
             do! run.Completion
-            do! run.DisposeAsync()
         }
 
     [<Fact>]
@@ -76,7 +75,7 @@ type TimingBehaviorTests() =
                 |> Source.delay second (bounded 4)
                 |> Source.toSink (Sink.forEach observed.Add)
 
-            let! run = host.MaterializeAsync(graph, token ())
+            use! run = host.MaterializeAsync(graph, token ())
             let! ingress = ingressOf graph run
 
             let! outcome = ingress.OfferAsync(7, token ())
@@ -89,7 +88,6 @@ type TimingBehaviorTests() =
 
             ingress.Complete()
             do! run.Completion
-            do! run.DisposeAsync()
         }
 
     [<Fact>]
@@ -103,7 +101,7 @@ type TimingBehaviorTests() =
                 |> Source.initialDelay second
                 |> Source.toSink (Sink.forEach observed.Add)
 
-            let! run = host.MaterializeAsync(graph, token ())
+            use! run = host.MaterializeAsync(graph, token ())
 
             // The armed timer is the run having reached its wait, so what is asserted at this moment is a
             // fact rather than a race: the stream that would otherwise have finished at once has not
@@ -118,8 +116,6 @@ type TimingBehaviorTests() =
             do! run.Completion
 
             Assert.Equal<int>([ 1; 2; 3 ], observed)
-
-            do! run.DisposeAsync()
         }
 
     [<Fact>]
@@ -132,7 +128,7 @@ type TimingBehaviorTests() =
                 |> Source.timeout second
                 |> Source.toSink Sink.ignore
 
-            let! run = host.MaterializeAsync(graph, token ())
+            use! run = host.MaterializeAsync(graph, token ())
 
             // The gap before the first element is counted from the moment the run started, so a stream that
             // never produces anything at all fails rather than hanging.
@@ -142,8 +138,6 @@ type TimingBehaviorTests() =
                 Assert.ThrowsAsync<Orleans.Dataflow.StreamTimeoutException>(fun () -> run.Completion)
 
             Assert.NotNull thrown
-
-            do! run.DisposeAsync()
         }
 
     [<Fact>]
@@ -157,7 +151,7 @@ type TimingBehaviorTests() =
                 |> Source.takeWithin (TimeSpan.FromMilliseconds 2500.0)
                 |> Source.toSink (Sink.forEach observed.Add)
 
-            let! run = host.MaterializeAsync(graph, token ())
+            use! run = host.MaterializeAsync(graph, token ())
 
             // Both timers before every advance: the window's, armed when the run starts, and the tick
             // source's, armed at its first pull and re-armed after every tick. Advancing while the source
@@ -176,8 +170,6 @@ type TimingBehaviorTests() =
             // reaching a count bound ends one.
             Assert.Equal<int64>([ 0L; 1L ], observed)
             Assert.Equal(TaskStatus.RanToCompletion, run.Completion.Status)
-
-            do! run.DisposeAsync()
         }
 
     [<Fact>]
@@ -197,7 +189,7 @@ type TimingBehaviorTests() =
                 |> Source.takeWithin (second * 3.0)
                 |> Source.toSink (Sink.forEach observed.Add)
 
-            let! run = host.MaterializeAsync(graph, token ())
+            use! run = host.MaterializeAsync(graph, token ())
 
             // Both timers before the advance: the window's, armed when the run starts, and the tick
             // source's, armed at its first pull. Moving time before the source has armed would leave the
@@ -217,8 +209,6 @@ type TimingBehaviorTests() =
 
             Assert.Empty observed
             Assert.Equal(TaskStatus.RanToCompletion, run.Completion.Status)
-
-            do! run.DisposeAsync()
         }
 
     [<Fact>]
@@ -232,7 +222,7 @@ type TimingBehaviorTests() =
                 |> Source.skipWithin second
                 |> Source.toSink (Sink.forEach observed.Add)
 
-            let! run = host.MaterializeAsync(graph, token ())
+            use! run = host.MaterializeAsync(graph, token ())
             let! ingress = ingressOf graph run
 
             // The clock never moves in this test, so whenever these elements reach the stage they are inside
@@ -245,8 +235,6 @@ type TimingBehaviorTests() =
             do! run.Completion
 
             Assert.Empty observed
-
-            do! run.DisposeAsync()
         }
 
     [<Fact>]
@@ -260,7 +248,7 @@ type TimingBehaviorTests() =
                 |> Source.skipWithin second
                 |> Source.toSink (Sink.forEach observed.Add)
 
-            let! run = host.MaterializeAsync(graph, token ())
+            use! run = host.MaterializeAsync(graph, token ())
             let! ingress = ingressOf graph run
 
             // The stage arms no timer — it has an answer for every element the moment it arrives — so the
@@ -276,8 +264,6 @@ type TimingBehaviorTests() =
             do! run.Completion
 
             Assert.Equal<int>([ 1; 2; 3 ], observed)
-
-            do! run.DisposeAsync()
         }
 
     [<Fact>]
@@ -291,7 +277,7 @@ type TimingBehaviorTests() =
                 |> Source.take 3
                 |> Source.toSink (Sink.forEach observed.Add)
 
-            let! run = host.MaterializeAsync(graph, token ())
+            use! run = host.MaterializeAsync(graph, token ())
 
             do! advance clock 1 second (token ())
             do! reaches "the first tick" (fun () -> observed.Count = 1) (token ())
@@ -303,6 +289,4 @@ type TimingBehaviorTests() =
 
             // The first element is the first tick and not a count of the ticks so far.
             Assert.Equal<int64>([ 0L; 1L; 2L ], observed)
-
-            do! run.DisposeAsync()
         }

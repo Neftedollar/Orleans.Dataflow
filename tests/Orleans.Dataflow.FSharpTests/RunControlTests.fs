@@ -70,7 +70,7 @@ type RunControlTests() =
                         gate.Wait()
                         state + int64 value))
 
-            let! run = host.MaterializeAsync(graph, token ())
+            use! run = host.MaterializeAsync(graph, token ())
             do! gate.Reached
 
             let paused = run.PauseAsync(token ())
@@ -97,8 +97,6 @@ type RunControlTests() =
             let! sum = run |> Run.value total (token ())
 
             Assert.Equal(15L, sum)
-
-            do! run.DisposeAsync()
         }
 
     [<Fact>]
@@ -114,7 +112,7 @@ type RunControlTests() =
                         gate.Wait()
                         state + int64 value))
 
-            let! run = host.MaterializeAsync(graph, token ())
+            use! run = host.MaterializeAsync(graph, token ())
             do! gate.Reached
 
             let shutdown = run.ShutdownAsync().AsTask()
@@ -130,8 +128,6 @@ type RunControlTests() =
             let! sum = run |> Run.value total (token ())
 
             Assert.Equal(1L, sum)
-
-            do! run.DisposeAsync()
         }
 
     [<Fact>]
@@ -143,7 +139,7 @@ type RunControlTests() =
 
             let control = graph.Control<Orleans.Dataflow.IIngressQueue<int>>("orders")
 
-            let! run = host.MaterializeAsync(graph, token ())
+            use! run = host.MaterializeAsync(graph, token ())
 
             // A control is a run-start value: it is already resolved when the handle is handed over, because
             // nothing could be offered to a run that had to end first.
@@ -165,8 +161,6 @@ type RunControlTests() =
             let! values = run |> Run.value seen (token ())
 
             Assert.Equal<int>([ 10; 20 ], values)
-
-            do! run.DisposeAsync()
         }
 
     [<Fact>]
@@ -197,7 +191,7 @@ type RunControlTests() =
                         gate.Wait()
                         state + int64 value))
 
-            let! run = host.MaterializeAsync(graph, token ())
+            use! run = host.MaterializeAsync(graph, token ())
             do! gate.Reached
 
             let reading = run |> Run.value total waiting.Token
@@ -221,8 +215,6 @@ type RunControlTests() =
             let! sum = run |> Run.value total (token ())
 
             Assert.Equal(3L, sum)
-
-            do! run.DisposeAsync()
         }
 
     [<Fact>]
@@ -236,7 +228,7 @@ type RunControlTests() =
                 Source.ofSeq [ 1; 2 ]
                 |> Source.toResult "total" (Sink.aggregate 0L (fun state value -> state + int64 value))
 
-            let! run = host.MaterializeAsync(graph, token ())
+            use! run = host.MaterializeAsync(graph, token ())
 
             // Two graphs of one shape share a fingerprint, so the instance identity is what separates them —
             // and the pipeline-shaped read carries that guard rather than softening it.
@@ -246,5 +238,4 @@ type RunControlTests() =
             Assert.Contains("instance", refused.Message)
 
             do! run.Completion
-            do! run.DisposeAsync()
         }

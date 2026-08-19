@@ -22,9 +22,9 @@ open Xunit
 /// <para>
 /// The results are exact wherever the semantics are exact. Where they are not — a merge, a balance, a
 /// merging diamond — what is asserted is the multiset or the total, because the order is genuinely undefined
-/// and an assertion that fixed it would be asserting a timing. Handles are disposed with a trailing
-/// <c>DisposeAsync</c> rather than <c>use</c>, because the task expression's <c>use</c> does not accept a
-/// type that is only <c>IAsyncDisposable</c>.
+/// and an assertion that fixed it would be asserting a timing. Handles are bound with <c>use!</c>: a handle
+/// is <see cref="T:System.IAsyncDisposable"/>, and <c>use!</c> disposes it at the end of the scope — after a
+/// failed assertion as much as after a passing one.
 /// </para>
 /// </remarks>
 type JunctionBehaviorTests() =
@@ -395,13 +395,12 @@ type JunctionBehaviorTests() =
                 |> Source.filter (fun value -> value > 1)
                 |> Source.broadcastTo [ counting; summing ]
 
-            let! run = host.MaterializeAsync(graph, token ())
+            use! run = host.MaterializeAsync(graph, token ())
             let! tapped = run.GetValueAsync(auditedSlot, token ())
             let! counted = run.GetValueAsync(countedSlot, token ())
             let! summed = run.GetValueAsync(summedSlot, token ())
 
             do! run.Completion
-            do! run.DisposeAsync()
 
             Assert.Equal<int>([ 1; 2; 3 ], tapped)
             Assert.Equal(2L, counted)
@@ -419,7 +418,7 @@ type JunctionBehaviorTests() =
 
             let _, unclosed = Flow.identity<int> |> Branch.toResult "counted" Sink.count
 
-            let! run = host.MaterializeAsync(graph, token ())
+            use! run = host.MaterializeAsync(graph, token ())
 
             let! refused =
                 Assert.ThrowsAsync<System.InvalidOperationException>(fun () ->
@@ -428,7 +427,6 @@ type JunctionBehaviorTests() =
             let! counted = run.GetValueAsync(countedSlot, token ())
 
             do! run.Completion
-            do! run.DisposeAsync()
 
             Assert.NotNull(refused)
             Assert.Equal(2L, counted)

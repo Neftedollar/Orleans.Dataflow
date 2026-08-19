@@ -96,18 +96,19 @@ module Durable =
 
             let afterCrash = attempt.Snapshot()
 
+            // Written out rather than bound with `use!`, and the order is the scenario: the first host's
+            // handle has to be gone before the second host picks the same run identity up, and `use!` would
+            // hold it to the end of this expression — past the resume it is supposed to precede.
             do! attempt.DisposeAsync()
 
             // A second host, standing in for a second process: it is handed the same document, the same run
             // identity and the same store, and nothing else passes between them.
             let secondHost = Orleans.Dataflow.LocalDataflowHost()
-            let! continued = secondHost.MaterializeFromCheckpointAsync(continuing, durable (), cancellationToken)
+            use! continued = secondHost.MaterializeFromCheckpointAsync(continuing, durable (), cancellationToken)
 
             do! continued.Completion
 
             let afterResume = continued.Snapshot()
-
-            do! continued.DisposeAsync()
 
             let replayed = HashSet<string>(firstAttempt)
 

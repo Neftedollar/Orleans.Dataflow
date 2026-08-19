@@ -24,9 +24,9 @@ open RegisteredVocabulary
 /// written once runs in either runtime, and this suite is the local half of that claim from F#.
 /// </para>
 /// <para>
-/// Handles are released with a trailing <c>DisposeAsync</c> rather than <c>use</c>, for the reason
-/// <c>MaterializationTests</c> gives: the task expression's <c>use</c> does not accept a type that is only
-/// <see cref="T:System.IAsyncDisposable"/>, and every run here completes on its own before the release.
+/// Handles are bound with <c>use!</c>, for the reason <c>MaterializationTests</c> gives: a handle is
+/// <see cref="T:System.IAsyncDisposable"/>, and <c>use!</c> disposes it at the end of the scope whether the
+/// scope ends in a return or in a failed assertion. Every run here completes on its own before that.
 /// </para>
 /// </remarks>
 type RegisteredRunTests() =
@@ -41,7 +41,7 @@ type RegisteredRunTests() =
                 |> Source.viaRegistered scale "scale-up" scaleParameters
                 |> Source.toRegisteredResult "total" sumSink "sum-out" sumParameters
 
-            let! run = host.MaterializeAsync(graph, token ())
+            use! run = host.MaterializeAsync(graph, token ())
 
             // Four elements from the source's own payload, tripled by the flow's own payload: 3+6+9+12.
             let! sum = run |> Run.value total (token ())
@@ -54,8 +54,6 @@ type RegisteredRunTests() =
             Assert.Equal<string>(
                 [ "numbers-in"; "scale-up"; "sum-out" ],
                 provided.Built.Keys |> Seq.sort |> Seq.toList)
-
-            do! run.DisposeAsync()
         }
 
     [<Fact>]
@@ -68,13 +66,11 @@ type RegisteredRunTests() =
                 |> Source.viaRegistered scale "scale-up" scaleParameters
                 |> Source.toRegistered labelSink "log-out" labelParameters
 
-            let! run = host.MaterializeAsync(graph, token ())
+            use! run = host.MaterializeAsync(graph, token ())
 
             do! run.Completion
 
             Assert.Equal<int>([ 3; 6; 9; 12 ], provided.Observed |> Seq.toList)
-
-            do! run.DisposeAsync()
         }
 
     [<Fact>]
@@ -89,7 +85,7 @@ type RegisteredRunTests() =
                 |> Source.viaRegistered scale "scale-up" doubled
                 |> Source.toRegisteredResult "total" sumSink "sum-out" sumParameters
 
-            let! run = host.MaterializeAsync(graph, token ())
+            use! run = host.MaterializeAsync(graph, token ())
             let! sum = run |> Run.value total (token ())
 
             // The same stage under the same handle, and a different stream, because a payload is document
@@ -97,7 +93,6 @@ type RegisteredRunTests() =
             Assert.Equal(20L, sum)
 
             do! run.Completion
-            do! run.DisposeAsync()
         }
 
     [<Fact>]
@@ -115,7 +110,7 @@ type RegisteredRunTests() =
                 Source.ofRegistered numberSource "numbers-in" sourceParameters
                 |> Source.fanOutToRegistered split "split" junctionParameters [ leftBranch; rightBranch ]
 
-            let! run = host.MaterializeAsync(graph, token ())
+            use! run = host.MaterializeAsync(graph, token ())
             let! leftSum = run |> Run.value left (token ())
             let! rightSum = run |> Run.value right (token ())
 
@@ -124,7 +119,6 @@ type RegisteredRunTests() =
             Assert.Equal(10L, rightSum)
 
             do! run.Completion
-            do! run.DisposeAsync()
         }
 
     [<Fact>]
@@ -138,14 +132,13 @@ type RegisteredRunTests() =
                     [ Source.ofRegistered numberSource "numbers-b" sourceParameters ]
                 |> Source.toRegisteredResult "total" sumSink "sum-out" sumParameters
 
-            let! run = host.MaterializeAsync(graph, token ())
+            use! run = host.MaterializeAsync(graph, token ())
             let! sum = run |> Run.value total (token ())
 
             // Both sources reach the junction, so the join is the two streams' elements: 10 + 10.
             Assert.Equal(20L, sum)
 
             do! run.Completion
-            do! run.DisposeAsync()
         }
 
     [<Fact>]
@@ -160,9 +153,11 @@ type RegisteredRunTests() =
             let refused =
                 Assert.ThrowsAsync<System.InvalidOperationException>(fun () ->
                     task {
-                        let! run = host.MaterializeAsync(graph, token ())
+                        // Never bound: the host refuses the document. `use!` is still what a caller who got
+                        // a handle would want, and it costs nothing to write the refusable call that way.
+                        use! _run = host.MaterializeAsync(graph, token ())
 
-                        do! run.DisposeAsync()
+                        ()
                     }
                     :> Task)
 

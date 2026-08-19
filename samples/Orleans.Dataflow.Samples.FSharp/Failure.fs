@@ -84,13 +84,11 @@ module Failure =
                 |> Source.map OrderDocument.ofEvent
                 |> Source.toSink (Sink.forEach (fun (document: OrderDocument) -> retried.Add document.OrderId))
 
-            let! retryRun = host.MaterializeAsync(retrying, cancellationToken)
+            use! retryRun = host.MaterializeAsync(retrying, cancellationToken)
 
             do! retryRun.Completion
 
             let afterRetries = retryRun.Snapshot()
-
-            do! retryRun.DisposeAsync()
 
             graphs.Add(GraphReading.Of("retry", retrying))
             observations.Add(Observation.Of("retry/times-the-stage-threw", flaky.Raised))
@@ -121,13 +119,11 @@ module Failure =
                 |> Source.map OrderDocument.ofEvent
                 |> Source.toSink (Sink.forEach (fun (document: OrderDocument) -> recovered.Add document.OrderId))
 
-            let! recoverRun = host.MaterializeAsync(recovering, cancellationToken)
+            use! recoverRun = host.MaterializeAsync(recovering, cancellationToken)
 
             do! recoverRun.Completion
 
             let afterRecovery = recoverRun.Snapshot()
-
-            do! recoverRun.DisposeAsync()
 
             graphs.Add(GraphReading.Of("recover", recovering))
             observations.Add(Observation.Of("recover/times-the-stage-threw", poison.Raised))

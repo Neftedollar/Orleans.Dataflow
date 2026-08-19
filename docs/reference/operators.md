@@ -129,8 +129,10 @@ let graph, seen =
     |> Source.toResult "seen" Sink.count
 
 let host = LocalDataflowHost()
-let! run = host.MaterializeAsync graph
+use! run = host.MaterializeAsync graph
 let! counted = run |> Run.value seen CancellationToken.None   // 103
+
+do! run.Completion
 ```
 
 ---

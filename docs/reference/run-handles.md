@@ -123,7 +123,7 @@ await run.Completion;
 
 ```fsharp
 let host = LocalDataflowHost()
-let! run = host.MaterializeAsync graph
+use! run = host.MaterializeAsync graph
 
 let snapshot = run.Snapshot()
 printfn "%A dropped %d" snapshot.Status snapshot.DroppedElements
@@ -136,12 +136,14 @@ let! ending = run.WatchTermination
 let! count = run |> Run.value seen CancellationToken.None
 
 do! run.Completion
-do! run.DisposeAsync()
 ```
 
 `RunHandle` is a C# type that F# uses directly; the one F# spelling of its own is
 `Run.value slot cancellationToken run`, which is `GetValueAsync` with the
-arguments in pipeline order. Everything else is a method call.
+arguments in pipeline order. Everything else is a method call. The handle is
+`IAsyncDisposable`, so `use!` is F#'s `await using`: it binds the handle and
+disposes it at the end of the scope, on the exception path as well as the
+ordinary one.
 
 ---
 
