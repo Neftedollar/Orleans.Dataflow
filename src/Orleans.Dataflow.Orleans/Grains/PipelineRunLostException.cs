@@ -5,16 +5,17 @@ namespace Orleans.Dataflow.Grains;
 /// </summary>
 /// <remarks>
 /// <para>
-/// The honest phase-1 answer to a deactivation mid-run. A run grain holds its engine in memory and
-/// persists nothing about the run's progress, so an activation that goes away takes the attempt with it;
-/// the fresh activation has no run and reports <see cref="RunPhase.NotStarted"/>. A client that had
+/// The honest answer to a deactivation mid-run of an ordinary run. A run grain holds its engine in memory and
+/// persists nothing about an ordinary run's progress, so an activation that goes away takes the attempt with
+/// it; the fresh activation has no run and reports <see cref="RunPhase.NotStarted"/>. A client that had
 /// already seen the run executing translates that into this exception rather than waiting forever for a
 /// terminal state that will never arrive.
 /// </para>
 /// <para>
 /// This is a lost attempt and not a failed pipeline. Nothing here retries and nothing here resumes:
-/// durable resume is the checkpoint work of a later milestone, and promising it now by quietly restarting
-/// would produce a second execution of every side effect the lost attempt had already performed.
+/// continuing a run from where it stopped is what a durable run's checkpoint is for, and an ordinary run
+/// declares none. Quietly restarting it instead would produce a second execution of every side effect the
+/// lost attempt had already performed.
 /// </para>
 /// </remarks>
 [GenerateSerializer]

@@ -26,7 +26,7 @@ namespace Orleans.Dataflow.Adapters;
 /// subscribes to a namespace decided at run time, and a run least of all. What a run can do is attach to a
 /// subscriber this package compiled, which is why consumption is confined to
 /// <see cref="BroadcastSourceNamespace"/> and a document names a channel <em>key</em> within it. The relay
-/// grain behind that namespace holds the delivery registry the phase-3 note said this stage needed: the
+/// grain behind that namespace holds the delivery registry this stage needs: the
 /// runtime chooses the subscriber's address, the registry maps it back to the live runs that asked for it.
 /// The sink stays namespace-free, because publishing needs no subscription.
 /// </para>
@@ -334,7 +334,7 @@ public static class OrleansStages
     /// <b>Cancellation</b>: observed between elements. A terminal in this engine is a synchronous fold and is
     /// handed no token, so a publication already in flight when a run is cancelled runs to its own end or to
     /// Orleans' own call timeout; what a cancellation stops is the publication of the next element. That is
-    /// a limit of the phase-1 terminal seam rather than of this adapter, and it is stated rather than hidden.
+    /// a limit of the terminal seam rather than of this adapter, and it is stated rather than hidden.
     /// </para>
     /// <para>
     /// <b>Completion</b>: a run that ends completes nothing on the stream. An Orleans stream has no end a
@@ -428,17 +428,17 @@ public static class OrleansStages
     /// from inside the run exactly as a plain grain call's are, and the key only orders them. Turned on,
     /// each key gets an executor grain of its own, keyed by the run's identity, this occurrence, and the
     /// key, and the cluster places those executors: work for different keys then runs on different silos
-    /// rather than all on the one hosting the run. That is opt-in because M3's rule is that runs distribute
-    /// before stages do, and this is the first stage allowed to distribute below its run.
+    /// rather than all on the one hosting the run. That is opt-in because what this library distributes is
+    /// runs and not the stages inside them; this is the one stage allowed to distribute below its run.
     /// </para>
     /// <para>
-    /// <b>Failure</b>: the first failure wins and faults the run, and no retry is ever made — an M3 keyed
+    /// <b>Failure</b>: the first failure wins and faults the run, and no retry is ever made — a keyed
     /// call is at-most-once per element from this adapter's side. A distributed call that fails arrives as
     /// the executor's refusal naming the author's exception type, its message, and the executor's own
     /// address; a run-local one arrives as the author's exception itself. That difference is the cost of the
     /// hop and is stated rather than hidden. A silo that dies while holding an executor surfaces as the
     /// failed grain call it is: the run faults, and nothing here quietly runs the element again. Supervision
-    /// and retry are M5's.
+    /// and retry are declared by the author, in a scope around this stage, and never supplied by it.
     /// </para>
     /// <para>
     /// <b>Executor lifetime</b>: an executor belongs to one run and holds no state between calls, so
@@ -474,7 +474,7 @@ public static class OrleansStages
     /// <b>Cancellation</b>: observed between elements. A terminal in this engine is a synchronous fold and
     /// is handed no token, so a call already in flight when a run is cancelled runs to its own end or to
     /// Orleans' own call timeout; what a cancellation stops is the admission of the next element. That is a
-    /// limit of the phase-1 terminal seam, stated here rather than hidden.
+    /// limit of the terminal seam, stated here rather than hidden.
     /// </para>
     /// </remarks>
     public static RegisteredSink<TIn> GrainCallSink<TIn>(GrainCallSinkBinding<TIn> call)
@@ -493,7 +493,7 @@ public static class OrleansStages
     /// <para>
     /// <b>Acknowledgement</b>: the call-scoped pull. An element is taken when the run asks for it, and
     /// Orleans batches the transport underneath at its own default; the batch size is deliberately not an
-    /// option this phase, and is the obvious first one to add.
+    /// option here: the transport's default is what a run gets, and nothing in the document can change it.
     /// </para>
     /// <para>
     /// <b>Backpressure</b>: the enumeration's own. A run that stops pulling stops the grain from producing,
@@ -533,11 +533,12 @@ public static class OrleansStages
     /// needs a different design rather than a longer period.
     /// </para>
     /// <para>
-    /// <b>What happens when the run is not there.</b> This phase's runs live for one activation. If the run
-    /// grain is deactivated mid-run, the attempt is faulted — that is phase 1's stated durability contract
-    /// and nothing here changes it — and the reminder outlives it. The next tick finds no live attempt, and
-    /// the trigger unregisters the reminder and stops. There is no silent resume: the run stays exactly as
-    /// it ended, and a caller polling it sees the loss. Durable resume is M5's checkpoint work.
+    /// <b>What happens when the run is not there.</b> A run that was not declared durable lives for one
+    /// activation. If the run grain is deactivated mid-run, the attempt is faulted — that is such a run's
+    /// stated durability contract and nothing here changes it — and the reminder outlives it. The next tick
+    /// finds no live attempt, and the trigger unregisters the reminder and stops. There is no silent
+    /// resume: the run stays exactly as it ended, and a caller polling it sees the loss. Nothing here
+    /// restarts a run, and nothing here approximates a resume.
     /// </para>
     /// <para>
     /// <b>Period</b>: whole milliseconds, and at least the cluster's configured
@@ -684,8 +685,8 @@ public static class OrleansStages
     /// <para>
     /// <b>Cancellation</b>: observed between elements. A terminal in this engine is a synchronous fold and
     /// is handed no token, so a publication already in flight when a run is cancelled runs to its own end;
-    /// what a cancellation stops is the publication of the next element. That is a limit of the phase-1
-    /// terminal seam, stated rather than hidden.
+    /// what a cancellation stops is the publication of the next element. That is a limit of the terminal
+    /// seam, stated rather than hidden.
     /// </para>
     /// <para>
     /// <b>Completion</b>: a run that ends signals nothing on the channel. A channel has no end a publisher

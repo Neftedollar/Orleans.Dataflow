@@ -11,13 +11,13 @@ namespace Orleans.Dataflow.Definition;
 /// A port specification is catalog data, not graph data. It says what a stage family declares; whether a
 /// particular node in a particular document actually connects the port is a rule of the graph compiler.
 /// The two planes stay separate so that a document can be structurally valid without a catalog and
-/// semantically checked against one later (ADR 0001).
+/// semantically checked against one later.
 /// </para>
 /// <para>
 /// The element contract is a <see cref="ContractReference"/> rather than a CLR type, so it is
 /// language-neutral and stable across refactoring. Two ports carry compatible elements only when their
 /// contract identifiers and major versions are equal; edge type checking is that comparison and nothing
-/// more (ADR 0001).
+/// more.
 /// </para>
 /// <para>
 /// <see cref="IsOptional"/> is the port's own declaration, made once by whoever registers the stage,

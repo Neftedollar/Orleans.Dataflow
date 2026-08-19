@@ -14,8 +14,8 @@ namespace Orleans.Dataflow.Grains;
 /// </para>
 /// <para>
 /// <see cref="NotStarted"/> means two different things and says so honestly: a run grain that has not been
-/// told to start yet, and a run grain that was deactivated while running and has come back empty. Phase 1
-/// does not resume a run across a deactivation, so the second case is the loss of that attempt, and a
+/// told to start yet, and a run grain that was deactivated while running and has come back empty. An
+/// ordinary run is not resumed across a deactivation, so the second case is the loss of that attempt, and a
 /// client that saw <see cref="Running"/> and then sees <see cref="NotStarted"/> reports the loss rather
 /// than waiting forever for a run that no longer exists.
 /// </para>

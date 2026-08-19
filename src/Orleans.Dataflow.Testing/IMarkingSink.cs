@@ -5,7 +5,7 @@ namespace Orleans.Dataflow.Testing;
 /// </summary>
 /// <remarks>
 /// <para>
-/// The commit mark of ADR 0007, read from a test. It is the number a checkpoint stores for this sink, so
+/// A sink's commit mark, read from a test. It is the number a checkpoint stores for this sink, so
 /// what a test asserts here is exactly what a resume of the run would find written down — which is the whole
 /// point of exposing it rather than leaving a test to count callbacks itself.
 /// </para>

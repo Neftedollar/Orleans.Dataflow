@@ -8,25 +8,26 @@ namespace Orleans.Dataflow.Hosting;
 /// </summary>
 /// <remarks>
 /// <para>
-/// <b>This is the coordinator store's shape generalized</b>, which is ADR 0007's decision rather than a
-/// convenience: one document per <c>(graph, run)</c> pair, read with the ETag it currently carries, written
-/// only by a writer presenting that ETag, and refused loudly when the ETag has moved on. The M3 coordinator
-/// proved what that buys against a real ETag-enforcing store — a superseded activation's write fails and the
+/// <b>This is the coordinator store's shape generalized</b>, and the generalization is the contract rather
+/// than a convenience: one document per <c>(graph, run)</c> pair, read with the ETag it currently carries,
+/// written only by a writer presenting that ETag, and refused loudly when the ETag has moved on. Against a
+/// real ETag-enforcing store that buys exactly one thing — a superseded activation's write fails and the
 /// fresh one's truth survives — and a checkpoint needs exactly the same property for exactly the same
 /// reason: two attempts of one run must not be able to interleave their snapshots into a document that
 /// describes neither.
 /// </para>
 /// <para>
-/// <b>The key is a pair and the word "checkpoint" is not part of it.</b> ADR 0007 writes the coordinator's
-/// key as <c>(GraphId, RunId, "checkpoint")</c> because a grain store addresses several states of one grain
-/// by name; this interface holds checkpoints and nothing else, so the third component is the interface
+/// <b>The key is a pair and the word "checkpoint" is not part of it.</b> A grain store addresses several
+/// states of one grain by name, so a coordinator's key reads <c>(GraphId, RunId, "checkpoint")</c>;
+/// this interface holds checkpoints and nothing else, so the third component is the interface
 /// rather than an argument. An implementation over a store that needs the name supplies its own.
 /// </para>
 /// <para>
 /// <b>The value is a canonical value and never an object.</b> What is stored is the document
-/// <see cref="LocalDataflowHost"/> writes: canonical UTF-8 JSON whose members are the ADR's five parts. No
-/// CLR type name reaches a store through this interface, which is what lets one deployment's store hold
-/// another process' checkpoint (the wire discipline, unchanged).
+/// <see cref="LocalDataflowHost"/> writes: canonical UTF-8 JSON whose members are the five parts of a
+/// checkpoint — the graph fingerprint, the revision, the per-source cursors, the per-scope durable state, and
+/// the per-sink commit marks. No CLR type name reaches a store through this interface, which is what lets one
+/// deployment's store hold another process' checkpoint (the wire discipline, unchanged).
 /// </para>
 /// <para>
 /// <b>Threading.</b> An implementation must be safe to call from any thread. One run's capture loop is the

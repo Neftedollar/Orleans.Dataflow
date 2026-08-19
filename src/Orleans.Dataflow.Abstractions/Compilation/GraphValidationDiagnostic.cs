@@ -17,12 +17,12 @@ namespace Orleans.Dataflow.Compilation;
 /// </para>
 /// <para>
 /// No member ever names a CLR type. A diagnostic is about the language-neutral model, and a document
-/// written in F# has to receive the same report as the same document written in C# (ADR 0001).
+/// written in F# has to receive the same report as the same document written in C#.
 /// </para>
 /// <para>
-/// The set of rule identifiers is open. This milestone defines the eleven catalog rules the graph
-/// compiler implements, and a later provider-supplied check may report an identifier of its own, so the
-/// factory validates that a rule is present rather than that it is one of a fixed list.
+/// The set of rule identifiers is open. The graph compiler implements eleven catalog rules, and a
+/// provider-supplied check may report an identifier of its own, so the factory validates that a rule is
+/// present rather than that it is one of a fixed list.
 /// </para>
 /// </remarks>
 public sealed record class GraphValidationDiagnostic

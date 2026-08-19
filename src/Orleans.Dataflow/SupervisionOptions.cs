@@ -8,7 +8,7 @@ namespace Orleans.Dataflow;
 /// </summary>
 /// <remarks>
 /// <para>
-/// One record per concern, never one options bag (ADR 0004 section 7). Everything here is written into the
+/// One record per concern, never one options bag. Everything here is written into the
 /// document, because all of it changes what the graph observably does: a scope that resumes and one that
 /// restarts produce different streams from the same elements, and two ladders of different lengths are two
 /// different graphs.
@@ -65,8 +65,8 @@ public sealed record class SupervisionOptions
     /// <para>
     /// The waits are taken on the run's own clock and are not jittered in this version. Jitter answers a
     /// question a per-element retry inside one run does not ask — it spreads a fleet's restarts, and there
-    /// is no fleet here — and adding a random source would make the one thing this milestone has to prove,
-    /// that the waits are exactly what the document says, a statistical claim instead of an asserted one.
+    /// is no fleet here — and adding a random source would turn the one guarantee worth having, that the
+    /// waits are exactly what the document says, into a statistical claim instead of an exact one.
     /// </para>
     /// </remarks>
     public IReadOnlyList<TimeSpan> Backoff { get; init; } = [];

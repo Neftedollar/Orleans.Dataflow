@@ -26,10 +26,9 @@ namespace Orleans.Dataflow;
 /// </para>
 /// <para>
 /// Slots of a pipeline bind by fingerprint and by <see cref="Id"/>-plus-revision lineage, without the
-/// per-instance authoring nonce a nondeployable graph's slots need (ADR 0004 section 4): registered
-/// behavior is in the document, so content identity means something. Materializing a pipeline is the M3
-/// Orleans host's concern and nothing here starts anything; this checkpoint produces the document and
-/// stops.
+/// per-instance authoring nonce a nondeployable graph's slots need: registered behavior is in the
+/// document, so content identity means something. Materializing a pipeline is a host's concern and
+/// nothing here starts anything; this type produces the document and stops.
 /// </para>
 /// </remarks>
 public sealed class PipelineDefinition
@@ -85,8 +84,8 @@ public sealed class PipelineDefinition
     /// the binding and this method checks the assertion against what the document declares.
     /// </para>
     /// <para>
-    /// The returned slot carries this pipeline's <see cref="Fingerprint"/> and no authoring nonce, per
-    /// ADR 0004 section 4: registered behavior is in the document, so two pipelines that share a
+    /// The returned slot carries this pipeline's <see cref="Fingerprint"/> and no authoring nonce:
+    /// registered behavior is in the document, so two pipelines that share a
     /// fingerprint are the same pipeline and a per-instance identity would distinguish nothing. A slot of
     /// a <see cref="RunnableGraph"/> does carry one, and the two are not interchangeable — a run of a
     /// pipeline refuses a graph's slot and a run of a graph refuses a pipeline's, each naming which world

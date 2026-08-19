@@ -9,8 +9,7 @@ namespace Orleans.Dataflow.Identity;
 /// <remarks>
 /// <para>
 /// A stage reference is the only way graph data names behavior. It resolves through a trusted stage
-/// catalog registered by deployment code, never by loading a CLR type named in the document
-/// (ADR 0001, provider boundary).
+/// catalog registered by deployment code, never by loading a CLR type named in the document.
 /// </para>
 /// <para>
 /// <see cref="MajorVersion"/> is the compatibility version of the stage contract, not the package

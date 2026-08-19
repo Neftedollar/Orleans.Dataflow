@@ -1319,7 +1319,7 @@ module Source =
     /// <remarks>
     /// The slot binds to the document's fingerprint and to this built instance — two graphs of one shape
     /// share a fingerprint, so a slot also remembers which instance declared it, exactly as a C#-declared
-    /// slot does (ADR 0004 section 4). The tuple is the composable form; there is no out-parameter
+    /// slot does. The tuple is the composable form; there is no out-parameter
     /// spelling to mirror, because F# already has one.
     /// </remarks>
     let toResult

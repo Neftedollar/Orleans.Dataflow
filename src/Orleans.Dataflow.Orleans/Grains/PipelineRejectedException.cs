@@ -21,7 +21,7 @@ namespace Orleans.Dataflow.Grains;
 /// <para>
 /// The message carries the diagnostics as text. That is what survives a hop: a validation report is a
 /// model of this library's own and serializing it across the boundary would publish a wire format for
-/// diagnostics that phase 1 has no need to pin.
+/// diagnostics that nothing here needs to pin.
 /// </para>
 /// <para>
 /// <b>A refusal thrown by a grain never carries an inner exception</b>, and the rule is load-bearing

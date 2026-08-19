@@ -202,7 +202,8 @@ public interface IOrleansDataflowBuilder
     /// The bound is a silo's, not a pipeline's, and that is deliberate: how much a host is willing to put on
     /// one message is a property of the deployment and its network, and putting it in a document would make
     /// two silos with different limits accept the same graph and disagree about what it may return. That
-    /// disagreement is the same deployment-scoped honesty the binding registry has carried since phase 2.
+    /// disagreement is what the deployment scope exists to prevent, exactly as it does for the binding
+    /// registry.
     /// </para>
     /// <para>
     /// Calling this replaces whatever a previous call said rather than adding to it, because a silo has one
@@ -228,8 +229,8 @@ public interface IOrleansDataflowBuilder
     /// durable while their positions died with the process that wrote them.
     /// </para>
     /// <para>
-    /// <b>A silo without one is a silo that runs no durable pipeline</b>, which is a legal configuration
-    /// and the one every deployment before M5.3 had. Its ordinary runs are unaffected; what it refuses — at
+    /// <b>A silo without one is a silo that runs no durable pipeline</b>, which is a legal configuration and
+    /// the one a silo has until this method is called. Its ordinary runs are unaffected; what it refuses — at
     /// the declaration, by name, before anything has run — is a request for a run whose position must
     /// survive.
     /// </para>

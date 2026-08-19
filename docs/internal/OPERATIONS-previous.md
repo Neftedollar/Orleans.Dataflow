@@ -3,8 +3,8 @@
 What a deployment needs to know to run pipelines in production: what a durable
 run demands of its store, where runs are placed, what the identities mean, how
 to replace and upgrade, and how to watch all of it. Everything here restates
-contracts the design documents establish — [ORLEANS-RUNTIME.md](design/ORLEANS-RUNTIME.md)
-and [LOCAL-RUNTIME.md](design/LOCAL-RUNTIME.md) are the authorities; this page
+contracts the design documents establish — [ORLEANS-RUNTIME.md](ORLEANS-RUNTIME.md)
+and [LOCAL-RUNTIME.md](LOCAL-RUNTIME.md) are the authorities; this page
 is the operator's ordering of them.
 
 ## The trust boundary
@@ -44,7 +44,7 @@ Every silo that may host runs calls `AddOrleansDataflow` on its
 `ISiloBuilder`, and registers the same stages with the same versions on every
 silo — the coordinator refuses a document a silo cannot resolve, and a rolling
 upgrade is exactly the window where silos disagree (see
-[Rolling upgrade](#rolling-upgrade)). A client materializes through
+[Rolling upgrade](#runbook-rolling-upgrade)). A client materializes through
 `AddOrleansDataflowClient` and `OrleansDataflowHost`.
 
 A silo that may host a **durable** run additionally calls
@@ -119,7 +119,7 @@ the run for its duration** — pause, snapshot, write, release; nothing overlaps
 snapshot's `TotalCheckpointHold`. Delivery between marks is **at-least-once,
 never exactly-once**: a crash replays from the last stored capture, and the
 replay window per adapter is stated in that adapter's
-[ADAPTERS.md](ADAPTERS.md) row (a stream source's window includes the element
+[ADAPTERS.md](ADAPTERS-previous.md) row (a stream source's window includes the element
 its cursor names; the grain-call sink's mark can lag by up to `maxInFlight`
 and is exact at a bound of one). A run that completes writes no checkpoint —
 its outcome is recorded on the coordinator's register instead, which is what
@@ -127,7 +127,7 @@ keeps a finished run finished across activations.
 
 The cadence you choose is a trade against how much is replayed after a crash
 and how long the resumed run takes to start delivering again.
-[BENCHMARKS.md](BENCHMARKS.md) measures both on an in-process cluster, and
+[BENCHMARKS.md](../BENCHMARKS.md) measures both on an in-process cluster, and
 states plainly what that measurement leaves out — no network, no real store,
 and no failure detection, which makes its recovery latency a floor rather than
 an estimate.

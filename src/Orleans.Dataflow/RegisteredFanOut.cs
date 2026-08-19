@@ -28,7 +28,7 @@ namespace Orleans.Dataflow;
 /// What the junction <em>does</em> with the element — deliver it to every leg, to one leg with room, or to
 /// the leg a function names — is the provider's, stated by the runtime its factory builds and never by this
 /// handle. A document says which stage stands here and what its payload is; behavior is resolved by
-/// identity, exactly as it is for every other registered stage (ADR 0001).
+/// identity, exactly as it is for every other registered stage.
 /// </para>
 /// </remarks>
 public sealed class RegisteredFanOut<TIn, TOut>

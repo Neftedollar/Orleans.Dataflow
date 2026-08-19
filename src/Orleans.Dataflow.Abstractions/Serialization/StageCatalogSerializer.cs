@@ -7,7 +7,7 @@ namespace Orleans.Dataflow.Serialization;
 /// </summary>
 /// <remarks>
 /// <para>
-/// One catalog has exactly one byte form (ADR 0003). That is what makes <see cref="Fingerprint"/> an
+/// One catalog has exactly one byte form. That is what makes <see cref="Fingerprint"/> an
 /// identity rather than a checksum, what lets a golden fixture pin compatibility, and what will let two
 /// silos agree that they resolve stages the same way by exchanging 32 bytes instead of a catalog.
 /// </para>
@@ -18,11 +18,11 @@ namespace Orleans.Dataflow.Serialization;
 /// every collection in canonical order and every number is written in the invariant culture.
 /// </para>
 /// <para>
-/// There is deliberately no reader in this milestone. A catalog is registered by deployment code that
-/// holds the specifications already, so nothing in M0 needs to decode one; a reader arrives with
-/// cross-silo catalog negotiation (M3 and later), together with the strictness rules and the format
-/// diagnostics that make decoding worth having. Serializing without a reader is honest about that: the
-/// bytes exist to be compared and digested, not yet to be parsed back.
+/// There is deliberately no reader: this type serializes a catalog and never decodes one. A catalog is
+/// registered by deployment code that holds the specifications already, so nothing needs to decode one,
+/// and a reader belongs with cross-silo catalog negotiation, together with the strictness rules and the
+/// format diagnostics that would make decoding worth having. Serializing without a reader is honest
+/// about that: the bytes exist to be compared and digested, not yet to be parsed back.
 /// </para>
 /// <para>
 /// A parameter validator is behavior and is never serialized. Two catalogs whose specifications agree but

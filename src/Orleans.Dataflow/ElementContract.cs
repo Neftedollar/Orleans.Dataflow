@@ -13,8 +13,8 @@ namespace Orleans.Dataflow;
 /// <see cref="ElementContract{T}"/> is deployment code's assertion that, in this process, the contract
 /// named by the reference is carried by <typeparamref name="T"/>. Two processes that agree on the
 /// reference and bind different CLR types have a deployment error the definition plane cannot see; that
-/// limit is stated here rather than hidden, and the cross-silo check is the M3 catalog fingerprint plus
-/// the serializer contracts.
+/// limit is stated here rather than hidden, and what catches it across silos is the catalog fingerprint
+/// plus the serializer contracts.
 /// </para>
 /// <para>
 /// <typeparamref name="T"/> is part of the type's identity, which is exactly what makes the assertion
@@ -92,7 +92,7 @@ public readonly record struct ElementContract<T>
 /// <remarks>
 /// The factory lives on a non-generic companion class so that the contract's name and version are written
 /// beside the CLR type they are asserted of, per the same rule that puts <see cref="Source.From{T}"/> on a
-/// companion of <see cref="Source{T}"/> (ADR 0004 section 1).
+/// companion of <see cref="Source{T}"/>.
 /// </remarks>
 public static class ElementContract
 {

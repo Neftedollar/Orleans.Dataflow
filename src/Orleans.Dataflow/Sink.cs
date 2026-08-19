@@ -46,7 +46,7 @@ public sealed class Sink<T>
 /// </summary>
 /// <remarks>
 /// The factories live on a non-generic companion class so that the generic type argument is written only
-/// where it cannot be inferred, per ADR 0004 section 1. Where even that is not enough — a fold whose
+/// where it cannot be inferred. Where even that is not enough — a fold whose
 /// element type appears only as an implicit lambda parameter — the sink-factory lambda overloads of
 /// <see cref="Source{T}.To{TResult}(Func{SinkFactory{T}, SinkWithResult{T, TResult}}, string, out ResultSlot{TResult})"/>
 /// pin the element type from the source instead, and <see cref="For{T}"/> pins it by hand for a sink built
@@ -86,7 +86,7 @@ public static class Sink
     /// <remarks>
     /// Both type arguments have to be written here, because the element type appears only as a parameter of
     /// <paramref name="folder"/> and C# does not flow an outer call's element type into an implicitly typed
-    /// lambda (ADR 0004 section 3 records the <c>CS0411</c> this produces). The inference-free spelling is
+    /// lambda; omitting them produces <c>CS0411</c>. The inference-free spelling is
     /// <c>source.To(s =&gt; s.Aggregate(seed, folder), "name", out var slot)</c>, where the element type comes
     /// from the source.
     /// </remarks>

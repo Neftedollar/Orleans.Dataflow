@@ -6,7 +6,7 @@ namespace Orleans.Dataflow.Testing;
 /// <remarks>
 /// <para>
 /// The arming vocabulary lives here rather than in the shipping package because that is what the seam is:
-/// ADR 0007's failure injection is test-support surface, and a library nobody should be injecting faults with
+/// failure injection is test-support surface, and a library nobody should be injecting faults with
 /// should not publish the words for doing it. The stage itself is a shape of the local vocabulary — a
 /// document has to be able to name what it is running — exactly as the probe sink is, and this is the only
 /// spelling that reaches it.

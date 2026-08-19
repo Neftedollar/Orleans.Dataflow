@@ -16,9 +16,9 @@ namespace Orleans.Dataflow;
 /// <para>
 /// A stage that does declare a result port is not this handle and is rejected as one, the same way a
 /// <see cref="SinkWithResult{TIn, TResult}"/> is not a <see cref="Sink{TIn}"/>: a result a graph does not
-/// name is a result nothing can read, and making it easy to end up with one is the accident ADR 0004
-/// section 3 exists to prevent. Attach such a stage as a
-/// <see cref="RegisteredSinkWithResult{TIn, TResult}"/> and name its slot.
+/// name is a result nothing can read, and making it easy to end up with one is the accident the mandatory
+/// slot name exists to prevent. Attach such a stage as a <see cref="RegisteredSinkWithResult{TIn, TResult}"/>
+/// and name its slot.
 /// </para>
 /// </remarks>
 public sealed class RegisteredSink<TIn>

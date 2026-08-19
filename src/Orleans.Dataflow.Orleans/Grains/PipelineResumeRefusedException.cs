@@ -6,7 +6,7 @@ namespace Orleans.Dataflow.Grains;
 /// </summary>
 /// <remarks>
 /// <para>
-/// V1's resume rule is <b>same document, same revision</b> (ADR 0007), and this is that rule refusing. It
+/// The resume rule is <b>same document, same revision</b>, and this is that rule refusing. It
 /// is a type of its own rather than a rejected start or a lost attempt, because it means something neither
 /// of those does: the run exists, its position is on disk, and the thing that cannot continue it is the
 /// document it was handed. A caller reads that as "reconcile the document or start a new run", which is a
@@ -65,7 +65,7 @@ public sealed class PipelineResumeRefusedException : Exception
     /// <param name="declared">The fingerprint of the document offered instead.</param>
     /// <returns>The exception.</returns>
     public static PipelineResumeRefusedException Mismatched(string run, string stored, string declared) =>
-        new($"The durable run '{run}' belongs to the document {stored} and this is an attempt to continue it with {declared}. A resume continues the very graph its checkpoint describes: v1 resumes at the same fingerprint and the same revision only, and migrating a checkpoint across a changed document is a recorded deferral rather than something a silo will guess at. Reconcile the document, or run the new one under a run identity of its own.")
+        new($"The durable run '{run}' belongs to the document {stored} and this is an attempt to continue it with {declared}. A resume continues the very graph its checkpoint describes — the same fingerprint at the same revision only — because a stored position names nodes of the document it was measured in and means nothing in another. No silo will migrate a checkpoint across a changed document. Reconcile the document with the one the run belongs to, run the new one under a run identity of its own, or call ReplaceDurableRunAsync to discard the stored position and start the new document from the beginning under this name.")
         {
             StoredFingerprint = stored,
             DeclaredFingerprint = declared,

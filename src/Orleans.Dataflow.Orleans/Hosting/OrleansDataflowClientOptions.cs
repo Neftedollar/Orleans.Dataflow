@@ -6,8 +6,8 @@ namespace Orleans.Dataflow.Hosting;
 /// <remarks>
 /// <para>
 /// Completion is observed by polling, and this is the one knob that choice needs. Polling is deliberate
-/// for phase 1: an observer is best-effort by design in Orleans, so a completion delivered by one would
-/// have to be backed by a poll anyway, and a design whose fallback is its whole mechanism is simpler
+/// rather than provisional: an observer is best-effort by design in Orleans, so a completion delivered by one
+/// would have to be backed by a poll anyway, and a design whose fallback is its whole mechanism is simpler
 /// honestly stated than dressed up.
 /// </para>
 /// <para>
@@ -15,8 +15,8 @@ namespace Orleans.Dataflow.Hosting;
 /// happens, and a client watching many runs makes one call per run per interval.
 /// </para>
 /// <para>
-/// <b>A class rather than a record, unlike the operator options.</b> "One record per concern" (ADR 0004
-/// section 7) is about the options that <em>shape a graph</em>, which become a node's payload and part of
+/// <b>A class rather than a record, unlike the operator options.</b> "One record per concern" is a rule
+/// about the options that <em>shape a graph</em>, which become a node's payload and part of
 /// the fingerprint; value equality is what they mean there. This one shapes neither a graph nor a run but a
 /// client, and it is registered the way .NET registers a client's settings:
 /// <c>AddOrleansDataflowClient</c> constructs one instance, hands it to the caller's configuration

@@ -5,18 +5,18 @@ namespace Orleans.Dataflow;
 /// </summary>
 /// <remarks>
 /// <para>
-/// ADR 0007's <c>WatchTermination</c>, in the shape ADR 0002's tension asked for. A result slot resolves at
-/// the end of a run and <em>carries</em> the run's outcome — it faults when the run failed — so a slot typed
-/// "how it ended" could never resolve to "failed". A control can, because a control is a thing an author
-/// holds while the run is running: <see cref="RunHandle.WatchTermination"/> hands back a task at the start of
-/// the run and that task <b>resolves</b> with one of these when the run ends, including when the run ended
-/// badly. That is the whole of "a control can carry an outcome without becoming it".
+/// What a watch on a run resolves with, in the one shape a result slot could not take. A result slot resolves
+/// at the end of a run and <em>carries</em> the run's outcome — it faults when the run failed — so a slot
+/// typed "how it ended" could never resolve to "failed". A control can, because a control is a thing an
+/// author holds while the run is running: <see cref="RunHandle.WatchTermination"/> hands back a task at the
+/// start of the run and that task <b>resolves</b> with one of these when the run ends, including when the run
+/// ended badly. That is the whole of "a control can carry an outcome without becoming it".
 /// </para>
 /// <para>
 /// <b>Two endings and no more.</b> Completing and failing end a run; cancelling does not — it abandons one,
-/// which is why the watch's task <em>cancels</em> instead of resolving, and why M5.4's coordinator refuses a
-/// cancellation as a report of an ending. A watch that reported cancellation as a third ending would make
-/// "this run is over" true for a run a durable deployment is about to continue.
+/// which is why the watch's task <em>cancels</em> instead of resolving, and why a cluster's coordinator
+/// refuses a cancellation as a report of an ending. A watch that reported cancellation as a third ending
+/// would make "this run is over" true for a run a durable deployment is about to continue.
 /// </para>
 /// <para>
 /// <b>The failure travels as its type name and its message.</b> That is what a cluster can say — a hop

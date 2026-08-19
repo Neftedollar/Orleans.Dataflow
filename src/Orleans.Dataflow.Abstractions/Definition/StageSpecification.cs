@@ -12,7 +12,7 @@ namespace Orleans.Dataflow.Definition;
 /// <para>
 /// A specification is the catalog side of the boundary a <see cref="StageRef"/> crosses. Deployment code
 /// registers it; graph data only names it. Nothing here can be reached by editing a document, which is
-/// what keeps graph data from causing code loading (ADR 0001).
+/// what keeps graph data from causing code loading.
 /// </para>
 /// <para>
 /// A specification is canonical by construction. <see cref="Create(StageRef, IEnumerable{InputPortSpecification}, IEnumerable{OutputPortSpecification}, IEnumerable{ResultPortSpecification}, ContractReference, IEnumerable{CapabilityToken})"/>

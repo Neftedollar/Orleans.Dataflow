@@ -9,13 +9,13 @@ namespace Orleans.Dataflow.Identity;
 /// <para>
 /// A contract reference is how graph data names a payload shape: a <see cref="ContractId"/> plus the
 /// compatibility major version of that contract. Contract identity is never a CLR type name, because a
-/// type name is neither language-neutral nor stable across refactoring (ADR 0001).
+/// type name is neither language-neutral nor stable across refactoring.
 /// </para>
 /// <para>
 /// Two references are compatible only when both the <see cref="Contract"/> and the
 /// <see cref="MajorVersion"/> are equal. Finer-grained compatibility, such as accepting an additive
-/// minor version, is deliberately absent from the M0 model: an exact match is the only rule, so
-/// compatibility can be relaxed later without invalidating documents already written.
+/// minor version, is deliberately absent: an exact match is the only rule, so compatibility can be
+/// relaxed later without invalidating documents already written.
 /// </para>
 /// <para>
 /// The default value carries no reference: <see cref="IsDefault"/> reports it, the component properties

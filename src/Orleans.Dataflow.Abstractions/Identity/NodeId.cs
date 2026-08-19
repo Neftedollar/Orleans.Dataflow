@@ -17,7 +17,7 @@ namespace Orleans.Dataflow.Identity;
 /// and importing it requires a stable scope segment; <see cref="InScope(string)"/> rebases every
 /// internal identifier below that scope. Because rebasing is pure prefixing, importing the same
 /// fragment under two different scopes deterministically yields two disjoint sets of node identifiers,
-/// and nested imports compose by nesting prefixes (ADR 0001, identity).
+/// and nested imports compose by nesting prefixes.
 /// </para>
 /// <para>
 /// The default value carries no path: <see cref="IsDefault"/> reports it, <see cref="Value"/>,
@@ -275,10 +275,10 @@ public readonly record struct NodeId : IComparable<NodeId>, IComparable
     /// <remarks>
     /// <para>
     /// The comparison is over the full <see cref="Separator"/>-joined path text, not segment by segment,
-    /// which is the order ADR 0003 fixes for a document's nodes: <c>a</c> sorts before <c>a-b</c>, and
-    /// <c>a-b</c> before <c>a/b</c>, because <c>-</c> precedes <c>/</c> in code-point order. A canonical
-    /// order only has to be total, deterministic, and documented, and comparing whole paths is the
-    /// cheapest rule that is all three.
+    /// which is the order the canonical byte form fixes for a document's nodes: <c>a</c> sorts before
+    /// <c>a-b</c>, and <c>a-b</c> before <c>a/b</c>, because <c>-</c> precedes <c>/</c> in code-point
+    /// order. A canonical order only has to be total, deterministic, and documented, and comparing whole
+    /// paths is the cheapest rule that is all three.
     /// </para>
     /// <para>
     /// The default value carries no path and sorts before every created one, so the order is total over

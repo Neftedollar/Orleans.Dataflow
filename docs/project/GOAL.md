@@ -22,7 +22,7 @@ The durable vocabulary is:
 - `ResultSlot<T>`: a typed declaration of one materialized result or runtime control (completion, fold result, first/last element, ingress control, queue control, hub endpoint, monitor, metrics snapshot, shutdown control);
 - `RunHandle`: the control and observation surface of one materialized run; it resolves `ResultSlot<T>` declarations into runtime values.
 
-Stream shapes carry element types only. Materialized results do not thread through authoring types as an extra generic parameter; they are named typed slots resolved from the run handle ([ADR 0002](architecture/0002-result-slots.md)). A run accepts only slots of the graph identity, revision, and import scope from which it was materialized.
+Stream shapes carry element types only. Materialized results do not thread through authoring types as an extra generic parameter; they are named typed slots resolved from the run handle ([ADR 0002](../architecture/0002-result-slots.md)). A run accepts only slots of the graph identity, revision, and import scope from which it was materialized.
 
 Names remain design candidates until the public API baseline is approved. The semantic separation is not optional.
 

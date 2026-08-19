@@ -369,11 +369,10 @@ public static class StreamElementBinding
 /// <typeparam name="TOut">The element type the call produces.</typeparam>
 /// <remarks>
 /// <para>
-/// A document names a call and never a CLR member, which is ADR 0001's rule applied to grain calls: graph
-/// data must not be able to cause code loading, so the deployment registers the callable thing under a name
-/// and a document may only address a name a silo already published. What travels is
-/// <c>{"call":"price-order", ...}</c>, and a document naming a call this silo does not register is refused
-/// before a run exists.
+/// A document names a call and never a CLR member: graph data must not be able to cause code loading, so the
+/// deployment registers the callable thing under a name and a document may only address a name a silo already
+/// published. What travels is <c>{"call":"price-order", ...}</c>, and a document naming a call this silo does
+/// not register is refused before a run exists.
 /// </para>
 /// <para>
 /// The two element contracts are part of the declaration and not decoration. They are written into the

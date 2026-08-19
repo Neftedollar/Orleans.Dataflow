@@ -23,12 +23,12 @@ namespace Orleans.Dataflow.Authoring;
 /// </para>
 /// <para>
 /// A fragment carries no result slots. A <see cref="ResultSlotId"/> is a single segment and cannot be
-/// path-rebased the way a <see cref="NodeId"/> can, and ADR 0002 binds a slot to an occurrence in a graph
+/// path-rebased the way a <see cref="NodeId"/> can, and a slot binds to an occurrence in a graph
 /// rather than to a reusable value; slots are therefore declared only when a fragment is closed, against
 /// the producer's (possibly scoped) address.
 /// </para>
 /// <para>
-/// <see cref="Nodes"/> and <see cref="Edges"/> are stored in the canonical order ADR 0003 fixes, so two
+/// <see cref="Nodes"/> and <see cref="Edges"/> are stored in the canonical order a document fixes, so two
 /// fragments built from the same elements in different orders are indistinguishable afterwards.
 /// <see cref="OpenInputs"/> and <see cref="OpenOutputs"/> keep the caller's order instead, because they
 /// are positional API surface: composition names a boundary port by position or by address, so sorting

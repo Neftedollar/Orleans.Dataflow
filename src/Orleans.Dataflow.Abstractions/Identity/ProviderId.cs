@@ -6,7 +6,7 @@ namespace Orleans.Dataflow.Identity;
 /// <remarks>
 /// <para>
 /// A provider owns a namespace of stage identifiers and is registered by deployment code, so that
-/// graph data can name trusted behavior without naming a CLR type (ADR 0001, provider boundary).
+/// graph data can name trusted behavior without naming a CLR type.
 /// </para>
 /// <para>
 /// The value is a single identifier segment: <c>[a-z0-9]+(-[a-z0-9]+)*</c>, 1 to 64 characters of

@@ -8,7 +8,7 @@ open Orleans.Dataflow.Identity
 /// <remarks>
 /// The F# spelling of the same algebra state the C# <c>Source&lt;T&gt;</c> carries — a partial graph shape —
 /// and deliberately not a wrapper over that type: the fluent facade is one language's spelling, and this
-/// package binds to the shape itself (F-SHARP-API.md, binding rule). The type parameter is the element
+/// package binds to the shape itself rather than to the facade's spelling of it. The type parameter is the element
 /// type of the one open output, tracked by the compiler and never by the shape: composing through a typed
 /// flow is what moves it, exactly as it moves through the C# facade.
 /// </remarks>
@@ -85,7 +85,7 @@ type Branch<'In>
 /// A <see cref="T:Orleans.Dataflow.FSharp.Source`1"/> is one stream, a <see cref="T:Orleans.Dataflow.FSharp.Branch`1"/>
 /// is one leg ending in a terminal, and a junction call takes a graph from one shape to another without ever
 /// leaving two ends dangling. Re-convergence — the same elements going two ways and meeting again — is not a
-/// tree, so it gets a carrier rather than a builder (ADR 0006).
+/// tree, so it gets a carrier rather than a builder.
 /// </para>
 /// <para>
 /// The rejoin is total and positional, and it is legal without a buffer between the halves precisely because

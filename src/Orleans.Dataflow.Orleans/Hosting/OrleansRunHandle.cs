@@ -21,12 +21,13 @@ namespace Orleans.Dataflow.Hosting;
 /// identities and two epochs, both alive at once, and each handle answers only for its own.
 /// </para>
 /// <para>
-/// <b>There is no pause on this handle, and that is a recorded decision rather than a hole.</b> The engine
+/// <b>There is no pause on this handle, and that is deliberate rather than an oversight.</b> The engine
 /// a grain hosts pauses — checkpoint capture uses that very machinery — so the gap is not network-imposed;
 /// what is missing is the design a remote pause owes: an epoch-fenced pause/resume protocol, a decided
 /// answer to what a pause means across an activation death (is a resumed durable run born paused?), and a
-/// poll-honest <c>IsPaused</c> reading. Deferring it whole was chosen over shipping a lossy version, and
-/// ORLEANS-RUNTIME.md records the deferral.
+/// poll-honest <c>IsPaused</c> reading. Leaving it out whole was chosen over shipping a version wrong in
+/// any of those three ways, so a run in a cluster is ended with <see cref="ShutdownAsync"/> and never
+/// held.
 /// </para>
 /// <para>
 /// <b>Threading.</b> Every member is safe to call from any thread at any point in the run's life.
@@ -352,7 +353,7 @@ public sealed class OrleansRunHandle : IAsyncDisposable
             RunPhase.Canceled => throw new OperationCanceledException(
                 $"The run '{RunId}' was cancelled, so the result '{slot.Id}' resolves to nothing. Cancellation abandons a run; a graceful shutdown is what resolves a result from the state a run had accumulated."),
             RunPhase.NotStarted => throw new PipelineRunLostException(
-                $"The run '{RunId}' is no longer active in the cluster, so the result '{slot.Id}' can no longer be read. The activation hosting it was recycled, and phase 1 does not resume a run across a deactivation."),
+                $"The run '{RunId}' is no longer active in the cluster, so the result '{slot.Id}' can no longer be read. The activation hosting it was recycled, and an ordinary run is not continued across a deactivation. Declare the run durable if its work has to survive one; a result itself is never persisted, so a value that has to outlive the run must be committed by a sink."),
             _ => throw new InvalidOperationException(
                 $"The run '{RunId}' reported the phase '{envelope.Phase}' with no value for the result '{slot.Id}'. A completed run settles every result it declares before it reports completion, so this is a runtime invariant that has moved rather than a state a caller can reach."),
         };
@@ -652,7 +653,7 @@ public sealed class OrleansRunHandle : IAsyncDisposable
                         $"The run '{RunId}' was cancelled.");
                 case RunPhase.NotStarted:
                     throw new PipelineRunLostException(
-                        $"The run '{RunId}' is no longer active in the cluster. The activation hosting it was recycled while it was executing, and phase 1 does not resume a run across a deactivation, so this attempt is lost rather than delayed.");
+                        $"The run '{RunId}' is no longer active in the cluster. The activation hosting it was recycled while it was executing, and an ordinary run is not continued across a deactivation, so this attempt is lost rather than delayed. Start the work again, or declare the run durable so that a later activation continues it from its checkpoint.");
                 default:
                     _ = await timer.WaitForNextTickAsync().ConfigureAwait(false);
                     break;

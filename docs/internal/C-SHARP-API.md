@@ -937,7 +937,7 @@ host's whole vocabulary, and the only fingerprints a resume compares are the
 checkpoint's and the document's.
 
 **What a resume replays is the adapter's own answer**, per adapter, in
-[ADAPTERS.md](../ADAPTERS.md). An Orleans stream source stores the sequence token
+[ADAPTERS.md](ADAPTERS-previous.md). An Orleans stream source stores the sequence token
 of the element the run delivered and reopens the subscription there, so a durable
 run over a rewindable provider replays from its position instead of from now;
 every other Orleans source declares no cursor and resumes from now, which is

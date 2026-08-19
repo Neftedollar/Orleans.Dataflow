@@ -7,7 +7,7 @@ namespace Orleans.Dataflow.Serialization;
 /// </summary>
 /// <remarks>
 /// <para>
-/// One document has exactly one byte form and one byte form decodes to exactly one document (ADR 0003).
+/// One document has exactly one byte form and one byte form decodes to exactly one document.
 /// That is what makes <see cref="Fingerprint"/> an identity rather than a checksum, what makes golden
 /// fixtures able to pin compatibility, and what lets two silos compare documents by digest without
 /// exchanging them.

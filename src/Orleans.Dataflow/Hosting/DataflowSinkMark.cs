@@ -8,7 +8,7 @@ namespace Orleans.Dataflow.Hosting;
 /// </summary>
 /// <remarks>
 /// <para>
-/// ADR 0007's commit mark, on the provider side of the runtime-factory seam and rhymed with
+/// The checkpoint model's commit mark, on the provider side of the runtime-factory seam and rhymed with
 /// <see cref="DataflowSourceCursor"/> on purpose: a sink <em>declares</em> a mark by being built through
 /// <see cref="DataflowStageRuntime.Terminal(Func{object?}, Func{object?, object?, object?}, Func{object?, object?}?, bool, DataflowSinkMark)"/>;
 /// every other registered sink contributes nothing to a checkpoint and says nothing about what it committed,

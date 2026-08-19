@@ -9,7 +9,7 @@ namespace Orleans.Dataflow;
 /// </summary>
 /// <remarks>
 /// <para>
-/// One record per concern, never one options bag (ADR 0004 section 7): a rate is not a buffer and not a
+/// One record per concern, never one options bag: a rate is not a buffer and not a
 /// concurrency bound, and a type that carried all three would let an author set one while meaning another.
 /// </para>
 /// <para>

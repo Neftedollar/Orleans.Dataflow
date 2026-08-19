@@ -14,7 +14,7 @@ namespace Orleans.Dataflow;
 /// else in this surface has one: a <see cref="Source{T}"/> is one stream, a <see cref="Branch{TIn}"/> is one
 /// leg that ends in a sink, and a junction call takes a graph from one shape to another without ever leaving
 /// two ends dangling. Re-convergence — the same elements going two ways and meeting again — cannot be
-/// written as a tree, so ADR 0006 gives it a carrier instead of a builder.
+/// written as a tree, so it gets a carrier instead of a builder.
 /// </para>
 /// <para>
 /// The rejoin is positional and total: <see cref="Zip()"/> pairs the two derived streams element by element,

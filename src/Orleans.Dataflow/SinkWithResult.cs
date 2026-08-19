@@ -12,7 +12,7 @@ namespace Orleans.Dataflow;
 /// <remarks>
 /// <para>
 /// The carrier is what keeps the result type out of <see cref="RunnableGraph"/> and out of every stream
-/// shape, per ADR 0004 section 3. The result type travels on the sink, is picked up by <c>To</c>, and ends
+/// shape. The result type travels on the sink, is picked up by <c>To</c>, and ends
 /// on the <see cref="ResultSlot{TResult}"/> that closing the graph produces.
 /// </para>
 /// <para>

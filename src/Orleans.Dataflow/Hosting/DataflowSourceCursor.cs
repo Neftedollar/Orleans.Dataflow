@@ -8,8 +8,9 @@ namespace Orleans.Dataflow.Hosting;
 /// </summary>
 /// <remarks>
 /// <para>
-/// ADR 0007's cursor, on the provider side of the runtime-factory seam. A source <em>declares</em> a cursor
-/// by being built through <see cref="DataflowStageRuntime.Source(Func{DataflowRunTokens, IAsyncEnumerable{object?}}, DataflowSourceCursor)"/>;
+/// The checkpoint model's cursor, on the provider side of the runtime-factory seam. A source
+/// <em>declares</em> a cursor by being built through
+/// <see cref="DataflowStageRuntime.Source(Func{DataflowRunTokens, IAsyncEnumerable{object?}}, DataflowSourceCursor)"/>;
 /// every other registered source contributes nothing to a checkpoint and <b>resumes from now</b>, which is
 /// stated per adapter in the adapter table rather than generalized here. The local vocabulary's own index
 /// cursor is the same three moving parts seen from the other side of the seam, which is why this type has

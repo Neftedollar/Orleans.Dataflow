@@ -12,9 +12,9 @@ open System.Threading.Tasks
 /// <c>run.WatchTermination</c>, <c>run.Snapshot()</c>, <c>run.PauseAsync ct</c>, <c>run.ResumeAsync()</c>,
 /// <c>run.ShutdownAsync()</c>, and <c>run.DisposeAsync()</c> are members with no receiver-threading to smooth
 /// over and no <c>out</c> parameter, and a module function per member would be a second name in a completion
-/// list for the identical call. So this module is deliberately one function, and that function is the one
-/// F-SHARP-API.md sketched as a pipeline: resolving a slot is what an author does <em>to</em> a run, in the
-/// middle of composing something else, and it is the only member whose argument order is worth reversing.
+/// list for the identical call. So this module is deliberately one function, and it is the one worth
+/// spelling as a pipeline: resolving a slot is what an author does <em>to</em> a run, in the middle of
+/// composing something else, and it is the only member whose argument order is worth reversing.
 /// </para>
 /// <para>
 /// The token is a required argument rather than an omitted optional one. Every other asynchronous surface in

@@ -9,7 +9,7 @@ namespace Orleans.Dataflow;
 /// </summary>
 /// <remarks>
 /// <para>
-/// <b>Checkpoint timing is declared and never implicit</b> (ADR 0007). A run takes a checkpoint on an
+/// <b>Checkpoint timing is declared and never implicit.</b> A run takes a checkpoint on an
 /// interval, after a number of elements, or on both; a run that declares neither never writes to the store
 /// at all, which is the honest reading of "durable options with no timing in them" and is asserted rather
 /// than assumed. There is no default interval, because a default would make every durable run pay for a
@@ -22,8 +22,8 @@ namespace Orleans.Dataflow;
 /// what makes <see cref="LocalDataflowHost.MaterializeFromCheckpointAsync"/> able to find anything.
 /// </para>
 /// <para>
-/// <b>A class rather than a record, unlike the operator options.</b> "One record per concern" (ADR 0004
-/// section 7) is about the options that <em>shape a graph</em> — a buffer's, a throttle's, a scope's — and
+/// <b>A class rather than a record, unlike the operator options.</b> "One record per concern" is a rule
+/// about the options that <em>shape a graph</em> — a buffer's, a throttle's, a scope's — and
 /// those become a node's payload and part of the fingerprint, so value equality is exactly what they mean
 /// and <c>with</c> is how an author varies one. These options shape a <em>run</em>: nothing compares them,
 /// nothing fingerprints them, and <see cref="Store"/> is a live service the caller owns, so the equality and

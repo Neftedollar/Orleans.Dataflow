@@ -52,7 +52,7 @@ module internal Bindings =
     /// <para>
     /// The run's token starts the computation rather than being ignored beside it, so
     /// <c>Async.CancellationToken</c> inside the author's workflow is the run's token and a cancelled run
-    /// actually reaches the work. That is the requirement F-SHARP-API.md states as "cancellation must reach
+    /// actually reaches the work. That is the requirement this frontend holds itself to: cancellation must reach
     /// the returned computation", and it is a requirement precisely because the obvious spelling —
     /// starting the computation and passing the token nowhere — compiles and silently fails it.
     /// </para>

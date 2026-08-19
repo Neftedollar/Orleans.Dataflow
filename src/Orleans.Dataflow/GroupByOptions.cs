@@ -8,7 +8,7 @@ namespace Orleans.Dataflow;
 /// </summary>
 /// <remarks>
 /// <para>
-/// One record per concern, never one options bag (ADR 0004 section 7). Grouping by key is the operator whose
+/// One record per concern, never one options bag. Grouping by key is the operator whose
 /// memory grows with the <em>data</em> in the sharpest way this vocabulary has — one running substream per
 /// distinct key rather than one entry per distinct key — so it gets a bound of its own rather than a share
 /// of somebody else's.

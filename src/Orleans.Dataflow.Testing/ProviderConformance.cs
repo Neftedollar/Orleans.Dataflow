@@ -51,8 +51,8 @@ namespace Orleans.Dataflow.Testing;
 /// <b>What it does not check.</b> Semantics. Whether a source really ends its sequence on a stop token,
 /// whether a terminal's fold is associative, whether an adapter's acknowledgement boundary is where its
 /// documentation says it is — none of that is derivable from a catalog and a factory, and a kit that
-/// pretended otherwise would be worse than one that says so. Those are the provider's own tests, and
-/// ADAPTERS.md is where their answers are written down.
+/// pretended otherwise would be worse than one that says so. Those are the provider's own tests, and the
+/// answers belong in the delivery table the provider publishes beside its adapters.
 /// </para>
 /// </remarks>
 public sealed class ProviderConformance

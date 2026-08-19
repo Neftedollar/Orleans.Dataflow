@@ -1,7 +1,7 @@
 # Benchmarks
 
 What Orleans.Dataflow costs to run, and what it holds while running. This page
-is the evidence behind [GOAL.md](GOAL.md)'s seventh definition-of-done point —
+is the evidence behind [GOAL.md](project/GOAL.md)'s seventh definition-of-done point —
 *runtime resources are bounded by default and measured under representative
 load* — together with the recovery half of the same claim: how long a durable
 run takes to start delivering again after the silo hosting it stops existing.

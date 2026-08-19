@@ -16,8 +16,7 @@ open Orleans.Dataflow.Authoring
 /// writes are stored typed — the runtime's own delegate adapter is the single owner of how a typed lambda
 /// meets a boxed element — so this module converts an F# function to its <see cref="T:System.Func`2"/>
 /// shape and nothing more, exactly as the C# facade stores what it receives. One named function per
-/// operation, never an overload family: overloads are what degrade F# diagnostics to a candidate dump
-/// (F-SHARP-API.md).
+/// operation, never an overload family: overloads are what degrade F# diagnostics to a candidate dump.
 /// </para>
 /// <para>
 /// Where the C# facade overloads one name, this module spells the difference: the effect is in the name
@@ -792,9 +791,9 @@ module Flow =
     /// </para>
     /// <para>
     /// The name is required, because a registered occurrence exists to be addressed across an edit, a
-    /// checkpoint, and an upgrade (ADR 0004 section 6). The payload is the raw canonical value the stage's
-    /// parameter contract describes, and it is checked against that contract by the graph compiler rather
-    /// than here, exactly as it is for the C# spelling.
+    /// checkpoint, and an upgrade, and a positional identifier anchors none of those. The payload is the raw
+    /// canonical value the stage's parameter contract describes, and it is checked against that contract by
+    /// the graph compiler rather than here, exactly as it is for the C# spelling.
     /// </para>
     /// </remarks>
     let andThenRegistered

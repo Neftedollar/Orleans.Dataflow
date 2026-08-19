@@ -27,7 +27,7 @@ using System.Runtime.CompilerServices;
 // The F# frontend is an equal authoring frontend over this package's algebra — the shape, the descriptor
 // vocabulary, the graph builder, and the slot factory — and never over the C# fluent facade, whose
 // spellings are one language's and would import every C#-ism into a package that exists to not have them
-// (F-SHARP-API.md, binding rule). The seam is friend access rather than a public surface because what the
+// rather than to the facade's spelling of it. The seam is friend access rather than a public surface because what the
 // F# modules consume is the very state the fluent methods consume: publishing it would fix the algebra's
 // shape as API by accident, and the two frontends ship from one repository in lockstep. Drift between the
 // frontends is impossible by construction, not by discipline: both call the one descriptor vocabulary and

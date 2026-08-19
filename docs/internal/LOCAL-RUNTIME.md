@@ -1,7 +1,7 @@
 # Local runtime semantics
 
 - Status: the semantics record of the local runtime, written milestone by milestone from M2 to M5.5 and current as of M5.5
-- Depends on: [ADR 0004](../architecture/0004-csharp-api-baseline.md) §4-§5, [ADR 0005](../architecture/0005-junction-semantics.md), [ADR 0007](../architecture/0007-supervision-and-checkpoints.md), [ROADMAP](../ROADMAP.md)
+- Depends on: [ADR 0004](../architecture/0004-csharp-api-baseline.md) §4-§5, [ADR 0005](../architecture/0005-junction-semantics.md), [ADR 0007](../architecture/0007-supervision-and-checkpoints.md), [ROADMAP](../project/ROADMAP.md)
 
 The local runtime is the semantic reference implementation: the fast harness
 that later runtimes (Orleans, M3) must agree with observably. It executes
@@ -2607,7 +2607,7 @@ fails the resume by name. A source over a list has every business declaring this
 cursor; one over an iterator that reads a socket has none.
 
 **Every other local source declares nothing and resumes from now.** The
-per-source table is in [ADAPTERS.md](../ADAPTERS.md) rather than generalized
+per-source table is in [ADAPTERS.md](ADAPTERS-previous.md) rather than generalized
 here.
 
 ### The durable-state seam: a scope, and it is not a supervision form

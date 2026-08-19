@@ -7,7 +7,7 @@ namespace Orleans.Dataflow.Definition;
 /// </summary>
 /// <remarks>
 /// <para>
-/// Result slots are how a materialized run hands values back (ADR 0002). The definition plane declares
+/// Result slots are how a materialized run hands values back. The definition plane declares
 /// the slot: its name, the contract of the value it yields, and the result port that produces it. A run
 /// handle resolves the declared slot to an actual value, and only for the graph identity, revision, and
 /// import scope the run was materialized from.

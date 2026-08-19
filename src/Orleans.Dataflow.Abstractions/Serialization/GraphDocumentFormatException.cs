@@ -5,7 +5,7 @@ namespace Orleans.Dataflow.Serialization;
 /// </summary>
 /// <remarks>
 /// <para>
-/// A graph document has exactly one canonical byte form (ADR 0003), so a reader accepts exactly the bytes
+/// A graph document has exactly one canonical byte form, so a reader accepts exactly the bytes
 /// the writer produces and rejects everything else. This exception is that rejection, and it is the only
 /// one <see cref="GraphDocumentSerializer.Deserialize"/> raises for input it will not accept: a malformed
 /// or non-canonical document never surfaces as a raw parser error, and it is never repaired on a

@@ -8,14 +8,14 @@ namespace Orleans.Dataflow.Definition;
 /// </summary>
 /// <remarks>
 /// <para>
-/// A result port is where a materialized run hands a value back (ADR 0002). It is not an element stream,
+/// A result port is where a materialized run hands a value back. It is not an element stream,
 /// which is why it carries no optionality or ignorability flag: a result port needs no edge at all, and a
 /// graph reads it by declaring a result slot whose producer is this port. Nothing in the definition plane
 /// forces a result to be consumed.
 /// </para>
 /// <para>
 /// The result contract is a <see cref="ContractReference"/> rather than a CLR type, so a run handle can
-/// resolve a slot across a process boundary where object identity cannot survive (ADR 0001, ADR 0002).
+/// resolve a slot across a process boundary where object identity cannot survive.
 /// </para>
 /// <para>
 /// The default value declares no port: <see cref="IsDefault"/> reports it, the component properties throw

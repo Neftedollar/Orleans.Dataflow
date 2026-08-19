@@ -15,9 +15,9 @@ namespace Orleans.Dataflow.Compilation;
 /// need a catalog, which are the ones about what the referenced stages actually declare.
 /// </para>
 /// <para>
-/// M0 scope is validation only. Producing a runnable plan is the local runtime's job, and it arrives
-/// with the milestone that can execute one; a compiler that emitted an artifact nothing could run would
-/// be a contract nobody tested.
+/// Its scope is validation only: it reports, and it produces no runnable artifact. Turning a valid
+/// document into something executable belongs to the runtime that has to execute it, because only a
+/// runtime can say whether the plan it would need can actually be run.
 /// </para>
 /// <para>
 /// <see cref="Validate"/> never throws for a semantic problem. An unresolvable stage, a contract
@@ -131,9 +131,9 @@ namespace Orleans.Dataflow.Compilation;
 /// where bytes of an unknown version actually arrive.
 /// </para>
 /// <para>
-/// Execution policy contracts are not validated against specifications in M0, because a specification
-/// does not yet declare which policy contracts a stage accepts. This is recorded in the design document
-/// rather than silently skipped.
+/// Execution policy contracts are not validated against specifications, because a specification does
+/// not declare which policy contracts a stage accepts. The gap is stated here rather than left to be
+/// discovered: a policy payload that no stage would accept still compiles without a diagnostic.
 /// </para>
 /// </remarks>
 public static class GraphCompiler

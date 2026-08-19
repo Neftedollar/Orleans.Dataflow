@@ -8,8 +8,8 @@ namespace Orleans.Dataflow.Grains;
 /// One activation per run, addressed by the composed key <c>graphId/runId</c>. The whole run executes
 /// inside this activation — the proven local engine, hosted whole — which is what preserves every
 /// semantic the engine was tested for: terminal discipline, drain versus abandon, boundaries, and the
-/// order elements travel in. Distribution of a run across grains is the concern of a later phase, and
-/// only where a stage's own semantics demand it.
+/// order elements travel in. A run is not spread across grains; the one stage that may distribute below
+/// its run says so in its own documentation, and nothing else does.
 /// </para>
 /// <para>
 /// The grain is non-reentrant, and nothing here needs it to be otherwise. The engine runs on its own
@@ -33,7 +33,8 @@ namespace Orleans.Dataflow.Grains;
 /// The same sentence has a consequence worth stating on its own: <b>a completed run's results live only as
 /// long as its activation.</b> Nothing writes them anywhere, so a result not read before the activation is
 /// recycled is gone, and the grain answers a later read with <see cref="PipelineRunLostException"/> rather
-/// than with a value it no longer has. Durable results are a later milestone's checkpoint work.
+/// than with a value it no longer has. Nothing makes a result durable: a value that has to outlive the
+/// run has to be written somewhere by the graph itself, through a sink that commits it.
 /// </para>
 /// </remarks>
 public interface IPipelineRunGrain : IGrainWithStringKey

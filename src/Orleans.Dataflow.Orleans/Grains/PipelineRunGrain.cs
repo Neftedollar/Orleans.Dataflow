@@ -603,7 +603,7 @@ internal sealed class PipelineRunGrain(DataflowSiloRegistry registry, Serializer
                     new PipelineResumeRefusedException(
                         string.Create(
                             CultureInfo.InvariantCulture,
-                            $"The checkpoint stored for the run '{_identity}' was taken at revision {checkpoint.Revision} and the document this cluster holds for it is revision {document.Revision}. A resume continues the same revision; cross-revision migration is a recorded deferral rather than a silent best effort. Replace the run to start the new revision from the beginning, or run it under a run identity of its own."))
+                            $"The checkpoint stored for the run '{_identity}' was taken at revision {checkpoint.Revision} and the document this cluster holds for it is revision {document.Revision}. A resume continues the revision its checkpoint was taken at. No silo will carry a stored position forward into a changed revision, and none will silently start over in its place. Call ReplaceDurableRunAsync to discard the stored position and start revision {document.Revision} from the beginning under this name, or run the new revision under a run identity of its own."))
                     {
                         StoredFingerprint = checkpoint.Graph.ToString(),
                         DeclaredFingerprint = fingerprint.ToString(),
@@ -972,7 +972,7 @@ internal sealed class PipelineRunGrain(DataflowSiloRegistry registry, Serializer
                 ? new PipelineRunLostException(
                     $"The durable run '{this.GetPrimaryKeyString()}' ended in the phase '{ended.Phase}' and its declaration records that, so nothing is executing here to answer for it. A run's results live only as long as the activation that produced them; what survives a finished durable run is how it ended and the checkpoint it stopped at.")
                 : new PipelineRunLostException(
-                    $"No run is active in the grain '{this.GetPrimaryKeyString()}'. Either it was never started, or the activation hosting it was recycled while it was running; phase 1 does not resume a run across a deactivation, and a run's results live only as long as its activation.");
+                    $"No run is active in the grain '{this.GetPrimaryKeyString()}'. Either it was never started, or the activation hosting it was recycled while it was running; an ordinary run is not continued across a deactivation, and a run's results live only as long as its activation. Start the work again, or declare the run durable so that a later activation continues it from its checkpoint.");
         }
 
         Fence(epoch);

@@ -1091,7 +1091,7 @@ internal sealed class OrleansStageFactory(
 /// element, so the state is where a token for a sink's own work has to live. The overload this stage is
 /// built with hands that factory the run's <c>DataflowRunTokens</c>, the window closes over the run token,
 /// and cancelling the run therefore reaches a call already in flight here — which is what makes
-/// <c>GOAL.md</c>'s claim about in-flight asynchronous work true of every grain-call path rather than of
+/// the library's promise that cancellation reaches in-flight asynchronous work true of every grain-call path rather than of
 /// three of the four.
 /// </para>
 /// <para>

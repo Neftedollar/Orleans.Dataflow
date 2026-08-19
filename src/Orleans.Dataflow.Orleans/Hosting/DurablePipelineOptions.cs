@@ -10,17 +10,17 @@ namespace Orleans.Dataflow.Hosting;
 /// checkpoint lives is a property of the deployment and not of a call.
 /// </para>
 /// <para>
-/// <b>The run identity is the author's, and that is this milestone's one change to what a run means.</b>
-/// <see cref="OrleansDataflowHost.MaterializeAsync"/> names each run with a fresh identifier, because two
-/// runs of one pipeline are two runs; a durable run is named here, because a resume is <em>the same run
-/// continuing</em> and continuing needs a stable address. The consequence is worth stating plainly rather
-/// than discovering: materializing one durable pipeline twice under one <see cref="RunId"/> addresses one
-/// run — the second call hands back a handle to the run that already exists, or continues it from its
+/// <b>The run identity is the author's, and that is the one thing a durable run changes about what a run
+/// means.</b> <see cref="OrleansDataflowHost.MaterializeAsync"/> names each run with a fresh identifier,
+/// because two runs of one pipeline are two runs; a durable run is named here, because a resume is <em>the
+/// same run continuing</em> and continuing needs a stable address. The consequence is worth stating plainly
+/// rather than discovering: materializing one durable pipeline twice under one <see cref="RunId"/> addresses
+/// one run — the second call hands back a handle to the run that already exists, or continues it from its
 /// checkpoint if the silo that was hosting it has died. Two independent durable runs are two names.
 /// </para>
 /// <para>
-/// <b>A class rather than a record, unlike the operator options.</b> "One record per concern" (ADR 0004
-/// section 7) is about the options that <em>shape a graph</em>, which become a node's payload and part of
+/// <b>A class rather than a record, unlike the operator options.</b> "One record per concern" is a rule
+/// about the options that <em>shape a graph</em>, which become a node's payload and part of
 /// the fingerprint; value equality is what they mean, and <c>with</c> is how an author varies one. These
 /// options shape a <em>run</em> and reach no document, so nothing compares them and nothing fingerprints
 /// them. What settles it is the copy-and-change a record invites: the member most tempting to vary is
@@ -29,7 +29,7 @@ namespace Orleans.Dataflow.Hosting;
 /// <c>DurableRunOptions</c> is a class for the same reason and one more of its own.
 /// </para>
 /// <para>
-/// <b>The timing is declared and never implicit</b> (ADR 0007). A run checkpoints on an interval, after a
+/// <b>The timing is declared and never implicit.</b> A run checkpoints on an interval, after a
 /// number of elements, or on both; declaring neither is legal and means the run never writes to the store,
 /// which is the honest reading of the words rather than a mistake this type guesses at. There is no default
 /// interval, because a default would make every durable run pay a cadence nobody chose — and a shorter

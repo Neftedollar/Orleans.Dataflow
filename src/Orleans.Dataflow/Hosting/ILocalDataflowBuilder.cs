@@ -14,8 +14,8 @@ namespace Orleans.Dataflow.Hosting;
 /// The mirror of <c>IOrleansDataflowBuilder</c>, member for member where the two hosts have the same
 /// question to answer. A catalog says which stages exist and what a document may say about them, which is
 /// all a validator needs; a factory says what a stage does, which only a host that will run the graph
-/// needs. Registering them separately is ADR 0001's boundary, and it is the same boundary on a silo and in
-/// a console application.
+/// needs. Registering them separately is what keeps validation possible where execution is not, and it is
+/// the same boundary on a silo and in a console application.
 /// </para>
 /// <para>
 /// One surface, two hosts, in the other direction too: the same declarations are handed to

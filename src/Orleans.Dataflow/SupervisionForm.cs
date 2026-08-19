@@ -5,16 +5,17 @@ namespace Orleans.Dataflow;
 /// </summary>
 /// <remarks>
 /// <para>
-/// The four forms of ADR 0007, and the whole of the vocabulary: a scope names one of them, the name is
+/// Four forms, and they are the whole of the vocabulary: a scope names one of them, the name is
 /// written into the document, and a scope whose form changes is a different graph with a different
 /// fingerprint. There is no fifth value for "fail the run" because that is not a form a scope takes — it is
-/// what happens outside every scope, and it stays the default the engine has had since M2.
+/// what happens outside every scope, and it is the engine's default.
 /// </para>
 /// <para>
-/// <b>No form names an exception type, and that is v1's honesty rather than an omission.</b> A policy that
+/// <b>No form names an exception type, and that is deliberate rather than an omission.</b> A policy that
 /// filtered by type would need CLR type names in a document, which the definition plane forbids, or a
 /// declared failure taxonomy, which is real design work owed evidence of its own. A scope therefore
-/// supervises every failure raised inside it alike; the taxonomy is a recorded deferral.
+/// supervises every failure raised inside it alike: there is no way to say "retry this failure but not
+/// that one", and a scope that needs the distinction has to make it in its own code.
 /// </para>
 /// </remarks>
 public enum SupervisionForm

@@ -11,7 +11,7 @@ namespace Orleans.Dataflow.Serialization;
 /// <para>
 /// This is the payload representation for graph documents: parameter payloads, execution-policy
 /// payloads, and every other provider-defined JSON value the core format embeds but does not schematize
-/// (ADR 0003). Two logically equal payloads always carry byte-identical canonical bytes, whatever order
+/// itself. Two logically equal payloads always carry byte-identical canonical bytes, whatever order
 /// their keys arrived in, whichever runtime parsed them, and whatever the ambient culture is, so a graph
 /// fingerprint over those bytes is stable.
 /// </para>

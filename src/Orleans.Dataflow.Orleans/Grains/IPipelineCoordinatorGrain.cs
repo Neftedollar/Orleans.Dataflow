@@ -26,7 +26,7 @@ namespace Orleans.Dataflow.Grains;
 /// </para>
 /// <para>
 /// <b>Those three passthroughs interleave, and that is a correctness requirement rather than a
-/// throughput one.</b> Since M5.3 a run grain calls its coordinator back — a durable run claims its epoch
+/// throughput one.</b> A run grain calls its coordinator back — a durable run claims its epoch
 /// when the activation hosting it comes up — so a passthrough that occupied this activation's turn while
 /// awaiting the run grain would be waiting for a grain that is waiting for this one. They interleave
 /// safely because they touch no state at all: each forwards one call and returns its answer. Everything
@@ -44,11 +44,11 @@ namespace Orleans.Dataflow.Grains;
 /// </para>
 /// <para>
 /// <b>Reading a declaration and owning it are two calls, and separating them is what stops a reader from
-/// fencing a live run.</b> A claim used to mint a fresh ownership epoch on the way past, which meant that
-/// anybody who merely asked what a durable run was got a number that superseded the activation actually
-/// executing it — after which that activation's own report of how the run ended was refused as stale, and
-/// the run was resumed and its tail re-run. An epoch orders <em>claims to ownership</em>, so it is minted
-/// where ownership is taken: by the activation that is about to host the run, once, and by nothing else.
+/// fencing a live run.</b> A claim that minted a fresh ownership epoch on the way past would hand anybody who
+/// merely asked what a durable run was a number that superseded the activation actually executing it — after
+/// which that activation's own report of how the run ended would be refused as stale, and the run would be
+/// resumed and its tail re-run. An epoch orders <em>claims to ownership</em>, so it is minted where ownership
+/// is taken: by the activation that is about to host the run, once, and by nothing else.
 /// </para>
 /// </remarks>
 public interface IPipelineCoordinatorGrain : IGrainWithStringKey
@@ -96,8 +96,8 @@ public interface IPipelineCoordinatorGrain : IGrainWithStringKey
     /// holds as many durable run identities as it will hold.
     /// </exception>
     /// <exception cref="PipelineResumeRefusedException">
-    /// The run identity is already declared for a different document. V1 continues one document per durable
-    /// run identity; a changed pipeline runs under a name of its own.
+    /// The run identity is already declared for a different document. One durable run identity continues
+    /// one document; a changed pipeline runs under a name of its own.
     /// </exception>
     /// <remarks>
     /// <para>
@@ -109,10 +109,10 @@ public interface IPipelineCoordinatorGrain : IGrainWithStringKey
     /// </para>
     /// <para>
     /// <b>The register a declaration grows is bounded, and the bound is generous.</b> A record holds the
-    /// document it names, the whole register is rewritten on every declaration, and nothing used to remove
-    /// one — so a deployment that named a durable run per request grew a state document until its storage
-    /// provider refused it, at which point the coordinator could no longer write at all and every start of
-    /// that pipeline stopped with it. A pipeline that reaches the cap is refused by name, told what the cap
+    /// document it names and the whole register is rewritten on every declaration, so a deployment that
+    /// named a durable run per request would grow a state document until its storage provider refused it —
+    /// at which point the coordinator could no longer write at all and every start of that pipeline would
+    /// stop with it. A pipeline that reaches the cap is refused by name, told what the cap
     /// is, and told that <see cref="RetireDurableRunAsync"/> is what makes room.
     /// </para>
     /// <para>
@@ -141,8 +141,8 @@ public interface IPipelineCoordinatorGrain : IGrainWithStringKey
     /// <remarks>
     /// <para>
     /// <b>This is the destructive operation and it is spelled to say so.</b> The checkpoint stored for the
-    /// run is <em>cleared</em> — a position taken of the old document could not describe the new one and
-    /// migrating it is a recorded deferral (ADR 0007), not something a silo will attempt — and a fresh epoch
+    /// run is <em>cleared</em> — a position taken of the old document could not describe the new one, and
+    /// no silo migrates a checkpoint across a changed document — and a fresh epoch
     /// supersedes whatever was executing: its control calls are fenced from the moment this returns and its
     /// next capture is refused by a store it no longer holds an ETag for. Nothing here is a migration and
     /// nothing here is silent.
@@ -263,12 +263,12 @@ public interface IPipelineCoordinatorGrain : IGrainWithStringKey
     /// </para>
     /// <para>
     /// <b>It reads and it changes nothing</b>, which is a correctness property and not an optimization. This
-    /// used to mint a fresh ownership epoch on every call after the first, so anybody who merely asked what
-    /// a durable run was superseded the activation that was executing it: that activation's own report of how
-    /// the run ended was then refused as stale, no outcome was recorded, and the next activation resumed a
-    /// finished run and re-ran its tail. Ownership is taken by <see cref="TakeDurableRunAsync"/>, once, by
-    /// the activation that is about to host the run — so a reader fences nobody and the epoch this returns is
-    /// simply the one the run is currently owned under.
+    /// would be wrong to mint a fresh ownership epoch on every call after the first: anybody who merely asked
+    /// what a durable run was would supersede the activation that was executing it, that activation's own
+    /// report of how the run ended would then be refused as stale, no outcome would be recorded, and the next
+    /// activation would resume a finished run and re-run its tail. Ownership is taken by
+    /// <see cref="TakeDurableRunAsync"/>, once, by the activation that is about to host the run — so a reader
+    /// fences nobody and the epoch this returns is simply the one the run is currently owned under.
     /// </para>
     /// <para>
     /// An identity this coordinator has no record of answers <see langword="null"/> rather than refusing.
@@ -317,8 +317,8 @@ public interface IPipelineCoordinatorGrain : IGrainWithStringKey
     /// <remarks>
     /// <para>
     /// <b>The protocol's own check that an epoch is real.</b> A run grain is handed an epoch by whoever
-    /// starts it and used to store whatever it was given: a start carrying <c>long.MaxValue</c> therefore
-    /// wedged the grain forever, because every later declaration compared as older and was answered with the
+    /// starts it. A grain that stored whatever it was given would be wedged forever by a start carrying
+    /// <c>long.MaxValue</c>, because every later declaration would compare as older and be answered with the
     /// number nobody could outbid. An epoch is this coordinator's to issue, so this is where "did you issue
     /// this?" is asked, and an epoch above the highest one issued is refused by the grain that was offered
     /// it.

@@ -20,8 +20,8 @@ namespace Orleans.Dataflow.Grains;
 /// arrives to a trigger with no live receiver — because this activation was recycled, because the run
 /// grain was, or because the run ended without a chance to clean up — is the end of that reminder: the
 /// trigger unregisters it and returns. Nothing resumes, and the attempt that owned the reminder stays
-/// exactly as it ended, faulted or lost. Durable resume is M5's checkpoint work and is not quietly
-/// approximated here.
+/// exactly as it ended, faulted or lost. Continuing a run from where it stopped is what a durable run's
+/// checkpoint is for, and nothing here quietly approximates it.
 /// </para>
 /// <para>
 /// <b>Ticks do not queue.</b> The stage's ingress is bounded and its overflow policy may not be

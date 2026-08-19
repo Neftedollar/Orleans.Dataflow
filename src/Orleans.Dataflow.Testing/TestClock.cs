@@ -9,7 +9,7 @@ namespace Orleans.Dataflow.Testing;
 /// <remarks>
 /// <para>
 /// <b>What it is for.</b> Every stage of this runtime that reads a clock reads the host's
-/// <see cref="TimeProvider"/> (ADR 0005), so a host constructed with one of these measures its runs by
+/// <see cref="TimeProvider"/>, so a host constructed with one of these measures its runs by
 /// nothing else. A test then advances time in the amounts its assertions are about — "after exactly the
 /// delay, and not a tick before" is a claim a real clock cannot support and this one can — and the run does
 /// in milliseconds what it would have taken minutes of wall clock to do.

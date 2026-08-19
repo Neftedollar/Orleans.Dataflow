@@ -9,15 +9,15 @@ namespace Orleans.Dataflow.Definition;
 /// </summary>
 /// <remarks>
 /// <para>
-/// The graph document is the only durable representation of a graph (ADR 0001). It contains identifiers,
+/// The graph document is the only durable representation of a graph. It contains identifiers,
 /// canonical payloads, and wiring, and nothing that could load code: everything it names resolves through
 /// a stage catalog that deployment code registers.
 /// </para>
 /// <para>
-/// A document is canonical by construction. <see cref="Create"/> sorts every collection into the order
-/// ADR 0003 fixes, so two documents built from the same elements in different orders are indistinguishable
-/// afterwards, element for element, and serialize to identical bytes. Callers never choose the order and
-/// never choose <see cref="FormatVersion"/>.
+/// A document is canonical by construction. <see cref="Create"/> sorts every collection into the single
+/// order the canonical byte form fixes, so two documents built from the same elements in different orders
+/// are indistinguishable afterwards, element for element, and serialize to identical bytes. Callers never
+/// choose the order and never choose <see cref="FormatVersion"/>.
 /// </para>
 /// <para>
 /// A document is also structurally valid by construction: <see cref="Create"/> enforces every structural
@@ -40,7 +40,7 @@ public sealed record class GraphDocument
     /// <remarks>
     /// Every document built through <see cref="Create"/> carries this version. Reading a document written
     /// under a different version is the reader's problem, and an unknown version fails before any other
-    /// rule runs rather than being parsed on a best-effort basis (ADR 0003).
+    /// rule runs rather than being parsed on a best-effort basis.
     /// </remarks>
     public const int CurrentFormatVersion = 1;
 
@@ -150,10 +150,11 @@ public sealed record class GraphDocument
     /// deliberately not required to be distinct.
     /// </para>
     /// <para>
-    /// A cycle is deliberately not among them, and a self-loop is a cycle of one node. M0 refused a
-    /// self-loop here because no layer could yet reason about a loop at all; ADR 0005 subsumes that
-    /// refusal into the cycle rule, which is a statement about the boundaries a loop passes and therefore
-    /// belongs to the runtime that has to execute it rather than to the shape of a document.
+    /// A cycle is deliberately not among them, and a self-loop is a cycle of one node rather than a shape
+    /// of its own. Whether a loop can run is a statement about the boundaries it passes — it is legal
+    /// exactly when it passes one that can hold an element and answer without waiting for its own
+    /// downstream — so it belongs to the runtime that has to execute it rather than to the shape of a
+    /// document, and a self-loop is tested by that rule like any other loop.
     /// </para>
     /// <para>
     /// Duplicate capability tokens are rejected rather than folded away. A caller that declares one token

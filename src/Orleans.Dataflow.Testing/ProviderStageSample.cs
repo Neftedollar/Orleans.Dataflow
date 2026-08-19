@@ -23,9 +23,9 @@ namespace Orleans.Dataflow.Testing;
 /// be the fullest payload the stage accepts rather than the smallest.
 /// </para>
 /// <para>
-/// The payload is written by the provider's own typed parameter builder wherever it has one — the pattern
-/// REGISTERED-STAGES.md describes — so that the sample is the same value an author would write and not a
-/// second spelling of it maintained beside the first.
+/// The payload is written by the provider's own typed parameter builder wherever it has one, so that the
+/// sample is the same value an author would write and not a second spelling of it maintained beside the
+/// first.
 /// </para>
 /// </remarks>
 public sealed class ProviderStageSample

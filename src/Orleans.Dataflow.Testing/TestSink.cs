@@ -66,10 +66,10 @@ public static class TestSink
     /// </exception>
     /// <remarks>
     /// <para>
-    /// ADR 0007's sink half, in the shape a local proof of it needs. A real committing sink belongs to an
-    /// adapter — a queue's acknowledgement, a database's transaction, a stream's checkpoint — and this one
-    /// exists so that the <em>seam</em> can be proven in a process with no adapter in it: the callback is
-    /// the commit, and the mark is what has been committed.
+    /// The sink half of the checkpoint model, in the shape a local proof of it needs. A real committing
+    /// sink belongs to an adapter — a queue's acknowledgement, a database's transaction, a stream's
+    /// checkpoint — and this one exists so that the <em>seam</em> can be proven in a process with no
+    /// adapter in it: the callback is the commit, and the mark is what has been committed.
     /// </para>
     /// <para>
     /// <b>The mark advances after the callback and never before it.</b> A callback that throws leaves the

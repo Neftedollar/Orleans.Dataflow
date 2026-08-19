@@ -13,7 +13,7 @@ namespace Orleans.Dataflow;
 /// </summary>
 /// <remarks>
 /// <para>
-/// <see cref="RunnableGraph"/> is not generic over its results, per ADR 0004 section 1. A generic parameter
+/// <see cref="RunnableGraph"/> is deliberately not generic over its results. A generic parameter
 /// shortens exactly one program, collapses into tuple threading as soon as a graph has two results, and
 /// does not prevent the cross-graph mistake it would exist to prevent, because two graphs with the same
 /// result type stay interchangeable. Results are named instead: <see cref="ResultSlots"/> lists them and a
@@ -232,7 +232,7 @@ public sealed class RunnableGraph
     /// <para>
     /// Every other declared capability travels into the pipeline untouched, and whether some target
     /// deployment knows those tokens is deliberately not checked here: no catalog is in scope, and a
-    /// capability check against the wrong catalog would be worse than none. That check belongs to the M3
+    /// capability check against the wrong catalog would be worse than none. That check belongs to the
     /// negotiation between a pipeline and the host asked to run it, which is where the target catalog and
     /// its fingerprint actually exist.
     /// </para>

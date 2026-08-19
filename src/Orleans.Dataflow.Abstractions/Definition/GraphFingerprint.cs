@@ -9,7 +9,7 @@ namespace Orleans.Dataflow.Definition;
 /// </summary>
 /// <remarks>
 /// <para>
-/// A graph document has exactly one canonical byte form (ADR 0003), so the digest of those bytes is an
+/// A graph document has exactly one canonical byte form, so the digest of those bytes is an
 /// identity rather than merely a checksum: two documents share a fingerprint when and only when they are
 /// the same document, and a fingerprint computed on one silo, one runtime, or one process is the same
 /// number computed anywhere else. That is why the durable identity of a document is this value and never

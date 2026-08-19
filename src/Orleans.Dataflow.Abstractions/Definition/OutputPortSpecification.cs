@@ -9,8 +9,9 @@ namespace Orleans.Dataflow.Definition;
 /// <remarks>
 /// <para>
 /// A port specification is catalog data, not graph data. It says what a stage family declares; whether a
-/// particular node in a particular document actually consumes the port is a rule of the graph compiler
-/// (ADR 0001).
+/// particular node in a particular document actually consumes the port is a rule of the graph compiler.
+/// The two planes stay separate so that a document can be structurally valid without a catalog and
+/// semantically checked against one later.
 /// </para>
 /// <para>
 /// <see cref="IsIgnorable"/> is the output-side counterpart of an optional input, and it is deliberately

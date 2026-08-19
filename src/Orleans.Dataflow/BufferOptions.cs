@@ -8,7 +8,7 @@ namespace Orleans.Dataflow;
 /// </summary>
 /// <remarks>
 /// <para>
-/// One record per concern, never one options bag (ADR 0004 section 7): buffering and parallelism are
+/// One record per concern, never one options bag: buffering and parallelism are
 /// different decisions with different defaults, and a type that carried both would let an author set one
 /// while meaning the other.
 /// </para>

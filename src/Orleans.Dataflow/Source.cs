@@ -27,7 +27,7 @@ namespace Orleans.Dataflow;
 /// <para>
 /// Every lambda occurrence is automatically named, so a graph built only from lambdas declares
 /// <c>ephemeral-identity</c> as well as <c>nondeployable</c>, and is therefore rejected for durable
-/// pipelines by design (ADR 0004 section 6). A lambda occurrence has no spelling for a name at all: a name
+/// pipelines by design. A lambda occurrence has no spelling for a name at all: a name
 /// on a delegate would promise an edit-stable identity the delegate behind it cannot honor. The registered
 /// overloads take one and require it, so what a closed document declares is a fact about what the chain
 /// actually holds.
@@ -208,7 +208,7 @@ public sealed class Source<T>
     /// <returns>A new source; this one is unchanged.</returns>
     /// <exception cref="ArgumentNullException"><paramref name="predicate"/> is <see langword="null"/>.</exception>
     /// <remarks>
-    /// The boundary is exclusive, per the naming rules of ADR 0004 section 7: the first element the
+    /// The boundary is exclusive, exactly as the LINQ name it borrows promises: the first element the
     /// predicate rejects is not emitted, and the run completes as if the source had ended there.
     /// <see cref="TakeThrough"/> is the inclusive spelling and is a different word rather than a flag.
     /// </remarks>
@@ -228,9 +228,7 @@ public sealed class Source<T>
     /// because LINQ has no such operator to borrow from: the first element the predicate rejects is emitted
     /// and the run completes after it, where <see cref="TakeWhile"/> ends without delivering it. This is
     /// how a stream ends at a terminator it has to deliver — the last page, the closing record, the
-    /// sentinel — spelled as the predicate for "not yet the terminator". This doc once said the opposite
-    /// ("the element the predicate accepts is emitted"); the runtime and the suite always meant this one,
-    /// and the M7.2 twin-frontend pass is what caught the drift.
+    /// sentinel — spelled as the predicate for "not yet the terminator".
     /// </remarks>
     public Source<T> TakeThrough(Func<T, bool> predicate)
     {
@@ -367,10 +365,10 @@ public sealed class Source<T>
     /// </exception>
     /// <remarks>
     /// <para>
-    /// <b>Supervision is a scope, and a scope is a stage</b> (ADR 0007). The flow is declared once, the
+    /// <b>Supervision is a scope, and a scope is a stage.</b> The flow is declared once, the
     /// scope owns one instance of it, and a failure raised inside that instance is answered by the declared
     /// form instead of failing the run. Everything outside the scope is untouched: the engine's own rule
-    /// since M2 — a failure fails the run — is the default and stays the default, and a scope is the
+    /// — a failure fails the run — is the default and stays the default, and a scope is the
     /// declared exception to it.
     /// </para>
     /// <para>
@@ -1093,10 +1091,10 @@ public sealed class Source<T>
     /// </exception>
     /// <remarks>
     /// <para>
-    /// <see cref="SelectAsync"/> in every respect but the type of the thing awaited (ADR 0004 section 7
-    /// names the three families): the same bound on callbacks in flight, the same emission in input order,
-    /// the same run token, and the same rule that a failing callback faults the run, cancels the callbacks
-    /// beside it, and starts no later element.
+    /// <see cref="SelectAsync"/> in every respect but the type of the thing awaited, which is why it is a
+    /// family with a name of its own rather than an overload: the same bound on callbacks in flight, the same
+    /// emission in input order, the same run token, and the same rule that a failing callback faults the run,
+    /// cancels the callbacks beside it, and starts no later element.
     /// </para>
     /// <para>
     /// The family exists because a <see cref="ValueTask{TResult}"/> is what a callback that usually
@@ -1191,7 +1189,7 @@ public sealed class Source<T>
     /// <remarks>
     /// <para>
     /// The name is required, because a registered occurrence exists to be addressed across an edit, a
-    /// checkpoint, and an upgrade, and a positional identifier anchors none of those (ADR 0004 section 6).
+    /// checkpoint, and an upgrade, and a positional identifier anchors none of those.
     /// Two occurrences of one graph may not share a name; that is reported when the chain is closed, which
     /// is where the whole chain is first visible.
     /// </para>
@@ -1226,8 +1224,8 @@ public sealed class Source<T>
     /// <para>
     /// Merging three streams is <c>a.Merge(b, c)</c> and merging four is <c>a.Merge(b, c).Merge(d)</c>. The
     /// second is honestly two junctions rather than one: merge semantics are associative, but the two
-    /// documents are distinct and fingerprint differently, and ADR 0006 states that rather than papering over
-    /// it with a rewrite that flattens the chain.
+    /// documents are distinct and fingerprint differently, and that is stated rather than papered over
+    /// with a rewrite that flattens the chain.
     /// </para>
     /// </remarks>
     public Source<T> Merge(Source<T> other)
@@ -1564,7 +1562,7 @@ public sealed class Source<T>
     /// <remarks>
     /// The factory form of the one-argument close, so <c>source.To(s =&gt; s.Ignore())</c> reads the same
     /// way as the result-bearing factory overloads. Overload resolution between this and the
-    /// result-bearing factory forms is by the lambda's return type and was probed unambiguous (ADR 0004).
+    /// result-bearing factory forms is by the lambda's return type, and is unambiguous.
     /// </remarks>
     public RunnableGraph To(Func<SinkFactory<T>, Sink<T>> sink)
     {
@@ -1625,8 +1623,8 @@ public sealed class Source<T>
     /// <remarks>
     /// The two names mean different things and neither is derivable from the other: the occurrence name is
     /// the node's durable identity in the graph, and the slot name is what a run handle resolves the
-    /// result under. This is the composable form, for the reason ADR 0004 section 3 gives — a tuple
-    /// survives <c>async</c> signatures, collections, and interface members.
+    /// result under. This is the composable form: a tuple survives <c>async</c> signatures, collections,
+    /// and interface members, where an <see langword="out"/> parameter is not allowed at all.
     /// </remarks>
     public (RunnableGraph Graph, ResultSlot<TResult> Slot) To<TResult>(
         RegisteredSinkWithResult<T, TResult> sink,
@@ -1689,7 +1687,7 @@ public sealed class Source<T>
     /// </exception>
     /// <remarks>
     /// This is the composable form: a tuple survives <c>async</c> signatures, collections, and interface
-    /// members, where an <see langword="out"/> parameter is not allowed at all (ADR 0004 section 3).
+    /// members, where an <see langword="out"/> parameter is not allowed at all.
     /// </remarks>
     public (RunnableGraph Graph, ResultSlot<TResult> Slot) To<TResult>(
         SinkWithResult<T, TResult> sink,
@@ -1791,7 +1789,7 @@ public sealed class Source<T>
     /// Without it, <c>To(countingSink)</c> is a wrong-type call whose one compiler-suggested repair is a
     /// cast to <see cref="Sink{T}"/> — which compiles, and silently drops the result the author asked for.
     /// A result-bearing close therefore has a real overload to bind to, and binding to it says what to
-    /// write instead (ADR 0004 section 3).
+    /// write instead.
     /// </para>
     /// <para>
     /// A guard is compile-time surface: it is never called, and nothing in a passing test suite can
@@ -2397,12 +2395,12 @@ public sealed class Source<T>
 /// <remarks>
 /// <para>
 /// The factories live on a non-generic companion class so that the element type is inferred from the
-/// argument wherever it can be, per ADR 0004 section 1.
+/// argument wherever it can be.
 /// </para>
 /// <para>
 /// <see cref="UnzipTo{TLeft, TRight}"/> lives here too, and is the one junction call on a source that is an
 /// extension method rather than an instance method. Every other one applies to a source of any element type
-/// and is therefore an instance method, per ADR 0004 section 2; an unzip applies only to a source of pairs,
+/// and is therefore an instance method; an unzip applies only to a source of pairs,
 /// and a receiver constrained to one shape of element type is exactly what an instance method cannot say.
 /// It reads identically at the call site.
 /// </para>

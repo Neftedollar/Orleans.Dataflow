@@ -10,8 +10,8 @@ namespace Orleans.Dataflow;
 /// <para>
 /// This type exists to close one inference hole. <c>Sink.Aggregate(0L, (count, _) =&gt; count + 1)</c> does not
 /// compile, because the element type appears only as an implicit lambda parameter and C# does not flow the
-/// outer call's element type inward (ADR 0004 section 3; <c>CS0411</c>, and a partial type-argument list is
-/// not a legal spelling either). Passing a lambda that receives this factory instead pins <typeparamref
+/// outer call's element type inward (<c>CS0411</c>, and a partial type-argument list is not a legal
+/// spelling either). Passing a lambda that receives this factory instead pins <typeparamref
 /// name="T"/> from the source, so <c>To(s =&gt; s.Aggregate(0L, (count, _) =&gt; count + 1), "processed", out
 /// var processed)</c> needs no type argument and no lambda annotation anywhere.
 /// </para>

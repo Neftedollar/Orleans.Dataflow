@@ -7,7 +7,7 @@ namespace Orleans.Dataflow;
 /// </summary>
 /// <remarks>
 /// <para>
-/// One record per concern, never one options bag (ADR 0004 section 7). Collecting is the one sink whose
+/// One record per concern, never one options bag. Collecting is the one sink whose
 /// state grows with the stream, so the bound on that growth is its own decision and its own type.
 /// </para>
 /// <para>

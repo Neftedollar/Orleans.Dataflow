@@ -14,7 +14,7 @@ namespace Orleans.Dataflow.Grains;
 /// <para>
 /// It is created off any grain context, on the run's own source thread, which is the one place it can be:
 /// Orleans refuses <c>CreateObjectReference</c> from inside a grain, and the run's engine threads are not
-/// inside one. That was probed rather than assumed, and it is the same fact the phase-2 stream source rests
+/// inside one. That was probed rather than assumed, and it is the same fact the stream source rests
 /// on — a run executes beside the grains of its silo rather than on one of their turns.
 /// </para>
 /// <para>

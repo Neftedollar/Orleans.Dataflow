@@ -17,9 +17,9 @@ namespace Orleans.Dataflow.Hosting;
 /// visible.
 /// </para>
 /// <para>
-/// The junction shapes arrived with M4.5. Until then a junction was necessarily a local stage, so a
-/// branching graph declared <c>nondeployable</c> however many of its other stages were registered — the
-/// limit ADR 0006 recorded and sent here. A provider that registers a junction closes that gap: the
+/// <b>A junction is one of the shapes a provider may register.</b> Were it not, a junction could only be a
+/// local stage, and a branching graph would declare <c>nondeployable</c> however many of its other stages
+/// were registered. A provider that registers a junction closes that gap: the
 /// junction's ports carry the provider's own contracts, its occurrence carries the author's own name, and a
 /// fan-out pipeline built entirely from registered stages is a pipeline.
 /// </para>

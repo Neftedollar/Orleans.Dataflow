@@ -25,7 +25,7 @@ namespace Orleans.Dataflow;
 /// into any number of graphs, but twice into one graph is a collision reported at closure.
 /// </para>
 /// <para>
-/// Operators are instance methods, per ADR 0004 section 2: an element-type mistake then reads as a
+/// Operators are instance methods rather than extension methods: an element-type mistake then reads as a
 /// conversion error naming both types instead of the inference failure an extension method produces, and
 /// the whole vocabulary stays in one completion list.
 /// </para>
@@ -184,7 +184,7 @@ public sealed class Flow<TIn, TOut>
     /// <returns>A new flow; this one is unchanged.</returns>
     /// <exception cref="ArgumentNullException"><paramref name="predicate"/> is <see langword="null"/>.</exception>
     /// <remarks>
-    /// The boundary is exclusive, per the naming rules of ADR 0004 section 7: the first element the
+    /// The boundary is exclusive, exactly as the LINQ name it borrows promises: the first element the
     /// predicate rejects is not emitted, and the run completes as if the source had ended there.
     /// <see cref="TakeThrough"/> is the inclusive spelling and is a different word rather than a flag.
     /// </remarks>
@@ -1096,7 +1096,7 @@ public sealed class Flow<TIn, TOut>
     /// produces a <see cref="Branch{TIn}"/> instead of a closed graph, because a leg of a junction is not a
     /// graph until the junction call takes it. Everything else — the mandatory slot name, the sink-factory
     /// lambdas that make inference total, the registered overloads, and the guards against a dropped result
-    /// — is the same surface for the same reasons (ADR 0004 sections 2 and 3).
+    /// — is the same surface for the same reasons.
     /// </remarks>
     public Branch<TIn> To(Sink<TOut> sink)
     {
@@ -1142,7 +1142,7 @@ public sealed class Flow<TIn, TOut>
     /// <para>
     /// There is one form rather than the two <see cref="Source{T}"/> offers, and the missing one is the
     /// tuple. A branch is written as an argument of the junction call that consumes it — that is the whole
-    /// reason an <see langword="out"/> parameter is legal here, per ADR 0006 — and a tuple in that position
+    /// reason an <see langword="out"/> parameter is legal here — and a tuple in that position
     /// would have to be unpacked into a statement first, which is the shape the fluent form exists to avoid.
     /// </para>
     /// <para>
@@ -1277,7 +1277,7 @@ public sealed class Flow<TIn, TOut>
     /// <returns>Nothing; the call cannot compile, and cannot be reached if it somehow does.</returns>
     /// <exception cref="NotSupportedException">Always.</exception>
     /// <remarks>
-    /// The branch half of the guard ADR 0004 section 3 introduced for chains. Without it,
+    /// The branch half of the guard the chain-closing overloads carry. Without it,
     /// <c>To(countingSink)</c> is a wrong-type call whose one compiler-suggested repair is a cast to
     /// <see cref="Sink{TOut}"/> — which compiles, and silently drops the result the author asked for. A
     /// branch that carries a result therefore has a real overload to bind to, and binding to it says what to
@@ -1376,8 +1376,8 @@ public sealed class Flow<TIn, TOut>
 /// </summary>
 /// <remarks>
 /// <see cref="For{T}"/> and a hypothetical <c>Create&lt;T&gt;</c> are inference-identical, because the type
-/// argument appears only in return position and has to be written either way. ADR 0004 section 1 chose the
-/// name that reads next to <c>Source.From</c>.
+/// argument appears only in return position and has to be written either way. The name chosen is the one
+/// that reads next to <c>Source.From</c>.
 /// </remarks>
 public static class Flow
 {

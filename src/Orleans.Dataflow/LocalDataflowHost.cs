@@ -24,7 +24,7 @@ namespace Orleans.Dataflow;
 /// </para>
 /// <para>
 /// <b>The clock is the host's.</b> Every stage of a run that reads a clock reads the one this host was
-/// given, resolved when the graph is materialized and carried by the run from there (ADR 0005). The default
+/// given, resolved when the graph is materialized and carried by the run from there. The default
 /// is <see cref="TimeProvider.System"/>; a test hands over a controlled one and the delays, the windows, the
 /// timeouts, the rates, and the ticks of every run this host starts are measured by it. A document never
 /// carries a clock, because a clock is runtime and not definition: two runs of one graph may be measured by
@@ -265,10 +265,10 @@ public sealed class LocalDataflowHost
     /// superseded coordinator does.
     /// </para>
     /// <para>
-    /// <b>A different fingerprint is refused by name.</b> V1's rule is same-revision resume only: a
-    /// checkpoint of another graph describes nodes that are not these nodes, so restoring a cursor into it
-    /// would be restoring a position into a source that never counted it. Cross-revision migration is a
-    /// recorded deferral (ADR 0007) and not a silent best effort.
+    /// <b>A different fingerprint is refused by name.</b> The rule is same graph, same revision, and
+    /// nothing else: a checkpoint of another graph describes nodes that are not these nodes, so restoring
+    /// a cursor into it would be restoring a position into a source that never counted it. There is no
+    /// migration of a checkpoint across a changed graph, and nothing here approximates one.
     /// </para>
     /// <para>
     /// <b>What survives and what resets is exactly stated.</b> A source that declared a cursor reopens at
@@ -314,13 +314,13 @@ public sealed class LocalDataflowHost
         if (checkpoint!.Graph != graph.Fingerprint)
         {
             throw new InvalidOperationException(
-                $"The checkpoint stored for the run '{durable.RunId}' was taken of the graph {checkpoint.Graph} and this is a run of {graph.Fingerprint}. A resume continues the very graph the checkpoint describes: v1 resumes at the same revision only, and migrating a checkpoint across a changed document is a recorded deferral rather than something this host will guess at.");
+                $"The checkpoint stored for the run '{durable.RunId}' was taken of the graph {checkpoint.Graph} and this is a run of {graph.Fingerprint}. A resume continues the very graph its checkpoint describes — the same fingerprint at the same revision only — because a stored position names nodes of the graph it was measured in and means nothing in another. There is no migration of a checkpoint across a changed graph, and this host will not guess at one. Resume the graph the checkpoint was taken of, or start this graph from the beginning under a run identity of its own.");
         }
 
         if (checkpoint.Revision != graph.Document.Revision)
         {
             throw new InvalidOperationException(
-                $"The checkpoint stored for the run '{durable.RunId}' was taken at revision {checkpoint.Revision} and this graph is revision {graph.Document.Revision}. A resume continues the same revision; cross-revision migration is a recorded deferral.");
+                $"The checkpoint stored for the run '{durable.RunId}' was taken at revision {checkpoint.Revision} and this graph is revision {graph.Document.Revision}. A resume continues the revision its checkpoint was taken at. Carrying a stored position forward into a changed revision is not something this host can do, and it will not silently start over in its place. Resume revision {checkpoint.Revision}, or start revision {graph.Document.Revision} from the beginning under a run identity of its own.");
         }
 
         return Start(graph, durable, checkpoint, stored.ETag, cancellationToken);

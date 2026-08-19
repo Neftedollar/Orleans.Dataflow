@@ -10,10 +10,11 @@ namespace Orleans.Dataflow;
 /// and a monitor can read rather than a silence.
 /// </para>
 /// <para>
-/// The values are the ADR's own — fail the run, or escalate to one of the two forms that drop the element —
-/// and there is deliberately no <see cref="SupervisionForm.Retry"/> among them, because retrying an element
-/// that has run out of retries is not an answer, and no <see cref="SupervisionForm.Recover"/>, because
-/// ending the stream after a fallback is a decision about the stream rather than about this element.
+/// The values are the three answers there are — fail the run, or escalate to one of the two forms that drop
+/// the element — and there is deliberately no <see cref="SupervisionForm.Retry"/> among them, because
+/// retrying an element that has run out of retries is not an answer, and no
+/// <see cref="SupervisionForm.Recover"/>, because ending the stream after a fallback is a decision about the
+/// stream rather than about this element.
 /// </para>
 /// </remarks>
 public enum RetryExhaustion

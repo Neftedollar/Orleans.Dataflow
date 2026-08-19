@@ -9,7 +9,7 @@ namespace Orleans.Dataflow.Testing;
 /// </summary>
 /// <remarks>
 /// <para>
-/// ADR 0007's failure-injection seam, and it follows the probes exactly: an injected fault is an
+/// The failure-injection seam, and it follows the probes exactly: an injected fault is an
 /// <b>ordinary stage a document names</b> rather than a hook reaching into the engine, so a graph under test
 /// is a graph — it validates against the stage catalog, it fingerprints, and it composes anywhere a flow
 /// stage stands. What it is not is a shipping stage: the arming vocabulary and every spelling that reaches

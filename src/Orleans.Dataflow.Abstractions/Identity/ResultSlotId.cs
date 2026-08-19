@@ -6,7 +6,7 @@ namespace Orleans.Dataflow.Identity;
 /// <remarks>
 /// <para>
 /// Result slots are how a graph declares what a run exposes, and a run handle resolves them per
-/// materialization instead of threading materialized values through the authoring types (ADR 0002).
+/// materialization instead of threading materialized values through the authoring types.
 /// </para>
 /// <para>
 /// The value is a single identifier segment: <c>[a-z0-9]+(-[a-z0-9]+)*</c>, 1 to 64 characters of

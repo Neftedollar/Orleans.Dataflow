@@ -17,8 +17,8 @@ namespace Orleans.Dataflow;
 /// <see cref="Source{T}.PartitionTo"/>, <see cref="Source.UnzipTo{TLeft, TRight}"/>, or
 /// <see cref="Source{T}.AlsoTo"/> — and it exists as a type because a leg has no receiver to hang off:
 /// type information flows left to right from sources, and a leg is built right to left from its sink.
-/// <see cref="Flow.For{T}"/> is the anchor that fixes the element type, which is why ADR 0006 calls it
-/// load-bearing.
+/// <see cref="Flow.For{T}"/> is the anchor that fixes the element type, and a leg cannot be written
+/// without it.
 /// </para>
 /// <para>
 /// A branch that declares no result is reusable exactly as a flow is: composing it into two graphs

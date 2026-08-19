@@ -6,12 +6,12 @@ namespace Orleans.Dataflow.Grains;
 /// </summary>
 /// <remarks>
 /// <para>
-/// <b>The run identity is the author's, and that is this phase's one change to what a run means.</b> An
-/// ordinary run is named by the coordinator with a fresh identifier per start, because two runs of one
-/// pipeline are two runs; a durable run is named by whoever will resume it, because a resume is <em>the
-/// same run continuing</em> and a resume needs a stable address to continue at. A name allocated per
-/// attempt would contradict the whole idea: nothing would be able to find the checkpoint the previous
-/// attempt wrote.
+/// <b>The run identity is the author's, and that is the one thing a durable run changes about what a run
+/// means.</b> An ordinary run is named by the coordinator with a fresh identifier per start, because two runs
+/// of one pipeline are two runs; a durable run is named by whoever will resume it, because a resume is
+/// <em>the same run continuing</em> and a resume needs a stable address to continue at. A name allocated per
+/// attempt would contradict the whole idea: nothing would be able to find the checkpoint the previous attempt
+/// wrote.
 /// </para>
 /// <para>
 /// The consequence is stated rather than left to be discovered: declaring one run identity twice addresses
@@ -20,14 +20,14 @@ namespace Orleans.Dataflow.Grains;
 /// one durable pipeline are two identities, chosen by the author, exactly as two files are two names.
 /// </para>
 /// <para>
-/// <b>The timing is declared and never implicit</b> (ADR 0007), and it is the very pair
+/// <b>The timing is declared and never implicit</b>, and it is the very pair
 /// <c>DurableRunOptions</c> carries in the local runtime: an interval, an element bound, or both. A run that
 /// declares neither never writes to the store at all — which is a legal declaration, and the honest reading
 /// of "durable with no timing", not a mistake this type prevents.
 /// </para>
 /// <para>
 /// Nothing here is an identity value of the definition plane. The run identity travels as text and the two
-/// bounds as ordinary framework values, which is the wire discipline this package has had since phase 1.
+/// bounds as ordinary framework values, which is this package's wire discipline throughout.
 /// </para>
 /// </remarks>
 [GenerateSerializer]
@@ -63,8 +63,8 @@ public sealed class DurableRunDeclaration
 /// The answer to a claim, and it exists because <b>the run grain holds nothing across an activation</b>. A
 /// silo that dies takes its run grains with it, so the activation that comes up afterwards knows only its
 /// own key; everything else it needs to continue the run is what the coordinator persisted when the run was
-/// declared. That is what the phase-1 note meant by "M5's durable resume will persist what reconciliation
-/// actually reads" — this is what it reads.
+/// declared. This type is that persisted answer — what a resuming activation reads in order to know what
+/// it is continuing.
 /// </para>
 /// <para>
 /// <b>The document travels as canonical bytes</b>, exactly as it did when a client sent it, so the
@@ -80,8 +80,8 @@ public sealed class DurableRunDeclaration
 /// the run had started.
 /// </para>
 /// <para>
-/// <b>A finished run answers a claim with how it ended and nothing to run.</b> Since M5.4 the last attempt
-/// of a durable run reports its terminal state to the coordinator, so a claim can say "there is nothing to
+/// <b>A finished run answers a claim with how it ended and nothing to run.</b> The last attempt of a
+/// durable run reports its terminal state to the coordinator, so a claim can say "there is nothing to
 /// continue here, and here is why" — which is the half a checkpoint cannot carry, because a checkpoint says
 /// where a run reached and never whether it is over. A claim answering that way costs no epoch at all: there
 /// is no attempt to fence when nothing is going to run.

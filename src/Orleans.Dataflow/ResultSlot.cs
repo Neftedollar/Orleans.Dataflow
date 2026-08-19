@@ -16,8 +16,8 @@ namespace Orleans.Dataflow;
 /// either, which is why the slot carries no run identity of its own.
 /// </para>
 /// <para>
-/// <see cref="Graph"/> is the <see cref="GraphFingerprint"/> of the document that declared the slot, per
-/// ADR 0004 section 4, and for a nondeployable graph the slot additionally binds to the built instance's
+/// <see cref="Graph"/> is the <see cref="GraphFingerprint"/> of the document that declared the slot,
+/// and for a nondeployable graph the slot additionally binds to the built instance's
 /// authoring nonce. The fingerprint identifies shape, not behavior: a document built from lambda stages
 /// never records what its delegates compute, so two graphs of one shape share a fingerprint whatever
 /// their lambdas do. The nonce closes exactly that gap — a slot resolves only against a run of the very
@@ -28,7 +28,7 @@ namespace Orleans.Dataflow;
 /// A slot of a <see cref="PipelineDefinition"/> carries no nonce, and says so by carrying the reserved
 /// value <see cref="Guid.Empty"/>. Registered stages carry their identity and their parameters in the
 /// document, so a pipeline's content identity means something on its own and a per-instance nonce would
-/// distinguish nothing (ADR 0004 section 4). The reserved value is not an absence: it is what makes the
+/// distinguish nothing. The reserved value is not an absence: it is what makes the
 /// two worlds tellable apart, so a run of a pipeline refuses a built graph's slot and a run of a built
 /// graph refuses a pipeline's, each naming which world the slot came from rather than reporting two
 /// fingerprints that happen to differ.

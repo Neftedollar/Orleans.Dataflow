@@ -31,12 +31,13 @@ namespace Orleans.Dataflow.Testing;
 /// </para>
 /// <para>
 /// It ships in the testing package because a durable store is a deployment's — exactly as the coordinator's
-/// is. What is here is the in-memory implementation ADR 0007 said would live beside the test store.
+/// is. What is here is the in-memory implementation that belongs beside a test store: it keeps every
+/// checkpoint in this process and nothing it holds outlives the process that wrote it.
 /// </para>
 /// <para>
 /// Every member is safe to call from any thread. One instance serves any number of runs and any number of
 /// graphs; two runs under one identity are two writers of one document, which is the case the ETag exists
-/// for and which the suite asserts.
+/// for and which it is safe to rely on.
 /// </para>
 /// </remarks>
 public sealed class InMemoryCheckpointStore : ICheckpointStore

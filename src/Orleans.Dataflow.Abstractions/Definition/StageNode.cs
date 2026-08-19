@@ -11,7 +11,7 @@ namespace Orleans.Dataflow.Definition;
 /// A node is data about behavior, never behavior itself. It names the stage family through a
 /// <see cref="StageRef"/> that resolves against a catalog registered by deployment code, and it carries
 /// the stage's configuration as a canonical JSON payload plus the contract that payload claims to satisfy
-/// (ADR 0001, ADR 0003). Nothing here can cause code loading.
+/// in canonical form. Nothing here can cause code loading.
 /// </para>
 /// <para>
 /// The declared <see cref="ParameterContract"/> is stored next to the payload rather than being inferred

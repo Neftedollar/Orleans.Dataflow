@@ -9,7 +9,7 @@ namespace Orleans.Dataflow.Hosting;
 /// <remarks>
 /// <para>
 /// The coordinator store's consequence, generalized with it: a superseded writer's write fails, and the
-/// failure kills the stale attempt rather than corrupting the fresh one (ADR 0007). A type of its own
+/// failure kills the stale attempt rather than corrupting the fresh one. A type of its own
 /// rather than a general-purpose exception, for the reason every other named failure in this package has
 /// one — a caller that wants to tell "I have been fenced out" apart from "the store is unreachable" has to
 /// be able to write the <c>catch</c>, and the two answers are opposites: the first means stop, the second

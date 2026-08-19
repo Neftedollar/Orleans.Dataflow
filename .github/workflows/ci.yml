@@ -39,6 +39,14 @@ jobs:
       # harness exits non-zero when a scenario fails, so no extra assertion is needed here.
       - name: Benchmark smoke
         run: dotnet run --project benchmarks/Orleans.Dataflow.Benchmarks/Orleans.Dataflow.Benchmarks.csproj --no-build --no-restore --configuration Release -- --smoke
+      # Documentation decays in two ways that a reader notices and a build does not. It drifts back towards
+      # being about the work rather than about the library — a milestone name, a decision-record number, a
+      # phrase like "as implemented" — and its links quietly stop resolving as files move. Both are checked
+      # here, over the pages a reader of the library is meant to read; the engineering records and the
+      # project tracking are exempt from the vocabulary rule, because being about the history is what they
+      # are for, and are still checked for broken links.
+      - name: Documentation
+        run: python3 .github/check-docs.py
       # The smallest sizes that still exercise every scenario, including the one that stands up a silo:
       # what this step checks is that the samples still run and that each scenario's two authorings — one
       # C#, one F# — still build byte-identical documents, which is the claim the samples exist to make.

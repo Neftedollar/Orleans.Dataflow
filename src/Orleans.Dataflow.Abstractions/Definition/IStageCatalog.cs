@@ -11,7 +11,7 @@ namespace Orleans.Dataflow.Definition;
 /// <para>
 /// A catalog is registered by deployment code at startup and is immutable afterwards. That is the
 /// property the provider boundary rests on: graph data names stages, a catalog resolves the names, and no
-/// document can add an entry, so no document can cause code loading (ADR 0001).
+/// document can add an entry, so no document can cause code loading.
 /// </para>
 /// <para>
 /// Lookup is total: an unregistered reference is a <see langword="false"/> answer, never an exception,
@@ -19,9 +19,9 @@ namespace Orleans.Dataflow.Definition;
 /// know. Reporting that is the graph compiler's <c>unknown-stage</c> diagnostic.
 /// </para>
 /// <para>
-/// The interface is the seam a heterogeneous or federated catalog will implement later. M0 ships one
-/// implementation, <see cref="StageCatalog"/>, and the graph compiler depends on this interface rather
-/// than on that class so the later ones need no change to the compiler.
+/// The interface is the seam a heterogeneous or federated catalog implements. One implementation ships
+/// here, <see cref="StageCatalog"/>, and the graph compiler depends on this interface rather than on that
+/// class, so another implementation needs no change to the compiler.
 /// </para>
 /// </remarks>
 public interface IStageCatalog

@@ -128,8 +128,9 @@ public sealed class OrleansDataflowHost
     /// The silo refused the document, or it registers no checkpoint store for a durable run to write to.
     /// </exception>
     /// <exception cref="PipelineResumeRefusedException">
-    /// The run identity is already declared for a different document. V1 continues one document per durable
-    /// run identity.
+    /// The run identity is already declared for a different document. One durable run identity continues
+    /// one document; a changed pipeline runs under a name of its own, or replaces this one deliberately
+    /// through <see cref="ReplaceDurableRunAsync"/>.
     /// </exception>
     /// <remarks>
     /// <para>
@@ -223,8 +224,8 @@ public sealed class OrleansDataflowHost
     /// <para>
     /// <b>The destructive spelling, and the only one.</b> <see cref="MaterializeDurableAsync"/> refuses a run
     /// identity that already holds a different document, by name and with both fingerprints, because
-    /// migrating a checkpoint across a changed graph is a recorded deferral rather than something a cluster
-    /// will guess at (ADR 0007). This is what a deployment says when it means the other thing: <b>the stored
+    /// a position taken of one graph does not describe another, and no cluster will guess at a migration.
+    /// This is what a deployment says when it means the other thing: <b>the stored
     /// checkpoint is cleared</b>, the previous attempt is <b>superseded by a fresh epoch</b>, and the
     /// document runs from the beginning under the name it took over.
     /// </para>

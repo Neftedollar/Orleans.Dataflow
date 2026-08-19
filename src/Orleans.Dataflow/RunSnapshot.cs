@@ -7,11 +7,10 @@ namespace Orleans.Dataflow;
 /// </summary>
 /// <remarks>
 /// <para>
-/// The monitor the M5 rows asked for, in its honest v1 shape: a reading of state the run already keeps,
-/// taken at a moment, with no new instrumentation inside any stage. Per-scope observability — which scope
-/// dropped what — is the recorded M5.1 deferral and stays one; a graph with three supervised scopes reports
-/// one <see cref="SupervisedFailures"/> for all of them, and this type says so rather than implying more
-/// resolution than exists.
+/// A reading of state the run already keeps, taken at a moment, with no new instrumentation inside any
+/// stage. There is no per-scope resolution: which scope dropped what is not recorded anywhere, so a graph
+/// with three supervised scopes reports one <see cref="SupervisedFailures"/> for all of them, and this
+/// type says so rather than implying more resolution than exists.
 /// </para>
 /// <para>
 /// A snapshot is a value and does not update. Two snapshots taken around an interval are how a rate is
@@ -29,7 +28,7 @@ public sealed record RunSnapshot
     /// The count covers the boundaries the engine owns: declared buffers and the ingress queues that are
     /// runtime controls. A registered adapter that keeps a private ingress of its own — the stream,
     /// broadcast, observer, and reminder sources do — counts its drops inside the adapter, and those are
-    /// not yet folded into this number; that seam is recorded as a deferral rather than papered over here.
+    /// not folded into this number, which is stated here rather than papered over.
     /// </remarks>
     public required long DroppedElements { get; init; }
 

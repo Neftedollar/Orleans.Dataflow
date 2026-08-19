@@ -7,7 +7,7 @@ namespace Orleans.Dataflow;
 /// </summary>
 /// <remarks>
 /// <para>
-/// One record per concern, never one options bag (ADR 0004 section 7). Deduplication is the first operator
+/// One record per concern, never one options bag. Deduplication is the first operator
 /// whose memory grows with the data rather than with the graph, so it gets a bound of its own rather than a
 /// share of somebody else's.
 /// </para>

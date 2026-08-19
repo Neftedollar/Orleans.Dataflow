@@ -10,7 +10,7 @@ namespace Orleans.Dataflow;
 /// <remarks>
 /// <para>
 /// A registered stage is named in a document and resolved from a catalog, which is what makes it
-/// deployable and what keeps graph data from causing code loading (ADR 0001). What it is not, by itself,
+/// deployable and what keeps graph data from causing code loading. What it is not, by itself,
 /// is typed: a specification declares contracts, and contracts are not CLR types. Pairing a specification
 /// with <see cref="ElementContract{T}"/> declarations is how a registered stage joins the same typed chain
 /// a lambda stage composes in.
@@ -32,7 +32,7 @@ namespace Orleans.Dataflow;
 /// </para>
 /// <para>
 /// The factories live on a non-generic class so that type arguments are written only where they cannot be
-/// inferred, which for these is only the result-bearing sink's pair, per ADR 0004 section 1.
+/// inferred, which for these is only the result-bearing sink's pair.
 /// </para>
 /// </remarks>
 public static class RegisteredStage

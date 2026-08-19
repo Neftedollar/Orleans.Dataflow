@@ -12,7 +12,7 @@ namespace Orleans.Dataflow;
 /// </para>
 /// <para>
 /// <b>Completion and shutdown are intrinsics.</b> Every run completes and every run can be stopped, so
-/// neither is a declared result an author has to name (ADR 0004 section 5). <see cref="Completion"/>,
+/// neither is a declared result an author has to name. <see cref="Completion"/>,
 /// <see cref="ShutdownAsync"/>, and <see cref="DisposeAsync"/> are members of the handle; result slots are
 /// reserved for what stages produce.
 /// </para>
@@ -20,9 +20,8 @@ namespace Orleans.Dataflow;
 /// <b>Stopping has two meanings and they are different on purpose.</b> Shutdown is graceful: the run stops
 /// pulling and completes as if the source had ended, so a fold resolves its slot with the state it has
 /// accumulated. Cancellation is not: the run stops and its slots cancel with it, resolving nothing. This
-/// checkpoint spells them <see cref="ShutdownAsync"/> and the cancellation token given at materialization
-/// (or <see cref="DisposeAsync"/>); they are the seed of the drain-and-abort vocabulary the milestone will
-/// grow.
+/// is why they are two spellings: <see cref="ShutdownAsync"/> for the graceful one, and the cancellation
+/// token given at materialization (or <see cref="DisposeAsync"/>) for the abrupt one.
 /// </para>
 /// <para>
 /// <b>Pausing is neither of them.</b> <see cref="PauseAsync"/> stops the run without ending it and
@@ -41,7 +40,7 @@ namespace Orleans.Dataflow;
 /// monitor: one reading of where the run is and what its counters have reached.
 /// </para>
 /// <para>
-/// <b>What this checkpoint does not do.</b> There is no abort distinct from cancellation, and nothing here
+/// <b>What this handle does not do.</b> There is no abort distinct from cancellation, and nothing here
 /// consults a clock.
 /// </para>
 /// </remarks>
@@ -87,10 +86,9 @@ public sealed class RunHandle : IAsyncDisposable
     /// rethrows the failure, which is the right shape for code that treats a failed run as its own failure.
     /// This task <em>resolves</em> with the outcome instead — a failed run's watch completes successfully,
     /// carrying the failure's type name and message as facts to read — which is the right shape for code
-    /// that reacts to endings: a coordinator restarting whatever ends, a log line, a metric. ADR 0007 names
-    /// this affordance <c>WatchTermination</c>, and ADR 0002 explains why it is a member of the handle and
-    /// not a result slot: a slot resolves at the end of a run and carries the run's outcome, so a slot
-    /// typed "how it ended" could never resolve to "failed".
+    /// that reacts to endings: a coordinator restarting whatever ends, a log line, a metric. It is a member
+    /// of the handle and not a result slot, because a slot resolves at the end of a run and carries the
+    /// run's outcome — so a slot typed "how it ended" could never resolve to "failed".
     /// </para>
     /// <para>
     /// Cancellation is not an ending — it abandons a run rather than finishing one — so the watch of a
@@ -206,7 +204,7 @@ public sealed class RunHandle : IAsyncDisposable
     /// A slot is accepted only when it was declared by the very graph instance this is a run of. The
     /// document fingerprint is checked first and identifies shape; the built graph's instance identity is
     /// checked after it, because two lambda graphs of one shape share a fingerprint whatever their
-    /// delegates compute (ADR 0004 section 4). The two are reported separately, so the message says which
+    /// delegates compute. The two are reported separately, so the message says which
     /// of the two identities disagreed.
     /// </para>
     /// </remarks>
@@ -307,9 +305,8 @@ public sealed class RunHandle : IAsyncDisposable
     /// run whose source has simply gone quiet are indistinguishable from the outside, and an author who
     /// wanted to tell them apart would have to keep their own flag beside the handle and hope it agreed
     /// with the runtime. One honest bool, documented as a reading, is a smaller lie than that. It is
-    /// deliberately not the first member of a state enumeration: the vocabulary of run lifecycle states
-    /// belongs to the supervision milestone, and inventing one here to hold a single fact would fix names
-    /// that have not been designed yet.
+    /// deliberately not the first member of a state enumeration: this API has no run-lifecycle-state
+    /// vocabulary, and inventing one here to hold a single fact would fix names nothing else uses.
     /// </para>
     /// <para>
     /// A run that has been asked to stop reports <see langword="false"/>, whether it was cancelled, shut

@@ -12,7 +12,7 @@ namespace Orleans.Dataflow.Definition;
 /// <para>
 /// The catalog is closed the moment it is created: there is no add, no remove, and no mutable backing
 /// collection, so a graph being validated cannot change what the catalog resolves while it is being
-/// validated (ADR 0001).
+/// validated.
 /// </para>
 /// <para>
 /// A catalog is canonical by construction. <see cref="Create"/> sorts the specifications ordinally by

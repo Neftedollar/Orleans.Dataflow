@@ -20,7 +20,7 @@ namespace Orleans.Dataflow.Hosting;
 /// either runtime.
 /// </para>
 /// <para>
-/// The catalog and the factory are separate on purpose (ADR 0001). A catalog says which stages exist and
+/// The catalog and the factory are separate on purpose. A catalog says which stages exist and
 /// what their documents may say, and validating a document needs nothing else — which is what lets a
 /// process that cannot execute a graph still check one. A factory says what a stage does, and only a host
 /// that will run the graph needs it.

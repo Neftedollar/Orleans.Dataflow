@@ -77,9 +77,8 @@ public readonly record struct GraphEdge : IComparable<GraphEdge>, IComparable
     /// </exception>
     /// <remarks>
     /// Both endpoints naming one node is a self-loop, and a self-loop is a cycle of one node rather than a
-    /// shape of its own. M0 refused it here because no validator could yet reason about a cycle at all;
-    /// ADR 0005 subsumes that refusal into the cycle rule, so an edge is now built and the runtime that has
-    /// to execute the loop is what decides whether it can — a cycle is legal exactly when it passes a
+    /// shape of its own. The edge is therefore built here, and the runtime that has to execute the loop is
+    /// what decides whether it can — a cycle is legal exactly when it passes a
     /// boundary that can answer without room below it, and one node's output feeding its own input is
     /// tested by that rule like any other loop rather than by a special case here.
     /// </remarks>

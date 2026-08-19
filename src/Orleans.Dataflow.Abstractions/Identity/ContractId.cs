@@ -7,7 +7,7 @@ namespace Orleans.Dataflow.Identity;
 /// <para>
 /// Contracts identify port element shapes and node parameter shapes. Contract identity is always
 /// explicit and stable; an assembly-qualified CLR type name is never used as contract identity,
-/// because it is neither language-neutral nor stable across refactoring (ADR 0001).
+/// because it is neither language-neutral nor stable across refactoring.
 /// </para>
 /// <para>
 /// The value is a single identifier segment: <c>[a-z0-9]+(-[a-z0-9]+)*</c>, 1 to 64 characters of

@@ -20,8 +20,8 @@ namespace Orleans.Dataflow.Adapters;
 /// cancelled the grain side either — which is exactly why the stage carries a timeout of its own.
 /// </para>
 /// <para>
-/// The exception reaches a remote caller as its type name and its message rather than as itself, per the
-/// phase-1 rule that a run's failure crosses a grain boundary as text.
+/// The exception reaches a remote caller as its type name and its message rather than as itself, because
+/// a run's failure crosses a grain boundary as text.
 /// </para>
 /// </remarks>
 public sealed class GrainCallTimeoutException : Exception

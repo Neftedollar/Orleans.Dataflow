@@ -58,9 +58,9 @@ public readonly record struct CapabilityToken : IComparable<CapabilityToken>, IC
     /// Auto-allocated sequential node ids are deterministic for one authoring pass but not edit-stable:
     /// inserting a stage renumbers everything after it. A graph that declares this token therefore has no
     /// identities a durable pipeline could anchor checkpoints, upgrades, or resumes to, and deployability
-    /// validation rejects it for durable use (ADR 0004 section 6). The token is orthogonal to
-    /// <see cref="Nondeployable"/>: a fully named graph of lambdas is nondeployable but not ephemeral, and
-    /// a pipeline of registered stages with unnamed occurrences is the reverse.
+    /// validation rejects it for durable use. The token is orthogonal to <see cref="Nondeployable"/>: a fully
+    /// named graph of lambdas is nondeployable but not ephemeral, and a pipeline of registered stages with
+    /// unnamed occurrences is the reverse.
     /// </remarks>
     public static CapabilityToken EphemeralIdentity { get; } = new(EphemeralIdentityText);
 

@@ -237,8 +237,8 @@ public static class GraphFragmentComposer
     /// Nothing here judges what the new edge means. A fragment does not know which stage is upstream of
     /// which — that is the document's edge set to state and the planner's to read — so wiring an output back
     /// to an input the stream already passed through builds a cycle, deliberately and without comment, and a
-    /// self-loop is simply the one-node case of that: ADR 0005 subsumed its old special refusal into the
-    /// cycle rule, so the loop is built here and judged where every loop is judged. What is checked is what
+    /// self-loop is simply the one-node case of that: it is a cycle like any other rather than a shape with
+    /// a rule of its own, so the loop is built here and judged where every loop is judged. What is checked is what
     /// a fragment can check: both ports are open and both are declared.
     /// </para>
     /// <para>
