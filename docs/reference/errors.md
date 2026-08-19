@@ -22,7 +22,7 @@ every pipeline to be Orleans-serializable — and then a run whose stage threw a
 unprepared exception would fail to report that it had failed.
 
 **Seventeen public exception types ship**, in four assemblies: six in
-`Orleans.Dataflow`, seven in `Orleans.Dataflow.Orleans`, one in
+`Orleans.Dataflow`, seven in `Orleans.Dataflow.Cluster`, one in
 `Orleans.Dataflow.Abstractions`, and three in `Orleans.Dataflow.Testing`. Seven of
 them end a run; the rest refuse something before a run exists, report a run that
 already ended, or belong to the testing package.
@@ -35,13 +35,13 @@ already ended, or belong to the testing package.
 | [`RateLimitExceededException`](#ratelimitexceededexception) | `Orleans.Dataflow` | ✅ |
 | [`StreamTimeoutException`](#streamtimeoutexception) | `Orleans.Dataflow` | ✅ |
 | [`CheckpointConflictException`](#checkpointconflictexception) | `Orleans.Dataflow` | ✅ |
-| [`GrainCallTimeoutException`](#graincalltimeoutexception) | `Orleans.Dataflow.Orleans` | ✅ |
-| [`PipelineRejectedException`](#pipelinerejectedexception) | `Orleans.Dataflow.Orleans` | nothing started |
-| [`PipelineResumeRefusedException`](#pipelineresumerefusedexception) | `Orleans.Dataflow.Orleans` | nothing started |
-| [`PipelineFencingException`](#pipelinefencingexception) | `Orleans.Dataflow.Orleans` | the call is refused |
-| [`PipelineRunFailedException`](#pipelinerunfailedexception) | `Orleans.Dataflow.Orleans` | reports one that did |
-| [`PipelineRunLostException`](#pipelinerunlostexception) | `Orleans.Dataflow.Orleans` | reports one that is gone |
-| [`ResultTooLargeException`](#resulttoolargeexception) | `Orleans.Dataflow.Orleans` | ❌ — the read fails, the run does not |
+| [`GrainCallTimeoutException`](#graincalltimeoutexception) | `Orleans.Dataflow.Cluster` | ✅ |
+| [`PipelineRejectedException`](#pipelinerejectedexception) | `Orleans.Dataflow.Cluster` | nothing started |
+| [`PipelineResumeRefusedException`](#pipelineresumerefusedexception) | `Orleans.Dataflow.Cluster` | nothing started |
+| [`PipelineFencingException`](#pipelinefencingexception) | `Orleans.Dataflow.Cluster` | the call is refused |
+| [`PipelineRunFailedException`](#pipelinerunfailedexception) | `Orleans.Dataflow.Cluster` | reports one that did |
+| [`PipelineRunLostException`](#pipelinerunlostexception) | `Orleans.Dataflow.Cluster` | reports one that is gone |
+| [`ResultTooLargeException`](#resulttoolargeexception) | `Orleans.Dataflow.Cluster` | ❌ — the read fails, the run does not |
 | [`GraphDocumentFormatException`](#graphdocumentformatexception) | `Orleans.Dataflow.Abstractions` | nothing started |
 | [`FaultInjectedException`](#the-testing-package) | `Orleans.Dataflow.Testing` | ✅ (that is its job) |
 | [`ProbeTerminatedException`](#the-testing-package) | `Orleans.Dataflow.Testing` | ❌ |

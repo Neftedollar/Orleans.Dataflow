@@ -128,7 +128,7 @@ let normalizeOrders : Flow<OrderCreated, OrderDocument> =
 
 Source options, flow/operator options, and sink options must be separately named and typed. `Task`, `ValueTask`, and F# `Async` operators must be distinct enough for reliable type inference. A computation expression may later provide optional declaration sugar, but it is not the foundation of graph composition.
 
-An optional future `Orleans.Dataflow.OrleansFSharp` package may integrate with the functional grain contracts from Orleans.FSharp specification 003. The core project does not depend on Orleans.FSharp.
+An optional future `Orleans.Dataflow.ClusterFSharp` package may integrate with the functional grain contracts from Orleans.FSharp specification 003. The core project does not depend on Orleans.FSharp.
 
 ## Constraints
 

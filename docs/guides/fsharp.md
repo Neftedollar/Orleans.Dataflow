@@ -42,8 +42,7 @@ let! count = run |> Run.value processed cancellationToken
 
 do! run.Completion
 
-// A run handle is IAsyncDisposable and nothing else, which a `use` inside a task expression
-// rejects, so the disposal is written out.
+// A run handle is IAsyncDisposable, and disposing it stops the run and waits for it.
 do! run.DisposeAsync()
 ```
 
@@ -203,20 +202,32 @@ Everything you need from that namespace is written out in full instead:
 Every file in the F# sample carries a comment saying exactly this, which is a fair
 measure of how often it comes up.
 
-### 2. `do! run.DisposeAsync()`, not `use`
+### 2. `use!`, not `let!`, for a run handle
 
-A run handle is `IAsyncDisposable` and nothing else, and `use` inside a `task`
-expression rejects that. Write the disposal out on every path:
+A run handle implements `IAsyncDisposable` and nothing else, and disposing it
+stops the run and waits for it — so a `task` that returns without disposing
+leaves a run going. Bind it with `use!` and the scope does that for you:
+
+```fsharp
+use! run = host.MaterializeAsync(graph, cancellationToken)
+
+let! count = run |> Run.value processed cancellationToken
+do! run.Completion
+```
+
+`use!` binds what the awaited call produced and disposes it when the expression
+ends — including when it ends because something threw. That last part is the
+reason to prefer it: the hand-written form
 
 ```fsharp
 let! run = host.MaterializeAsync(graph, cancellationToken)
-
-do! run.Completion
+// …
 do! run.DisposeAsync()
 ```
 
-Disposing stops the run and waits for it, so a `task` that returns without
-disposing leaves a run going.
+is correct only while nothing between the two lines fails, and leaves the run
+alive if anything does. Write it out by hand only when the handle must outlive
+the block, or when you need to dispose at a point of your choosing.
 
 ### 3. Tuples where C# has `out`
 

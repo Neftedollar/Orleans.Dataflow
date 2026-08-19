@@ -287,7 +287,7 @@ A computation expression may later be added as optional syntax for declarations,
 
 ## Orleans.FSharp specification-003 integration
 
-An optional `Orleans.Dataflow.OrleansFSharp` package may adapt functional grain contracts without making them part of the core dependency graph.
+An optional `Orleans.Dataflow.ClusterFSharp` package may adapt functional grain contracts without making them part of the core dependency graph.
 
 The adapter must preserve:
 

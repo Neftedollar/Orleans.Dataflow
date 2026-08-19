@@ -67,7 +67,7 @@ cannot break when Orleans releases, because they cannot see Orleans.
 |---|---|---|
 | `Orleans.Dataflow.Abstractions` | The language-neutral contracts: [graph documents](../reference/glossary.md#graph-document), identities, [canonical JSON](../reference/glossary.md#canonical-json), the validator. Namespaces `Definition`, `Identity`, `Serialization`, `Compilation`. | Nothing. |
 | `Orleans.Dataflow` | Authoring (`Source`, `Flow`, `Sink`) and the local engine (`LocalDataflowHost`, `RunHandle`). Namespaces `Orleans.Dataflow`, `Authoring`, `Adapters`, `Hosting`. | `Orleans.Dataflow.Abstractions`. |
-| `Orleans.Dataflow.Orleans` | Cluster hosting: `AddOrleansDataflow`, `OrleansDataflowHost`, `OrleansRunHandle`, the grains behind them. | `Orleans.Dataflow` and the Orleans packages. |
+| `Orleans.Dataflow.Cluster` | Cluster hosting: `AddOrleansDataflow`, `OrleansDataflowHost`, `OrleansRunHandle`, the grains behind them. | `Orleans.Dataflow` and the Orleans packages. |
 | `Orleans.Dataflow.FSharp` | The F# frontend: the `Source`, `Flow`, `Sink`, `Branch`, `Pipeline` and `Run` modules. | `Orleans.Dataflow` and `FSharp.Core`. |
 | `Orleans.Dataflow.Testing` | Probes for tests: `TestSource`, `TestSink`, `TestFlow`, `TestClock`, `InMemoryCheckpointStore`, and the provider conformance kit. | `Orleans.Dataflow`. |
 
@@ -80,7 +80,7 @@ Two things about that table catch people out.
 the clue — this table is.
 
 **References are transitive, so you name one.** Referencing
-`Orleans.Dataflow.Orleans` gets you the core and the abstractions for free. You
+`Orleans.Dataflow.Cluster` gets you the core and the abstractions for free. You
 never need to list all three.
 
 ## Which one you need
@@ -88,8 +88,8 @@ never need to list all three.
 | What you are doing | Reference |
 |---|---|
 | Building and running pipelines in your own process | `Orleans.Dataflow` |
-| Running pipelines on a [silo](../reference/glossary.md#silo), or writing the client that starts them | `Orleans.Dataflow.Orleans` |
-| Authoring in F# | `Orleans.Dataflow.FSharp` (add `Orleans.Dataflow.Orleans` too if you also host) |
+| Running pipelines on a [silo](../reference/glossary.md#silo), or writing the client that starts them | `Orleans.Dataflow.Cluster` |
+| Authoring in F# | `Orleans.Dataflow.FSharp` (add `Orleans.Dataflow.Cluster` too if you also host) |
 | Writing tests for a pipeline | `Orleans.Dataflow.Testing`, in the test project only |
 | Writing a custom stage that others deploy | `Orleans.Dataflow` — the seam lives in the core assembly, so a stage provider never references Orleans |
 
@@ -208,7 +208,7 @@ it. If you do, you get `warning NU1504: Duplicate 'PackageReference' items found
 |---|---|
 | `error: There are no versions available for the package 'Orleans.Dataflow'.` | You tried `dotnet add package`. There is no package; use a `ProjectReference`. |
 | `error NETSDK1045: The current .NET SDK does not support targeting .NET 10.0` | Your SDK is older than 10. `dotnet --list-sdks` will say so. |
-| `error CS0246: The type or namespace name 'OrleansDataflowHost' could not be found` | You referenced `Orleans.Dataflow` but that type lives in `Orleans.Dataflow.Orleans`. See the table above — the namespace they share is `Orleans.Dataflow.Hosting`. |
+| `error CS0246: The type or namespace name 'OrleansDataflowHost' could not be found` | You referenced `Orleans.Dataflow` but that type lives in `Orleans.Dataflow.Cluster`. See the table above — the namespace they share is `Orleans.Dataflow.Hosting`. |
 | `warning NU1504: Duplicate 'PackageReference' items ... FSharp.Core` | An F# project with its own `FSharp.Core` reference. Remove it; the SDK supplies a newer one. |
 | `error NETSDK1022: Duplicate 'Compile' items were included` | The F# console template as generated. It both lists `Program.fs` and lets the SDK glob it, and it fails on an empty project before this library is involved. Set `EnableDefaultCompileItems` to `false`. |
 

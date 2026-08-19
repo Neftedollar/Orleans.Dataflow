@@ -335,7 +335,7 @@ existing separately from the replacement one.
 - The checkpoint-hold histogram returns to its usual shape.
 
 All of this is measured by
-[`DurableStoreOutageTests`](../../tests/Orleans.Dataflow.OrleansTests/Cluster/DurableStoreOutageTests.cs).
+[`DurableStoreOutageTests`](../../tests/Orleans.Dataflow.ClusterTests/Cluster/DurableStoreOutageTests.cs).
 
 ### If a run keeps failing after the store is healthy
 

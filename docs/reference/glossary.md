@@ -19,6 +19,7 @@ reads as a short story, and the index below jumps into it.
 [epoch](#epoch) · [ETag](#etag) · [fencing](#fencing) ·
 [fingerprint](#fingerprint) · [Flow](#flow) · [fork](#fork) ·
 [fragment](#fragment) · [grain](#grain) · [graph document](#graph-document) ·
+[graph identity](#graph-identity) ·
 [group-by](#group-by) · [interleave](#interleave) · [junction](#junction) ·
 [local stage](#local-stage) · [mark](#mark) · [materialize](#materialize) ·
 [merge](#merge) · [node](#node) · [occurrence](#occurrence) ·
@@ -172,11 +173,25 @@ A `PipelineDefinition`: a `RunnableGraph` that has been given an identity and a
 check that everything in it can be resolved by name rather than by delegate. A
 pipeline is what a cluster can run.
 
+### graph identity
+
+A pipeline's name, spelled `GraphId`, and the same across every version of that
+pipeline. It is validated when you create it — lowercase ASCII letters, digits,
+and interior hyphens — because an identifier that reaches a document, a grain
+key, and a stored checkpoint is worth refusing early rather than at first use.
+A `RunnableGraph` has no identity; giving it one with `AsPipeline` is part of
+what turns it into a [pipeline](#pipeline).
+
 ### revision
 
-A number you increase when a pipeline's shape changes. It sits beside the
-identity, and it is what a durable run compares against when deciding whether
-the thing it stored still describes the thing you are asking for.
+The version of a pipeline's *shape*, spelled `GraphRevision`, starting at one.
+You increase it when you change what the pipeline does. It sits beside the
+[graph identity](#graph-identity), and the two answer different questions:
+the identity says *which pipeline*, the revision says *which version of it*.
+A [durable run](#durable-run) is why they are separate — it continues the same
+name at the same revision, so the name is what lets a stored position find its
+pipeline again, and the revision is what stops a position taken of one shape
+being handed to another.
 
 ### local stage
 

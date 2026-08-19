@@ -19,7 +19,7 @@
     -->
     <PackageReference Include="Microsoft.Orleans.TestingHost" />
     <ProjectReference Include="../../src/Orleans.Dataflow/Orleans.Dataflow.csproj" />
-    <ProjectReference Include="../../src/Orleans.Dataflow.Orleans/Orleans.Dataflow.Orleans.csproj" />
+    <ProjectReference Include="../../src/Orleans.Dataflow.Cluster/Orleans.Dataflow.Cluster.csproj" />
     <!-- The shipped in-memory checkpoint store, which is what the recovery scenario resumes through. -->
     <ProjectReference Include="../../src/Orleans.Dataflow.Testing/Orleans.Dataflow.Testing.csproj" />
   </ItemGroup>

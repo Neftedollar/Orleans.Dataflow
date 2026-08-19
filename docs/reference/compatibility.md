@@ -31,7 +31,7 @@ deliberate decisions rather than accidents.
 | `Orleans.Dataflow` | the authoring surface, the local runtime, the provider seam, the .NET adapters | `Orleans.Dataflow.Abstractions` |
 | `Orleans.Dataflow.FSharp` | the F# frontend | `Orleans.Dataflow`, `FSharp.Core` |
 | `Orleans.Dataflow.Testing` | probes, a fault point, a marking sink, an in-memory checkpoint store, a test clock, the provider conformance kit | `Orleans.Dataflow` |
-| `Orleans.Dataflow.Orleans` | the grains, the cluster host, the Orleans adapters | `Orleans.Dataflow` plus Orleans |
+| `Orleans.Dataflow.Cluster` | the grains, the cluster host, the Orleans adapters | `Orleans.Dataflow` plus Orleans |
 
 ### Where Orleans can couple, and where it cannot
 
@@ -43,7 +43,7 @@ Orleans package references are isolated to one assembly by construction:
 | `Orleans.Dataflow` | none |
 | `Orleans.Dataflow.Testing` | none |
 | `Orleans.Dataflow.FSharp` | none (`FSharp.Core` only) |
-| `Orleans.Dataflow.Orleans` | `Microsoft.Orleans.Sdk`, `.Server`, `.Streaming`, `.BroadcastChannel`, `.Reminders` |
+| `Orleans.Dataflow.Cluster` | `Microsoft.Orleans.Sdk`, `.Server`, `.Streaming`, `.BroadcastChannel`, `.Reminders` |
 
 **The definition plane, the local runtime, the provider kit, and the F# frontend
 cannot break with an Orleans release, because they cannot see one.** A deployment
@@ -51,7 +51,7 @@ that pins a different Orleans 10.x patch than 10.2.2 is expected to work under
 Orleans' own compatibility discipline; it is not in the tested set until this
 table says so.
 
-`Orleans.Dataflow.Orleans` additionally carries a **generated** public surface:
+`Orleans.Dataflow.Cluster` additionally carries a **generated** public surface:
 the Orleans code generator emits public codec and proxy types (`OrleansCodeGen.*`)
 into the assembly, and their signatures name Orleans runtime types directly. That
 surface belongs to the Orleans SDK that emitted it, is coupled to its version, and
@@ -69,13 +69,13 @@ reference. This table is:
 |---|---|
 | `Orleans.Dataflow` | `Orleans.Dataflow` |
 | `Orleans.Dataflow.Authoring` | `Orleans.Dataflow` |
-| `Orleans.Dataflow.Adapters` | `Orleans.Dataflow` **and** `Orleans.Dataflow.Orleans` |
-| `Orleans.Dataflow.Hosting` | `Orleans.Dataflow` **and** `Orleans.Dataflow.Orleans` |
+| `Orleans.Dataflow.Adapters` | `Orleans.Dataflow` **and** `Orleans.Dataflow.Cluster` |
+| `Orleans.Dataflow.Hosting` | `Orleans.Dataflow` **and** `Orleans.Dataflow.Cluster` |
 | `Orleans.Dataflow.Definition` | `Orleans.Dataflow.Abstractions` |
 | `Orleans.Dataflow.Identity` | `Orleans.Dataflow.Abstractions` |
 | `Orleans.Dataflow.Serialization` | `Orleans.Dataflow.Abstractions` |
 | `Orleans.Dataflow.Compilation` | `Orleans.Dataflow.Abstractions` |
-| `Orleans.Dataflow.Grains` | `Orleans.Dataflow.Orleans` |
+| `Orleans.Dataflow.Grains` | `Orleans.Dataflow.Cluster` |
 | `Orleans.Dataflow.Testing` | `Orleans.Dataflow.Testing` |
 | `Orleans.Dataflow.FSharp` | `Orleans.Dataflow.FSharp` |
 
@@ -134,7 +134,7 @@ and it is guarded twice:
   invoking grain methods directly is on the wire protocol, not the API.
 - **Internals reached through friend grants.** The `InternalsVisibleTo` list
   exists so the F# frontend binds to the shared core and the test suites see the
-  seams: `Orleans.Dataflow` grants to `Orleans.Dataflow.Orleans`,
+  seams: `Orleans.Dataflow` grants to `Orleans.Dataflow.Cluster`,
   `Orleans.Dataflow.Testing`, `Orleans.Dataflow.FSharp`, and the four test
   assemblies. Internals are not a compatibility surface and not a security
   boundary. The grants are unkeyed because the assemblies are not strong-named —
@@ -231,7 +231,7 @@ established with the trim and AOT analyzers:
 |---|---|
 | `Orleans.Dataflow.Abstractions` | analyzer-clean. |
 | `Orleans.Dataflow` | one genuine reflection site remains: the delegate adapter closes generic templates over types recovered at run time, which is inherent to a delegate-based authoring surface, not an oversight. |
-| `Orleans.Dataflow.Orleans` | cannot claim compatibility regardless of this repository's code — Orleans 10.2.2 itself carries no `IsTrimmable` or `IsAotCompatible` annotation on any of the assemblies this library references, so reference-compatibility checks warn on every one of them. |
+| `Orleans.Dataflow.Cluster` | cannot claim compatibility regardless of this repository's code — Orleans 10.2.2 itself carries no `IsTrimmable` or `IsAotCompatible` annotation on any of the assemblies this library references, so reference-compatibility checks warn on every one of them. |
 | `Orleans.Dataflow.Testing` | the provider conformance kit reflects over provider assemblies by design; it is a diagnostic tool. |
 | `Orleans.Dataflow.FSharp` | the IL analyzers do not run under the F# compiler, so a claim here would be unverified by tooling; none is made. |
 

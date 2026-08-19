@@ -25,7 +25,7 @@ Orleans package references are isolated to one assembly by construction:
 | `Orleans.Dataflow` | none |
 | `Orleans.Dataflow.Testing` | none |
 | `Orleans.Dataflow.FSharp` | none (`FSharp.Core` only) |
-| `Orleans.Dataflow.Orleans` | `Microsoft.Orleans.Sdk`, `.Server`, `.Streaming`, `.BroadcastChannel`, `.Reminders` |
+| `Orleans.Dataflow.Cluster` | `Microsoft.Orleans.Sdk`, `.Server`, `.Streaming`, `.BroadcastChannel`, `.Reminders` |
 
 The definition plane, the local runtime, the provider kit, and the F#
 frontend cannot break with an Orleans release, because they cannot see one.
@@ -33,7 +33,7 @@ A deployment that pins a different Orleans 10.x patch than `10.2.2` is
 expected to work under Orleans' own compatibility discipline; it is not in
 the tested set until this table says so.
 
-`Orleans.Dataflow.Orleans` additionally carries a **generated** public
+`Orleans.Dataflow.Cluster` additionally carries a **generated** public
 surface: the Orleans code generator emits public codec and proxy types
 (`OrleansCodeGen.*`) into the assembly, and their signatures name Orleans
 runtime types directly. That surface belongs to the Orleans SDK that emitted
@@ -50,13 +50,13 @@ what to reference. This table is:
 |---|---|
 | `Orleans.Dataflow` | `Orleans.Dataflow` |
 | `Orleans.Dataflow.Authoring` | `Orleans.Dataflow` |
-| `Orleans.Dataflow.Adapters` | `Orleans.Dataflow` **and** `Orleans.Dataflow.Orleans` |
-| `Orleans.Dataflow.Hosting` | `Orleans.Dataflow` **and** `Orleans.Dataflow.Orleans` |
+| `Orleans.Dataflow.Adapters` | `Orleans.Dataflow` **and** `Orleans.Dataflow.Cluster` |
+| `Orleans.Dataflow.Hosting` | `Orleans.Dataflow` **and** `Orleans.Dataflow.Cluster` |
 | `Orleans.Dataflow.Definition` | `Orleans.Dataflow.Abstractions` |
 | `Orleans.Dataflow.Identity` | `Orleans.Dataflow.Abstractions` |
 | `Orleans.Dataflow.Serialization` | `Orleans.Dataflow.Abstractions` |
 | `Orleans.Dataflow.Compilation` | `Orleans.Dataflow.Abstractions` |
-| `Orleans.Dataflow.Grains` | `Orleans.Dataflow.Orleans` |
+| `Orleans.Dataflow.Grains` | `Orleans.Dataflow.Cluster` |
 | `Orleans.Dataflow.Testing` | `Orleans.Dataflow.Testing` |
 | `Orleans.Dataflow.FSharp` | `Orleans.Dataflow.FSharp` |
 
@@ -160,7 +160,7 @@ assembly, established with the trim/AOT analyzers:
 - `Orleans.Dataflow` — one genuine reflection site remains: the delegate
   adapter closes generic templates over types recovered at runtime, which
   is inherent to a delegate-based authoring surface, not an oversight.
-- `Orleans.Dataflow.Orleans` — cannot claim compatibility regardless of
+- `Orleans.Dataflow.Cluster` — cannot claim compatibility regardless of
   this repo's code: Orleans `10.2.2` itself ships no `IsTrimmable` or AOT
   annotation on any of its twelve assemblies (verified with reference
   compatibility checks, which warn on every one).

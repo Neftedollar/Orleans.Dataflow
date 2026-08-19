@@ -34,6 +34,6 @@
     <ProjectReference Include="../../src/Orleans.Dataflow/Orleans.Dataflow.csproj" />
     <ProjectReference Include="../../src/Orleans.Dataflow.FSharp/Orleans.Dataflow.FSharp.fsproj" />
     <!-- The cluster scenario materializes its pipeline through the ordinary client host. -->
-    <ProjectReference Include="../../src/Orleans.Dataflow.Orleans/Orleans.Dataflow.Orleans.csproj" />
+    <ProjectReference Include="../../src/Orleans.Dataflow.Cluster/Orleans.Dataflow.Cluster.csproj" />
   </ItemGroup>
 </Project>

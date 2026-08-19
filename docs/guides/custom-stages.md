@@ -473,7 +473,7 @@ Where your stages need a host to build — because building one resolves a strea
 provider, or reads a cluster option — run the kit *inside* your test cluster,
 against the very container `AddOrleansDataflow` would hand its factory. That is
 what
-[`tests/Orleans.Dataflow.OrleansTests/Cluster/OrleansVocabularyConformanceTests.cs`](../../tests/Orleans.Dataflow.OrleansTests/Cluster/OrleansVocabularyConformanceTests.cs)
+[`tests/Orleans.Dataflow.ClusterTests/Cluster/OrleansVocabularyConformanceTests.cs`](../../tests/Orleans.Dataflow.ClusterTests/Cluster/OrleansVocabularyConformanceTests.cs)
 does for the shipped Orleans vocabulary.
 
 **What the kit does not prove.** It is structural. No test can check that an

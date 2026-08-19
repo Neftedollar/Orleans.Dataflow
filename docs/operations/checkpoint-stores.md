@@ -158,7 +158,7 @@ Five things to get right, in order of how much they cost when wrong:
 
 Test yours against the two failure modes rather than only the happy path. The
 shipped
-[`DurableStoreOutageTests`](../../tests/Orleans.Dataflow.OrleansTests/Cluster/DurableStoreOutageTests.cs)
+[`DurableStoreOutageTests`](../../tests/Orleans.Dataflow.ClusterTests/Cluster/DurableStoreOutageTests.cs)
 does exactly that with a store that can be told to refuse a fixed number of
 writes, and it is a good template.
 
@@ -227,7 +227,7 @@ rather than healing on its own. That is deliberate: the caller has to be able to
 see what the store did.
 
 All three behaviours are proven by
-[`DurableStoreOutageTests`](../../tests/Orleans.Dataflow.OrleansTests/Cluster/DurableStoreOutageTests.cs).
+[`DurableStoreOutageTests`](../../tests/Orleans.Dataflow.ClusterTests/Cluster/DurableStoreOutageTests.cs).
 
 ## What a store cannot give you
 

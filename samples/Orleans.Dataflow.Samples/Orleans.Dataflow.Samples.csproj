@@ -14,7 +14,7 @@
     -->
     <PackageReference Include="Microsoft.Orleans.Server" />
     <ProjectReference Include="../../src/Orleans.Dataflow/Orleans.Dataflow.csproj" />
-    <ProjectReference Include="../../src/Orleans.Dataflow.Orleans/Orleans.Dataflow.Orleans.csproj" />
+    <ProjectReference Include="../../src/Orleans.Dataflow.Cluster/Orleans.Dataflow.Cluster.csproj" />
     <!--
       The F# half of the sample, holding the F# authoring of every scenario and the small kernel both
       frontends share. Both authorings must run in one process, because comparing them is the whole point,

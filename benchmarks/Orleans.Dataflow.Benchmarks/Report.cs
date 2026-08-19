@@ -110,7 +110,7 @@ internal static class Report
         Row("claim", "evidence");
         Row(
             "rolling upgrade",
-            "tests/Orleans.Dataflow.OrleansTests/Cluster/RollingUpgradeTests.cs (M5.4), not re-measured here");
+            "tests/Orleans.Dataflow.ClusterTests/Cluster/RollingUpgradeTests.cs (M5.4), not re-measured here");
         Row(
             "bounded memory as a contract",
             "tests/Orleans.Dataflow.Tests/Runtime/BoundedMemoryTests.cs, which asserts on every build what this harness only prints");

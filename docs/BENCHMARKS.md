@@ -13,7 +13,7 @@ Three things produce what is written here, and they are not interchangeable:
 - **`tests/Orleans.Dataflow.Tests/Runtime/BoundedMemoryTests.cs`** asserts. It
   is where boundedness is a contract rather than an observation: it fails the
   build when a graph starts holding what its author did not declare.
-- **`tests/Orleans.Dataflow.OrleansTests/Cluster/`** holds the cluster
+- **`tests/Orleans.Dataflow.ClusterTests/Cluster/`** holds the cluster
   behaviour these numbers describe — failover, durable resume, rolling upgrade
   — as executable claims. The harness measures a *latency* over that behaviour
   and deliberately does not re-prove it.
@@ -164,7 +164,7 @@ to rely on:
   number of calls in flight and awaits each; the call itself is local. What an
   Orleans call costs is a measurement of Orleans.
 - **Rolling upgrade is not re-measured.** It is proven, not timed:
-  `tests/Orleans.Dataflow.OrleansTests/Cluster/RollingUpgradeTests.cs` (M5.4)
+  `tests/Orleans.Dataflow.ClusterTests/Cluster/RollingUpgradeTests.cs` (M5.4)
   is the evidence, and the harness prints a pointer to it rather than a number.
 
 ## Three things the instrument had to be taught

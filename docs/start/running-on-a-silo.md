@@ -10,7 +10,7 @@ About twenty-five minutes.
 ## Before you start
 
 - [ ] You have finished [Your first pipeline](first-pipeline.md).
-- [ ] A project that references `Orleans.Dataflow.Orleans`. That one reference
+- [ ] A project that references `Orleans.Dataflow.Cluster`. That one reference
       brings `Orleans.Dataflow`, the abstractions, `Microsoft.Orleans.Server
       10.2.2` and the .NET generic host with it — you name none of them
       separately:
@@ -24,12 +24,31 @@ About twenty-five minutes.
     <ImplicitUsings>enable</ImplicitUsings>
   </PropertyGroup>
   <ItemGroup>
-    <ProjectReference Include="../orleans-dataflow/src/Orleans.Dataflow.Orleans/Orleans.Dataflow.Orleans.csproj" />
+    <ProjectReference Include="../orleans-dataflow/src/Orleans.Dataflow.Cluster/Orleans.Dataflow.Cluster.csproj" />
   </ItemGroup>
 </Project>
 ```
 
 ## Step 1 — find out why your pipeline cannot go
+
+A graph that runs in your process needs no name: you hold it in a variable, and
+the variable is how you refer to it. A pipeline that runs somewhere else needs
+two things your variable cannot supply, so `AsPipeline` asks for both.
+
+- **`GraphId`** is the pipeline's *name*, and it stays the same across every
+  version of it. `GraphId.Create("weather-daily")` validates the text
+  immediately rather than at first use: lowercase ASCII letters, digits, and
+  interior hyphens, refused by name if you hand it anything else. It is a type
+  and not a `string` for the ordinary reason — the call takes two identifiers,
+  and two strings side by side is a mistake waiting to happen.
+- **`GraphRevision`** is the version of that pipeline's *shape*, starting at 1.
+  You increase it when you change what the pipeline does.
+
+Together they answer "which pipeline, in which version". A
+[durable run](../reference/glossary.md#durable-run) is the reason both exist
+separately: it continues the same name at the same revision, so the name is what
+lets a stored position find its pipeline again, and the revision is what stops a
+position taken of one shape being handed to another.
 
 Take the graph from the last page and try to give it an identity:
 

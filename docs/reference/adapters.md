@@ -14,7 +14,7 @@ is no external system behind an `IEnumerable<T>`, a bounded queue, or a `Take`.
 | Vocabulary | Package | Registered by | Stages |
 |---|---|---|---|
 | `dotnet` | `Orleans.Dataflow` | `AddDotnetStages()` | 2 |
-| `orleans` | `Orleans.Dataflow.Orleans` | any Orleans binding | 10 |
+| `orleans` | `Orleans.Dataflow.Cluster` | any Orleans binding | 10 |
 
 The `dotnet` vocabulary lives in the core package deliberately: nothing about a
 periodic tick or an `IObservable<T>` is an Orleans concept, so one registration
