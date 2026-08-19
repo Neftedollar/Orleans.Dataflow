@@ -589,21 +589,20 @@ internal sealed class LocalRun
 
         try
         {
-            canceled = segment.Elements is { } source
-                ? Pull(segment, index, source, ref elements)
-                : segment.Async is { } asynchronous
-                    ? Map(segment, index, asynchronous)
-                    : segment.MergeMap is { } merging
-                        ? Merge(segment, index, merging, inners!)
-                        : segment.FanOut is { } splitting
-                            ? splitting.Router is { } routing
-                                ? Route(segment, index, routing)
-                                : Fan(segment, index, splitting)
-                            : segment.FanIn is { } joining
-                                ? joining.Combiner is { } combining
-                                    ? Row(segment, index, joining, combining)
-                                    : Join(segment, index, joining)
-                                : Push(segment, index);
+            // The arms are tried in order and the order is the contract, because a segment can satisfy more
+            // than one of these tests: a head segment carrying a junction answers the first arm that matches
+            // it and no other. The last arm is the ordinary interior segment, which carries none of them.
+            canceled = segment switch
+            {
+                { Elements: { } source } => Pull(segment, index, source, ref elements),
+                { Async: { } asynchronous } => Map(segment, index, asynchronous),
+                { MergeMap: { } merging } => Merge(segment, index, merging, inners!),
+                { FanOut: { Router: { } routing } } => Route(segment, index, routing),
+                { FanOut: { } splitting } => Fan(segment, index, splitting),
+                { FanIn: { Combiner: { } combining } joining } => Row(segment, index, joining, combining),
+                { FanIn: { } joining } => Join(segment, index, joining),
+                _ => Push(segment, index),
+            };
 
             // Inside the try, because a residue travels through the author's own stages and an exception one
             // of them raises is this run's outcome exactly as an ordinary element's would be; and after the

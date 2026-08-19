@@ -1069,6 +1069,20 @@ internal sealed class OrleansStageFactory(
 /// and cannot narrow it, which is the safe direction; a bound of one makes the two coincide exactly, which
 /// is the arrangement the crash suite measures on.
 /// </para>
+/// <para>
+/// <b>The calls this window makes carry no run token, and that is a limit of the seam rather than a choice
+/// made here.</b> Every other grain call this provider builds is an asynchronous element stage, which the
+/// engine hands the run's token per element, and every one of them threads it. A terminal is handed a seed
+/// factory and a fold, and neither is given the run's tokens — <c>DataflowStageRuntime.Terminal</c> has no
+/// parameter that could carry them and the engine's own <c>LocalTerminal.Provided</c> drops the run context
+/// it is called with. So a call in flight here is bounded by the stage's declared timeout when it has one
+/// and by Orleans' response timeout when it has not, and by nothing else: cancelling the run does not reach
+/// it. Nor could a later hook repair it — the engine's terminal-closing callback runs from the code that
+/// settles a run, and a run does not settle until every segment has stopped, so a thread already blocked
+/// here is exactly the thread that would have to be released for the hook to be reached. What closes this
+/// gap is the seed factory receiving the run's tokens; until it does, the honest statement is this one, and
+/// <c>GOAL.md</c>'s claim that cancellation reaches in-flight asynchronous work reads as one path short.
+/// </para>
 /// </remarks>
 internal sealed class GrainCallWindow(
     IGrainCallSinkEntry call,
@@ -1082,6 +1096,12 @@ internal sealed class GrainCallWindow(
 
     /// <summary>Submits one element, waiting first if the bound is already reached.</summary>
     /// <param name="element">The element.</param>
+    /// <remarks>
+    /// The token is <see cref="CancellationToken.None"/> because a terminal is given no other one, which the
+    /// class remark states in full. It is spelled out here rather than left implied so that a reader who
+    /// compares this call with the three above it sees a seam that has no token to offer rather than a path
+    /// that declined the one it had.
+    /// </remarks>
     internal void Submit(object? element)
     {
         while (_inFlight.Count >= maxInFlight)
@@ -1125,9 +1145,19 @@ internal sealed class GrainCallWindow(
     /// <summary>Observes one finished call, raising what it raised and marking it if it answered.</summary>
     /// <param name="pending">The call.</param>
     /// <remarks>
+    /// <para>
     /// The order is the commit mark's whole contract: the reply is waited for, and only a reply that arrived
     /// advances the mark. A call that threw leaves the number where it was, so what a checkpoint stores is
     /// acknowledged work and never attempted work.
+    /// </para>
+    /// <para>
+    /// <b>The wait blocks the segment's own thread, and that is structural rather than lazy.</b> A terminal
+    /// in this engine is a synchronous fold: the fold returns the next state and has nowhere to put a
+    /// continuation, so the only way to make the reply happen before the next element is admitted is to hold
+    /// the thread the segment was given for exactly this. The stream sink beside this one blocks the same
+    /// way for the same reason. What the block costs is stated where it is paid: the thread is released when
+    /// the call answers, and nothing else releases it.
+    /// </para>
     /// </remarks>
     private void Settle(Task pending)
     {

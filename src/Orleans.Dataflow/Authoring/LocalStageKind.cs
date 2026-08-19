@@ -17,7 +17,9 @@ namespace Orleans.Dataflow.Authoring;
 /// The members are grouped by what a shape does to a chain: the shapes that begin one, the shapes that
 /// transform elements inside one, the shapes that cut one into segments, the shapes that split one into
 /// branches, and the shapes that end one. A source declares no input port, a terminal declares no output
-/// port, and the three result-bearing terminals declare a result port on top of that.
+/// port, and a terminal that exposes a value declares a result port on top of that; a few shapes that are
+/// not terminals at all declare a control result port the same way.
+/// <see cref="LocalVocabulary.ResultPortOf"/> is which, and it is one place rather than a count kept here.
 /// </para>
 /// <para>
 /// Ten of the shapes are boundaries: <see cref="Buffer"/>, <see cref="SelectAsync"/>,
@@ -34,13 +36,16 @@ namespace Orleans.Dataflow.Authoring;
 /// is no window to hold and nothing a boundary would buy.
 /// </para>
 /// <para>
-/// Eight of the shapes read a clock, and every one of them reads the run's own: <see cref="Tick"/>,
-/// <see cref="Delay"/>, <see cref="InitialDelay"/>, <see cref="Timeout"/>, <see cref="TakeWithin"/>,
-/// <see cref="SkipWithin"/>, <see cref="GroupedWithin"/>, and <see cref="GroupedWeightedWithin"/>, together
-/// with <see cref="Throttle"/>, which reads one to measure a rate. The
-/// clock is the host's <see cref="System.TimeProvider"/>, resolved at materialization and carried by the run
-/// (ADR 0005); no stage of this vocabulary reads <see cref="System.TimeProvider.System"/> directly, which is
-/// what makes a deterministic test of one possible at all.
+/// Ten of the shapes read a clock, and every one of them reads the run's own. Eight of them read it to
+/// pace a stream: <see cref="Tick"/>, <see cref="Delay"/>, <see cref="InitialDelay"/>,
+/// <see cref="Timeout"/>, <see cref="TakeWithin"/>, <see cref="SkipWithin"/>, <see cref="GroupedWithin"/>,
+/// and <see cref="GroupedWeightedWithin"/>. <see cref="Throttle"/> reads one to measure a rate, and
+/// <see cref="Supervised"/> reads one to wait out a backoff rung between attempts — which is why it is an
+/// attached stage rather than a plain element one, and why
+/// <see cref="LocalVocabulary.RunsInsideAGroup"/> refuses it. The clock is the host's
+/// <see cref="System.TimeProvider"/>, resolved at materialization and carried by the run (ADR 0005); no
+/// stage of this vocabulary reads <see cref="System.TimeProvider.System"/> directly, which is what makes a
+/// deterministic test of one possible at all.
 /// </para>
 /// <para>
 /// Nine of the shapes are junctions. <see cref="Broadcast"/>, <see cref="Balance"/>,

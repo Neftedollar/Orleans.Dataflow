@@ -17,7 +17,8 @@ namespace Orleans.Dataflow.Runtime;
 /// </para>
 /// <para>
 /// <b>Outcomes, never exceptions.</b> An offer answers with a <see cref="QueueOfferOutcome"/> for every
-/// state the queue can be in — room, full, completed, failed, and a run that has ended. None of the five is
+/// state the queue can be in: room, full, failed, and — as one outcome rather than two, because a producer
+/// can do nothing different about them — completed or a run that has ended. None of the four is
 /// exceptional, and a producer that had to tell them apart from <c>catch</c> blocks would be writing its
 /// control flow in the wrong construct.
 /// </para>

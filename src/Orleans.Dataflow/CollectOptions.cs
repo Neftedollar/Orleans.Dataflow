@@ -18,6 +18,19 @@ namespace Orleans.Dataflow;
 /// answer that looks like a right one.
 /// </para>
 /// <para>
+/// This is the bound the graph declares, and it is not the only one a collecting sink meets. A result that
+/// crosses a grain boundary meets a second one, declared by the silo rather than by the document: the run
+/// grain measures the serialized value before it puts it on the envelope and refuses anything past
+/// <c>IOrleansDataflowBuilder.LimitResultSize</c> — one mebibyte unless a deployment says otherwise — with a
+/// <c>ResultTooLargeException</c> naming the slot, the measured size, and the bound. That refusal fails
+/// <em>that read</em> and nothing else: the run stays completed, its completion stays successful, and its
+/// other slots resolve normally, because reading a result is not an event in a run's life. The two bounds
+/// answer different questions — how much a run may accumulate, and how much a host is willing to put on one
+/// message — which is why this one is the author's and required, and that one is the deployment's and has a
+/// default. Neither package can name the other's type here; <c>Orleans.Dataflow</c> does not reference
+/// Orleans, and the cluster half is documented with the builder that declares it.
+/// </para>
+/// <para>
 /// The value is checked where the sink is created rather than here, so <c>with</c> expressions and object
 /// initializers compose freely and the diagnostic names the factory's own parameter.
 /// </para>

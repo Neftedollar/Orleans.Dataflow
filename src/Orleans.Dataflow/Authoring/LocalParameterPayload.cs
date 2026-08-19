@@ -10,9 +10,12 @@ namespace Orleans.Dataflow.Authoring;
 /// </summary>
 /// <remarks>
 /// <para>
-/// Two stage families carry parameters — the buffer and the two asynchronous mappings — and both say the
-/// same things about the same kinds of mistake. Saying them once means the two reports read alike and
-/// cannot drift into two dialects of the same complaint.
+/// Every parameterized stage of this vocabulary reads its payload through here, and so do the two adapter
+/// payload readers — one of them in the Orleans package, reaching this through the friend grant — and the
+/// checkpoint document. A member that is missing, that is a string where a count belongs, or that this
+/// stage never declared is the same mistake wherever it is found, so it is worded once here rather than
+/// once per reader; that is what keeps every report reading alike instead of drifting into private dialects
+/// of the same complaint.
 /// </para>
 /// <para>
 /// Every fragment produced here follows the <see cref="Definition.IStageParameterValidator"/> convention: a

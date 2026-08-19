@@ -384,6 +384,57 @@ Orleans behind one assembly, what the API guarantee covers and excludes,
 and the honest per-assembly trim/AOT stance: no claim at 1.0, and
 Orleans 10.2.2 itself makes none.
 
+**M8.4 — security, reliability, and maintainability reviews (done
+2026-08-19).** Two independent reviewers read the tree in fresh context and
+were told to prove findings by running code rather than by reasoning. The
+security pass built an in-process cluster and executed its own findings: it
+retired a live run through an unauthenticated call, wedged a run grain with an
+epoch of `long.MaxValue`, retired a durable run permanently with one transient
+store timeout, and measured a 57 MiB document being absorbed while an honest
+status poll on the same coordinator waited 2.36 seconds. The maintainability
+pass ran six navigation exercises from README and file names alone, completed
+five, and returned PASS WITH FINDINGS.
+
+The verdict on the central finding is stated rather than engineered around:
+**this is a single trust domain**, Orleans hands a grain no caller identity,
+and a library that faked one would be selling security theater — so
+OPERATIONS.md now says who can call what, what a caller reaching the grains
+directly can read, and which obligations are the deployment's. What the
+protocol *can* defend, it now does. An ownership epoch is refused unless the
+coordinator issued it. Reading a durable declaration no longer mints one:
+claiming and taking ownership became two calls, so a bystander's read stops
+fencing the activation that is actually executing the run — which had been
+silencing that activation's ending report and letting a finished run be resumed
+and its tail re-run, exactly the M5.3 defect M5.4 closed. A checkpoint write
+that is *refused* still kills the attempt, but one that is merely *unanswered*
+is retried over four seconds and, if it never lands, ends the attempt without
+writing an outcome — so a store hiccup is resumed by re-declaring the run
+instead of costing every checkpoint it had. Documents are bounded before they
+are decoded, the durable-run register is bounded and has a retirement path,
+refusal messages are capped, telemetry tag cardinality is capped, an over-long
+group-by key is truncated before it reaches durable text, disposal of a cluster
+handle waits for the run the way the local one does, and the canonical parser
+refuses an absurd input before allocating a gigabyte to discover it is absurd.
+
+The maintainability findings were one habit with one fix: nine census sentences
+— hand-written enumerations that were true at sixteen stage kinds and false at
+seventy-three, the flagship being a public document naming 39 of them and
+omitting every junction. None made a wrong behavioral claim; all made the
+system look smaller than it is. The rule that closes the class is now applied:
+never hand-enumerate a set the code already enumerates. Beside them, README
+gained the start-here section it never had (42% of source files cite an ADR by
+number and the README named none), the largest design document stopped opening
+with a status claiming that buffers and time were unimplemented, and the run
+loop's eight-way nested ternary became a switch — verified across all 128
+combinations of its decision space rather than by reading.
+
+Named and not closed: the grain-call sink is the one grain-call path with no
+token to thread, because a terminal's seed factory receives no run context —
+the fix needs a public overload and is recorded rather than silently carried;
+coordinator states are still created per caller-chosen graph identity; and a
+claim still hands the canonical document to any caller, which is the trust
+verdict rather than an oversight.
+
 Deliverables:
 
 - all approved P0/P1 capability rows at Qualified or explicitly deferred with a release-blocking rationale;

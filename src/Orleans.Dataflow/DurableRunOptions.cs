@@ -22,6 +22,17 @@ namespace Orleans.Dataflow;
 /// what makes <see cref="LocalDataflowHost.MaterializeFromCheckpointAsync"/> able to find anything.
 /// </para>
 /// <para>
+/// <b>A class rather than a record, unlike the operator options.</b> "One record per concern" (ADR 0004
+/// section 7) is about the options that <em>shape a graph</em> — a buffer's, a throttle's, a scope's — and
+/// those become a node's payload and part of the fingerprint, so value equality is exactly what they mean
+/// and <c>with</c> is how an author varies one. These options shape a <em>run</em>: nothing compares them,
+/// nothing fingerprints them, and <see cref="Store"/> is a live service the caller owns, so the equality and
+/// the <c>ToString</c> a record would generate are promises this type cannot keep. The copy-and-change a
+/// record invites is the sharper reason: the member most tempting to vary is <see cref="RunId"/>, and
+/// varying it does not produce a variation of this configuration — it names a different run, which is the
+/// one mistake durability cannot absorb.
+/// </para>
+/// <para>
 /// <b>A capture holds the run for its duration and the cost is stated rather than hidden.</b> The engine
 /// reaches a quiescent point through the pause machinery it already has — hold, snapshot, resume — so while
 /// a checkpoint is being taken and written, no element moves anywhere in the graph. A shorter interval and

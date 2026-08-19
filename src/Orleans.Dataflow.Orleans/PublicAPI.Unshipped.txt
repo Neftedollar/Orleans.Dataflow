@@ -80,10 +80,13 @@ Orleans.Dataflow.Grains.IPipelineCoordinatorGrain.CancelRunAsync(string! runId, 
 Orleans.Dataflow.Grains.IPipelineCoordinatorGrain.ClaimDurableRunAsync(string! runId) -> System.Threading.Tasks.Task<Orleans.Dataflow.Grains.DurableRunClaim?>!
 Orleans.Dataflow.Grains.IPipelineCoordinatorGrain.DeclareDurableRunAsync(byte[]! canonicalDocument, Orleans.Dataflow.Grains.DurableRunDeclaration! declaration) -> System.Threading.Tasks.Task<Orleans.Dataflow.Grains.PipelineRunTicket!>!
 Orleans.Dataflow.Grains.IPipelineCoordinatorGrain.GetStatusAsync(string! runId, long epoch) -> System.Threading.Tasks.Task<Orleans.Dataflow.Grains.RunStatusSnapshot!>!
+Orleans.Dataflow.Grains.IPipelineCoordinatorGrain.HasIssuedEpochAsync(long epoch) -> System.Threading.Tasks.Task<bool>!
 Orleans.Dataflow.Grains.IPipelineCoordinatorGrain.ReplaceDurableRunAsync(byte[]! canonicalDocument, Orleans.Dataflow.Grains.DurableRunDeclaration! declaration) -> System.Threading.Tasks.Task<Orleans.Dataflow.Grains.PipelineRunTicket!>!
 Orleans.Dataflow.Grains.IPipelineCoordinatorGrain.ReportDurableRunEndedAsync(string! runId, Orleans.Dataflow.Grains.RunStatusSnapshot! terminal) -> System.Threading.Tasks.Task!
+Orleans.Dataflow.Grains.IPipelineCoordinatorGrain.RetireDurableRunAsync(string! runId) -> System.Threading.Tasks.Task<bool>!
 Orleans.Dataflow.Grains.IPipelineCoordinatorGrain.ShutdownRunAsync(string! runId, long epoch) -> System.Threading.Tasks.Task!
 Orleans.Dataflow.Grains.IPipelineCoordinatorGrain.StartRunAsync(byte[]! canonicalDocument) -> System.Threading.Tasks.Task<Orleans.Dataflow.Grains.PipelineRunTicket!>!
+Orleans.Dataflow.Grains.IPipelineCoordinatorGrain.TakeDurableRunAsync(string! runId) -> System.Threading.Tasks.Task<long?>!
 Orleans.Dataflow.Grains.IPipelineRunGrain
 Orleans.Dataflow.Grains.IPipelineRunGrain.CancelAsync(long epoch) -> System.Threading.Tasks.Task!
 Orleans.Dataflow.Grains.IPipelineRunGrain.EnsureStartedAsync(long declaredEpoch) -> System.Threading.Tasks.Task<long>!
@@ -193,6 +196,8 @@ Orleans.Dataflow.Grains.RunStatusSnapshot.SupervisedFailures.get -> long
 Orleans.Dataflow.Grains.RunStatusSnapshot.SupervisedFailures.set -> void
 Orleans.Dataflow.Grains.RunStatusSnapshot.TotalCheckpointHold.get -> System.TimeSpan
 Orleans.Dataflow.Grains.RunStatusSnapshot.TotalCheckpointHold.set -> void
+Orleans.Dataflow.Grains.RunStatusSnapshot.UnrecordedEnding.get -> string?
+Orleans.Dataflow.Grains.RunStatusSnapshot.UnrecordedEnding.set -> void
 Orleans.Dataflow.Hosting.DataflowPlacement
 Orleans.Dataflow.Hosting.DataflowPlacement.ClusterDefault = 0 -> Orleans.Dataflow.Hosting.DataflowPlacement
 Orleans.Dataflow.Hosting.DataflowPlacement.HashBased = 3 -> Orleans.Dataflow.Hosting.DataflowPlacement
@@ -232,6 +237,7 @@ Orleans.Dataflow.Hosting.OrleansDataflowHost.MaterializeDurableAsync(Orleans.Dat
 Orleans.Dataflow.Hosting.OrleansDataflowHost.OrleansDataflowHost(Orleans.IGrainFactory! grains) -> void
 Orleans.Dataflow.Hosting.OrleansDataflowHost.OrleansDataflowHost(Orleans.IGrainFactory! grains, Orleans.Dataflow.Hosting.OrleansDataflowClientOptions! options) -> void
 Orleans.Dataflow.Hosting.OrleansDataflowHost.ReplaceDurableRunAsync(Orleans.Dataflow.PipelineDefinition! pipeline, Orleans.Dataflow.Hosting.DurablePipelineOptions! durable, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task<Orleans.Dataflow.Hosting.OrleansRunHandle!>!
+Orleans.Dataflow.Hosting.OrleansDataflowHost.RetireDurableRunAsync(string! pipelineId, string! runId, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task<bool>!
 Orleans.Dataflow.Hosting.OrleansDataflowResults
 Orleans.Dataflow.Hosting.OrleansDataflowSiloBuilderExtensions
 Orleans.Dataflow.Hosting.OrleansRunHandle

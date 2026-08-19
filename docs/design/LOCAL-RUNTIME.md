@@ -1,13 +1,57 @@
 # Local runtime semantics
 
-- Status: M2 semantics contract; checkpoint 1 covers the strict-pull linear core
-- Depends on: [ADR 0004](../architecture/0004-csharp-api-baseline.md) §4-§5, [ROADMAP](../ROADMAP.md) M2
+- Status: the semantics record of the local runtime, written milestone by milestone from M2 to M5.5 and current as of M5.5
+- Depends on: [ADR 0004](../architecture/0004-csharp-api-baseline.md) §4-§5, [ADR 0005](../architecture/0005-junction-semantics.md), [ADR 0007](../architecture/0007-supervision-and-checkpoints.md), [ROADMAP](../ROADMAP.md)
 
 The local runtime is the semantic reference implementation: the fast harness
-that later runtimes (Orleans, M3) must agree with observably. Checkpoint 1
-executes linear local graphs under the strongest possible bound; buffers,
-overflow policies, parallel operators, and time arrive in later checkpoints
-inside this contract.
+that later runtimes (Orleans, M3) must agree with observably. It executes
+arbitrary local graphs — linear chains and DAGs, fused stages and declared
+boundaries, junctions, time, bounded parallelism, keyed substreams,
+supervision scopes, and durable runs with checkpoint resume — and what each of
+those means is what this file states.
+
+## How to read this file
+
+**It is chronological, not topical.** Each milestone appended its own section
+rather than editing the ones before it, because a semantics record whose past
+is rewritten cannot be used to answer "what did this mean when that test was
+written". A section therefore describes the engine *of its milestone*, and the
+newest section naming your topic is the one that binds.
+
+Most section headings carry one of three markers; the four that carry none are
+the short M2 sections immediately below:
+
+- **— as implemented**: written after the code landed, and describing it. This
+  is the authoritative form.
+- **— design ahead of code**: written before the code landed, and describing
+  what was intended. Where an "as implemented" section covers the same ground,
+  that one wins; the differences between them are stated in the later section
+  rather than by silent deletion here.
+- **— historical**: superseded outright. Kept because it is the record of what
+  was decided and why, and it is not a description of the engine today.
+
+The newest binding section per topic:
+
+| Topic | Where it is settled |
+|---|---|
+| Materialization, terminal states, slot resolution | `Materialization`, `Terminal states`, and `Slot resolution` below — unchanged since M2 |
+| One run's threads | `M4.1 checkpoint 1` and after: one dedicated thread per segment. `Threading` below describes the single-loop linear engine of checkpoint 1; its rule that every `RunHandle` member is safe to call concurrently still holds |
+| Plan, segments, fusion, boundaries | `M4.1 checkpoint 1 (DAG plan and fan-out)` |
+| Junctions: fan-out, fan-in, rows, partition, cycles | `M4.1 checkpoints 2, 3, and 4`, with the liveness rule in `Assessment: a liveness rule for the acyclic split-join hazard` |
+| Controls, pause, probes | `M4.1 checkpoint 5 (control-plane generalization)`, over the quiescence definition in `Checkpoint 5 contract (pause, probes, ValueTask)` |
+| Asynchronous ingress and the two stop signals | `Checkpoint 4 contract (asynchronous ingress and adapters)` |
+| Time, the clock, and every clock-reading operator | `M4.3 wave 1 (time)` |
+| Batching, flattening, deduplication, sequence edits | `M4.3 wave 2` |
+| Bounded-parallel flattening and the asynchronous folds | `M4.3 wave 3` |
+| Keyed substreams | `M4.4 (bounded group-by)` |
+| Fault injection and supervision scopes | `M5.1 (the injection seam and local supervision scopes)` |
+| Checkpoints, the storage contract, and resume | `M5.2 (the checkpoint model, the storage contract, and local resume)` |
+| The termination watch, the monitor, telemetry, the sink's mark | `M5.5 (the watch, the monitor, telemetry, and the sink's mark)` |
+
+Every milestone section from M4.3 on closes with a "what this wave does not do"
+or "what this phase does not do" heading, and those are load-bearing: a deferral
+recorded there is a deferral rather than an oversight, and the milestone that
+later closed one says so in its own section rather than by editing the record.
 
 ## Materialization
 
@@ -18,7 +62,7 @@ returns the `RunHandle`. Materializing one graph twice yields two
 independent runs: fresh source enumeration, fresh aggregate state, no shared
 mutable anything.
 
-## Execution model (checkpoint 1)
+## Execution model (checkpoint 1) — historical
 
 Strict pull. One asynchronous loop pulls one element from the source,
 applies the stage functions in order, delivers to the sink, and repeats.
@@ -109,7 +153,13 @@ different slots all see one terminal state.
   exactly once (pinned with an `IValueTaskSource` that throws on a second
   consumption).
 
-## Not in checkpoint 1
+## Not in checkpoint 1 — historical
+
+Every line below except the last shipped: buffers and overflow policies in
+checkpoint 2, parallel and async-callback operators in checkpoints 2 and 3,
+time in M4.3 wave 1, pause and resume in checkpoint 5, and the monitor in M5.5.
+The list is kept as the record of what checkpoint 1 deliberately excluded, not
+as a statement about the engine.
 
 - buffers, overflow policies, and credit above one;
 - parallel or async-callback operators;
@@ -119,7 +169,7 @@ different slots all see one terminal state.
 - executing documents not built by this process (foreign documents fail
   validation or slot binding by design).
 
-## Checkpoint 2 contract (buffers and async stages) — design ahead of code
+## Checkpoint 2 contract (buffers and async stages) — historical, design ahead of code
 
 Checkpoint 2 relaxes the credit-of-one bound only where the author asks for
 it, and nowhere else.
@@ -163,7 +213,7 @@ run, cancels the other in-flight callbacks, and no later element starts.
 `ParallelismOptions.MaxConcurrency >= 1` required. `MaxConcurrency = 1`
 ordered is semantically the sequential async map.
 
-## Checkpoint 3 contract (operator breadth and core adapters) — design ahead of code
+## Checkpoint 3 contract (operator breadth and core adapters) — historical, design ahead of code
 
 All checkpoint-3 stages are synchronous local stages and fuse per the
 checkpoint-2 rule; none introduces a boundary.
@@ -281,7 +331,7 @@ one-element-in-flight test of checkpoint 1 becomes per-segment:
 in-flight-per-segment never exceeds the declared bound, and total memory is
 the sum of declared capacities — provable per boundary with gated probes.
 
-## M4 DAG execution model — design ahead of code
+## M4 DAG execution model — historical, design ahead of code
 
 The engine grows from a line to a graph. What follows is the shape M4.1
 implements, checkpointed like M2 was; ADR 0005 fixes the junction

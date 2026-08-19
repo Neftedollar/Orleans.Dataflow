@@ -9,6 +9,38 @@ The goal is an original, Orleans-native implementation with the expressive power
 
 Akka.NET Streams is an important capability reference, not an implementation to port. Orleans.Dataflow will define its own contracts around virtual actors, durable identities, Orleans Streams, reminders, grains, placement, persistence, and cluster lifecycle.
 
+## Start here
+
+Three documents explain the system; everything else assumes them.
+
+- [**Project goal**](docs/GOAL.md) defines the user-facing vocabulary — `Source<T>`,
+  `Flow<TIn, TOut>`, `Sink<T>`, `RunnableGraph`, `ResultSlot<T>`, `RunHandle` — and what
+  each of those words is allowed to mean. It is the only page that does, so it is the one
+  to read before any code.
+- [**ADR 0001: separate authoring, definition, and runtime planes**](docs/architecture/0001-definition-runtime-authoring-planes.md)
+  is the split the source tree is laid out by. The `Authoring/`, `Definition/`, and
+  `Runtime/` folders under `src/` *are* that decision, and no file inside them says so;
+  this is where a reader learns why a type lives where it does.
+- [**ADR 0004: C# authoring API baseline**](docs/architecture/0004-csharp-api-baseline.md)
+  is the shape of the public C# surface, argued section by section. Source comments cite it
+  by section number more often than they cite anything else, so a comment reading "ADR 0004
+  section 7" is pointing at a numbered section of this file.
+
+Below those, [`docs/design/`](docs/design) holds one semantics contract per area — the
+[local](docs/design/LOCAL-RUNTIME.md) and [Orleans](docs/design/ORLEANS-RUNTIME.md)
+runtimes, the [definition model](docs/design/DEFINITION-MODEL.md), the
+[C#](docs/design/C-SHARP-API.md) and [F#](docs/design/F-SHARP-API.md) frontends,
+[registered stages](docs/design/REGISTERED-STAGES.md), and the
+[fragment algebra](docs/design/FRAGMENT-ALGEBRA.md). Those state what the runtimes are held
+to rather than describing what they happen to do, and each opens with a status line naming
+the milestone that wrote it — worth reading first, because several of them grew section by
+section as the milestones landed.
+[`docs/architecture/`](docs/architecture) holds the numbered decisions; the code cites them
+by number throughout, and a citation always names the file carrying that number. Which
+package a namespace comes from is a table in
+[compatibility](docs/COMPATIBILITY.md#namespaces-and-the-packages-they-come-from), because
+two of the namespaces span two assemblies each.
+
 ## Direction
 
 - C# API first, backed by a language-neutral immutable graph model.
@@ -75,4 +107,4 @@ API guarantee covers.
 
 Until 1.0.0, development is intentionally performed through frequent, reviewed commits directly to `main`. Pull requests and package publication begin with the 1.0.0 release process. Repository documentation remains explicit about incomplete behavior and must not make production-readiness claims without qualification evidence.
 
-Detailed goals, architecture decisions, parity tracking, and milestone criteria will live under `docs/`.
+Detailed goals, architecture decisions, parity tracking, and milestone criteria live under `docs/`; the start-here section above is the way in.

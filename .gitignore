@@ -26,3 +26,6 @@ packages/
 *.nupkg
 *.snupkg
 artifacts/
+
+## Scratch checkouts made for parallel work; the branches they hold are not history
+.claude/worktrees/

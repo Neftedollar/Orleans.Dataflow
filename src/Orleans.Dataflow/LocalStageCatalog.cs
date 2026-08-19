@@ -29,11 +29,12 @@ namespace Orleans.Dataflow;
 /// placed remotely.
 /// </para>
 /// <para>
-/// Parameters split the vocabulary in two. Most shapes have nothing to declare — their behavior is a
+/// Parameters split the vocabulary in two, and the split is "what can a document state honestly" rather
+/// than "what happens to have options". A majority of shapes have nothing to declare — their behavior is a
 /// delegate, and a delegate is never durable topology — so they carry the empty payload under
-/// <c>local-parameters</c> and need no check. The shapes that are configured by numbers carry real payloads
-/// under contracts of their own and each brings the very reader the runtime uses. The validator is what
-/// makes a hand-written document's capacity of zero a diagnostic rather than a run that hangs.
+/// <c>local-parameters</c> and need no check. The rest carry real payloads under contracts of their own and
+/// each brings the very reader the runtime uses. The validator is what makes a hand-written document's
+/// capacity of zero a diagnostic rather than a run that hangs.
 /// </para>
 /// <para>
 /// The catalog is therefore not a registration mechanism and is not extensible. Registered stages, with
@@ -45,15 +46,11 @@ public static class LocalStageCatalog
 {
     /// <summary>Gets the catalog of the local stage vocabulary.</summary>
     /// <value>
-    /// A catalog holding one specification for each local stage: the sources <c>from-enumerable</c>,
-    /// <c>empty</c>, <c>single</c>, <c>repeat</c>, <c>range</c>, <c>from-task</c>, <c>failed</c>,
-    /// <c>unfold</c>, <c>from-async-enumerable</c>, <c>from-factory</c>, <c>from-async-factory</c>,
-    /// <c>never</c>, <c>cycle</c>, <c>unfold-async</c>, <c>queue</c>, and <c>from-channel</c>; the
-    /// operators <c>select</c>, <c>where</c>, <c>scan</c>, <c>take</c>, <c>skip</c>, <c>take-while</c>,
-    /// <c>take-through</c>, <c>skip-while</c>, <c>distinct</c>, <c>buffer</c>, <c>select-async</c>, and
-    /// <c>select-async-unordered</c>; and the sinks <c>fold</c>, <c>ignore</c>, <c>for-each</c>,
-    /// <c>for-each-async</c>, <c>first</c>, <c>first-or-default</c>, <c>count</c>, <c>last</c>,
-    /// <c>last-or-default</c>, <c>collect</c>, and <c>to-channel</c>.
+    /// A catalog holding one specification per member of <see cref="LocalStageKind"/> — the whole local
+    /// vocabulary, and nothing beside it. Which shapes those are is deliberately not written down here:
+    /// <see cref="Build"/> walks the enumeration, so a shape added to the vocabulary is in this catalog the
+    /// moment it exists, and a list kept here would be a second answer to a question the code already
+    /// answers.
     /// </value>
     /// <remarks>
     /// The catalog is immutable and stateless, so one instance serves every caller; a
@@ -65,10 +62,11 @@ public static class LocalStageCatalog
     /// <returns>The catalog.</returns>
     /// <remarks>
     /// The port lists follow from where a shape stands: a source produces and does not consume, an operator
-    /// does both, a junction consumes one stream and produces several, and a sink consumes and produces
-    /// nothing, with a result port when it exposes a value. A buffer and an asynchronous mapping are
-    /// operator-shaped, because from the document's point of view they are: one element in, one element
-    /// out, whatever they do about queueing and concurrency in between. No port of a chain shape is
+    /// does both, a splitting junction consumes one stream and produces several, a joining one consumes
+    /// several and produces one, and a sink consumes and produces nothing, with a result port when it
+    /// exposes a value. A buffer and an asynchronous mapping are operator-shaped, because from the
+    /// document's point of view they are: one element in, one element out, whatever they do about queueing
+    /// and concurrency in between. No port of a chain shape is
     /// optional or ignorable, so the graph compiler's connectivity rule requires every one of them to be
     /// wired — which is exactly the linear chain the authoring types can build, and nothing looser. The
     /// legs of a junction beyond its first two are the one exception and are ignorable, because the edges

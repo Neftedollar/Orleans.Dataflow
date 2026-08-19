@@ -70,4 +70,28 @@ public sealed class RunStatusSnapshot
     /// <summary>Gets or sets how long the attempt's checkpoints have held it quiescent in total.</summary>
     [Id(8)]
     public TimeSpan TotalCheckpointHold { get; set; }
+
+    /// <summary>Gets or sets why this attempt's ending was not written onto its run's declaration.</summary>
+    /// <value>
+    /// The refusal, in the words the coordinator answered with, for an attempt that reached a terminal state
+    /// and could not record it; <see langword="null"/> whenever there is nothing to say, which is every
+    /// reading of a run that has not ended and every reading of one whose ending was recorded.
+    /// </value>
+    /// <remarks>
+    /// <para>
+    /// <b>A durable run whose ending nobody wrote down is a run a later activation resumes and re-runs the
+    /// tail of</b>, which is the very defect the register was added to close. The report can fail — the
+    /// coordinator may refuse it as stale, or be unreachable — and nothing on this side can act on that: a
+    /// refusal means somebody else owns the run, and an unreachable coordinator leaves the declaration where
+    /// it was. What was missing was any way to <em>see</em> it, so the fact is carried here on every reading
+    /// of the attempt rather than raised once where nobody is listening.
+    /// </para>
+    /// <para>
+    /// It is a reading and never a refusal, because a poll that faulted on this would stop reporting the
+    /// outcome it was polling for — a client watching a completed run would learn that the register is
+    /// unhappy instead of learning that its run completed.
+    /// </para>
+    /// </remarks>
+    [Id(9)]
+    public string? UnrecordedEnding { get; set; }
 }

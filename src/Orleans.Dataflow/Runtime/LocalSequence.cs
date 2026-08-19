@@ -10,17 +10,30 @@ namespace Orleans.Dataflow.Runtime;
 /// <remarks>
 /// <para>
 /// A run pulls its elements from an <see cref="IEnumerable"/> and has done since checkpoint 1, so the way
-/// to add sources is to give each of them one rather than to add a case to the loop. That is not a
-/// disguise: emitting one element, emitting a value a declared number of times, counting a range, awaiting
-/// a task, failing, and unfolding a state are all exactly "produce elements until there are no more, on the
-/// segment's own thread", which is what a sequence is.
+/// to add sources is to give each of them one rather than to add a case to the loop. For the members that
+/// take nothing but the author's own values that is not a disguise: emitting one element, emitting a value
+/// a declared number of times, counting a range, awaiting a deferred value, failing, unfolding a state, and
+/// cycling a sequence are all exactly "produce elements until there are no more, on the segment's own
+/// thread", which is what a sequence is.
 /// </para>
 /// <para>
-/// Every one of these is an iterator method, so a fresh enumerator carries fresh state: an unfold begins at
-/// its seed in every run, a range counts from its start in every run, and two runs of one graph never
-/// continue each other. What a run cannot make fresh is what the author shared with it — the element a
-/// repeat repeats, the task a run awaits, the exception a failure carries — and those are shared on
-/// purpose, because they are the author's values.
+/// The members that take a <see cref="LocalRunContext"/> are the rest, and what they add is not a second
+/// threading model but a reading of the run — its tokens, its pause gate, and its clock. They still hand
+/// the run one element per pull on the segment's own thread; what they also do is wait, and where the wait
+/// lives is what a stop costs. <see cref="Never"/>, <see cref="Channel"/>, and <see cref="Ticks"/> wait on
+/// one of this runtime's own waits and say so to the pause gate, so a pause of a run parked in one takes
+/// effect at once, a shutdown ends the sequence as running out of elements would, and a cancellation is
+/// raised. <see cref="Async"/> and <see cref="UnfoldAsync"/> hand the run's own token to the author's code
+/// and wait inside it instead, so a stop is as prompt as that code is — the slow-source rule, stated where
+/// it bites.
+/// </para>
+/// <para>
+/// Every one of these but the two that answer with an array is an iterator method, and all of them buy the
+/// same thing by it: a fresh enumerator carries fresh state, so an unfold begins at its seed in every run,
+/// a range counts from its start in every run, and two runs of one graph never continue each other. What a
+/// run cannot make fresh is what the author shared with it — the element a repeat repeats, the task a run
+/// awaits, the exception a failure carries — and those are shared on purpose, because they are the author's
+/// values.
 /// </para>
 /// <para>
 /// The elements are <see cref="object"/> because the plan is: the element types of a local graph live in

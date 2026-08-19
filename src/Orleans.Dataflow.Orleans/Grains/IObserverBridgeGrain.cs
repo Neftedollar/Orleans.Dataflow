@@ -68,11 +68,20 @@ public interface IObserverBridgeGrain : IGrainWithStringKey
     /// The element is not of the type the bridge's binding declares in the silo executing the run.
     /// </exception>
     /// <remarks>
+    /// <para>
     /// A refusal is an outcome and never an exception: <see cref="DataflowPushOutcome.Closed"/> for a
     /// bridge nothing is listening on, <see cref="DataflowPushOutcome.Dropped"/> for a full ingress under a
     /// dropping policy, and <see cref="DataflowPushOutcome.Failed"/> for a run whose ingress has been
     /// failed. The one exception is a type mismatch, which is a programming error rather than a delivery
     /// outcome.
+    /// </para>
+    /// <para>
+    /// <b>The parameter is <see cref="object"/> and the type check happens after deserialization, so what
+    /// bounds the types a caller can put on this wire is Orleans' own allow-list rather than anything this
+    /// library declares</b>: Orleans 7 and later deserialize only types it has been told about —
+    /// <c>[GenerateSerializer]</c> types and registered serializers — and a deployment that widens that
+    /// allow-list widens this member with it.
+    /// </para>
     /// </remarks>
     Task<DataflowPushOutcome> PushAsync(object? element);
 }

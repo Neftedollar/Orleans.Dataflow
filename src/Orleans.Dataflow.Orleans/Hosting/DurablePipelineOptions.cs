@@ -19,6 +19,16 @@ namespace Orleans.Dataflow.Hosting;
 /// checkpoint if the silo that was hosting it has died. Two independent durable runs are two names.
 /// </para>
 /// <para>
+/// <b>A class rather than a record, unlike the operator options.</b> "One record per concern" (ADR 0004
+/// section 7) is about the options that <em>shape a graph</em>, which become a node's payload and part of
+/// the fingerprint; value equality is what they mean, and <c>with</c> is how an author varies one. These
+/// options shape a <em>run</em> and reach no document, so nothing compares them and nothing fingerprints
+/// them. What settles it is the copy-and-change a record invites: the member most tempting to vary is
+/// <see cref="RunId"/>, and varying it does not produce a variation of this configuration — it addresses a
+/// different run, and under this type addressing is what a name does. Its local twin
+/// <c>DurableRunOptions</c> is a class for the same reason and one more of its own.
+/// </para>
+/// <para>
 /// <b>The timing is declared and never implicit</b> (ADR 0007). A run checkpoints on an interval, after a
 /// number of elements, or on both; declaring neither is legal and means the run never writes to the store,
 /// which is the honest reading of the words rather than a mistake this type guesses at. There is no default

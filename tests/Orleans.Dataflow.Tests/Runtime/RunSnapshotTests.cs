@@ -1,3 +1,4 @@
+using System.Globalization;
 using Orleans.Dataflow.Testing;
 using Xunit;
 using static Orleans.Dataflow.Tests.Runtime.DurableFixtures;
@@ -261,7 +262,38 @@ public sealed class RunSnapshotTests
         // update" means in code.
         Assert.Equal(first, second);
         Assert.NotSame(first, second);
-        Assert.Equal("Completed: dropped 0, supervised 0, poison 0, checkpoints 0", first.ToString());
+        Assert.Equal(
+            "Completed: dropped 0, supervised 0, poison 0, checkpoints 0, held 00:00:00",
+            first.ToString());
+    }
+
+    [Fact]
+    public void TheDiagnosticLineCarriesEveryValueTheReadingHolds()
+    {
+        // The line above pins one reading's text and therefore only catches a change to it. This one
+        // re-derives what the text has to cover from the type itself, so a counter added to RunSnapshot and
+        // left out of ToString fails here rather than shipping as a number no log line ever shows. The
+        // values are deliberately distinct, so a member printed in place of another is a failure too.
+        RunSnapshot reading = new()
+        {
+            Status = RunSnapshotStatus.Failed,
+            DroppedElements = 11L,
+            SupervisedFailures = 22L,
+            PoisonElements = 33L,
+            Checkpoints = 44L,
+            TotalCheckpointHold = TimeSpan.FromSeconds(55),
+        };
+
+        string line = reading.ToString();
+
+        foreach (System.Reflection.PropertyInfo property in typeof(RunSnapshot).GetProperties())
+        {
+            object? value = property.GetValue(reading);
+
+            Assert.True(
+                value is not null && line.Contains(Convert.ToString(value, CultureInfo.InvariantCulture)!, StringComparison.Ordinal),
+                $"'{property.Name}' reads as '{value}', and the diagnostic line '{line}' does not carry it.");
+        }
     }
 
     [Fact]

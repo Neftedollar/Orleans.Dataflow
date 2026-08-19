@@ -30,12 +30,14 @@ namespace Orleans.Dataflow.Authoring;
 /// constructed types, so the local runtime can recover them without ever having widened them.
 /// </para>
 /// <para>
-/// <see cref="Parameters"/> is the other half of the split and goes the other way. A buffer's capacity and
-/// policy, an asynchronous stage's concurrency bound, a count of elements, a range's bounds, and a
-/// deduplication key bound are configuration rather than behavior: they are numbers and names a document
-/// can state, they change what a graph observably does, and they therefore belong in the payload and in the
-/// fingerprint. Every other shape carries the empty object, because a delegate is all it has and a delegate
-/// is never durable topology.
+/// <see cref="Parameters"/> is the other half of the split and goes the other way. A capacity and the
+/// policy that empties it, a concurrency bound, a count, a range's bounds, a duration, a rate and the mode
+/// it is held to, a valve's starting position, a supervision form and its ladder, the stages of an inner
+/// chain — all of these are configuration rather than behavior: a document can state them, they change what
+/// a graph observably does, and they therefore belong in the payload and in the fingerprint. Which shapes
+/// carry which of them is <see cref="LocalVocabulary.ParameterContractOf"/>'s answer and not this type's; a
+/// shape with nothing but a delegate carries the empty object, because a delegate is never durable
+/// topology.
 /// </para>
 /// </remarks>
 internal sealed class LocalStageDescriptor : StageOccurrence
@@ -71,12 +73,12 @@ internal sealed class LocalStageDescriptor : StageOccurrence
     /// the predicate, the folder, the generator, the comparer, or the callback of everything else.
     /// </summary>
     /// <value>
-    /// <see langword="null"/> for the shapes whose whole behavior is stated by their parameters or by their
-    /// stage reference — <see cref="LocalStageKind.Buffer"/>, <see cref="LocalStageKind.Empty"/>,
-    /// <see cref="LocalStageKind.Range"/>, <see cref="LocalStageKind.Ignore"/>,
-    /// <see cref="LocalStageKind.First"/>, <see cref="LocalStageKind.FirstOrDefault"/>, and
-    /// <see cref="LocalStageKind.Count"/> — and legitimately <see langword="null"/> for a source bound to a
-    /// null element. <see cref="Kind"/> and not this value decides what a binding has to be.
+    /// <see langword="null"/> for every shape whose whole behavior is stated by its parameters or by its
+    /// stage reference — a buffer, a counted take or skip, a range, a duration, a tick, a valve, a
+    /// discarding or first-element terminal, a junction that needs no function of the author's — and
+    /// legitimately <see langword="null"/> for a source bound to a null element. The factories below are
+    /// where which shapes those are is stated; naming them again here would be a second list to keep true.
+    /// <see cref="Kind"/> and not this value decides what a binding has to be.
     /// </value>
     internal object? Behavior { get; }
 
@@ -274,8 +276,8 @@ internal sealed class LocalStageDescriptor : StageOccurrence
     /// <remarks>
     /// The payload is a buffer's payload, under a buffer's contract, because a queue's capacity and
     /// overflow policy are a buffer's capacity and overflow policy seen from the other side of a graph. The
-    /// stage reference is what says which of them a node is, exactly as it does for the three stages that
-    /// share a count.
+    /// stage reference is what says which of them a node is, exactly as it does for the stages that share a
+    /// count.
     /// </remarks>
     internal static LocalStageDescriptor Queue(
         BufferOptions options,

@@ -40,6 +40,44 @@ runtime types directly. That surface belongs to the Orleans SDK that emitted
 it, is coupled to its version, and is explicitly outside this library's API
 guarantee below.
 
+## Namespaces and the packages they come from
+
+A namespace here does not name its package, and that is a decision rather than
+an accident — but it means the namespace on a type is not enough to tell you
+what to reference. This table is:
+
+| Namespace | Assembly holding its public types |
+|---|---|
+| `Orleans.Dataflow` | `Orleans.Dataflow` |
+| `Orleans.Dataflow.Authoring` | `Orleans.Dataflow` |
+| `Orleans.Dataflow.Adapters` | `Orleans.Dataflow` **and** `Orleans.Dataflow.Orleans` |
+| `Orleans.Dataflow.Hosting` | `Orleans.Dataflow` **and** `Orleans.Dataflow.Orleans` |
+| `Orleans.Dataflow.Definition` | `Orleans.Dataflow.Abstractions` |
+| `Orleans.Dataflow.Identity` | `Orleans.Dataflow.Abstractions` |
+| `Orleans.Dataflow.Serialization` | `Orleans.Dataflow.Abstractions` |
+| `Orleans.Dataflow.Compilation` | `Orleans.Dataflow.Abstractions` |
+| `Orleans.Dataflow.Grains` | `Orleans.Dataflow.Orleans` |
+| `Orleans.Dataflow.Testing` | `Orleans.Dataflow.Testing` |
+| `Orleans.Dataflow.FSharp` | `Orleans.Dataflow.FSharp` |
+
+Two rows carry the practical consequence. **`Orleans.Dataflow.Hosting`** holds
+`ILocalDataflowBuilder`, `ICheckpointStore`, and the stage-factory seam
+(`IDataflowStageFactory`, `DataflowStageRequest`, `DataflowStageRuntime`,
+`DataflowRunTokens`) from the core package, and `OrleansDataflowHost`,
+`OrleansRunHandle`, `DurablePipelineOptions`, and the silo and client builders
+from the Orleans package. **`Orleans.Dataflow.Adapters`** holds `DotnetStages`
+and `ObservableBinding` from the core package, and the grain, stream, and
+broadcast bindings from the Orleans package. In both cases the namespace is
+shared because the *seam* is shared: the factory mirror moved into the core
+package in M4.5 under the same names in the same namespace precisely so that one
+seam serves a silo and a `LocalDataflowHost` alike, and a provider that never
+references Orleans can still write a factory. The cost is this table, and it is
+the cheaper half of the trade.
+
+`Orleans.Dataflow.Runtime` and `Orleans.Dataflow.Diagnostics` are absent because
+they contain no public types at all; they are internal to `Orleans.Dataflow` and
+are reached only through the friend grants described below.
+
 ## What the public API is
 
 The guaranteed surface is the **hand-written public API of the five

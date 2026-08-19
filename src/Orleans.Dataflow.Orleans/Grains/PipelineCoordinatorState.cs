@@ -5,15 +5,27 @@ namespace Orleans.Dataflow.Grains;
 /// </summary>
 /// <remarks>
 /// <para>
-/// Small on purpose, and bounded by what a deployment named: one counter, plus one record per
-/// <em>declared durable run</em> and nothing per ordinary start. The coordinator owns the ordering of
-/// starts and nothing about a run's progress — progress is the checkpoint store's, which is a different
-/// store for a different reason. A register of issued runs used to sit beside the counter, written for a
-/// reconciliation that phase 4 turned out not to need; it grew by one record per accepted start with
-/// nothing pruning it, so it was removed rather than capped, with the note that M5's durable resume would
-/// persist what reconciliation actually reads. <see cref="DurableRuns"/> is that, and it differs from what
-/// was removed in the way that matters: a durable run is named by its author, so the register grows with
-/// the names a deployment chose rather than with the number of times it pressed start.
+/// Small on purpose, and bounded: one counter, plus one record per <em>declared durable run</em> and
+/// nothing per ordinary start. The coordinator owns the ordering of starts and nothing about a run's
+/// progress — progress is the checkpoint store's, which is a different store for a different reason. A
+/// register of issued runs used to sit beside the counter, written for a reconciliation that phase 4 turned
+/// out not to need; it grew by one record per accepted start with nothing pruning it, so it was removed
+/// rather than capped, with the note that M5's durable resume would persist what reconciliation actually
+/// reads. <see cref="DurableRuns"/> is that, and it differs from what was removed in the way that matters:
+/// a durable run is named by its author, so the register grows with the names a deployment chose rather
+/// than with the number of times it pressed start.
+/// </para>
+/// <para>
+/// <b>"Named by its author" turned out not to be a bound, and M8.4 gives it one.</b> A name a deployment
+/// derives from something it does not control — a tenant, a day, a request — is as unbounded as a counter,
+/// and the consequence is worse here than it was for the register that was removed: every record keeps the
+/// whole canonical document it names, and Orleans rewrites this state document whole on every declaration,
+/// so the cost of the n-th name is linear in n and past the storage provider's per-document limit the
+/// coordinator cannot write <em>at all</em> — which stops ordinary starts of the pipeline as well as durable
+/// ones. So there are now two things the previous register never got: a generous cap
+/// (<c>PipelineCoordinatorGrain.MaximumDurableRuns</c>), and a way to remove a record
+/// (<c>IPipelineCoordinatorGrain.RetireDurableRunAsync</c>) so that reaching the cap is a state a deployment
+/// can get out of rather than one it is stuck in.
 /// </para>
 /// <para>
 /// This state is also the fencing primitive. Every start writes it, so a stale activation that has been
@@ -140,8 +152,16 @@ internal sealed class DurableRunRecord
     /// which is the exact opposite of what a durable run is for.
     /// </para>
     /// <para>
-    /// Once set, only <c>ReplaceDurableRunAsync</c> clears it, which is what makes "finished" a state a
-    /// deployment leaves on purpose rather than one a poll can undo.
+    /// <b>Nor by an attempt that lost its checkpoint store</b>, which M8.4 adds to the same list and for the
+    /// same reason. Such an attempt faults and is indistinguishable from a failing pipeline once both are
+    /// "the engine threw", so it used to be written here — and a run recorded as finished is only restartable
+    /// through a replacement, whose first act is to clear the very checkpoints a store outage was about. An
+    /// attempt ending is not the run ending, and this member records only the second.
+    /// </para>
+    /// <para>
+    /// Once set, only <c>ReplaceDurableRunAsync</c> clears it and only <c>RetireDurableRunAsync</c> takes the
+    /// whole record away, which is what makes "finished" a state a deployment leaves on purpose rather than
+    /// one a poll can undo.
     /// </para>
     /// </remarks>
     [Id(6)]

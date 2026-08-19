@@ -48,6 +48,12 @@ public sealed class ResultEnvelope
 
     /// <summary>Gets or sets the value the slot resolved to.</summary>
     /// <value>The author's own value, or <see langword="null"/> when there is none to report.</value>
+    /// <remarks>
+    /// <b>The declared type is <see cref="object"/> and the receiving cast happens after deserialization, so
+    /// what bounds the types that can arrive here is Orleans' own allow-list rather than anything this
+    /// library declares</b>: Orleans 7 and later deserialize only <c>[GenerateSerializer]</c> types and
+    /// registered serializers, and a deployment that widens that allow-list widens this member with it.
+    /// </remarks>
     [Id(2)]
     public object? Value { get; set; }
 

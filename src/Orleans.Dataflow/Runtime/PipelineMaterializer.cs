@@ -32,6 +32,25 @@ namespace Orleans.Dataflow.Runtime;
 /// </remarks>
 internal static class PipelineMaterializer
 {
+    /// <summary>The greatest number of diagnostics one refusal spells out.</summary>
+    /// <remarks>
+    /// <para>
+    /// A refusal is a message, and a message that is thrown across a grain boundary is bytes on the wire
+    /// that the refused caller pays for. The report itself is unbounded — it holds one diagnostic per thing
+    /// wrong with a document, and a document is an input — so a document engineered to be wrong in a hundred
+    /// thousand places would otherwise answer with a hundred thousand sentences: measured at 23,600,112
+    /// characters for a 200,000-node document, which is a refusal larger than the thing being refused.
+    /// </para>
+    /// <para>
+    /// Twenty, and the count of what was left out is stated rather than the list silently ending. Twenty is
+    /// generous for the case this text is written for — an author reconciling a document with a deployment's
+    /// catalog, who reads the diagnostics and fixes them — and a document with more than twenty things wrong
+    /// with it is one whose first twenty are where the work starts. The whole report is still there for a
+    /// caller that has it: this bounds what crosses a wire, not what validation produced.
+    /// </para>
+    /// </remarks>
+    internal const int ReportedDiagnosticLimit = 20;
+
     /// <summary>The authoring nonce every run of a pipeline carries.</summary>
     /// <remarks>
     /// Documented rather than incidental: a slot whose nonce is this value was declared by a
@@ -198,10 +217,17 @@ internal static class PipelineMaterializer
     /// <param name="report">The report, which is known to carry at least one diagnostic.</param>
     /// <returns>The message.</returns>
     /// <remarks>
-    /// Every diagnostic appears, in the report's own deterministic order, as its stable rule identifier,
-    /// its subject when it names one, and its message. A caller reconciling a document with a host's
-    /// catalog needs the whole report and not its first line, which is exactly why a rolling upgrade that
-    /// removed a stage produces a readable refusal rather than one line about one node.
+    /// <para>
+    /// Each diagnostic appears, in the report's own deterministic order, as its stable rule identifier, its
+    /// subject when it names one, and its message. A caller reconciling a document with a host's catalog
+    /// needs the report and not its first line, which is exactly why a rolling upgrade that removed a stage
+    /// produces a readable refusal rather than one line about one node.
+    /// </para>
+    /// <para>
+    /// <b>Up to <see cref="ReportedDiagnosticLimit"/> of them, and the rest are counted.</b> The full count
+    /// is stated first, so the sentence a caller reads is honest about how much of the report it is holding;
+    /// what is bounded is the text, which travels as the message of an exception across a wire.
+    /// </para>
     /// </remarks>
     internal static string Describe(GraphValidationReport report)
     {
@@ -220,7 +246,7 @@ internal static class PipelineMaterializer
 
         message.Append(':');
 
-        foreach (GraphValidationDiagnostic diagnostic in report.Diagnostics)
+        foreach (GraphValidationDiagnostic diagnostic in report.Diagnostics.Take(ReportedDiagnosticLimit))
         {
             message.Append(CultureInfo.InvariantCulture, $" [{diagnostic.Rule}]");
 
@@ -230,6 +256,13 @@ internal static class PipelineMaterializer
             }
 
             message.Append(CultureInfo.InvariantCulture, $" {diagnostic.Message}");
+        }
+
+        if (report.Diagnostics.Count > ReportedDiagnosticLimit)
+        {
+            message.Append(
+                CultureInfo.InvariantCulture,
+                $" … and {report.Diagnostics.Count - ReportedDiagnosticLimit} more, which this message does not spell out: a refusal travels as text across a wire, so it names the first {ReportedDiagnosticLimit} and counts the rest.");
         }
 
         return message.ToString();

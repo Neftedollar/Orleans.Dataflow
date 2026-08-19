@@ -439,9 +439,10 @@ internal static class LocalVocabulary
 
     /// <summary>The parameter contract a stage counted in elements declares.</summary>
     /// <remarks>
-    /// One contract for <c>take</c>, <c>skip</c>, and <c>repeat</c>, because a count is a count: the three
-    /// carry the same member under the same rules, and which of them is meant is the stage reference's job
-    /// to say. <see cref="LocalCountParameters"/> owns the shape.
+    /// One contract for every stage counted in elements, because a count is a count: they carry the same
+    /// member under the same rules, and which of them is meant is the stage reference's job to say.
+    /// <see cref="ParameterContractOf"/> is where which shapes those are is stated, and
+    /// <see cref="LocalCountParameters"/> owns the shape.
     /// </remarks>
     internal static readonly ContractReference CountParameterContract =
         ContractReference.Create(
@@ -495,7 +496,7 @@ internal static class LocalVocabulary
     /// <summary>The parameter contract a stage configured by one duration declares.</summary>
     /// <remarks>
     /// One contract for the initial delay, the two windows, and the timeout, because a duration is a
-    /// duration: which of them a node is is the stage reference's job to say, exactly as it is for the three
+    /// duration: which of them a node is is the stage reference's job to say, exactly as it is for the
     /// stages that share a count. <see cref="LocalDurationParameters"/> owns the shape.
     /// </remarks>
     internal static readonly ContractReference DurationParameterContract =
@@ -886,8 +887,13 @@ internal static class LocalVocabulary
     /// <exception cref="ArgumentOutOfRangeException"><paramref name="kind"/> is not a declared member.</exception>
     /// <remarks>
     /// The distinction is not "which stages happen to have options" but "which stages have options a
-    /// document can state honestly": a capacity, a concurrency bound, a count, a range, and a key bound are
-    /// numbers, and none of them is a delegate. Every other shape carries the empty payload.
+    /// document can state honestly", and honest is wider than numeric: the arms below carry capacities,
+    /// concurrency bounds, counts, ranges, durations written as ticks, names drawn from closed sets — an
+    /// overflow policy, a valve's starting position, a supervision form, a retry exhaustion answer — and,
+    /// for the three scope-bearing shapes, a whole inner chain. A delegate is the one kind of value
+    /// disqualified, because a delegate is never durable topology. The last arm is the empty payload, and
+    /// the arms are themselves the enumeration: which shapes carry what is read off this method, and a
+    /// count written here would stop being true the next time the vocabulary grew.
     /// </remarks>
     internal static ContractReference ParameterContractOf(LocalStageKind kind) => kind switch
     {
@@ -1046,8 +1052,6 @@ internal static class LocalVocabulary
             LocalStageKind.SkipWhile or
             LocalStageKind.Distinct or
             LocalStageKind.GroupBy or
-            LocalStageKind.DeduplicateConsecutive or
-            LocalStageKind.SelectMany or
             LocalStageKind.Grouped or
             LocalStageKind.Sliding or
             LocalStageKind.GroupedWithin or
@@ -1237,8 +1241,8 @@ internal static class LocalVocabulary
     /// <remarks>
     /// A fan-out has one input by definition and every operator and terminal has one because a branch is a
     /// chain; the fan-in junctions are the only shapes whose answer is a list, and it is the same list for
-    /// all three because what differs between them is which input they read next rather than how many they
-    /// have.
+    /// every one of them because what differs between them is which input they read next rather than how
+    /// many they have.
     /// </remarks>
     internal static IReadOnlyList<InputPortSpecification> InputPortsOf(LocalStageKind kind) =>
         PlaceOf(kind) switch

@@ -1,3 +1,5 @@
+using System.Globalization;
+
 namespace Orleans.Dataflow;
 
 /// <summary>
@@ -46,10 +48,21 @@ public sealed record RunSnapshot
     public required TimeSpan TotalCheckpointHold { get; init; }
 
     /// <summary>Returns a one-line diagnostic summary of this reading.</summary>
-    /// <returns>Text naming the status and any nonzero counter.</returns>
-    /// <remarks>The method never throws, so it is safe in any log line.</remarks>
+    /// <returns>
+    /// Text of the form <c>Completed: dropped 0, supervised 0, poison 0, checkpoints 0, held 00:00:00</c>:
+    /// the status, then every counter this type carries, whether or not any of them has moved.
+    /// </returns>
+    /// <remarks>
+    /// Unconditional on purpose. A line whose shape depended on which counters were nonzero would be a
+    /// different line for every run, and these readings exist to be compared with each other and found in a
+    /// log; a healthy run would print a status and nothing else, which is the reading a monitor least wants
+    /// to be ambiguous. The numbers are formatted with the invariant culture, and the method never throws,
+    /// so it is safe in any log line.
+    /// </remarks>
     public override string ToString() =>
-        $"{Status}: dropped {DroppedElements}, supervised {SupervisedFailures}, poison {PoisonElements}, checkpoints {Checkpoints}";
+        string.Create(
+            CultureInfo.InvariantCulture,
+            $"{Status}: dropped {DroppedElements}, supervised {SupervisedFailures}, poison {PoisonElements}, checkpoints {Checkpoints}, held {TotalCheckpointHold}");
 }
 
 /// <summary>

@@ -158,8 +158,75 @@ internal sealed class LocalDurableScope(IReadOnlyList<LocalElementStage> chain)
     /// <summary>Builds the failure an exported state this scope cannot read produces.</summary>
     /// <param name="state">The state as the checkpoint carried it.</param>
     /// <returns>The exception.</returns>
-    private static InvalidOperationException Unreadable(CanonicalJsonValue state) =>
-        new($"The checkpoint carries the state {state} for a durable scope, and such a scope's state is an object with a '{StagesMember}' member holding one entry per stage of the chain. The checkpoint was written by a different graph or by hand.");
+    /// <remarks>
+    /// <para>
+    /// <b>The message says what the value is and never what it holds.</b> A durable scope's stored state is
+    /// whatever the author's own export function wrote — up to the canonical limit of 256 KiB of their
+    /// data — and this message does not stay where it is thrown: it is remembered on the run grain and
+    /// handed back to every caller that polls it. Quoting the value would put the author's data on that
+    /// trip, and the whole of what a reader needs here is the shape.
+    /// </para>
+    /// <para>
+    /// The shape is enough for the diagnosis this failure has. Every way to reach it is a mismatch between
+    /// what was stored and what this scope is — a checkpoint of a different graph, or one written by hand —
+    /// and the naming of the scope's own arity beside the shape that arrived is what makes the two
+    /// comparable.
+    /// </para>
+    /// </remarks>
+    private InvalidOperationException Unreadable(CanonicalJsonValue state) =>
+        new(string.Create(
+            CultureInfo.InvariantCulture,
+            $"The checkpoint carries a state a durable scope of {chain.Count} stages cannot read: {Describe(state)}. Such a scope's state is an object with a '{StagesMember}' member holding one entry per stage of the chain, in the chain's own order. The stored value is not quoted here, because an exported state is the author's own data and this message travels with the run. The checkpoint was written by a different graph or by hand."));
+
+    /// <summary>Names the shape of a stored state without reading anything out of it.</summary>
+    /// <param name="state">The state as the checkpoint carried it.</param>
+    /// <returns>A phrase naming its kind, its size, and the first thing wrong with it.</returns>
+    /// <remarks>
+    /// The size is a fact about the value rather than a fact in it, and it is the one number that tells a
+    /// checkpoint written by a different graph apart from one that was truncated or never written.
+    /// </remarks>
+    private static string Describe(CanonicalJsonValue state)
+    {
+        if (state.IsDefault)
+        {
+            return "it carries no JSON at all";
+        }
+
+        JsonElement declared = state.ToElement();
+
+        if (declared.ValueKind is not JsonValueKind.Object)
+        {
+            return string.Create(
+                CultureInfo.InvariantCulture,
+                $"it is {Name(declared.ValueKind)} of {state.ByteLength} bytes rather than an object");
+        }
+
+        if (!declared.TryGetProperty(StagesMember, out JsonElement stages))
+        {
+            return string.Create(
+                CultureInfo.InvariantCulture,
+                $"it is an object of {state.ByteLength} bytes with no '{StagesMember}' member");
+        }
+
+        return string.Create(
+            CultureInfo.InvariantCulture,
+            $"it is an object of {state.ByteLength} bytes whose '{StagesMember}' member is {Name(stages.ValueKind)} rather than an array");
+    }
+
+    /// <summary>Names one JSON kind as a noun phrase.</summary>
+    /// <param name="kind">The kind.</param>
+    /// <returns>The phrase, which reads after the word <c>is</c>.</returns>
+    private static string Name(JsonValueKind kind) =>
+        kind switch
+        {
+            JsonValueKind.Object => "an object",
+            JsonValueKind.Array => "an array",
+            JsonValueKind.String => "a string",
+            JsonValueKind.Number => "a number",
+            JsonValueKind.True or JsonValueKind.False => "a boolean",
+            JsonValueKind.Null => "the null literal",
+            _ => "no value at all",
+        };
 
     /// <summary>Answers with whatever the chain emitted while this stage was being asked.</summary>
     /// <param name="result">The one element, the sequence of them, or an unspecified value.</param>

@@ -35,10 +35,23 @@ namespace Orleans.Dataflow.Runtime;
 /// observe.
 /// </para>
 /// <para>
-/// <b>A refused write kills the attempt.</b> A store that answers <see cref="CheckpointConflictException"/>
-/// is saying somebody else owns this run now, and the documented consequence — the coordinator's, since M3 —
-/// is that the stale writer fails rather than retries. The exception faults the run through the same hook a
-/// throwing stage uses, so it arrives on <see cref="RunHandle.Completion"/> unwrapped.
+/// <b>A refused write kills the attempt; an unanswered one is retried first.</b> The two are different
+/// facts and the store says which. <see cref="CheckpointConflictException"/> is somebody else owning this
+/// run now, and the documented consequence — the coordinator's, since M3 — is that the stale writer fails
+/// rather than retries; the exception faults the run through the same hook a throwing stage uses, so it
+/// arrives on <see cref="RunHandle.Completion"/> unwrapped. Anything else is a store that did not answer,
+/// which a blob store does for a second at a time and which says nothing at all about who owns the run, so
+/// the same document is presented again on a bounded backoff before the attempt is given up. Retrying a
+/// conflict would overwrite the truth a fresh attempt is building; not retrying a timeout costs a long
+/// pipeline every checkpoint it had.
+/// </para>
+/// <para>
+/// <b>An exhausted write ends the attempt and not the run</b>, and the distinction is what
+/// <see cref="CheckpointWriteFailedException"/> exists to carry across the seam. The engine faults, so the
+/// caller learns what the store did with the store's own exception as the cause; what the wrapper adds is
+/// the one bit a host needs to decide differently — that the run itself reached no terminal state, so
+/// nothing should be written down as its outcome and the next activation continues it from the last
+/// checkpoint the store accepted.
 /// </para>
 /// <para>
 /// <b>A run that ends writes nothing.</b> A clean end has an outcome and does not need a checkpoint, and a
@@ -48,6 +61,32 @@ namespace Orleans.Dataflow.Runtime;
 /// </remarks>
 internal sealed class LocalCheckpointer
 {
+    /// <summary>How many times one capture presents its document to the store before it gives up.</summary>
+    /// <remarks>
+    /// A fixed policy rather than a declared option, and fixed for the reason the pause machinery is reused
+    /// rather than reinvented: what a deployment wants to say about durability is <em>when</em> a capture is
+    /// due, and how hard the runtime tries to land one is the runtime's own answer to a store that hiccups.
+    /// An option here would be one more thing to get wrong in every deployment that has no opinion about it,
+    /// and a deployment that does have one already has the knob that matters — its store's own client retry
+    /// policy, which sits underneath this.
+    /// </remarks>
+    private const int WriteAttempts = 5;
+
+    /// <summary>What each wait between attempts is multiplied by to give the next.</summary>
+    private const double RetryFactor = 3.0;
+
+    /// <summary>How long the first retry waits.</summary>
+    /// <remarks>
+    /// A hundred milliseconds, tripling: 0.1 s, 0.3 s, 0.9 s and 2.7 s, so five attempts span four seconds
+    /// of store outage and no more. That is deliberately longer than the blip this exists for — a store that
+    /// is unavailable for a second — and deliberately short enough to be a stall rather than a hang, because
+    /// <b>the run is held for the whole of it</b>: a capture's hold covers its write, and retrying inside the
+    /// hold is what keeps the document being written a snapshot of the moment it was taken rather than of a
+    /// run that has moved on. The cost is visible in <see cref="Held"/> and in the hold histogram, which is
+    /// where a deployment discovers that its store is slow.
+    /// </remarks>
+    private static readonly TimeSpan FirstRetryDelay = TimeSpan.FromMilliseconds(100);
+
     private readonly LocalRunPlan _plan;
     private readonly LocalPause _pause;
     private readonly TimeProvider _clock;
@@ -295,17 +334,16 @@ internal sealed class LocalCheckpointer
                 Read(_plan.DurableStates, static state => state.Export()),
                 Read(_plan.Marks, static mark => mark.Mark));
 
-            _etag = await _store
-                .WriteAsync(_graph, _run, document, _etag, CancellationToken.None)
-                .ConfigureAwait(false);
+            _etag = await WriteAsync(document).ConfigureAwait(false);
 
             _ = Interlocked.Increment(ref _captures);
         }
         catch (Exception error)
         {
             // Deliberately every exception, for the reason the run loop catches every exception: a store is
-            // somebody else's code, and a capture that failed in a way nobody anticipated must end the run
-            // rather than leave a durable run quietly running without durability.
+            // somebody else's code, and a capture that failed in a way nobody anticipated must end the
+            // attempt rather than leave a durable run quietly running without durability. What arrives here
+            // is either the conflict, unwrapped, or the exhaustion wrapper — the retrying happened below.
             _fail(error);
         }
         finally
@@ -319,6 +357,60 @@ internal sealed class LocalCheckpointer
             DataflowDiagnostics.CheckpointHeld(_fingerprint, held);
 
             _ = _pause.Release(LocalHold.Checkpoint);
+        }
+    }
+
+    /// <summary>Presents one document to the store, retrying a store that did not answer.</summary>
+    /// <param name="document">The document this capture took.</param>
+    /// <returns>The ETag the accepted write produced.</returns>
+    /// <exception cref="CheckpointConflictException">
+    /// The store holds an ETag this attempt does not, so somebody else owns the run. Raised on the first
+    /// refusal and never retried: a stale writer that kept presenting its document would eventually
+    /// overwrite the position a fresh attempt is building.
+    /// </exception>
+    /// <exception cref="CheckpointWriteFailedException">
+    /// The store failed to answer on every attempt. The last failure is the cause.
+    /// </exception>
+    /// <remarks>
+    /// <para>
+    /// The whole loop happens inside the capture's hold, which is what makes a retry a retry of <em>this</em>
+    /// capture: the run has not moved, so the document presented again is the document that was taken, and
+    /// the ETag presented again is the one that was current when the hold began. Releasing between attempts
+    /// and re-taking the snapshot would be a different, later capture wearing this one's name.
+    /// </para>
+    /// <para>
+    /// The waits are on the run's own clock, exactly as the interval between captures is, so a controlled
+    /// clock moves them. A run that ends while a retry is waiting stops retrying at the next attempt rather
+    /// than serving out the whole backoff, which is what keeps a shutdown during a store outage bounded by
+    /// one wait rather than by all of them.
+    /// </para>
+    /// </remarks>
+    private async Task<string> WriteAsync(CanonicalJsonValue document)
+    {
+        TimeSpan wait = FirstRetryDelay;
+
+        for (int attempt = 1; ; attempt++)
+        {
+            try
+            {
+                return await _store
+                    .WriteAsync(_graph, _run, document, _etag, CancellationToken.None)
+                    .ConfigureAwait(false);
+            }
+            catch (CheckpointConflictException)
+            {
+                throw;
+            }
+            catch (Exception) when (attempt < WriteAttempts && !Over)
+            {
+                await Task.Delay(wait, _clock).ConfigureAwait(false);
+
+                wait *= RetryFactor;
+            }
+            catch (Exception error)
+            {
+                throw new CheckpointWriteFailedException(_graph, _run, attempt, error);
+            }
         }
     }
 
@@ -340,4 +432,57 @@ internal sealed class LocalCheckpointer
 
         return values;
     }
+}
+
+/// <summary>
+/// A capture presented its document to the store on every attempt it was allowed and the store never
+/// answered, so the attempt stops rather than going on without durability.
+/// </summary>
+/// <remarks>
+/// <para>
+/// <b>It says "this attempt is over" and deliberately not "this run is over".</b> That is the whole reason
+/// it exists as a type rather than as the store's own exception travelling on: a host that records how a run
+/// ended must be able to tell a run that reached a terminal state from an attempt that lost its store, and
+/// the two are indistinguishable once both are "the engine faulted". Recording a store outage as the run's
+/// outcome retires the run — after which the only way back is a destructive replacement, which clears the
+/// very checkpoints the outage was about — so the fact travels here rather than being inferred.
+/// </para>
+/// <para>
+/// <b>The store's own exception is the cause and is not flattened into the message.</b> A caller awaiting
+/// the run's completion inside the process gets the timeout, the authentication failure or the quota refusal
+/// its store raised, with everything that carries; the message repeats its type and text because a host that
+/// reports a run's failure as a type name and a string across a wire has nothing else to carry it.
+/// </para>
+/// <para>
+/// Internal, and the seam a same-repo host consumes. The distinction it draws is between an engine and the
+/// thing hosting it, so it is not part of the vocabulary an author writing a pipeline uses; a deployment
+/// meets it as the failure text of the run, which is what it is for.
+/// </para>
+/// </remarks>
+internal sealed class CheckpointWriteFailedException : Exception
+{
+    /// <summary>Initializes a new instance of the <see cref="CheckpointWriteFailedException"/> class.</summary>
+    /// <param name="graph">The graph whose run was being captured.</param>
+    /// <param name="run">The run being captured.</param>
+    /// <param name="attempts">How many times the document was presented to the store.</param>
+    /// <param name="refused">What the store did on the last of those attempts.</param>
+    internal CheckpointWriteFailedException(GraphId graph, RunId run, int attempts, Exception refused)
+        : base(Describe(graph, run, attempts, refused), refused)
+    {
+        Attempts = attempts;
+    }
+
+    /// <summary>Gets how many times the capture presented its document before giving up.</summary>
+    internal int Attempts { get; }
+
+    /// <summary>Builds the message a host reports this failure by.</summary>
+    /// <param name="graph">The graph whose run was being captured.</param>
+    /// <param name="run">The run being captured.</param>
+    /// <param name="attempts">How many times the document was presented to the store.</param>
+    /// <param name="refused">What the store did on the last of those attempts.</param>
+    /// <returns>The message.</returns>
+    private static string Describe(GraphId graph, RunId run, int attempts, Exception refused) =>
+        string.Create(
+            System.Globalization.CultureInfo.InvariantCulture,
+            $"The checkpoint of the run '{run}' of the graph '{graph}' was presented to the store {attempts} times and the store answered none of them, so this attempt stops rather than continuing without durability. The last answer was {refused.GetType().FullName}: {refused.Message}. The run itself reached no terminal state: nothing records an outcome for it, so the next activation continues it from the last checkpoint the store did accept.");
 }

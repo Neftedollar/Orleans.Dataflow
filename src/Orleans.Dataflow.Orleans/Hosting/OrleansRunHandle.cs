@@ -398,12 +398,37 @@ public sealed class OrleansRunHandle : IAsyncDisposable
         await _run.ShutdownAsync(Epoch).ConfigureAwait(false);
     }
 
-    /// <summary>Cancels this run and stops watching it.</summary>
-    /// <returns>A task that completes when the cancellation has been requested.</returns>
+    /// <summary>Cancels this run and waits for it to stop.</summary>
+    /// <returns>A task that completes when the run has reached a terminal state.</returns>
     /// <remarks>
     /// <para>
     /// Disposal is the abrupt stop: the run abandons what it was doing and <see cref="Completion"/> and
     /// every result end cancelled, unless the run had already reached a terminal state of its own.
+    /// </para>
+    /// <para>
+    /// <b>It returns when the run has stopped and not when the request was sent.</b> That is what
+    /// <see cref="IAsyncDisposable"/> means to the caller who wrote <c>await using</c>, it is what
+    /// <see cref="RunHandle"/> has always done, and the two handles answer the same request — a caller
+    /// writing against both should not have to remember which one it is holding. Returning early is not
+    /// merely untidy here: a grain-call sink whose reply is still outstanding goes on delivering elements
+    /// after the block that owned the handle has exited, so a test that asserted on what a sink received
+    /// would be asserting on a run that was still writing.
+    /// </para>
+    /// <para>
+    /// <b>What bounds the wait</b> is the run reaching a terminal state, observed by the same poll loop
+    /// <see cref="Completion"/> and <see cref="WatchTermination"/> read — so within one poll interval of the
+    /// run stopping, and a cancelled run stops as soon as its segments reach their next safe points.
+    /// Nothing is waited for that no longer exists: an attempt whose activation was recycled is reported
+    /// lost by the loop rather than waited for forever, and an undeliverable poll is retried until the
+    /// cluster gives an authoritative answer. The one case with no bound is a cluster that never answers
+    /// again, and no shorter answer would be honest there either — a caller who must abandon even that wait
+    /// wraps this task in its own timeout.
+    /// </para>
+    /// <para>
+    /// Nothing is waited for when there is nothing to wait for. A run this handle could not cancel — an
+    /// attempt already gone, or an identity some other claim owns — is not polled at all, because starting
+    /// the loop there would be this handle asking about work it has just been told is not its own, and for a
+    /// durable run addressing it is what brings it back.
     /// </para>
     /// <para>
     /// It never throws — not for the cancellation it caused itself, not for a failure the run had already
@@ -414,16 +439,46 @@ public sealed class OrleansRunHandle : IAsyncDisposable
     /// </remarks>
     public async ValueTask DisposeAsync()
     {
+        if (!await RequestCancellationAsync().ConfigureAwait(false))
+        {
+            return;
+        }
+
+        try
+        {
+            await Completion.ConfigureAwait(false);
+        }
+        catch (Exception)
+        {
+            // Every way this run could have ended is an outcome and not a failure of the teardown: the
+            // cancellation this very call caused, a failure the run had suffered before it arrived, a lost
+            // attempt, a foreign claim. All of them are readable on Completion by anyone who wants them,
+            // and none of them is a reason for `await using` to throw.
+        }
+    }
+
+    /// <summary>Asks the run to cancel, following a resumed attempt's epoch if it has to.</summary>
+    /// <returns>
+    /// <see langword="true"/> when the request reached a run this handle owns, which is when there is a
+    /// termination to wait for; otherwise <see langword="false"/>.
+    /// </returns>
+    /// <remarks>
+    /// The two refusals mean opposite things and both mean "do not wait". A lost attempt has already
+    /// stopped, so there is no terminal state still to come; a foreign claim is somebody else's run, whose
+    /// ending is not this handle's to observe and whose grain this handle should stop addressing.
+    /// </remarks>
+    private async ValueTask<bool> RequestCancellationAsync()
+    {
         try
         {
             await _run.CancelAsync(Epoch).ConfigureAwait(false);
 
-            return;
+            return true;
         }
         catch (PipelineRunLostException)
         {
             // The activation hosting the run is gone, so there is nothing left to cancel.
-            return;
+            return false;
         }
         catch (PipelineFencingException refused)
         {
@@ -431,19 +486,23 @@ public sealed class OrleansRunHandle : IAsyncDisposable
             // do — unless the claim is this very run's own later attempt, which a durable handle follows.
             if (!Adopt(refused))
             {
-                return;
+                return false;
             }
         }
 
         try
         {
             await _run.CancelAsync(Epoch).ConfigureAwait(false);
+
+            return true;
         }
         catch (PipelineRunLostException)
         {
+            return false;
         }
         catch (PipelineFencingException)
         {
+            return false;
         }
     }
 

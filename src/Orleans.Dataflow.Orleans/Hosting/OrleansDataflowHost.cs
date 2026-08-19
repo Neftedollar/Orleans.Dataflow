@@ -288,6 +288,81 @@ public sealed class OrleansDataflowHost
         }
     }
 
+    /// <summary>Destroys everything one durable run identity holds and forgets that it existed.</summary>
+    /// <param name="pipelineId">The identity of the pipeline the run belongs to.</param>
+    /// <param name="runId">What the run is called.</param>
+    /// <param name="cancellationToken">A token that stops this wait; it does not stop a running attempt.</param>
+    /// <returns>
+    /// A task carrying <see langword="true"/> when a declaration was retired, and <see langword="false"/>
+    /// when the cluster held none under that identity — which is what a retirement already carried out
+    /// answers, so a runbook step is safe to repeat.
+    /// </returns>
+    /// <exception cref="ArgumentNullException">Either identifier is <see langword="null"/>.</exception>
+    /// <exception cref="ArgumentException">
+    /// <paramref name="pipelineId"/> or <paramref name="runId"/> is not a valid identifier.
+    /// </exception>
+    /// <exception cref="CheckpointConflictException">
+    /// The stored checkpoint moved between being read and being cleared, so something is still writing under
+    /// the identity. Retrying the retirement is safe and is the answer.
+    /// </exception>
+    /// <remarks>
+    /// <para>
+    /// <b>The runbook operation, and it is destructive in exactly the way
+    /// <see cref="ReplaceDurableRunAsync"/> is</b> — the checkpoint is cleared and whatever was executing is
+    /// superseded — with the one difference that gives it its name: the declaration is <em>removed</em>
+    /// rather than rewritten. A replacement takes a name forward onto a new document; this gives the name
+    /// up.
+    /// </para>
+    /// <para>
+    /// <b>It exists because the register of durable names is a thing that grows.</b> A record holds the
+    /// document it names, a coordinator rewrites the whole register on every declaration, and a deployment
+    /// that names durable runs after something outside its control — a tenant, a day, a customer — otherwise
+    /// grows a state document until its storage provider will not accept it, at which point that pipeline
+    /// cannot start any run at all. A cap refuses the thousand-and-first name; this is what makes room for
+    /// it.
+    /// </para>
+    /// <para>
+    /// <b>It takes names rather than a pipeline.</b> Every other member here takes the
+    /// <see cref="PipelineDefinition"/> because it is about to run it, and a document is what a run needs; a
+    /// retirement is about to destroy one, and an operator carrying out a runbook has the two identifiers and
+    /// no reason to be able to rebuild the document as well.
+    /// </para>
+    /// <para>
+    /// <b>It does not stop what is running, because the cluster may not.</b> What ends a retired run is its
+    /// own next capture, refused by a store it no longer holds an ETag for; a run that declared no timing at
+    /// all and therefore never captures runs on until something else ends it. That is the sentence a
+    /// replacement carries too, and it is why both are an operator's decision.
+    /// </para>
+    /// </remarks>
+    public async Task<bool> RetireDurableRunAsync(
+        string pipelineId,
+        string runId,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(pipelineId);
+        ArgumentNullException.ThrowIfNull(runId);
+
+        if (!GraphId.TryCreate(pipelineId, out GraphId pipeline))
+        {
+            throw new ArgumentException(
+                $"'{pipelineId}' is not a valid pipeline identifier, so it addresses no coordinator that could hold a durable run.",
+                nameof(pipelineId));
+        }
+
+        if (!RunId.TryCreate(runId, out _))
+        {
+            throw new ArgumentException(
+                $"'{runId}' is not a valid run identifier, so it names no durable run a cluster could have declared.",
+                nameof(runId));
+        }
+
+        return await _grains
+            .GetGrain<IPipelineCoordinatorGrain>(pipeline.Value)
+            .RetireDurableRunAsync(runId)
+            .WaitAsync(cancellationToken)
+            .ConfigureAwait(false);
+    }
+
     /// <summary>Drives the second hop of a durable materialization and composes the handle.</summary>
     /// <param name="pipeline">The pipeline, whose fingerprint the handle validates slots against.</param>
     /// <param name="declared">The ticket the declaration or the replacement answered with.</param>

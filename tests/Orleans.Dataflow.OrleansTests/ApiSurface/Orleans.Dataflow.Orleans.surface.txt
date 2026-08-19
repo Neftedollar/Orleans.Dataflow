@@ -168,6 +168,9 @@ TYPE interface Orleans.Dataflow.Grains.IPipelineCoordinatorGrain
   method abstract System.Threading.Tasks.Task<Orleans.Dataflow.Grains.PipelineRunTicket> ReplaceDurableRunAsync(System.Byte[] canonicalDocument, Orleans.Dataflow.Grains.DurableRunDeclaration declaration)
   method abstract System.Threading.Tasks.Task<Orleans.Dataflow.Grains.PipelineRunTicket> StartRunAsync(System.Byte[] canonicalDocument)
   method abstract System.Threading.Tasks.Task<Orleans.Dataflow.Grains.RunStatusSnapshot> GetStatusAsync(System.String runId, System.Int64 epoch)  [Orleans.Concurrency.AlwaysInterleaveAttribute]
+  method abstract System.Threading.Tasks.Task<System.Boolean> HasIssuedEpochAsync(System.Int64 epoch)  [Orleans.Concurrency.AlwaysInterleaveAttribute]
+  method abstract System.Threading.Tasks.Task<System.Boolean> RetireDurableRunAsync(System.String runId)
+  method abstract System.Threading.Tasks.Task<System.Nullable<System.Int64>> TakeDurableRunAsync(System.String runId)
 TYPE interface Orleans.Dataflow.Grains.IPipelineRunGrain
   IFACE Orleans.IGrain
   IFACE Orleans.IGrainWithStringKey
@@ -272,6 +275,7 @@ TYPE sealed class Orleans.Dataflow.Grains.RunStatusSnapshot  [Orleans.GenerateSe
   property System.Int64 SupervisedFailures { get; set; }  [Orleans.IdAttribute(5)]
   property System.String FailureMessage { get; set; }  [Orleans.IdAttribute(3)]
   property System.String FailureType { get; set; }  [Orleans.IdAttribute(2)]
+  property System.String UnrecordedEnding { get; set; }  [Orleans.IdAttribute(9)]
   property System.TimeSpan TotalCheckpointHold { get; set; }  [Orleans.IdAttribute(8)]
 TYPE enum Orleans.Dataflow.Hosting.DataflowPlacement
   IFACE System.IComparable
@@ -315,6 +319,7 @@ TYPE sealed class Orleans.Dataflow.Hosting.OrleansDataflowHost
   method System.Threading.Tasks.Task<Orleans.Dataflow.Hosting.OrleansRunHandle> MaterializeAsync(Orleans.Dataflow.PipelineDefinition pipeline, System.Threading.CancellationToken cancellationToken = default)
   method System.Threading.Tasks.Task<Orleans.Dataflow.Hosting.OrleansRunHandle> MaterializeDurableAsync(Orleans.Dataflow.PipelineDefinition pipeline, Orleans.Dataflow.Hosting.DurablePipelineOptions durable, System.Threading.CancellationToken cancellationToken = default)
   method System.Threading.Tasks.Task<Orleans.Dataflow.Hosting.OrleansRunHandle> ReplaceDurableRunAsync(Orleans.Dataflow.PipelineDefinition pipeline, Orleans.Dataflow.Hosting.DurablePipelineOptions durable, System.Threading.CancellationToken cancellationToken = default)
+  method System.Threading.Tasks.Task<System.Boolean> RetireDurableRunAsync(System.String pipelineId, System.String runId, System.Threading.CancellationToken cancellationToken = default)
 TYPE static class Orleans.Dataflow.Hosting.OrleansDataflowResults
   field static const System.Int32 DefaultMaximumResultBytes = 1048576
 TYPE static class Orleans.Dataflow.Hosting.OrleansDataflowSiloBuilderExtensions  [System.Runtime.CompilerServices.ExtensionAttribute]

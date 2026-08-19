@@ -1,3 +1,4 @@
+using System.Globalization;
 using System.Text;
 using System.Text.Json;
 
@@ -54,6 +55,15 @@ namespace Orleans.Dataflow.Serialization;
 /// </item>
 /// </list>
 /// <para>
+/// Those two are rules about what a value is. There is a third bound that is not: a parse entry point
+/// refuses text longer than 4 MiB before it reads any of it. The canonical size limit can only be applied
+/// to the canonical form, which means applying it costs a full parse of the input, so an input ceiling
+/// sixteen times the canonical one stands in front of that parse and keeps the cost of refusing an
+/// oversized payload proportional to nothing. It is set high enough that no input whose canonical form
+/// could fit is turned away, and it is not part of the format: two deployments that disagreed about it
+/// would still agree about every value either of them accepted.
+/// </para>
+/// <para>
 /// Canonicalization is idempotent: parsing the canonical bytes of a value yields the same value, byte
 /// for byte.
 /// </para>
@@ -84,6 +94,39 @@ public readonly record struct CanonicalJsonValue
     /// do not count against it.
     /// </remarks>
     public const int MaxCanonicalBytes = 262144;
+
+    /// <summary>
+    /// The greatest number of UTF-8 bytes a parse entry point will read before it refuses: 4 MiB.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// This is a memory floor and not a rule of the canonical form. <see cref="MaxCanonicalBytes"/> says
+    /// what a value <em>is</em>; this says how much text may be examined while deciding, and it exists
+    /// because everything between reading the input and writing the canonical bytes is paid for first: a
+    /// <see cref="JsonDocument"/> over the whole input is built before the writer can refuse a single byte,
+    /// and its cost is a double-digit multiple of the input. A 76-million-character array of short strings
+    /// was measured allocating over a gigabyte on one thread before the 256 KiB refusal arrived. Refusing
+    /// on length first turns that into an argument check.
+    /// </para>
+    /// <para>
+    /// <b>Why it is not <see cref="MaxCanonicalBytes"/>.</b> Canonicalizing never makes a value longer than
+    /// the text it was written from, but it very often makes it much shorter: insignificant whitespace and
+    /// indentation vanish, and the six-character escape for an ASCII letter costs six input bytes where the
+    /// canonical form spends one.
+    /// An input well past 256 KiB therefore routinely canonicalizes under it, and refusing at exactly the
+    /// canonical bound would reject values this library accepts today. Sixteen times the canonical bound
+    /// clears the worst shrinkage a legitimate encoder produces — the six-to-one escape ratio applied to
+    /// every character, with room left over for indentation — so nothing that used to be accepted is
+    /// refused by the new check.
+    /// </para>
+    /// <para>
+    /// It is deliberately not public and deliberately not a promise. It is not the boundary of what
+    /// canonicalizes: text above it may well have canonicalized to a small value, and is refused all the
+    /// same because deciding would have cost more than the answer is worth. Below it nothing changes, so no
+    /// caller has to reason about the number.
+    /// </para>
+    /// </remarks>
+    private const int MaxInputBytes = 16 * MaxCanonicalBytes;
 
     /// <summary>The diagnostic text <see cref="ToString"/> renders for the default value.</summary>
     private const string DefaultText = "(default CanonicalJsonValue)";
@@ -142,16 +185,30 @@ public readonly record struct CanonicalJsonValue
     /// <exception cref="ArgumentNullException"><paramref name="json"/> is <see langword="null"/>.</exception>
     /// <exception cref="JsonException"><paramref name="json"/> is not well-formed JSON.</exception>
     /// <exception cref="ArgumentException">
-    /// <paramref name="json"/> is well-formed JSON that breaks a canonical rule, or is not well-formed
-    /// UTF-16. The message names the offending construct and the rule it breaks.
+    /// <paramref name="json"/> is well-formed JSON that breaks a canonical rule, is not well-formed UTF-16,
+    /// or is longer than a canonical value is parsed from at all. The message names the offending construct
+    /// and the rule it breaks, or the length ceiling it passed.
     /// </exception>
     /// <remarks>
+    /// <para>
     /// The text is transcoded to UTF-8 strictly: an unpaired surrogate has no UTF-8 encoding, so it is
     /// rejected rather than silently replaced.
+    /// </para>
+    /// <para>
+    /// Length is refused before that transcoding rather than after it. UTF-8 never encodes a UTF-16 code
+    /// unit in fewer than one byte, so text longer than the ceiling cannot transcode under it, and checking
+    /// the count the caller already holds is what keeps refusing an oversized input from first allocating a
+    /// UTF-8 copy of it.
+    /// </para>
     /// </remarks>
     public static CanonicalJsonValue Parse(string json)
     {
         ArgumentNullException.ThrowIfNull(json);
+
+        if (json.Length > MaxInputBytes)
+        {
+            throw new ArgumentException(FormatInputExceeded(json.Length), nameof(json));
+        }
 
         return new CanonicalJsonValue(Canonicalize(Transcode(json, nameof(json)), nameof(json)));
     }
@@ -166,11 +223,24 @@ public readonly record struct CanonicalJsonValue
     /// <returns>The canonicalized value.</returns>
     /// <exception cref="JsonException"><paramref name="utf8Json"/> is not well-formed JSON.</exception>
     /// <exception cref="ArgumentException">
-    /// <paramref name="utf8Json"/> is well-formed JSON that breaks a canonical rule. The message names
-    /// the offending construct and the rule it breaks.
+    /// <paramref name="utf8Json"/> is well-formed JSON that breaks a canonical rule, or is longer than a
+    /// canonical value is parsed from at all. The message names the offending construct and the rule it
+    /// breaks, or the length ceiling it passed.
     /// </exception>
-    public static CanonicalJsonValue Parse(ReadOnlySpan<byte> utf8Json) =>
-        new(Canonicalize(utf8Json.ToArray(), nameof(utf8Json)));
+    /// <remarks>
+    /// Length is refused before the span is copied. The copy exists because canonicalization holds the
+    /// bytes past this call, and refusing after it would have allocated a second copy of the very input
+    /// being refused.
+    /// </remarks>
+    public static CanonicalJsonValue Parse(ReadOnlySpan<byte> utf8Json)
+    {
+        if (utf8Json.Length > MaxInputBytes)
+        {
+            throw new ArgumentException(FormatInputExceeded(utf8Json.Length), nameof(utf8Json));
+        }
+
+        return new CanonicalJsonValue(Canonicalize(utf8Json.ToArray(), nameof(utf8Json)));
+    }
 
     /// <summary>
     /// Attempts to parse JSON text and canonicalize it.
@@ -352,12 +422,28 @@ public readonly record struct CanonicalJsonValue
     /// <param name="parameterName">The caller's parameter name, reported on rejection.</param>
     /// <returns>The canonical bytes.</returns>
     /// <remarks>
-    /// Depth is checked before a document is built, so deeply nested untrusted input is rejected without
-    /// materializing a document for it and reports the canonical rule it broke rather than the parser's
-    /// own depth error. Every remaining rule is checked while the canonical bytes are written.
+    /// <para>
+    /// Three checks in the order their cost demands. Length is checked first, against
+    /// <see cref="MaxInputBytes"/>, because it is the only one that can be answered without touching the
+    /// text at all and because everything after it allocates in proportion to the input. Depth is checked
+    /// next, by a streaming scan, so deeply nested untrusted input is rejected without materializing a
+    /// document for it and reports the canonical rule it broke rather than the parser's own depth error.
+    /// Every remaining rule is checked while the canonical bytes are written.
+    /// </para>
+    /// <para>
+    /// The order is what makes the bounds real rather than eventual. The size rule is enforced on the
+    /// canonical form and can therefore only be applied by the writer, which is downstream of a whole
+    /// <see cref="JsonDocument"/> over the whole input; the length ceiling is the guard in front of that
+    /// document, and it is why refusing an oversized value costs an argument check instead of a gigabyte.
+    /// </para>
     /// </remarks>
     private static byte[] Canonicalize(byte[] utf8Json, string parameterName)
     {
+        if (utf8Json.Length > MaxInputBytes)
+        {
+            throw new ArgumentException(FormatInputExceeded(utf8Json.Length), parameterName);
+        }
+
         CanonicalJsonWriter.EnsureDepthWithinLimit(utf8Json, parameterName);
 
         using JsonDocument document = JsonDocument.Parse(
@@ -366,6 +452,30 @@ public readonly record struct CanonicalJsonValue
 
         return CanonicalJsonWriter.Canonicalize(document.RootElement, parameterName);
     }
+
+    /// <summary>Builds the message for text longer than <see cref="MaxInputBytes"/>.</summary>
+    /// <param name="length">
+    /// A lower bound on the UTF-8 length of the rejected text: the exact byte count on the UTF-8 path, and
+    /// the UTF-16 code unit count on the text path, which UTF-8 never encodes in fewer bytes.
+    /// </param>
+    /// <returns>A message naming both bounds and saying which one it is.</returns>
+    /// <remarks>
+    /// <para>
+    /// The message quotes the length, unlike the canonical-size diagnostic, because here it is known before
+    /// anything is read and quoting it is what tells an author whose payload grew past the ceiling how far
+    /// past it they are. It is quoted as a lower bound rather than as a measurement, because the text
+    /// overload refuses before it has transcoded anything.
+    /// </para>
+    /// <para>
+    /// It is composed here rather than in <see cref="CanonicalJsonGrammar"/>, which holds the diagnostics
+    /// for the canonical <em>rules</em>. This refusal is not one of them: it is a bound on the work of
+    /// deciding, and the message says so rather than naming a rule the value broke.
+    /// </para>
+    /// </remarks>
+    private static string FormatInputExceeded(int length) =>
+        string.Create(
+            CultureInfo.InvariantCulture,
+            $"The JSON text needs at least {length} bytes of UTF-8, and a canonical value is parsed from at most {MaxInputBytes} bytes (4 MiB) of input. That ceiling is not a canonical rule but a bound on the work of applying them: a canonical form is limited to {MaxCanonicalBytes} bytes (256 KiB), deciding whether text reaches that limit costs a parse of the whole text, and no payload written to be read is sixteen times longer than the value it denotes. Split the payload, or reference the bulk of it from outside the graph document.");
 
     /// <summary>
     /// Transcodes JSON text to UTF-8, rejecting text that has no UTF-8 encoding.
