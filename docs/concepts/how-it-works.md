@@ -87,6 +87,28 @@ Read what is there and, more importantly, what is not. There is a node saying
 not `OrderEvent`, not `OrderDocument`. There is no connection string, no grain
 reference, no service provider, no task.
 
+**So where did your predicate go?** Beside the document, not inside it — and
+this is the first thing to understand about the value you built. A
+`RunnableGraph` is *two* things held together: the document above, and a table
+of everything your code handed over, keyed by node identifier. The lambda
+`order => order.IsValid` sits in that table under the `where` node, the
+projection under the `select` node, and — this catches people — the
+`orderEvents` sequence itself sits there under the source node. It is not only
+code that stays outside. Your **data** stays outside too: the document says "a
+sequence is read here", never which sequence, and never its elements.
+
+That table lives in your process and travels nowhere. The document, meanwhile,
+travels anywhere. The `nondeployable` token in the capabilities list above is the
+document saying exactly that about itself: *some of my stages have behaviour that
+only the process that built me can supply, so do not send me to a silo and expect
+me to run.* Its neighbour `ephemeral-identity` says the same thing about names:
+*my node names are positions I made up — `stage-0001`, `stage-0002` — rather than
+names an author chose, so nothing durable can point at them.*
+
+If that sounds like the design defeating itself, hold on: it is the honest
+half of a trade, and [what the separation costs you](#what-the-separation-costs-you)
+is where the other half is paid. First, what the document does hold.
+
 The [graph document](../reference/glossary.md#graph-document) holds three kinds
 of thing and only these three:
 
@@ -97,14 +119,6 @@ of thing and only these three:
 - **numbers and enumerations**, in each stage's parameter payload. A buffer's
   capacity is in the document; a buffer's *contents* never are. Change the
   capacity from 16 to 8 and you have a different document.
-
-Everything else about your pipeline — the code — lives outside the document, in a
-table beside it keyed by node identifier, and the document records that fact
-about itself in its `capabilities` list. Both tokens above are the document being
-honest about what it is: `nondeployable` says "one of my stages has behavior that
-lives only in the process that built me", and `ephemeral-identity` says "my node
-names are positions I made up — `stage-0001`, `stage-0002` — rather than names an
-author chose, so nothing durable can point at them".
 
 ## Three things, and why each exists
 
