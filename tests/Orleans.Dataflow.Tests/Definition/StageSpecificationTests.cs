@@ -43,13 +43,7 @@ public sealed class StageSpecificationTests
     [Fact]
     public void CreateAcceptsAStageThatDeclaresNothingAtAll()
     {
-        StageSpecification specification = StageSpecification.Create(
-            SampleStage,
-            [],
-            [],
-            [],
-            SampleParameterContract,
-            []);
+        StageSpecification specification = StageSpecification.Create(SampleStage, SampleParameterContract);
 
         Assert.Empty(specification.InputPorts);
         Assert.Empty(specification.OutputPorts);
@@ -62,10 +56,10 @@ public sealed class StageSpecificationTests
     {
         StageSpecification specification = StageSpecification.Create(
             SampleStage,
+            SampleParameterContract,
             [Input("side"), Input("in"), Input("aux")],
             [Output("trace"), Output("out")],
             [Result("total"), Result("count")],
-            SampleParameterContract,
             [Capability("zeta"), Capability("alpha"), Capability("mid")]);
 
         Assert.Equal(["aux", "in", "side"], specification.InputPorts.Select(port => port.Id.Value));
@@ -80,10 +74,10 @@ public sealed class StageSpecificationTests
         StageSpecification first = Representative();
         StageSpecification second = StageSpecification.Create(
             SampleStage,
+            SampleParameterContract,
             [Input("side", isOptional: true), Input("in")],
             [Output("trace", isIgnorable: true), Output("out")],
             [Result("count")],
-            SampleParameterContract,
             [CapabilityToken.Nondeployable]);
 
         Assert.Equal(first, second);
@@ -103,41 +97,40 @@ public sealed class StageSpecificationTests
             specification,
             StageSpecification.Create(
                 StageRef.Create(ProviderId.Create("orleans-core"), StageId.Create("map-async"), 3),
+                SampleParameterContract,
                 [Input("in"), Input("side", isOptional: true)],
                 [Output("out"), Output("trace", isIgnorable: true)],
                 [Result("count")],
-                SampleParameterContract,
                 [CapabilityToken.Nondeployable]));
 
         Assert.NotEqual(
             specification,
             StageSpecification.Create(
                 SampleStage,
+                SampleParameterContract,
                 [Input("in"), Input("side")],
                 [Output("out"), Output("trace", isIgnorable: true)],
                 [Result("count")],
-                SampleParameterContract,
                 [CapabilityToken.Nondeployable]));
 
         Assert.NotEqual(
             specification,
             StageSpecification.Create(
                 SampleStage,
-                [Input("in"), Input("side", isOptional: true)],
-                [Output("out"), Output("trace", isIgnorable: true)],
-                [Result("count")],
                 ContractReference.Create(ContractId.Create("map-parameters"), 4),
+                [Input("in"), Input("side", isOptional: true)],
+                [Output("out"), Output("trace", isIgnorable: true)],
+                [Result("count")],
                 [CapabilityToken.Nondeployable]));
 
         Assert.NotEqual(
             specification,
             StageSpecification.Create(
                 SampleStage,
+                SampleParameterContract,
                 [Input("in"), Input("side", isOptional: true)],
                 [Output("out"), Output("trace", isIgnorable: true)],
-                [Result("count")],
-                SampleParameterContract,
-                []));
+                [Result("count")]));
     }
 
     [Fact]
@@ -170,42 +163,151 @@ public sealed class StageSpecificationTests
     public void ToStringSummarizesTheStageAndItsPortCounts() =>
         Assert.Equal("orleans-core/map-async@v2 (2 in, 2 out, 1 result)", Representative().ToString());
 
-    [Theory]
-    [InlineData("inputPorts")]
-    [InlineData("outputPorts")]
-    [InlineData("resultPorts")]
-    [InlineData("requiredCapabilities")]
-    public void CreateRejectsANullSequence(string parameterName)
+    [Fact]
+    public void CreateReadsAnOmittedCollectionAndANullOneAsDeclaringNone()
     {
-        Assert.Throws<ArgumentNullException>(
-            parameterName,
-            () =>
-            {
-                _ = StageSpecification.Create(
-                    SampleStage,
-                    parameterName == "inputPorts" ? null! : [],
-                    parameterName == "outputPorts" ? null! : [],
-                    parameterName == "resultPorts" ? null! : [],
-                    SampleParameterContract,
-                    parameterName == "requiredCapabilities" ? null! : []);
-            });
+        StageSpecification omitted = StageSpecification.Create(SampleStage, SampleParameterContract);
+        StageSpecification supplied = StageSpecification.Create(
+            SampleStage,
+            SampleParameterContract,
+            inputPorts: null,
+            outputPorts: null,
+            resultPorts: null,
+            requiredCapabilities: null,
+            parameterValidator: null);
+
+        Assert.Equal(omitted, supplied);
+        Assert.Empty(supplied.InputPorts);
+        Assert.Empty(supplied.OutputPorts);
+        Assert.Empty(supplied.ResultPorts);
+        Assert.Empty(supplied.RequiredCapabilities);
+        Assert.Null(supplied.ParameterValidator);
     }
 
     [Fact]
-    public void CreateRejectsANullValidator() =>
+    public void ShapeFactoriesRefuseANullValidator()
+    {
+        InputPortSpecification input = Input("in");
+        OutputPortSpecification output = Output("out");
+        ResultPortSpecification result = Result("count");
+
         Assert.Throws<ArgumentNullException>(
             "parameterValidator",
-            () =>
-            {
-                _ = StageSpecification.Create(
-                    SampleStage,
-                    [],
-                    [],
-                    [],
-                    SampleParameterContract,
-                    [],
-                    null!);
-            });
+            () => StageSpecification.Source(SampleStage, SampleParameterContract, output, null!));
+        Assert.Throws<ArgumentNullException>(
+            "parameterValidator",
+            () => StageSpecification.Flow(SampleStage, SampleParameterContract, input, output, null!));
+        Assert.Throws<ArgumentNullException>(
+            "parameterValidator",
+            () => StageSpecification.Sink(SampleStage, SampleParameterContract, input, null!));
+        Assert.Throws<ArgumentNullException>(
+            "parameterValidator",
+            () => StageSpecification.Sink(SampleStage, SampleParameterContract, input, result, null!));
+        Assert.Throws<ArgumentNullException>(
+            "parameterValidator",
+            () => StageSpecification.FanOut(SampleStage, SampleParameterContract, input, [output], null!));
+        Assert.Throws<ArgumentNullException>(
+            "parameterValidator",
+            () => StageSpecification.FanIn(SampleStage, SampleParameterContract, [input], output, null!));
+    }
+
+    [Fact]
+    public void EveryShapeFactoryDeclaresWhatTheGeneralFormDeclares()
+    {
+        OutputPortSpecification left = Output("left");
+        OutputPortSpecification right = Output("right");
+        InputPortSpecification first = Input("first");
+        InputPortSpecification second = Input("second");
+
+        SameStage(
+            StageSpecification.Create(SampleStage, SampleParameterContract, outputPorts: [Output("out")]),
+            StageSpecification.Source(SampleStage, SampleParameterContract, Output("out")));
+        SameStage(
+            StageSpecification.Create(
+                SampleStage,
+                SampleParameterContract,
+                inputPorts: [Input("in")],
+                outputPorts: [Output("out")]),
+            StageSpecification.Flow(SampleStage, SampleParameterContract, Input("in"), Output("out")));
+        SameStage(
+            StageSpecification.Create(SampleStage, SampleParameterContract, inputPorts: [Input("in")]),
+            StageSpecification.Sink(SampleStage, SampleParameterContract, Input("in")));
+        SameStage(
+            StageSpecification.Create(
+                SampleStage,
+                SampleParameterContract,
+                inputPorts: [Input("in")],
+                resultPorts: [Result("count")]),
+            StageSpecification.Sink(SampleStage, SampleParameterContract, Input("in"), Result("count")));
+        SameStage(
+            StageSpecification.Create(
+                SampleStage,
+                SampleParameterContract,
+                inputPorts: [Input("in")],
+                outputPorts: [left, right]),
+            StageSpecification.FanOut(SampleStage, SampleParameterContract, Input("in"), [left, right]));
+        SameStage(
+            StageSpecification.Create(
+                SampleStage,
+                SampleParameterContract,
+                inputPorts: [first, second],
+                outputPorts: [Output("out")]),
+            StageSpecification.FanIn(SampleStage, SampleParameterContract, [first, second], Output("out")));
+    }
+
+    [Fact]
+    public void AShapeFactoryCarriesTheValidatorItIsGiven()
+    {
+        AcceptingValidator validator = new();
+
+        Assert.Same(
+            validator,
+            StageSpecification.Source(SampleStage, SampleParameterContract, Output("out"), validator)
+                .ParameterValidator);
+        Assert.Same(
+            validator,
+            StageSpecification.Flow(SampleStage, SampleParameterContract, Input("in"), Output("out"), validator)
+                .ParameterValidator);
+        Assert.Same(
+            validator,
+            StageSpecification.Sink(SampleStage, SampleParameterContract, Input("in"), validator)
+                .ParameterValidator);
+        Assert.Same(
+            validator,
+            StageSpecification.Sink(SampleStage, SampleParameterContract, Input("in"), Result("count"), validator)
+                .ParameterValidator);
+        Assert.Same(
+            validator,
+            StageSpecification.FanOut(SampleStage, SampleParameterContract, Input("in"), [Output("out")], validator)
+                .ParameterValidator);
+        Assert.Same(
+            validator,
+            StageSpecification.FanIn(SampleStage, SampleParameterContract, [Input("in")], Output("out"), validator)
+                .ParameterValidator);
+    }
+
+    [Fact]
+    public void AShapeFactoryOrdersItsPortsCanonically()
+    {
+        StageSpecification fanOut = StageSpecification.FanOut(
+            SampleStage,
+            SampleParameterContract,
+            Input("in"),
+            [Output("zulu"), Output("alpha")]);
+
+        Assert.Equal(["alpha", "zulu"], fanOut.OutputPorts.Select(port => port.Id.Value));
+    }
+
+    [Fact]
+    public void AShapeFactoryReportsTheSameViolationsTheGeneralFormDoes()
+    {
+        ArgumentException failure = Assert.Throws<ArgumentException>(
+            () => StageSpecification.Flow(default, SampleParameterContract, Input("shared"), Output("shared")));
+
+        Assert.Contains("The stage specification breaks 2 invariants:", failure.Message, StringComparison.Ordinal);
+        Assert.Contains("the stage reference is the default StageRef", failure.Message, StringComparison.Ordinal);
+        Assert.Contains("outputPorts[0] repeats the port id 'shared'", failure.Message, StringComparison.Ordinal);
+    }
 
     [Fact]
     public void CreateRejectsADefaultStageReference()
@@ -362,15 +464,31 @@ public sealed class StageSpecificationTests
         List<InputPortSpecification> inputs = [Input("in")];
         StageSpecification specification = StageSpecification.Create(
             SampleStage,
-            inputs,
-            [],
-            [],
             SampleParameterContract,
-            []);
+            inputs);
 
         inputs.Add(Input("added-afterwards"));
 
         Assert.Equal(["in"], specification.InputPorts.Select(port => port.Id.Value));
+    }
+
+    /// <summary>
+    /// Asserts that two specifications declare one stage contract, by value and by canonical bytes.
+    /// </summary>
+    /// <param name="general">The specification the general form built.</param>
+    /// <param name="shaped">The specification a shape factory built.</param>
+    /// <remarks>
+    /// The fingerprint is asserted as well as the value because it is the identity a deployment actually
+    /// compares: a shorthand that produced an equal value but different bytes would let two silos registering
+    /// the same vocabulary refuse each other's documents. Equality is what this type defines; the fingerprint
+    /// re-derives the same claim from the serializer, which reads the specification rather than asking it.
+    /// </remarks>
+    private static void SameStage(StageSpecification general, StageSpecification shaped)
+    {
+        Assert.Equal(general, shaped);
+        Assert.Equal(
+            StageCatalogSerializer.Fingerprint(StageCatalog.Create([general])),
+            StageCatalogSerializer.Fingerprint(StageCatalog.Create([shaped])));
     }
 
     /// <summary>Builds the representative specification used by several tests.</summary>
@@ -378,42 +496,41 @@ public sealed class StageSpecificationTests
     private static StageSpecification Representative() =>
         StageSpecification.Create(
             SampleStage,
+            SampleParameterContract,
             [Input("in"), Input("side", isOptional: true)],
             [Output("out"), Output("trace", isIgnorable: true)],
             [Result("count")],
-            SampleParameterContract,
             [CapabilityToken.Nondeployable]);
 
     /// <summary>Builds a specification that declares nothing but its stage and parameter contract.</summary>
     /// <returns>The minimal specification.</returns>
     private static StageSpecification Minimal() =>
-        StageSpecification.Create(SampleStage, [], [], [], SampleParameterContract, []);
+        StageSpecification.Create(SampleStage, SampleParameterContract);
 
     /// <summary>Builds the minimal specification with a validator attached.</summary>
     /// <param name="validator">The validator to attach.</param>
     /// <returns>The minimal specification, which differs from <see cref="Minimal"/> only in behavior.</returns>
     private static StageSpecification MinimalWith(IStageParameterValidator validator) =>
-        StageSpecification.Create(SampleStage, [], [], [], SampleParameterContract, [], validator);
+        StageSpecification.Create(SampleStage, SampleParameterContract, parameterValidator: validator);
 
     /// <summary>Builds an input port on the sample element contract.</summary>
     /// <param name="port">The port name.</param>
     /// <param name="isOptional">Whether the port may be left unconnected.</param>
     /// <returns>The port specification.</returns>
     private static InputPortSpecification Input(string port, bool isOptional = false) =>
-        InputPortSpecification.Create(PortId.Create(port), ElementContract, isOptional);
+        Port.In(port, ElementContract, isOptional);
 
     /// <summary>Builds an output port on the sample element contract.</summary>
     /// <param name="port">The port name.</param>
     /// <param name="isIgnorable">Whether the port may be left unconnected.</param>
     /// <returns>The port specification.</returns>
     private static OutputPortSpecification Output(string port, bool isIgnorable = false) =>
-        OutputPortSpecification.Create(PortId.Create(port), ElementContract, isIgnorable);
+        Port.Out(port, ElementContract, isIgnorable);
 
     /// <summary>Builds a result port on the sample result contract.</summary>
     /// <param name="port">The port name.</param>
     /// <returns>The port specification.</returns>
-    private static ResultPortSpecification Result(string port) =>
-        ResultPortSpecification.Create(PortId.Create(port), ResultContract);
+    private static ResultPortSpecification Result(string port) => Port.Result(port, ResultContract);
 
     /// <summary>Builds a capability token from its text.</summary>
     /// <param name="value">The token text.</param>
@@ -468,10 +585,10 @@ public sealed class StageSpecificationTests
             {
                 _ = StageSpecification.Create(
                     stage,
+                    parameterContract,
                     inputPorts,
                     outputPorts,
                     resultPorts,
-                    parameterContract,
                     requiredCapabilities);
             });
 

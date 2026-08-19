@@ -256,21 +256,15 @@ public static class DotnetStages
     internal static StageCatalog Publish(DotnetAdapterRegistry registry) =>
         StageCatalog.Create(
         [
-            StageSpecification.Create(
+            StageSpecification.Source(
                 TimerStage,
-                [],
-                [OutputPortSpecification.Create(LocalVocabulary.OutputPort, ElementContract)],
-                [],
                 TimerParameterContract,
-                [],
+                OutputPortSpecification.Create(LocalVocabulary.OutputPort, ElementContract),
                 new DotnetStageValidator(registry, DotnetStageKind.Timer)),
-            StageSpecification.Create(
+            StageSpecification.Source(
                 ObservableStage,
-                [],
-                [OutputPortSpecification.Create(LocalVocabulary.OutputPort, ElementContract)],
-                [],
                 ObservableParameterContract,
-                [],
+                OutputPortSpecification.Create(LocalVocabulary.OutputPort, ElementContract),
                 new DotnetStageValidator(registry, DotnetStageKind.Observable)),
         ]);
 }

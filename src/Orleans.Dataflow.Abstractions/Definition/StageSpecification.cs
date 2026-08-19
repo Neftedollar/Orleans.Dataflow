@@ -15,10 +15,22 @@ namespace Orleans.Dataflow.Definition;
 /// what keeps graph data from causing code loading.
 /// </para>
 /// <para>
-/// A specification is canonical by construction. <see cref="Create(StageRef, IEnumerable{InputPortSpecification}, IEnumerable{OutputPortSpecification}, IEnumerable{ResultPortSpecification}, ContractReference, IEnumerable{CapabilityToken})"/>
-/// sorts each port list ordinally by port name and the capability tokens ordinally by text, so two
-/// specifications built from the same elements in different orders are indistinguishable afterwards,
-/// element for element, and serialize to identical bytes.
+/// A specification is canonical by construction. Every factory sorts each port list ordinally by port
+/// name and the capability tokens ordinally by text, so two specifications built from the same elements
+/// in different orders are indistinguishable afterwards, element for element, and serialize to identical
+/// bytes.
+/// </para>
+/// <para>
+/// There are two ways to write one, and they build the same values. The shape factories —
+/// <see cref="Source(StageRef, ContractReference, OutputPortSpecification)"/>,
+/// <see cref="Flow(StageRef, ContractReference, InputPortSpecification, OutputPortSpecification)"/>,
+/// <see cref="Sink(StageRef, ContractReference, InputPortSpecification)"/>,
+/// <see cref="FanOut(StageRef, ContractReference, InputPortSpecification, IEnumerable{OutputPortSpecification})"/>,
+/// and <see cref="FanIn(StageRef, ContractReference, IEnumerable{InputPortSpecification}, OutputPortSpecification)"/>
+/// — name the shapes the engine runs and ask only for the ports those shapes have, which is why a source
+/// written with one declares no empty input list. <see cref="Create"/> is the general form for everything
+/// the shapes do not cover: a stage that requires a capability, one that declares several result ports, one
+/// whose ports form no shape at all.
 /// </para>
 /// <para>
 /// Port names are unique across the whole stage: inputs, outputs, and result ports share one namespace.
@@ -134,27 +146,50 @@ public sealed record class StageSpecification
     public IStageParameterValidator? ParameterValidator { get; }
 
     /// <summary>
-    /// Creates a canonical, valid <see cref="StageSpecification"/> without a parameter validator.
+    /// Creates a canonical, valid <see cref="StageSpecification"/> of any shape.
     /// </summary>
     /// <param name="stage">The stage reference; must not be the default value.</param>
-    /// <param name="inputPorts">The input ports, in any order.</param>
-    /// <param name="outputPorts">The output ports, in any order.</param>
-    /// <param name="resultPorts">The result ports, in any order.</param>
     /// <param name="parameterContract">The parameter contract; must not be the default value.</param>
-    /// <param name="requiredCapabilities">The required capability tokens, in any order, without duplicates.</param>
+    /// <param name="inputPorts">The input ports, in any order, or nothing when the stage consumes nothing.</param>
+    /// <param name="outputPorts">The output ports, in any order, or nothing when the stage produces nothing.</param>
+    /// <param name="resultPorts">The result ports, in any order, or nothing when the stage yields nothing.</param>
+    /// <param name="requiredCapabilities">
+    /// The required capability tokens, in any order, without duplicates, or nothing when the stage requires
+    /// nothing of its host.
+    /// </param>
+    /// <param name="parameterValidator">
+    /// The check to apply to parameter payloads, or nothing when the stage accepts any payload that declares
+    /// its parameter contract.
+    /// </param>
     /// <returns>The validated specification, with every collection in canonical order.</returns>
-    /// <exception cref="ArgumentNullException">Any sequence argument is <see langword="null"/>.</exception>
     /// <exception cref="ArgumentException">
     /// The inputs break at least one invariant. The message is a numbered list of every violation found,
     /// so one call reports every problem rather than one problem per call.
     /// </exception>
+    /// <remarks>
+    /// <para>
+    /// The stage and its parameter contract come first because every stage has exactly one of each, and
+    /// everything after them is what this particular stage happens to declare, written by name. A stage that
+    /// declares nothing but a source's one output port therefore says exactly that.
+    /// </para>
+    /// <para>
+    /// Every optional argument means the same thing when it is left out and when it is
+    /// <see langword="null"/>: absent. A stage with no result ports and a stage with no payload check are
+    /// both saying that they have none of that thing, and one factory that reads absence one way is easier
+    /// to hold than a pair of overloads that read it two ways. The cost is stated rather than hidden: a
+    /// <see langword="null"/> handed over in a variable is accepted as absence rather than refused, and a
+    /// provider that wants a missing validator to be a compile error declares its stage through one of the
+    /// shape factories, where the validator is a required argument.
+    /// </para>
+    /// </remarks>
     public static StageSpecification Create(
         StageRef stage,
-        IEnumerable<InputPortSpecification> inputPorts,
-        IEnumerable<OutputPortSpecification> outputPorts,
-        IEnumerable<ResultPortSpecification> resultPorts,
         ContractReference parameterContract,
-        IEnumerable<CapabilityToken> requiredCapabilities) =>
+        IEnumerable<InputPortSpecification>? inputPorts = null,
+        IEnumerable<OutputPortSpecification>? outputPorts = null,
+        IEnumerable<ResultPortSpecification>? resultPorts = null,
+        IEnumerable<CapabilityToken>? requiredCapabilities = null,
+        IStageParameterValidator? parameterValidator = null) =>
         CreateCore(
             stage,
             inputPorts,
@@ -162,49 +197,251 @@ public sealed record class StageSpecification
             resultPorts,
             parameterContract,
             requiredCapabilities,
-            parameterValidator: null);
+            parameterValidator);
 
-    /// <summary>
-    /// Creates a canonical, valid <see cref="StageSpecification"/> with a parameter validator.
-    /// </summary>
+    /// <summary>Declares a stage that produces on one port and consumes nothing.</summary>
     /// <param name="stage">The stage reference; must not be the default value.</param>
-    /// <param name="inputPorts">The input ports, in any order.</param>
-    /// <param name="outputPorts">The output ports, in any order.</param>
-    /// <param name="resultPorts">The result ports, in any order.</param>
     /// <param name="parameterContract">The parameter contract; must not be the default value.</param>
-    /// <param name="requiredCapabilities">The required capability tokens, in any order, without duplicates.</param>
-    /// <param name="parameterValidator">The check to apply to parameter payloads.</param>
-    /// <returns>The validated specification, with every collection in canonical order.</returns>
-    /// <exception cref="ArgumentNullException">
-    /// Any sequence argument or <paramref name="parameterValidator"/> is <see langword="null"/>.
-    /// </exception>
-    /// <exception cref="ArgumentException">
-    /// The inputs break at least one invariant. The message is a numbered list of every violation found.
-    /// </exception>
+    /// <param name="outputPort">The one port the stage produces on.</param>
+    /// <returns>The validated specification.</returns>
+    /// <exception cref="ArgumentException">The inputs break at least one invariant.</exception>
     /// <remarks>
-    /// The validator is an overload rather than a nullable parameter so that a caller cannot pass
-    /// <see langword="null"/> and silently get a stage that validates nothing: a stage without a check
-    /// says so by calling the other overload.
+    /// The definition-plane half of what <c>DataflowStageRuntime.Source</c> builds, and named after it so
+    /// that a provider's two halves read as one pair. A source declares no input, no result, and no
+    /// required capability; a stage that needs one of those is not this shape and says so by using
+    /// <see cref="Create"/>.
     /// </remarks>
-    public static StageSpecification Create(
+    public static StageSpecification Source(
         StageRef stage,
-        IEnumerable<InputPortSpecification> inputPorts,
-        IEnumerable<OutputPortSpecification> outputPorts,
-        IEnumerable<ResultPortSpecification> resultPorts,
         ContractReference parameterContract,
-        IEnumerable<CapabilityToken> requiredCapabilities,
+        OutputPortSpecification outputPort) =>
+        CreateCore(stage, null, [outputPort], null, parameterContract, null, parameterValidator: null);
+
+    /// <summary>Declares a stage that produces on one port, consumes nothing, and checks its payloads.</summary>
+    /// <param name="stage">The stage reference; must not be the default value.</param>
+    /// <param name="parameterContract">The parameter contract; must not be the default value.</param>
+    /// <param name="outputPort">The one port the stage produces on.</param>
+    /// <param name="parameterValidator">The check to apply to parameter payloads.</param>
+    /// <returns>The validated specification.</returns>
+    /// <exception cref="ArgumentNullException"><paramref name="parameterValidator"/> is <see langword="null"/>.</exception>
+    /// <exception cref="ArgumentException">The inputs break at least one invariant.</exception>
+    public static StageSpecification Source(
+        StageRef stage,
+        ContractReference parameterContract,
+        OutputPortSpecification outputPort,
         IStageParameterValidator parameterValidator)
     {
         ArgumentNullException.ThrowIfNull(parameterValidator);
 
-        return CreateCore(
-            stage,
-            inputPorts,
-            outputPorts,
-            resultPorts,
-            parameterContract,
-            requiredCapabilities,
-            parameterValidator);
+        return CreateCore(stage, null, [outputPort], null, parameterContract, null, parameterValidator);
+    }
+
+    /// <summary>Declares a stage that consumes on one port and produces on one port.</summary>
+    /// <param name="stage">The stage reference; must not be the default value.</param>
+    /// <param name="parameterContract">The parameter contract; must not be the default value.</param>
+    /// <param name="inputPort">The one port the stage consumes on.</param>
+    /// <param name="outputPort">The one port the stage produces on.</param>
+    /// <returns>The validated specification.</returns>
+    /// <exception cref="ArgumentException">The inputs break at least one invariant.</exception>
+    /// <remarks>
+    /// The definition-plane half of what <c>DataflowStageRuntime.Element</c> and
+    /// <c>DataflowStageRuntime.ElementAsync</c> build. Both runtime shapes declare one specification here,
+    /// because whether a transformation awaits is a property of the code that stays behind rather than of
+    /// the ports a document connects.
+    /// </remarks>
+    public static StageSpecification Flow(
+        StageRef stage,
+        ContractReference parameterContract,
+        InputPortSpecification inputPort,
+        OutputPortSpecification outputPort) =>
+        CreateCore(stage, [inputPort], [outputPort], null, parameterContract, null, parameterValidator: null);
+
+    /// <summary>
+    /// Declares a stage that consumes on one port, produces on one port, and checks its payloads.
+    /// </summary>
+    /// <param name="stage">The stage reference; must not be the default value.</param>
+    /// <param name="parameterContract">The parameter contract; must not be the default value.</param>
+    /// <param name="inputPort">The one port the stage consumes on.</param>
+    /// <param name="outputPort">The one port the stage produces on.</param>
+    /// <param name="parameterValidator">The check to apply to parameter payloads.</param>
+    /// <returns>The validated specification.</returns>
+    /// <exception cref="ArgumentNullException"><paramref name="parameterValidator"/> is <see langword="null"/>.</exception>
+    /// <exception cref="ArgumentException">The inputs break at least one invariant.</exception>
+    public static StageSpecification Flow(
+        StageRef stage,
+        ContractReference parameterContract,
+        InputPortSpecification inputPort,
+        OutputPortSpecification outputPort,
+        IStageParameterValidator parameterValidator)
+    {
+        ArgumentNullException.ThrowIfNull(parameterValidator);
+
+        return CreateCore(stage, [inputPort], [outputPort], null, parameterContract, null, parameterValidator);
+    }
+
+    /// <summary>Declares a stage that consumes on one port and yields no result.</summary>
+    /// <param name="stage">The stage reference; must not be the default value.</param>
+    /// <param name="parameterContract">The parameter contract; must not be the default value.</param>
+    /// <param name="inputPort">The one port the stage consumes on.</param>
+    /// <returns>The validated specification.</returns>
+    /// <exception cref="ArgumentException">The inputs break at least one invariant.</exception>
+    /// <remarks>
+    /// The definition-plane half of what <c>DataflowStageRuntime.Terminal</c> builds. A terminal that hands
+    /// a value back to whoever ran the graph declares its result port through the overload that takes one;
+    /// a terminal whose effect is entirely outside the run declares none, and this is that stage.
+    /// </remarks>
+    public static StageSpecification Sink(
+        StageRef stage,
+        ContractReference parameterContract,
+        InputPortSpecification inputPort) =>
+        CreateCore(stage, [inputPort], null, null, parameterContract, null, parameterValidator: null);
+
+    /// <summary>Declares a stage that consumes on one port, yields no result, and checks its payloads.</summary>
+    /// <param name="stage">The stage reference; must not be the default value.</param>
+    /// <param name="parameterContract">The parameter contract; must not be the default value.</param>
+    /// <param name="inputPort">The one port the stage consumes on.</param>
+    /// <param name="parameterValidator">The check to apply to parameter payloads.</param>
+    /// <returns>The validated specification.</returns>
+    /// <exception cref="ArgumentNullException"><paramref name="parameterValidator"/> is <see langword="null"/>.</exception>
+    /// <exception cref="ArgumentException">The inputs break at least one invariant.</exception>
+    public static StageSpecification Sink(
+        StageRef stage,
+        ContractReference parameterContract,
+        InputPortSpecification inputPort,
+        IStageParameterValidator parameterValidator)
+    {
+        ArgumentNullException.ThrowIfNull(parameterValidator);
+
+        return CreateCore(stage, [inputPort], null, null, parameterContract, null, parameterValidator);
+    }
+
+    /// <summary>Declares a stage that consumes on one port and yields one result.</summary>
+    /// <param name="stage">The stage reference; must not be the default value.</param>
+    /// <param name="parameterContract">The parameter contract; must not be the default value.</param>
+    /// <param name="inputPort">The one port the stage consumes on.</param>
+    /// <param name="resultPort">The one port the run's value is read from.</param>
+    /// <returns>The validated specification.</returns>
+    /// <exception cref="ArgumentException">The inputs break at least one invariant.</exception>
+    /// <remarks>
+    /// A result is not an element stream, so a terminal that yields one is still this shape rather than a
+    /// second kind of stage: what changes is that a graph may bind a result slot to it.
+    /// </remarks>
+    public static StageSpecification Sink(
+        StageRef stage,
+        ContractReference parameterContract,
+        InputPortSpecification inputPort,
+        ResultPortSpecification resultPort) =>
+        CreateCore(stage, [inputPort], null, [resultPort], parameterContract, null, parameterValidator: null);
+
+    /// <summary>
+    /// Declares a stage that consumes on one port, yields one result, and checks its payloads.
+    /// </summary>
+    /// <param name="stage">The stage reference; must not be the default value.</param>
+    /// <param name="parameterContract">The parameter contract; must not be the default value.</param>
+    /// <param name="inputPort">The one port the stage consumes on.</param>
+    /// <param name="resultPort">The one port the run's value is read from.</param>
+    /// <param name="parameterValidator">The check to apply to parameter payloads.</param>
+    /// <returns>The validated specification.</returns>
+    /// <exception cref="ArgumentNullException"><paramref name="parameterValidator"/> is <see langword="null"/>.</exception>
+    /// <exception cref="ArgumentException">The inputs break at least one invariant.</exception>
+    public static StageSpecification Sink(
+        StageRef stage,
+        ContractReference parameterContract,
+        InputPortSpecification inputPort,
+        ResultPortSpecification resultPort,
+        IStageParameterValidator parameterValidator)
+    {
+        ArgumentNullException.ThrowIfNull(parameterValidator);
+
+        return CreateCore(stage, [inputPort], null, [resultPort], parameterContract, null, parameterValidator);
+    }
+
+    /// <summary>Declares a stage that consumes on one port and routes to several.</summary>
+    /// <param name="stage">The stage reference; must not be the default value.</param>
+    /// <param name="parameterContract">The parameter contract; must not be the default value.</param>
+    /// <param name="inputPort">The one port the stage consumes on.</param>
+    /// <param name="outputPorts">The ports it routes to, in any order.</param>
+    /// <returns>The validated specification.</returns>
+    /// <exception cref="ArgumentException">The inputs break at least one invariant.</exception>
+    /// <remarks>
+    /// The definition-plane half of what <c>DataflowStageRuntime.Broadcast</c>,
+    /// <c>DataflowStageRuntime.Balance</c>, <c>DataflowStageRuntime.Partition</c>, and
+    /// <c>DataflowStageRuntime.Unzip</c> build. This is the one shape whose ports are genuinely a
+    /// collection: how many legs a junction has is a fact about the stage a provider registered, and the
+    /// engine wires them in the specification's own canonical port order.
+    /// </remarks>
+    public static StageSpecification FanOut(
+        StageRef stage,
+        ContractReference parameterContract,
+        InputPortSpecification inputPort,
+        IEnumerable<OutputPortSpecification> outputPorts) =>
+        CreateCore(stage, [inputPort], outputPorts, null, parameterContract, null, parameterValidator: null);
+
+    /// <summary>
+    /// Declares a stage that consumes on one port, routes to several, and checks its payloads.
+    /// </summary>
+    /// <param name="stage">The stage reference; must not be the default value.</param>
+    /// <param name="parameterContract">The parameter contract; must not be the default value.</param>
+    /// <param name="inputPort">The one port the stage consumes on.</param>
+    /// <param name="outputPorts">The ports it routes to, in any order.</param>
+    /// <param name="parameterValidator">The check to apply to parameter payloads.</param>
+    /// <returns>The validated specification.</returns>
+    /// <exception cref="ArgumentNullException"><paramref name="parameterValidator"/> is <see langword="null"/>.</exception>
+    /// <exception cref="ArgumentException">The inputs break at least one invariant.</exception>
+    public static StageSpecification FanOut(
+        StageRef stage,
+        ContractReference parameterContract,
+        InputPortSpecification inputPort,
+        IEnumerable<OutputPortSpecification> outputPorts,
+        IStageParameterValidator parameterValidator)
+    {
+        ArgumentNullException.ThrowIfNull(parameterValidator);
+
+        return CreateCore(stage, [inputPort], outputPorts, null, parameterContract, null, parameterValidator);
+    }
+
+    /// <summary>Declares a stage that consumes on several ports and produces on one.</summary>
+    /// <param name="stage">The stage reference; must not be the default value.</param>
+    /// <param name="parameterContract">The parameter contract; must not be the default value.</param>
+    /// <param name="inputPorts">The ports it joins, in any order.</param>
+    /// <param name="outputPort">The one port the stage produces on.</param>
+    /// <returns>The validated specification.</returns>
+    /// <exception cref="ArgumentException">The inputs break at least one invariant.</exception>
+    /// <remarks>
+    /// The definition-plane half of what <c>DataflowStageRuntime.Merge</c>,
+    /// <c>DataflowStageRuntime.Concat</c>, <c>DataflowStageRuntime.Interleave</c>,
+    /// <c>DataflowStageRuntime.Zip</c>, and <c>DataflowStageRuntime.CombineLatest</c> build. The mirror of
+    /// <see cref="FanOut(StageRef, ContractReference, InputPortSpecification, IEnumerable{OutputPortSpecification})"/>,
+    /// and its ports are read in the same canonical order.
+    /// </remarks>
+    public static StageSpecification FanIn(
+        StageRef stage,
+        ContractReference parameterContract,
+        IEnumerable<InputPortSpecification> inputPorts,
+        OutputPortSpecification outputPort) =>
+        CreateCore(stage, inputPorts, [outputPort], null, parameterContract, null, parameterValidator: null);
+
+    /// <summary>
+    /// Declares a stage that consumes on several ports, produces on one, and checks its payloads.
+    /// </summary>
+    /// <param name="stage">The stage reference; must not be the default value.</param>
+    /// <param name="parameterContract">The parameter contract; must not be the default value.</param>
+    /// <param name="inputPorts">The ports it joins, in any order.</param>
+    /// <param name="outputPort">The one port the stage produces on.</param>
+    /// <param name="parameterValidator">The check to apply to parameter payloads.</param>
+    /// <returns>The validated specification.</returns>
+    /// <exception cref="ArgumentNullException"><paramref name="parameterValidator"/> is <see langword="null"/>.</exception>
+    /// <exception cref="ArgumentException">The inputs break at least one invariant.</exception>
+    public static StageSpecification FanIn(
+        StageRef stage,
+        ContractReference parameterContract,
+        IEnumerable<InputPortSpecification> inputPorts,
+        OutputPortSpecification outputPort,
+        IStageParameterValidator parameterValidator)
+    {
+        ArgumentNullException.ThrowIfNull(parameterValidator);
+
+        return CreateCore(stage, inputPorts, [outputPort], null, parameterContract, null, parameterValidator);
     }
 
     /// <summary>
@@ -294,30 +531,25 @@ public sealed record class StageSpecification
     /// <param name="requiredCapabilities">The candidate required capability tokens.</param>
     /// <param name="parameterValidator">The validator, or <see langword="null"/>.</param>
     /// <returns>The validated specification.</returns>
-    /// <exception cref="ArgumentNullException">Any sequence argument is <see langword="null"/>.</exception>
     /// <exception cref="ArgumentException">The inputs break at least one invariant.</exception>
     /// <remarks>
     /// Each sequence is enumerated exactly once and copied, so a caller may pass a lazy sequence and may
-    /// keep mutating its own collection afterwards without affecting the specification.
+    /// keep mutating its own collection afterwards without affecting the specification. An absent sequence
+    /// declares no ports of its kind, which is the same thing an empty one declares.
     /// </remarks>
     private static StageSpecification CreateCore(
         StageRef stage,
-        IEnumerable<InputPortSpecification> inputPorts,
-        IEnumerable<OutputPortSpecification> outputPorts,
-        IEnumerable<ResultPortSpecification> resultPorts,
+        IEnumerable<InputPortSpecification>? inputPorts,
+        IEnumerable<OutputPortSpecification>? outputPorts,
+        IEnumerable<ResultPortSpecification>? resultPorts,
         ContractReference parameterContract,
-        IEnumerable<CapabilityToken> requiredCapabilities,
+        IEnumerable<CapabilityToken>? requiredCapabilities,
         IStageParameterValidator? parameterValidator)
     {
-        ArgumentNullException.ThrowIfNull(inputPorts);
-        ArgumentNullException.ThrowIfNull(outputPorts);
-        ArgumentNullException.ThrowIfNull(resultPorts);
-        ArgumentNullException.ThrowIfNull(requiredCapabilities);
-
-        InputPortSpecification[] inputArray = [.. inputPorts];
-        OutputPortSpecification[] outputArray = [.. outputPorts];
-        ResultPortSpecification[] resultArray = [.. resultPorts];
-        CapabilityToken[] capabilityArray = [.. requiredCapabilities];
+        InputPortSpecification[] inputArray = inputPorts is null ? [] : [.. inputPorts];
+        OutputPortSpecification[] outputArray = outputPorts is null ? [] : [.. outputPorts];
+        ResultPortSpecification[] resultArray = resultPorts is null ? [] : [.. resultPorts];
+        CapabilityToken[] capabilityArray = requiredCapabilities is null ? [] : [.. requiredCapabilities];
 
         List<string> violations =
             Validate(stage, inputArray, outputArray, resultArray, parameterContract, capabilityArray);

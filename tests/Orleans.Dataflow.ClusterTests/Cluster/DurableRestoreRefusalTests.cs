@@ -53,20 +53,14 @@ internal static class RestoreProbeVocabulary
     internal static StageCatalog Catalog() =>
         StageCatalog.Create(
         [
-            StageSpecification.Create(
+            StageSpecification.Source(
                 Counted,
-                [],
-                [OutputPortSpecification.Create(PortId.Create("out"), TestVocabulary.Number.Reference)],
-                [],
                 TestVocabulary.NoParameters,
-                []),
-            StageSpecification.Create(
+                Port.Out("out", TestVocabulary.Number)),
+            StageSpecification.Sink(
                 Recorded,
-                [InputPortSpecification.Create(PortId.Create("in"), TestVocabulary.Number.Reference)],
-                [],
-                [],
                 TestVocabulary.NoParameters,
-                []),
+                Port.In("in", TestVocabulary.Number)),
         ]);
 }
 

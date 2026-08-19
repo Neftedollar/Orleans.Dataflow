@@ -1,5 +1,5 @@
 # assembly: Orleans.Dataflow
-# public types: 74
+# public types: 75
 TYPE enum Orleans.Dataflow.ActiveKeyOverflowPolicy
   IFACE System.IComparable
   IFACE System.IConvertible
@@ -95,6 +95,17 @@ TYPE sealed class Orleans.Dataflow.CollectOverflowException
   .ctor()
   .ctor(System.String message)
   .ctor(System.String message, System.Exception innerException)
+TYPE static class Orleans.Dataflow.Definition.Port
+  method static Orleans.Dataflow.Definition.InputPortSpecification In(System.String name, Orleans.Dataflow.Identity.ContractReference elementContract)
+  method static Orleans.Dataflow.Definition.InputPortSpecification In(System.String name, Orleans.Dataflow.Identity.ContractReference elementContract, System.Boolean isOptional)
+  method static Orleans.Dataflow.Definition.InputPortSpecification In<T>(System.String name, Orleans.Dataflow.ElementContract<T> contract)
+  method static Orleans.Dataflow.Definition.InputPortSpecification In<T>(System.String name, Orleans.Dataflow.ElementContract<T> contract, System.Boolean isOptional)
+  method static Orleans.Dataflow.Definition.OutputPortSpecification Out(System.String name, Orleans.Dataflow.Identity.ContractReference elementContract)
+  method static Orleans.Dataflow.Definition.OutputPortSpecification Out(System.String name, Orleans.Dataflow.Identity.ContractReference elementContract, System.Boolean isIgnorable)
+  method static Orleans.Dataflow.Definition.OutputPortSpecification Out<T>(System.String name, Orleans.Dataflow.ElementContract<T> contract)
+  method static Orleans.Dataflow.Definition.OutputPortSpecification Out<T>(System.String name, Orleans.Dataflow.ElementContract<T> contract, System.Boolean isIgnorable)
+  method static Orleans.Dataflow.Definition.ResultPortSpecification Result(System.String name, Orleans.Dataflow.Identity.ContractReference resultContract)
+  method static Orleans.Dataflow.Definition.ResultPortSpecification Result<TResult>(System.String name, Orleans.Dataflow.ResultContract<TResult> contract)
 TYPE sealed class Orleans.Dataflow.DistinctOptions  [System.Runtime.CompilerServices.RequiredMemberAttribute]
   IFACE System.IEquatable<Orleans.Dataflow.DistinctOptions>
   .ctor()  [System.ObsoleteAttribute("Constructors of types with required members are not supported in this version of your compiler.", true),System.Runtime.CompilerServices.CompilerFeatureRequiredAttribute("RequiredMembers")]

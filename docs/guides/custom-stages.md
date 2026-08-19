@@ -65,29 +65,22 @@ public static class SalesVocabulary
     public static StageCatalog Catalog() =>
         StageCatalog.Create(
         [
-            StageSpecification.Create(
+            StageSpecification.Source(
                 FeedStage,
-                [],                                                   // no input ports: this is a source
-                [OutputPortSpecification.Create(PortId.Create("out"), OrderEventContract.Reference)],
-                [],                                                   // no result ports
                 FeedParameterContract,
-                [],                                                   // no required capabilities
+                Port.Out("out", OrderEventContract),
                 new PayloadValidator("order feed", (CountMember, JsonValueKind.Number))),
-            StageSpecification.Create(
+            StageSpecification.Flow(
                 DiscountStage,
-                [InputPortSpecification.Create(PortId.Create("in"), OrderEventContract.Reference)],
-                [OutputPortSpecification.Create(PortId.Create("out"), OrderDocumentContract.Reference)],
-                [],
                 DiscountParameterContract,
-                [],
+                Port.In("in", OrderEventContract),
+                Port.Out("out", OrderDocumentContract),
                 new PayloadValidator("discounting flow", (PercentMember, JsonValueKind.Number))),
-            StageSpecification.Create(
+            StageSpecification.Sink(
                 TallyStage,
-                [InputPortSpecification.Create(PortId.Create("in"), OrderDocumentContract.Reference)],
-                [],                                                   // no output ports: this is a terminal
-                [ResultPortSpecification.Create(PortId.Create("total"), TallyContract.Reference)],
                 TallyParameterContract,
-                [],
+                Port.In("in", OrderDocumentContract),
+                Port.Result("total", TallyContract),
                 new PayloadValidator(
                     "tallying terminal",
                     (LabelMember, JsonValueKind.String),
@@ -119,7 +112,79 @@ public static class SalesVocabulary
 The shape to copy is the sample's own vocabulary,
 [`samples/Orleans.Dataflow.Samples.FSharp/Vocabulary.fs`](../../samples/Orleans.Dataflow.Samples.FSharp/Vocabulary.fs)
 — a catalog is a published artifact rather than a language artifact, which is why
-the sample's lives in the F# project and is consumed from C#.
+the sample's lives in the F# project and is consumed from C#. The same three
+stages read the same way there:
+
+```fsharp
+StageCatalog.Create
+    [
+        StageSpecification.Source(FeedStage, FeedParameterContract, Port.Out("out", OrderEventContract))
+        StageSpecification.Flow(
+            DiscountStage,
+            DiscountParameterContract,
+            Port.In("in", OrderEventContract),
+            Port.Out("out", OrderDocumentContract)
+        )
+        StageSpecification.Sink(
+            TallyStage,
+            TallyParameterContract,
+            Port.In("in", OrderDocumentContract),
+            Port.Result("total", TallyContract)
+        )
+    ]
+```
+
+### Declaring a stage
+
+A specification always has six things in it — input ports, output ports, result
+ports, a parameter contract, required capabilities, and an optional payload check
+— because that is what a catalog stores. An *author* almost never has six things
+to say, so the factory you call names the shape you are declaring and asks for
+only the ports that shape has.
+
+| Shape | Factory | Ports it asks for |
+|---|---|---|
+| Source | `StageSpecification.Source(stage, parameters, out)` | one output |
+| Flow | `StageSpecification.Flow(stage, parameters, in, out)` | one input, one output |
+| Sink | `StageSpecification.Sink(stage, parameters, in)` | one input |
+| Sink with a result | `StageSpecification.Sink(stage, parameters, in, result)` | one input, one result |
+| Fan-out junction | `StageSpecification.FanOut(stage, parameters, in, outs)` | one input, a collection of outputs |
+| Fan-in junction | `StageSpecification.FanIn(stage, parameters, ins, out)` | a collection of inputs, one output |
+
+The names are `DataflowStageRuntime`'s own, so a provider's two halves read as one
+pair — [the shapes it builds](#the-shapes-available) map onto these one for one,
+except that `Flow` covers both the synchronous and the asynchronous element stage
+(whether a transformation awaits is a property of the code that stays behind, not
+of the ports a document connects) and a terminal is a `Sink` whether or not it
+yields a result. Each factory takes an `IStageParameterValidator` as a last
+argument when the stage checks its payloads, which is what the catalog above does.
+
+`Port.In`, `Port.Out`, and `Port.Result` take the port name as plain text and the
+contract as the `ElementContract<T>` or `ResultContract<T>` you already declared,
+so a port costs one call. They are typed on purpose: `Port.In` will not take a
+result contract and `Port.Result` will not take an element one. Overloads taking
+a `ContractReference` are there for a provider whose ports carry whatever a
+deployment binds to them — the shipped Orleans adapters are written that way —
+and `InputPortSpecification.Create` and its siblings remain for a caller who
+already holds a `PortId`. An optional input or an ignorable output says so with a
+third argument: `Port.In("side", contract, isOptional: true)`.
+
+**`StageSpecification.Create` is the general form**, and the escape hatch for
+everything the shapes do not cover — a stage that requires a capability of its
+host, one that declares several result ports, one whose ports form no shape at
+all. Everything after the stage and its parameter contract is optional and
+written by name:
+
+```csharp
+StageSpecification.Create(
+    DurableSinkStage,
+    DurableSinkParameterContract,
+    inputPorts: [Port.In("in", OrderDocumentContract)],
+    requiredCapabilities: [CapabilityToken.Create("durable-state")]);
+```
+
+An omitted collection declares none of that kind, so nothing has to be written
+just to say that a stage has no result ports.
 
 ### The parameter validator
 

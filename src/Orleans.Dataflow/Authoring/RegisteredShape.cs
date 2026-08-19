@@ -18,7 +18,7 @@ namespace Orleans.Dataflow.Authoring;
 /// </para>
 /// <para>
 /// The report is one numbered list of every violation, in the style
-/// <see cref="StageSpecification.Create(StageRef, IEnumerable{InputPortSpecification}, IEnumerable{OutputPortSpecification}, IEnumerable{ResultPortSpecification}, ContractReference, IEnumerable{CapabilityToken})"/>
+/// <see cref="StageSpecification.Create"/>
 /// and <see cref="GraphDocument.Create"/> already use, so one call names every problem rather than one
 /// problem per call. It carries no parameter name, because a violation is a relation between the stage,
 /// the catalog, and the declared contracts and belongs to no argument alone.

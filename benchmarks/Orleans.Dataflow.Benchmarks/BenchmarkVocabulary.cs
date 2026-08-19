@@ -61,20 +61,8 @@ internal static class BenchmarkVocabulary
     internal static StageCatalog Catalog() =>
         StageCatalog.Create(
         [
-            StageSpecification.Create(
-                Range,
-                [],
-                [OutputPortSpecification.Create(PortId.Create("out"), Number.Reference)],
-                [],
-                RangeParameters,
-                []),
-            StageSpecification.Create(
-                Record,
-                [InputPortSpecification.Create(PortId.Create("in"), Number.Reference)],
-                [],
-                [],
-                RecordParameters,
-                []),
+            StageSpecification.Source(Range, RangeParameters, Port.Out("out", Number)),
+            StageSpecification.Sink(Record, RecordParameters, Port.In("in", Number)),
         ]);
 
     /// <summary>Writes the range source's payload.</summary>

@@ -419,11 +419,12 @@ public sealed class RegisteredJunctionTests
 
     /// <summary>Builds a catalog whose fan-out declares two ports under other names.</summary>
     /// <returns>The catalog.</returns>
-    private static StageCatalog Renamed() => Rewritten(Port("port-a", "order-document"), Port("port-b", "order-document"));
+    private static StageCatalog Renamed() =>
+        Rewritten(Leg("port-a", "order-document"), Leg("port-b", "order-document"));
 
     /// <summary>Builds a catalog whose fan-out declares its second leg under another contract.</summary>
     /// <returns>The catalog.</returns>
-    private static StageCatalog Retyped() => Rewritten(Port("left", "order-document"), Port("right", "order-key"));
+    private static StageCatalog Retyped() => Rewritten(Leg("left", "order-document"), Leg("right", "order-key"));
 
     /// <summary>Builds a catalog identical to the fixture one but for the fan-out's output ports.</summary>
     /// <param name="ports">The output ports the rewritten fan-out declares.</param>
@@ -433,19 +434,17 @@ public sealed class RegisteredJunctionTests
         [
             .. Catalog.Specifications.Where(
                 specification => specification.Stage != RegisteredFixtures.Stage("split")),
-            StageSpecification.Create(
+            StageSpecification.FanOut(
                 RegisteredFixtures.Stage("split"),
-                [InputPortSpecification.Create(PortId.Create("in"), Contract("order-document"))],
-                ports,
-                [],
                 ContractReference.Create(ContractId.Create("split-parameters"), 1),
-                []),
+                Port.In("in", Contract("order-document")),
+                ports),
         ]);
 
-    /// <summary>Builds an output port specification.</summary>
+    /// <summary>Builds one leg of the rewritten fan-out.</summary>
     /// <param name="port">The port name.</param>
     /// <param name="contract">The element contract identifier text.</param>
     /// <returns>The port specification.</returns>
-    private static OutputPortSpecification Port(string port, string contract) =>
-        OutputPortSpecification.Create(PortId.Create(port), Contract(contract));
+    private static OutputPortSpecification Leg(string port, string contract) =>
+        Port.Out(port, Contract(contract));
 }

@@ -711,10 +711,10 @@ public sealed class ProviderConformance
             .. _specifications.Skip(1),
             StageSpecification.Create(
                 head.Stage,
+                ContractReference.Create(ContractId.Create(AbsentContract), head.ParameterContract.MajorVersion),
                 head.InputPorts,
                 head.OutputPorts,
                 head.ResultPorts,
-                ContractReference.Create(ContractId.Create(AbsentContract), head.ParameterContract.MajorVersion),
                 head.RequiredCapabilities),
         ]);
 
@@ -792,10 +792,10 @@ public sealed class ProviderConformance
 
         StageSpecification specification = StageSpecification.Create(
             stranger,
+            shape.ParameterContract,
             shape.InputPorts,
             shape.OutputPorts,
             shape.ResultPorts,
-            shape.ParameterContract,
             shape.RequiredCapabilities);
         StageNode node = StageNode.Create(
             NodeId.Create("conformance"),

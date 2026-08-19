@@ -441,17 +441,10 @@ public sealed class ProviderConformanceTests
             [
                 Interlocked.Increment(ref _reads) is 1
                     ? ConformanceProbe.Source(new ProbeReader())
-                    : StageSpecification.Create(
+                    : StageSpecification.Source(
                         ConformanceProbe.Stage("source"),
-                        [],
-                        [
-                            OutputPortSpecification.Create(
-                                PortId.Create("out"),
-                                ContractReference.Create(ContractId.Create("probe-other"), 1)),
-                        ],
-                        [],
                         ContractReference.Create(ContractId.Create("probe-parameters"), 1),
-                        [],
+                        Port.Out("out", ContractReference.Create(ContractId.Create("probe-other"), 1)),
                         new ProbeReader()),
             ];
 

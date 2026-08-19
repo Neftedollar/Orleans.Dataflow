@@ -126,12 +126,12 @@ module internal RegisteredVocabulary =
         =
         StageSpecification.Create(
             stage name,
+            contract $"{name}-parameters",
             inputs,
             outputs,
             results,
-            contract $"{name}-parameters",
-            [],
-            PayloadReader members)
+            parameterValidator = PayloadReader members
+        )
 
     /// <summary>The payload every <c>number-source</c> occurrence in these tests carries.</summary>
     let sourceParameters = CanonicalJsonValue.Parse """{"count":4}"""

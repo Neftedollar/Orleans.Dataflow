@@ -342,13 +342,11 @@ internal static class TestPipelines
         StageCatalog authoring = StageCatalog.Create(
         [
             .. TestVocabulary.Catalog().Specifications,
-            StageSpecification.Create(
+            StageSpecification.Flow(
                 missing,
-                [InputPortSpecification.Create(PortId.Create("in"), TestVocabulary.Number.Reference)],
-                [OutputPortSpecification.Create(PortId.Create("out"), TestVocabulary.Number.Reference)],
-                [],
                 TestVocabulary.NoParameters,
-                []),
+                Port.In("in", TestVocabulary.Number),
+                Port.Out("out", TestVocabulary.Number)),
         ]);
 
         (RunnableGraph graph, ResultSlot<long> _) = Source

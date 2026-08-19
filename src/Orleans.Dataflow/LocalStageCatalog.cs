@@ -92,22 +92,14 @@ public static class LocalStageCatalog
                 ? [result]
                 : [];
 
-            return LocalVocabulary.ParameterValidatorOf(kind) is { } validator
-                ? StageSpecification.Create(
-                    LocalVocabulary.StageOf(kind),
-                    inputs,
-                    outputs,
-                    results,
-                    LocalVocabulary.ParameterContractOf(kind),
-                    LocalVocabulary.RequiredCapabilitiesOf(kind),
-                    validator)
-                : StageSpecification.Create(
-                    LocalVocabulary.StageOf(kind),
-                    inputs,
-                    outputs,
-                    results,
-                    LocalVocabulary.ParameterContractOf(kind),
-                    LocalVocabulary.RequiredCapabilitiesOf(kind));
+            return StageSpecification.Create(
+                LocalVocabulary.StageOf(kind),
+                LocalVocabulary.ParameterContractOf(kind),
+                inputs,
+                outputs,
+                results,
+                LocalVocabulary.RequiredCapabilitiesOf(kind),
+                LocalVocabulary.ParameterValidatorOf(kind));
         }
     }
 }

@@ -147,11 +147,8 @@ public sealed class StageCatalogSerializerGoldenTests
             [
                 StageSpecification.Create(
                     StageRef.Create(ProviderId.Create("orleans-core"), StageId.Create("map-async"), 1),
-                    [InputPortSpecification.Create(PortId.Create("in"), contract, isOptional)],
-                    [],
-                    [],
                     contract,
-                    []),
+                    inputPorts: [InputPortSpecification.Create(PortId.Create("in"), contract, isOptional)]),
             ]);
     }
 

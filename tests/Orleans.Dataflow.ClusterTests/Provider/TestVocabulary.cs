@@ -127,87 +127,28 @@ internal static class TestVocabulary
     internal static StageCatalog Catalog() =>
         StageCatalog.Create(
         [
-            StageSpecification.Create(
+            StageSpecification.Source(
                 Range,
-                [],
-                [OutputPortSpecification.Create(PortId.Create("out"), Number.Reference)],
-                [],
                 RangeParameters,
-                [],
+                Port.Out("out", Number),
                 TestRangeParameters.Validator),
-            StageSpecification.Create(
-                Double,
-                [InputPortSpecification.Create(PortId.Create("in"), Number.Reference)],
-                [OutputPortSpecification.Create(PortId.Create("out"), Number.Reference)],
-                [],
-                NoParameters,
-                []),
-            StageSpecification.Create(
-                Fail,
-                [InputPortSpecification.Create(PortId.Create("in"), Number.Reference)],
-                [OutputPortSpecification.Create(PortId.Create("out"), Number.Reference)],
-                [],
-                FailParameters,
-                []),
-            StageSpecification.Create(
-                Sum,
-                [InputPortSpecification.Create(PortId.Create("in"), Number.Reference)],
-                [],
-                [ResultPortSpecification.Create(PortId.Create("total"), Total.Reference)],
-                NoParameters,
-                []),
-            StageSpecification.Create(
-                DoubleAsync,
-                [InputPortSpecification.Create(PortId.Create("in"), Number.Reference)],
-                [OutputPortSpecification.Create(PortId.Create("out"), Number.Reference)],
-                [],
-                NoParameters,
-                []),
-            StageSpecification.Create(
-                Collected,
-                [InputPortSpecification.Create(PortId.Create("in"), Number.Reference)],
-                [],
-                [ResultPortSpecification.Create(PortId.Create("total"), Total.Reference)],
-                NoParameters,
-                []),
-            StageSpecification.Create(
-                Misplaced,
-                [InputPortSpecification.Create(PortId.Create("in"), Number.Reference)],
-                [OutputPortSpecification.Create(PortId.Create("out"), Number.Reference)],
-                [],
-                NoParameters,
-                []),
-            StageSpecification.Create(
-                Explode,
-                [InputPortSpecification.Create(PortId.Create("in"), Number.Reference)],
-                [OutputPortSpecification.Create(PortId.Create("out"), Number.Reference)],
-                [],
-                NoParameters,
-                []),
-            StageSpecification.Create(
+            StageSpecification.Flow(Double, NoParameters, Port.In("in", Number), Port.Out("out", Number)),
+            StageSpecification.Flow(Fail, FailParameters, Port.In("in", Number), Port.Out("out", Number)),
+            StageSpecification.Sink(Sum, NoParameters, Port.In("in", Number), Port.Result("total", Total)),
+            StageSpecification.Flow(DoubleAsync, NoParameters, Port.In("in", Number), Port.Out("out", Number)),
+            StageSpecification.Sink(Collected, NoParameters, Port.In("in", Number), Port.Result("total", Total)),
+            StageSpecification.Flow(Misplaced, NoParameters, Port.In("in", Number), Port.Out("out", Number)),
+            StageSpecification.Flow(Explode, NoParameters, Port.In("in", Number), Port.Out("out", Number)),
+            StageSpecification.FanOut(
                 Split,
-                [InputPortSpecification.Create(PortId.Create("in"), Number.Reference)],
-                [
-                    OutputPortSpecification.Create(PortId.Create("left"), Number.Reference),
-                    OutputPortSpecification.Create(PortId.Create("right"), Number.Reference),
-                ],
-                [],
                 NoParameters,
-                []),
-            StageSpecification.Create(
-                Bulk,
-                [InputPortSpecification.Create(PortId.Create("in"), Number.Reference)],
-                [],
-                [ResultPortSpecification.Create(PortId.Create("payload"), Block.Reference)],
-                BulkParameters,
-                []),
-            StageSpecification.Create(
+                Port.In("in", Number),
+                [Port.Out("left", Number), Port.Out("right", Number)]),
+            StageSpecification.Sink(Bulk, BulkParameters, Port.In("in", Number), Port.Result("payload", Block)),
+            StageSpecification.Sink(
                 Record,
-                [InputPortSpecification.Create(PortId.Create("in"), Number.Reference)],
-                [],
-                [],
                 RecordParameters,
-                [],
+                Port.In("in", Number),
                 TestRecordParameters.Validator),
         ]);
 }

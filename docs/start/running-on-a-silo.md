@@ -132,27 +132,9 @@ ContractReference parameters = ContractReference.Create(ContractId.Create("weath
 
 StageCatalog catalog = StageCatalog.Create(
 [
-    StageSpecification.Create(
-        feedStage,
-        [],
-        [OutputPortSpecification.Create(PortId.Create("out"), reading.Reference)],
-        [],
-        parameters,
-        []),
-    StageSpecification.Create(
-        scaleStage,
-        [InputPortSpecification.Create(PortId.Create("in"), reading.Reference)],
-        [OutputPortSpecification.Create(PortId.Create("out"), reading.Reference)],
-        [],
-        parameters,
-        []),
-    StageSpecification.Create(
-        tallyStage,
-        [InputPortSpecification.Create(PortId.Create("in"), reading.Reference)],
-        [],
-        [ResultPortSpecification.Create(PortId.Create("total"), total.Reference)],
-        parameters,
-        []),
+    StageSpecification.Source(feedStage, parameters, Port.Out("out", reading)),
+    StageSpecification.Flow(scaleStage, parameters, Port.In("in", reading), Port.Out("out", reading)),
+    StageSpecification.Sink(tallyStage, parameters, Port.In("in", reading), Port.Result("total", total)),
 ]);
 ```
 
@@ -161,9 +143,12 @@ Look at what a contract is: `"weather-reading"` and a major version. Not
 contract *identifier*, which is a fact a document can state and a silo in
 another process can check without ever seeing your assembly.
 
-The empty lists are the ports a stage does not have — a source has no inputs, a
-terminal has no outputs — and the last one is the capabilities a stage requires,
-which none of these do.
+`Source`, `Flow`, and `Sink` name the shapes the engine runs, and each asks only
+for the ports its shape has — which is why nothing above declares a port it does
+not have. The [shapes](../guides/custom-stages.md#declaring-a-stage) go on:
+`FanOut` and `FanIn` take a collection where a junction genuinely has several
+legs, and `StageSpecification.Create` is the general form for anything the shapes
+do not cover, such as a stage that requires a capability of its host.
 
 ## Step 3 — say what those names do
 

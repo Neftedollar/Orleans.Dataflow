@@ -153,49 +153,37 @@ internal static class RegisteredFixtures
     private static StageCatalog Build() =>
         StageCatalog.Create(
         [
-            StageSpecification.Create(
+            StageSpecification.Source(
                 Stage("order-source"),
-                [],
-                [Output("events", "order-created")],
-                [],
                 Parameters("order-source"),
-                [],
+                Output("events", "order-created"),
                 new TopicValidator()),
-            StageSpecification.Create(
+            StageSpecification.Flow(
                 Stage("normalize"),
-                [Input("in", "order-created")],
-                [Output("out", "order-document")],
-                [],
                 Parameters("normalize"),
-                []),
-            StageSpecification.Create(
+                Input("in", "order-created"),
+                Output("out", "order-document")),
+            StageSpecification.Flow(
                 Stage("enrich"),
-                [Input("in", "order-document")],
-                [Output("out", "order-document")],
-                [],
                 Parameters("enrich"),
-                []),
-            StageSpecification.Create(
+                Input("in", "order-document"),
+                Output("out", "order-document")),
+            StageSpecification.Sink(
                 Stage("index-sink"),
-                [Input("in", "order-document")],
-                [],
-                [],
                 Parameters("index-sink"),
-                []),
-            StageSpecification.Create(
+                Input("in", "order-document")),
+            StageSpecification.Sink(
                 Stage("count-sink"),
-                [Input("elements", "order-document")],
-                [],
-                [Result("total", "order-count")],
                 Parameters("count-sink"),
-                []),
+                Input("elements", "order-document"),
+                Result("total", "order-count")),
+            // The one stage the shape factories deliberately do not cover: a required capability is not
+            // part of any shape, so it is declared through the general form, by name.
             StageSpecification.Create(
                 Stage("durable-sink"),
-                [Input("in", "order-document")],
-                [],
-                [],
                 Parameters("durable-sink"),
-                [CapabilityToken.Create("durable-state")]),
+                inputPorts: [Input("in", "order-document")],
+                requiredCapabilities: [CapabilityToken.Create("durable-state")]),
         ]);
 
     /// <summary>Builds the parameter contract of one fixture stage.</summary>

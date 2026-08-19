@@ -229,15 +229,12 @@ public sealed class PipelineDefinitionTests
         [
             StageSpecification.Create(
                 Stage("shim-sink"),
-                [
-                    InputPortSpecification.Create(
-                        PortId.Create("in"),
-                        ContractReference.Create(ContractId.Create("order-document"), 1)),
-                ],
-                [],
-                [],
                 ContractReference.Create(ContractId.Create("shim-sink-parameters"), 1),
-                [CapabilityToken.Nondeployable]),
+                inputPorts:
+                [
+                    Port.In("in", ContractReference.Create(ContractId.Create("order-document"), 1)),
+                ],
+                requiredCapabilities: [CapabilityToken.Nondeployable]),
         ]);
 
         RunnableGraph graph = Source.FromRegistered(OrderSource, "orders-in", SourceParameters)

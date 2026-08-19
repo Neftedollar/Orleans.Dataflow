@@ -290,87 +290,67 @@ internal static class RegisteredJunctionFixtures
         StageCatalog.Create(
         [
             .. RegisteredFixtures.Catalog.Specifications,
-            StageSpecification.Create(
+            StageSpecification.Flow(
                 Stage("keys"),
-                [Input("in", "order-document")],
-                [Output("out", "order-key")],
-                [],
                 Parameters("keys"),
-                []),
-            StageSpecification.Create(
+                Input("in", "order-document"),
+                Output("out", "order-key")),
+            StageSpecification.Sink(
                 Stage("key-count-sink"),
-                [Input("elements", "order-key")],
-                [],
-                [Result("total", "order-count")],
                 Parameters("count-sink"),
-                []),
-            StageSpecification.Create(
+                Input("elements", "order-key"),
+                Result("total", "order-count")),
+            StageSpecification.Sink(
                 Stage("pair-count-sink"),
-                [Input("elements", "order-pair")],
-                [],
-                [Result("total", "order-count")],
                 Parameters("count-sink"),
-                []),
-            StageSpecification.Create(
+                Input("elements", "order-pair"),
+                Result("total", "order-count")),
+            StageSpecification.FanOut(
                 Stage("split"),
-                [Input("in", "order-document")],
-                [Output("left", "order-document"), Output("right", "order-document")],
-                [],
                 Parameters("split"),
-                [],
+                Input("in", "order-document"),
+                [Output("left", "order-document"), Output("right", "order-document")],
                 new JunctionModeValidator(joining: false)),
-            StageSpecification.Create(
+            StageSpecification.FanOut(
                 Stage("divide"),
-                [Input("in", "order-document")],
-                [Output("keys", "order-key"), Output("documents", "order-document")],
-                [],
                 Parameters("divide"),
-                []),
-            StageSpecification.Create(
+                Input("in", "order-document"),
+                [Output("keys", "order-key"), Output("documents", "order-document")]),
+            StageSpecification.FanIn(
                 Stage("join"),
-                [Input("primary", "order-document"), Input("secondary", "order-document")],
-                [Output("out", "order-document")],
-                [],
                 Parameters("join"),
-                [],
+                [Input("primary", "order-document"), Input("secondary", "order-document")],
+                Output("out", "order-document"),
                 new JunctionModeValidator(joining: true)),
-            StageSpecification.Create(
+            StageSpecification.FanIn(
                 Stage("pair"),
-                [Input("first", "order-document"), Input("second", "order-key")],
-                [Output("out", "order-pair")],
-                [],
                 Parameters("pair"),
-                []),
-            StageSpecification.Create(
+                [Input("first", "order-document"), Input("second", "order-key")],
+                Output("out", "order-pair")),
+            StageSpecification.Flow(
                 Stage("enrich-miscast"),
-                [Input("in", "order-document")],
-                [Output("out", "order-document")],
-                [],
                 Parameters("enrich"),
-                []),
-            StageSpecification.Create(
+                Input("in", "order-document"),
+                Output("out", "order-document")),
+            StageSpecification.FanOut(
                 Stage("spread"),
-                [Input("in", "order-document")],
+                Parameters("split"),
+                Input("in", "order-document"),
                 [
                     Output("leg-a", "order-document"),
                     Output("leg-b", "order-document"),
                     Output("leg-c", "order-document"),
                 ],
-                [],
-                Parameters("split"),
-                [],
                 new JunctionModeValidator(joining: false)),
-            StageSpecification.Create(
+            StageSpecification.FanIn(
                 Stage("gather"),
+                Parameters("join"),
                 [
                     Input("src-a", "order-document"),
                     Input("src-b", "order-document"),
                     Input("src-c", "order-document"),
                 ],
-                [Output("out", "order-document")],
-                [],
-                Parameters("join"),
-                [],
+                Output("out", "order-document"),
                 new JunctionModeValidator(joining: true)),
         ]);
 

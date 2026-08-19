@@ -92,38 +92,52 @@ specification's declared parameter contract.
 
 A `StageCatalog` of `StageSpecification`s. Each specification names the stage, its
 input ports, its output ports, its result ports, its parameter contract, and the
-capabilities it requires.
+capabilities it requires. A stage is written through the factory that names its
+shape, which asks for only the ports that shape has:
 
 ```fsharp
 let Catalog () : StageCatalog =
     StageCatalog.Create
         [
-            StageSpecification.Create(
-                FeedStage,
-                [],
-                [ OutputPortSpecification.Create(PortId.Create "out", OrderEventContract.Reference) ],
-                [],
-                FeedParameterContract,
-                []
-            )
-            StageSpecification.Create(
+            StageSpecification.Source(FeedStage, FeedParameterContract, Port.Out("out", OrderEventContract))
+            StageSpecification.Flow(
                 DiscountStage,
-                [ InputPortSpecification.Create(PortId.Create "in", OrderEventContract.Reference) ],
-                [ OutputPortSpecification.Create(PortId.Create "out", OrderDocumentContract.Reference) ],
-                [],
                 DiscountParameterContract,
-                []
+                Port.In("in", OrderEventContract),
+                Port.Out("out", OrderDocumentContract)
             )
-            StageSpecification.Create(
+            StageSpecification.Sink(
                 TallyStage,
-                [ InputPortSpecification.Create(PortId.Create "in", OrderDocumentContract.Reference) ],
-                [],
-                [ ResultPortSpecification.Create(PortId.Create "total", TallyContract.Reference) ],
                 TallyParameterContract,
-                []
+                Port.In("in", OrderDocumentContract),
+                Port.Result("total", TallyContract)
             )
         ]
 ```
+
+| Factory | Ports | Runtime shapes it declares |
+|---|---|---|
+| `Source(stage, parameters, out)` | one output | `Source` |
+| `Flow(stage, parameters, in, out)` | one input, one output | `Element`, `ElementAsync` |
+| `Sink(stage, parameters, in)` | one input | `Terminal` |
+| `Sink(stage, parameters, in, result)` | one input, one result | `Terminal` yielding a result |
+| `FanOut(stage, parameters, in, outs)` | one input, a collection of outputs | `Broadcast`, `Balance`, `Partition`, `Unzip` |
+| `FanIn(stage, parameters, ins, out)` | a collection of inputs, one output | `Merge`, `Concat`, `Interleave`, `Zip`, `CombineLatest` |
+
+Each takes an `IStageParameterValidator` as a last argument when the stage checks
+its payloads. `Port.In`, `Port.Out`, and `Port.Result` take the port name as text
+and the contract as an `ElementContract<T>` or a `ResultContract<T>`; overloads
+taking a `ContractReference` serve a provider whose ports carry whatever a
+deployment binds to them, which is how the shipped Orleans vocabulary declares
+its own. `Port` lives in `Orleans.Dataflow.Definition` beside the port
+specifications it builds, and ships in the `Orleans.Dataflow` package, because the
+typed contracts it accepts are an authoring-plane assertion the language-neutral
+package cannot make.
+
+`StageSpecification.Create` is the general form, for the shapes these do not
+cover — a stage requiring a capability, one with several result ports. Everything
+after the stage and its parameter contract is optional and written by name, so
+nothing has to be written to say that a stage has no ports of some kind.
 
 A specification sorts its ports at construction, so canonical port order is the
 same in every process that resolves it. That one order is read by three places:

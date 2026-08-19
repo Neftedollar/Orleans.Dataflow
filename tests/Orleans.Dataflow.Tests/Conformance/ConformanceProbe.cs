@@ -94,9 +94,7 @@ internal static class ConformanceProbe
         IEnumerable<OutputPortSpecification> outputs,
         IEnumerable<ResultPortSpecification> results,
         IStageParameterValidator? reader) =>
-        reader is null
-            ? StageSpecification.Create(stage, inputs, outputs, results, Parameters, [])
-            : StageSpecification.Create(stage, inputs, outputs, results, Parameters, [], reader);
+        StageSpecification.Create(stage, Parameters, inputs, outputs, results, parameterValidator: reader);
 
     /// <summary>Gets the parameter contract every probe stage declares.</summary>
     private static ContractReference Parameters { get; } =

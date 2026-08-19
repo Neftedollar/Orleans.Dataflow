@@ -92,29 +92,18 @@ module SampleVocabulary =
     let Catalog () : StageCatalog =
         StageCatalog.Create
             [
-                StageSpecification.Create(
-                    FeedStage,
-                    [],
-                    [ OutputPortSpecification.Create(PortId.Create "out", OrderEventContract.Reference) ],
-                    [],
-                    FeedParameterContract,
-                    []
-                )
-                StageSpecification.Create(
+                StageSpecification.Source(FeedStage, FeedParameterContract, Port.Out("out", OrderEventContract))
+                StageSpecification.Flow(
                     DiscountStage,
-                    [ InputPortSpecification.Create(PortId.Create "in", OrderEventContract.Reference) ],
-                    [ OutputPortSpecification.Create(PortId.Create "out", OrderDocumentContract.Reference) ],
-                    [],
                     DiscountParameterContract,
-                    []
+                    Port.In("in", OrderEventContract),
+                    Port.Out("out", OrderDocumentContract)
                 )
-                StageSpecification.Create(
+                StageSpecification.Sink(
                     TallyStage,
-                    [ InputPortSpecification.Create(PortId.Create "in", OrderDocumentContract.Reference) ],
-                    [],
-                    [ ResultPortSpecification.Create(PortId.Create "total", TallyContract.Reference) ],
                     TallyParameterContract,
-                    []
+                    Port.In("in", OrderDocumentContract),
+                    Port.Result("total", TallyContract)
                 )
             ]
 

@@ -39,6 +39,7 @@ Orleans.Dataflow.CollectOverflowException
 Orleans.Dataflow.CollectOverflowException.CollectOverflowException() -> void
 Orleans.Dataflow.CollectOverflowException.CollectOverflowException(string! message) -> void
 Orleans.Dataflow.CollectOverflowException.CollectOverflowException(string! message, System.Exception! innerException) -> void
+Orleans.Dataflow.Definition.Port
 Orleans.Dataflow.DistinctOptions
 Orleans.Dataflow.DistinctOptions.<Clone>$() -> Orleans.Dataflow.DistinctOptions!
 Orleans.Dataflow.DistinctOptions.DistinctOptions() -> void
@@ -558,6 +559,16 @@ static Orleans.Dataflow.BufferOptions.operator !=(Orleans.Dataflow.BufferOptions
 static Orleans.Dataflow.BufferOptions.operator ==(Orleans.Dataflow.BufferOptions? left, Orleans.Dataflow.BufferOptions? right) -> bool
 static Orleans.Dataflow.CollectOptions.operator !=(Orleans.Dataflow.CollectOptions? left, Orleans.Dataflow.CollectOptions? right) -> bool
 static Orleans.Dataflow.CollectOptions.operator ==(Orleans.Dataflow.CollectOptions? left, Orleans.Dataflow.CollectOptions? right) -> bool
+static Orleans.Dataflow.Definition.Port.In(string! name, Orleans.Dataflow.Identity.ContractReference elementContract) -> Orleans.Dataflow.Definition.InputPortSpecification
+static Orleans.Dataflow.Definition.Port.In(string! name, Orleans.Dataflow.Identity.ContractReference elementContract, bool isOptional) -> Orleans.Dataflow.Definition.InputPortSpecification
+static Orleans.Dataflow.Definition.Port.In<T>(string! name, Orleans.Dataflow.ElementContract<T> contract) -> Orleans.Dataflow.Definition.InputPortSpecification
+static Orleans.Dataflow.Definition.Port.In<T>(string! name, Orleans.Dataflow.ElementContract<T> contract, bool isOptional) -> Orleans.Dataflow.Definition.InputPortSpecification
+static Orleans.Dataflow.Definition.Port.Out(string! name, Orleans.Dataflow.Identity.ContractReference elementContract) -> Orleans.Dataflow.Definition.OutputPortSpecification
+static Orleans.Dataflow.Definition.Port.Out(string! name, Orleans.Dataflow.Identity.ContractReference elementContract, bool isIgnorable) -> Orleans.Dataflow.Definition.OutputPortSpecification
+static Orleans.Dataflow.Definition.Port.Out<T>(string! name, Orleans.Dataflow.ElementContract<T> contract) -> Orleans.Dataflow.Definition.OutputPortSpecification
+static Orleans.Dataflow.Definition.Port.Out<T>(string! name, Orleans.Dataflow.ElementContract<T> contract, bool isIgnorable) -> Orleans.Dataflow.Definition.OutputPortSpecification
+static Orleans.Dataflow.Definition.Port.Result(string! name, Orleans.Dataflow.Identity.ContractReference resultContract) -> Orleans.Dataflow.Definition.ResultPortSpecification
+static Orleans.Dataflow.Definition.Port.Result<TResult>(string! name, Orleans.Dataflow.ResultContract<TResult> contract) -> Orleans.Dataflow.Definition.ResultPortSpecification
 static Orleans.Dataflow.DistinctOptions.operator !=(Orleans.Dataflow.DistinctOptions? left, Orleans.Dataflow.DistinctOptions? right) -> bool
 static Orleans.Dataflow.DistinctOptions.operator ==(Orleans.Dataflow.DistinctOptions? left, Orleans.Dataflow.DistinctOptions? right) -> bool
 static Orleans.Dataflow.ElementContract.For<T>(string! contractId, int majorVersion) -> Orleans.Dataflow.ElementContract<T>

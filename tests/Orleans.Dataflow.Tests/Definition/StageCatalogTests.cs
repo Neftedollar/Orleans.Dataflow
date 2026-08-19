@@ -154,19 +154,12 @@ public sealed class StageCatalogTests
         // one by registration order would make what a document runs depend on startup order.
         StageSpecification first = StageSpecification.Create(
             Stage("orleans-core", "map-async", 2),
-            [],
-            [],
-            [],
-            SampleParameterContract,
-            []);
+            SampleParameterContract);
 
         StageSpecification second = StageSpecification.Create(
             Stage("orleans-core", "map-async", 2),
-            [InputPortSpecification.Create(PortId.Create("in"), SampleParameterContract)],
-            [],
-            [],
             SampleParameterContract,
-            []);
+            inputPorts: [Port.In("in", SampleParameterContract)]);
 
         Assert.Contains(
             "specifications[1] repeats the stage reference 'orleans-core/map-async@v2'",
@@ -248,13 +241,7 @@ public sealed class StageCatalogTests
     /// <param name="majorVersion">The compatibility major version.</param>
     /// <returns>The specification.</returns>
     private static StageSpecification Specification(string provider, string stage, int majorVersion) =>
-        StageSpecification.Create(
-            Stage(provider, stage, majorVersion),
-            [],
-            [],
-            [],
-            SampleParameterContract,
-            []);
+        StageSpecification.Create(Stage(provider, stage, majorVersion), SampleParameterContract);
 
     /// <summary>
     /// Asserts that a candidate catalog is rejected and returns the rejection message.

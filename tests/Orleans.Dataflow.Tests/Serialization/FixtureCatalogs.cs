@@ -64,20 +64,16 @@ internal static class FixtureCatalogs
             [
                 StageSpecification.Create(
                     MapperStage,
+                    MapperParameters,
                     MapperInputs(),
                     MapperOutputs(),
                     MapperResults(),
-                    MapperParameters,
                     [CapabilityToken.Nondeployable],
                     new FixtureValidator("the mapper payload is refused")),
                 StageSpecification.Create(
                     SinkStage,
-                    [],
-                    [],
-                    [],
                     SinkParameters,
-                    [],
-                    new FixtureValidator("the sink payload is refused")),
+                    parameterValidator: new FixtureValidator("the sink payload is refused")),
             ]);
 
     /// <summary>Gets the stage reference of the rich fixture specification.</summary>
@@ -102,10 +98,10 @@ internal static class FixtureCatalogs
     private static StageSpecification Mapper() =>
         StageSpecification.Create(
             MapperStage,
+            MapperParameters,
             MapperInputs(),
             MapperOutputs(),
             MapperResults(),
-            MapperParameters,
             [CapabilityToken.Nondeployable]);
 
     /// <summary>Builds the rich fixture specification from ports supplied in the other order.</summary>
@@ -113,19 +109,19 @@ internal static class FixtureCatalogs
     private static StageSpecification MapperFromPermutedPorts() =>
         StageSpecification.Create(
             MapperStage,
+            MapperParameters,
             [Input("side", "lookup-table", 1, isOptional: true), Input("in", "order", 1, isOptional: false)],
             [
                 Output("trace", "trace-event", 1, isIgnorable: true),
                 Output("out", "order-summary", 3, isIgnorable: false),
             ],
             MapperResults(),
-            MapperParameters,
             [CapabilityToken.Nondeployable]);
 
     /// <summary>Builds the minimal fixture specification.</summary>
     /// <returns>A stage that declares no port and requires no capability.</returns>
     private static StageSpecification Sink() =>
-        StageSpecification.Create(SinkStage, [], [], [], SinkParameters, []);
+        StageSpecification.Create(SinkStage, SinkParameters);
 
     /// <summary>Builds the input ports of the rich fixture specification.</summary>
     /// <returns>One required and one optional input port.</returns>

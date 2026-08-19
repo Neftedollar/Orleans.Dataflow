@@ -71,7 +71,7 @@ reference. This table is:
 | `Orleans.Dataflow.Authoring` | `Orleans.Dataflow` |
 | `Orleans.Dataflow.Adapters` | `Orleans.Dataflow` **and** `Orleans.Dataflow.Cluster` |
 | `Orleans.Dataflow.Hosting` | `Orleans.Dataflow` **and** `Orleans.Dataflow.Cluster` |
-| `Orleans.Dataflow.Definition` | `Orleans.Dataflow.Abstractions` |
+| `Orleans.Dataflow.Definition` | `Orleans.Dataflow.Abstractions` **and** `Orleans.Dataflow` |
 | `Orleans.Dataflow.Identity` | `Orleans.Dataflow.Abstractions` |
 | `Orleans.Dataflow.Serialization` | `Orleans.Dataflow.Abstractions` |
 | `Orleans.Dataflow.Compilation` | `Orleans.Dataflow.Abstractions` |
@@ -79,7 +79,7 @@ reference. This table is:
 | `Orleans.Dataflow.Testing` | `Orleans.Dataflow.Testing` |
 | `Orleans.Dataflow.FSharp` | `Orleans.Dataflow.FSharp` |
 
-**Two rows carry the practical consequence.**
+**Three rows carry the practical consequence.**
 
 `Orleans.Dataflow.Hosting` holds `ILocalDataflowBuilder`, `ICheckpointStore`, and
 the stage-factory seam (`IDataflowStageFactory`, `DataflowStageRequest`,
@@ -95,6 +95,16 @@ In both cases the namespace is shared because **the seam is shared**: one seam
 serves a silo and a `LocalDataflowHost` alike, and a provider that never
 references Orleans can still write a factory. The cost is this table, and it is
 the cheaper half of the trade.
+
+`Orleans.Dataflow.Definition` holds every definition-plane type from the
+abstractions package, and exactly one type — `Port` — from the core package. The
+port factories take an `ElementContract<T>` or a `ResultContract<T>`, which is the
+assertion that a CLR type carries a contract in this process, and that is an
+authoring-plane statement the language-neutral package does not make. Putting the
+class in the namespace of the values it builds is what keeps it in scope wherever
+a specification is written; referencing only the abstractions package leaves
+`InputPortSpecification.Create` and its siblings, which take the values that
+package does define.
 
 `Orleans.Dataflow.Runtime` and `Orleans.Dataflow.Diagnostics` are absent from the
 table because they contain no public types at all; they are internal to

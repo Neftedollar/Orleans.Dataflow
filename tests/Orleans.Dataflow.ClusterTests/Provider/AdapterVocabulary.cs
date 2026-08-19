@@ -302,34 +302,26 @@ internal static class AdapterVocabulary
     internal static StageCatalog Catalog() =>
         StageCatalog.Create(
         [
-            StageSpecification.Create(
+            StageSpecification.Sink(
                 Count,
-                [InputPortSpecification.Create(PortId.Create("in"), OrleansStages.ElementContract)],
-                [],
-                [ResultPortSpecification.Create(PortId.Create("total"), Total.Reference)],
                 CountParameters,
-                []),
-            StageSpecification.Create(
+                Port.In("in", OrleansStages.ElementContract),
+                Port.Result("total", Total)),
+            StageSpecification.Flow(
                 Gate,
-                [InputPortSpecification.Create(PortId.Create("in"), OrleansStages.ElementContract)],
-                [OutputPortSpecification.Create(PortId.Create("out"), OrleansStages.ElementContract)],
-                [],
                 GateParameters,
-                []),
-            StageSpecification.Create(
+                Port.In("in", OrleansStages.ElementContract),
+                Port.Out("out", OrleansStages.ElementContract)),
+            StageSpecification.Sink(
                 DotnetCount,
-                [InputPortSpecification.Create(PortId.Create("in"), DotnetStages.ElementContract)],
-                [],
-                [ResultPortSpecification.Create(PortId.Create("total"), Total.Reference)],
                 CountParameters,
-                []),
-            StageSpecification.Create(
+                Port.In("in", DotnetStages.ElementContract),
+                Port.Result("total", Total)),
+            StageSpecification.Flow(
                 Priced,
-                [InputPortSpecification.Create(PortId.Create("in"), TestVocabulary.Number.Reference)],
-                [OutputPortSpecification.Create(PortId.Create("out"), OrleansStages.ElementContract)],
-                [],
                 TestVocabulary.NoParameters,
-                []),
+                Port.In("in", TestVocabulary.Number),
+                Port.Out("out", OrleansStages.ElementContract)),
         ]);
 
     /// <summary>Writes the counting sink's payload.</summary>

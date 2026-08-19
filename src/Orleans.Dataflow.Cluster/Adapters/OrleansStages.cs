@@ -1136,85 +1136,57 @@ public static class OrleansStages
     internal static StageCatalog Publish(OrleansAdapterRegistry registry) =>
         StageCatalog.Create(
         [
-            StageSpecification.Create(
+            StageSpecification.Source(
                 StreamSourceStage,
-                [],
-                [OutputPortSpecification.Create(OutputPort, ElementContract)],
-                [],
                 StreamSourceParameterContract,
-                [],
+                OutputPortSpecification.Create(OutputPort, ElementContract),
                 new OrleansStageValidator(registry, OrleansStageKind.StreamSource)),
-            StageSpecification.Create(
+            StageSpecification.Sink(
                 StreamSinkStage,
-                [InputPortSpecification.Create(InputPort, ElementContract)],
-                [],
-                [],
                 StreamSinkParameterContract,
-                [],
+                InputPortSpecification.Create(InputPort, ElementContract),
                 new OrleansStageValidator(registry, OrleansStageKind.StreamSink)),
-            StageSpecification.Create(
+            StageSpecification.Flow(
                 GrainCallStage,
-                [InputPortSpecification.Create(InputPort, ElementContract)],
-                [OutputPortSpecification.Create(OutputPort, ElementContract)],
-                [],
                 GrainCallParameterContract,
-                [],
+                InputPortSpecification.Create(InputPort, ElementContract),
+                OutputPortSpecification.Create(OutputPort, ElementContract),
                 new OrleansStageValidator(registry, OrleansStageKind.GrainCall)),
-            StageSpecification.Create(
+            StageSpecification.Flow(
                 KeyedGrainCallStage,
-                [InputPortSpecification.Create(InputPort, ElementContract)],
-                [OutputPortSpecification.Create(OutputPort, ElementContract)],
-                [],
                 KeyedGrainCallParameterContract,
-                [],
+                InputPortSpecification.Create(InputPort, ElementContract),
+                OutputPortSpecification.Create(OutputPort, ElementContract),
                 new OrleansStageValidator(registry, OrleansStageKind.KeyedGrainCall)),
-            StageSpecification.Create(
+            StageSpecification.Sink(
                 GrainCallSinkStage,
-                [InputPortSpecification.Create(InputPort, ElementContract)],
-                [],
-                [],
                 GrainCallSinkParameterContract,
-                [],
+                InputPortSpecification.Create(InputPort, ElementContract),
                 new OrleansStageValidator(registry, OrleansStageKind.GrainCallSink)),
-            StageSpecification.Create(
+            StageSpecification.Source(
                 GrainEnumerableStage,
-                [],
-                [OutputPortSpecification.Create(OutputPort, ElementContract)],
-                [],
                 GrainEnumerableParameterContract,
-                [],
+                OutputPortSpecification.Create(OutputPort, ElementContract),
                 new OrleansStageValidator(registry, OrleansStageKind.GrainEnumerable)),
-            StageSpecification.Create(
+            StageSpecification.Source(
                 ReminderTriggerStage,
-                [],
-                [OutputPortSpecification.Create(OutputPort, ElementContract)],
-                [],
                 ReminderTriggerParameterContract,
-                [],
+                OutputPortSpecification.Create(OutputPort, ElementContract),
                 new OrleansStageValidator(registry, OrleansStageKind.ReminderTrigger)),
-            StageSpecification.Create(
+            StageSpecification.Source(
                 ObserverBridgeStage,
-                [],
-                [OutputPortSpecification.Create(OutputPort, ElementContract)],
-                [],
                 ObserverBridgeParameterContract,
-                [],
+                OutputPortSpecification.Create(OutputPort, ElementContract),
                 new OrleansStageValidator(registry, OrleansStageKind.ObserverBridge)),
-            StageSpecification.Create(
+            StageSpecification.Sink(
                 BroadcastSinkStage,
-                [InputPortSpecification.Create(InputPort, ElementContract)],
-                [],
-                [],
                 BroadcastSinkParameterContract,
-                [],
+                InputPortSpecification.Create(InputPort, ElementContract),
                 new OrleansStageValidator(registry, OrleansStageKind.BroadcastSink)),
-            StageSpecification.Create(
+            StageSpecification.Source(
                 BroadcastSourceStage,
-                [],
-                [OutputPortSpecification.Create(OutputPort, ElementContract)],
-                [],
                 BroadcastSourceParameterContract,
-                [],
+                OutputPortSpecification.Create(OutputPort, ElementContract),
                 new OrleansStageValidator(registry, OrleansStageKind.BroadcastSource)),
         ]);
 

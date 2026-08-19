@@ -93,13 +93,14 @@ public static class AuditVocabulary
     public static StageCatalog Catalog() =>
         StageCatalog.Create(
         [
-            StageSpecification.Create(
+            // The adapters' element contract is a ContractReference rather than an ElementContract<T>,
+            // because a port facing one carries whatever this deployment binds to it. Port.In and Port.Out
+            // take either form.
+            StageSpecification.Flow(
                 Audit,
-                [InputPortSpecification.Create(PortId.Create("in"), OrleansStages.ElementContract)],
-                [OutputPortSpecification.Create(PortId.Create("out"), OrleansStages.ElementContract)],
-                [],
                 NoParameters,
-                []),
+                Port.In("in", OrleansStages.ElementContract),
+                Port.Out("out", OrleansStages.ElementContract)),
         ]);
 }
 

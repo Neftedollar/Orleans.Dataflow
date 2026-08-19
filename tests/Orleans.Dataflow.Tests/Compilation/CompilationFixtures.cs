@@ -66,12 +66,8 @@ internal static class CompilationFixtures
                 // Declares nothing but carries a parameter validator.
                 StageSpecification.Create(
                     Stage("strict"),
-                    [],
-                    [],
-                    [],
                     ParameterContractOf("strict"),
-                    [],
-                    strictValidator),
+                    parameterValidator: strictValidator),
 
                 // Capability requirements, one token each, named so that the order the nodes contribute
                 // them in is the opposite of ordinal order.
@@ -232,10 +228,10 @@ internal static class CompilationFixtures
 
         return StageSpecification.Create(
             Stage(stage),
-            inputPorts,
-            outputPorts ?? [],
-            resultPorts ?? [],
             ParameterContractOf(stage),
+            inputPorts,
+            outputPorts,
+            resultPorts,
             tokens);
     }
 
