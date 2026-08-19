@@ -17,4 +17,28 @@ namespace Orleans.Dataflow.Hosting;
 /// The ETag is opaque text and never a number a caller may compare for order — a store is free to spell it
 /// as a counter, a hash, or a token, and only equality means anything to a writer.
 /// </remarks>
-public readonly record struct StoredCheckpoint(CanonicalJsonValue Document, string ETag);
+public readonly record struct StoredCheckpoint(CanonicalJsonValue Document, string ETag)
+{
+    private readonly CanonicalJsonValue _document = Document;
+    private readonly string _etag = ETag;
+
+    /// <summary>Gets the stored checkpoint, in canonical form.</summary>
+    /// <exception cref="InvalidOperationException">This instance is the uninitialized default.</exception>
+    public CanonicalJsonValue Document
+    {
+        get => _etag is null ? throw DefaultAccess() : _document;
+        init => _document = value;
+    }
+
+    /// <summary>Gets the opaque version the store gave this document.</summary>
+    /// <value>Never <see langword="null"/>.</value>
+    /// <exception cref="InvalidOperationException">This instance is the uninitialized default.</exception>
+    public string ETag
+    {
+        get => _etag ?? throw DefaultAccess();
+        init => _etag = value;
+    }
+
+    private static InvalidOperationException DefaultAccess() =>
+        new($"The default {nameof(StoredCheckpoint)} holds no document. A store reports an absent checkpoint as null, never as the uninitialized struct.");
+}

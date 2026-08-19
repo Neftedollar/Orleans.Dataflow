@@ -30,7 +30,7 @@ namespace Orleans.Dataflow;
     "Naming",
     "CA1711:Identifiers should not have incorrect suffix",
     Justification = "The suffix is reserved so that only a queue is called one, and this is a queue: elements are offered at one end, held under a declared bound, and taken in order at the other. Renaming it to satisfy the letter of a rule it satisfies in substance would cost the reader the one word that says what it is.")]
-public interface IIngressQueue<T>
+public interface IIngressQueue<in T>
 {
     /// <summary>Offers one element to the queue.</summary>
     /// <param name="element">The element to enqueue, which may be <see langword="null"/>.</param>

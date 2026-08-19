@@ -240,8 +240,8 @@ Orleans.Dataflow.Hosting.OrleansRunHandle.DisposeAsync() -> System.Threading.Tas
 Orleans.Dataflow.Hosting.OrleansRunHandle.Epoch.get -> long
 Orleans.Dataflow.Hosting.OrleansRunHandle.GetValueAsync<TResult>(Orleans.Dataflow.ResultSlot<TResult> slot, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task<TResult>!
 Orleans.Dataflow.Hosting.OrleansRunHandle.RunId.get -> string!
-Orleans.Dataflow.Hosting.OrleansRunHandle.ShutdownAsync() -> System.Threading.Tasks.Task!
-Orleans.Dataflow.Hosting.OrleansRunHandle.SnapshotAsync() -> System.Threading.Tasks.Task<Orleans.Dataflow.RunSnapshot!>!
+Orleans.Dataflow.Hosting.OrleansRunHandle.ShutdownAsync() -> System.Threading.Tasks.ValueTask
+Orleans.Dataflow.Hosting.OrleansRunHandle.SnapshotAsync(System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task<Orleans.Dataflow.RunSnapshot!>!
 Orleans.Dataflow.Hosting.OrleansRunHandle.Ticket.get -> Orleans.Dataflow.Grains.PipelineRunTicket!
 Orleans.Dataflow.Hosting.OrleansRunHandle.WatchTermination.get -> System.Threading.Tasks.Task<Orleans.Dataflow.RunEnding!>!
 const Orleans.Dataflow.Grains.OrleansDataflowStorage.CoordinatorProviderName = "orleans-dataflow-coordinator" -> string!

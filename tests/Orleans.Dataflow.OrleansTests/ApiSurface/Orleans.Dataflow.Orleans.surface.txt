@@ -1,0 +1,333 @@
+# assembly: Orleans.Dataflow.Orleans
+# public types: 45
+TYPE static class Orleans.Dataflow.Adapters.BroadcastElementBinding
+  method static Orleans.Dataflow.Adapters.BroadcastElementBinding<T> Create<T>(Orleans.Dataflow.ElementContract<T> element)
+TYPE sealed class Orleans.Dataflow.Adapters.BroadcastElementBinding<T>
+  IFACE Orleans.Dataflow.Adapters.IBroadcastElementEntry
+  method virtual System.String ToString()
+  property Orleans.Dataflow.ElementContract<T> Element { get; }
+TYPE static class Orleans.Dataflow.Adapters.GrainCallBinding
+  method static Orleans.Dataflow.Adapters.GrainCallBinding<TIn, TOut> Create<TIn, TOut>(System.String name, Orleans.Dataflow.ElementContract<TIn> input, Orleans.Dataflow.ElementContract<TOut> output, System.Func<Orleans.IGrainFactory, TIn, System.Threading.CancellationToken, System.Threading.Tasks.Task<TOut>> call)
+TYPE sealed class Orleans.Dataflow.Adapters.GrainCallBinding<TIn, TOut>
+  IFACE Orleans.Dataflow.Adapters.IGrainCallEntry
+  method virtual System.String ToString()
+  property Orleans.Dataflow.ElementContract<TIn> Input { get; }
+  property Orleans.Dataflow.ElementContract<TOut> Output { get; }
+  property System.String Name { get; }
+TYPE static class Orleans.Dataflow.Adapters.GrainCallSinkBinding
+  method static Orleans.Dataflow.Adapters.GrainCallSinkBinding<TIn> Create<TIn>(System.String name, Orleans.Dataflow.ElementContract<TIn> input, System.Func<Orleans.IGrainFactory, TIn, System.Threading.CancellationToken, System.Threading.Tasks.Task> call)
+TYPE sealed class Orleans.Dataflow.Adapters.GrainCallSinkBinding<TIn>
+  IFACE Orleans.Dataflow.Adapters.IGrainCallSinkEntry
+  method virtual System.String ToString()
+  property Orleans.Dataflow.ElementContract<TIn> Input { get; }
+  property System.String Name { get; }
+TYPE sealed class Orleans.Dataflow.Adapters.GrainCallTimeoutException
+  BASE System.Exception
+  IFACE System.Runtime.Serialization.ISerializable
+  .ctor()
+  .ctor(System.String message)
+  .ctor(System.String message, System.Exception innerException)
+TYPE static class Orleans.Dataflow.Adapters.GrainEnumerableBinding
+  method static Orleans.Dataflow.Adapters.GrainEnumerableBinding<T> Create<T>(System.String name, Orleans.Dataflow.ElementContract<T> output, System.Func<Orleans.IGrainFactory, System.Threading.CancellationToken, System.Collections.Generic.IAsyncEnumerable<T>> open)
+TYPE sealed class Orleans.Dataflow.Adapters.GrainEnumerableBinding<T>
+  IFACE Orleans.Dataflow.Adapters.IGrainEnumerableEntry
+  method virtual System.String ToString()
+  property Orleans.Dataflow.ElementContract<T> Output { get; }
+  property System.String Name { get; }
+TYPE static class Orleans.Dataflow.Adapters.KeyedGrainCallBinding
+  method static Orleans.Dataflow.Adapters.KeyedGrainCallBinding<TIn, TOut> Create<TIn, TOut>(System.String name, Orleans.Dataflow.ElementContract<TIn> input, Orleans.Dataflow.ElementContract<TOut> output, System.Func<TIn, System.String> key, System.Func<Orleans.IGrainFactory, TIn, System.Threading.CancellationToken, System.Threading.Tasks.Task<TOut>> call)
+TYPE sealed class Orleans.Dataflow.Adapters.KeyedGrainCallBinding<TIn, TOut>
+  IFACE Orleans.Dataflow.Adapters.IKeyedGrainCallEntry
+  method virtual System.String ToString()
+  property Orleans.Dataflow.ElementContract<TIn> Input { get; }
+  property Orleans.Dataflow.ElementContract<TOut> Output { get; }
+  property System.String Name { get; }
+TYPE static class Orleans.Dataflow.Adapters.ObserverBridgeBinding
+  method static Orleans.Dataflow.Adapters.ObserverBridgeBinding<T> Create<T>(System.String name, Orleans.Dataflow.ElementContract<T> output)
+TYPE sealed class Orleans.Dataflow.Adapters.ObserverBridgeBinding<T>
+  IFACE Orleans.Dataflow.Adapters.IObserverBridgeEntry
+  method virtual System.String ToString()
+  property Orleans.Dataflow.ElementContract<T> Output { get; }
+  property System.String Name { get; }
+TYPE static class Orleans.Dataflow.Adapters.OrleansStages
+  method static Orleans.Dataflow.Adapters.OrleansStreamAddress BroadcastSourceChannel(System.String provider, System.String key)
+  method static Orleans.Dataflow.ElementContract<T> Element<T>()
+  method static Orleans.Dataflow.RegisteredFlow<TIn, TOut> GrainCall<TIn, TOut>(Orleans.Dataflow.Adapters.GrainCallBinding<TIn, TOut> call)
+  method static Orleans.Dataflow.RegisteredFlow<TIn, TOut> KeyedGrainCall<TIn, TOut>(Orleans.Dataflow.Adapters.KeyedGrainCallBinding<TIn, TOut> call)
+  method static Orleans.Dataflow.RegisteredSink<T> BroadcastSink<T>(Orleans.Dataflow.Adapters.BroadcastElementBinding<T> element)
+  method static Orleans.Dataflow.RegisteredSink<T> StreamSink<T>(Orleans.Dataflow.Adapters.StreamElementBinding<T> element)
+  method static Orleans.Dataflow.RegisteredSink<TIn> GrainCallSink<TIn>(Orleans.Dataflow.Adapters.GrainCallSinkBinding<TIn> call)
+  method static Orleans.Dataflow.RegisteredSource<System.Int64> ReminderTrigger()
+  method static Orleans.Dataflow.RegisteredSource<T> BroadcastSource<T>(Orleans.Dataflow.Adapters.BroadcastElementBinding<T> element)
+  method static Orleans.Dataflow.RegisteredSource<T> GrainEnumerable<T>(Orleans.Dataflow.Adapters.GrainEnumerableBinding<T> source)
+  method static Orleans.Dataflow.RegisteredSource<T> ObserverBridge<T>(Orleans.Dataflow.Adapters.ObserverBridgeBinding<T> bridge)
+  method static Orleans.Dataflow.RegisteredSource<T> StreamSource<T>(Orleans.Dataflow.Adapters.StreamElementBinding<T> element)
+  method static Orleans.Dataflow.Serialization.CanonicalJsonValue BroadcastSinkParameters<T>(Orleans.Dataflow.Adapters.BroadcastElementBinding<T> element, Orleans.Dataflow.Adapters.OrleansStreamAddress channel, System.Boolean fireAndForgetDelivery)
+  method static Orleans.Dataflow.Serialization.CanonicalJsonValue BroadcastSourceParameters<T>(Orleans.Dataflow.Adapters.BroadcastElementBinding<T> element, System.String provider, System.String channel, Orleans.Dataflow.BufferOptions ingress)
+  method static Orleans.Dataflow.Serialization.CanonicalJsonValue GrainCallParameters<TIn, TOut>(Orleans.Dataflow.Adapters.GrainCallBinding<TIn, TOut> call, System.Int32 maxInFlight, System.Nullable<System.TimeSpan> timeout = default)
+  method static Orleans.Dataflow.Serialization.CanonicalJsonValue GrainCallSinkParameters<TIn>(Orleans.Dataflow.Adapters.GrainCallSinkBinding<TIn> call, System.Int32 maxInFlight, System.Nullable<System.TimeSpan> timeout = default)
+  method static Orleans.Dataflow.Serialization.CanonicalJsonValue GrainEnumerableParameters<T>(Orleans.Dataflow.Adapters.GrainEnumerableBinding<T> source)
+  method static Orleans.Dataflow.Serialization.CanonicalJsonValue KeyedGrainCallParameters<TIn, TOut>(Orleans.Dataflow.Adapters.KeyedGrainCallBinding<TIn, TOut> call, System.Int32 maxInFlight, System.Boolean distributed = false, System.Nullable<System.TimeSpan> timeout = default)
+  method static Orleans.Dataflow.Serialization.CanonicalJsonValue ObserverBridgeParameters<T>(Orleans.Dataflow.Adapters.ObserverBridgeBinding<T> bridge, Orleans.Dataflow.BufferOptions ingress)
+  method static Orleans.Dataflow.Serialization.CanonicalJsonValue ReminderTriggerParameters(System.TimeSpan period, Orleans.Dataflow.BufferOptions ingress)
+  method static Orleans.Dataflow.Serialization.CanonicalJsonValue StreamSinkParameters<T>(Orleans.Dataflow.Adapters.StreamElementBinding<T> element, Orleans.Dataflow.Adapters.OrleansStreamAddress stream)
+  method static Orleans.Dataflow.Serialization.CanonicalJsonValue StreamSourceParameters<T>(Orleans.Dataflow.Adapters.StreamElementBinding<T> element, Orleans.Dataflow.Adapters.OrleansStreamAddress stream, Orleans.Dataflow.BufferOptions ingress)
+  method static System.String ObserverBridgeKey(Orleans.Dataflow.Grains.PipelineRunTicket ticket, System.String bridge)
+  method static System.String ObserverBridgeKey(System.String graphId, System.String runId, System.String bridge)
+  property static Orleans.Dataflow.Definition.StageCatalog Catalog { get; }
+  property static Orleans.Dataflow.ElementContract<System.Int64> Tick { get; }
+  property static Orleans.Dataflow.Identity.ContractReference BroadcastSinkParameterContract { get; }
+  property static Orleans.Dataflow.Identity.ContractReference BroadcastSourceParameterContract { get; }
+  property static Orleans.Dataflow.Identity.ContractReference ElementContract { get; }
+  property static Orleans.Dataflow.Identity.ContractReference GrainCallParameterContract { get; }
+  property static Orleans.Dataflow.Identity.ContractReference GrainCallSinkParameterContract { get; }
+  property static Orleans.Dataflow.Identity.ContractReference GrainEnumerableParameterContract { get; }
+  property static Orleans.Dataflow.Identity.ContractReference KeyedGrainCallParameterContract { get; }
+  property static Orleans.Dataflow.Identity.ContractReference ObserverBridgeParameterContract { get; }
+  property static Orleans.Dataflow.Identity.ContractReference ReminderTriggerParameterContract { get; }
+  property static Orleans.Dataflow.Identity.ContractReference StreamSinkParameterContract { get; }
+  property static Orleans.Dataflow.Identity.ContractReference StreamSourceParameterContract { get; }
+  property static Orleans.Dataflow.Identity.ProviderId Provider { get; }
+  property static Orleans.Dataflow.Identity.StageRef BroadcastSinkStage { get; }
+  property static Orleans.Dataflow.Identity.StageRef BroadcastSourceStage { get; }
+  property static Orleans.Dataflow.Identity.StageRef GrainCallSinkStage { get; }
+  property static Orleans.Dataflow.Identity.StageRef GrainCallStage { get; }
+  property static Orleans.Dataflow.Identity.StageRef GrainEnumerableStage { get; }
+  property static Orleans.Dataflow.Identity.StageRef KeyedGrainCallStage { get; }
+  property static Orleans.Dataflow.Identity.StageRef ObserverBridgeStage { get; }
+  property static Orleans.Dataflow.Identity.StageRef ReminderTriggerStage { get; }
+  property static Orleans.Dataflow.Identity.StageRef StreamSinkStage { get; }
+  property static Orleans.Dataflow.Identity.StageRef StreamSourceStage { get; }
+  property static System.String BroadcastSourceNamespace { get; }
+TYPE struct Orleans.Dataflow.Adapters.OrleansStreamAddress  [System.Runtime.CompilerServices.IsReadOnlyAttribute]
+  BASE System.ValueType
+  IFACE System.IEquatable<Orleans.Dataflow.Adapters.OrleansStreamAddress>
+  method System.Boolean Equals(Orleans.Dataflow.Adapters.OrleansStreamAddress other)
+  method static Orleans.Dataflow.Adapters.OrleansStreamAddress Create(System.String provider, System.String streamNamespace, System.Guid key)
+  method static Orleans.Dataflow.Adapters.OrleansStreamAddress Create(System.String provider, System.String streamNamespace, System.String key)
+  method virtual System.Boolean Equals(System.Object obj)
+  method virtual System.Int32 GetHashCode()
+  method virtual System.String ToString()
+  operator static System.Boolean op_Equality(Orleans.Dataflow.Adapters.OrleansStreamAddress left, Orleans.Dataflow.Adapters.OrleansStreamAddress right)
+  operator static System.Boolean op_Inequality(Orleans.Dataflow.Adapters.OrleansStreamAddress left, Orleans.Dataflow.Adapters.OrleansStreamAddress right)
+  property System.Boolean IsDefault { get; }
+  property System.String Key { get; }
+  property System.String Namespace { get; }
+  property System.String Provider { get; }
+TYPE static class Orleans.Dataflow.Adapters.StreamElementBinding
+  method static Orleans.Dataflow.Adapters.StreamElementBinding<T> Create<T>(Orleans.Dataflow.ElementContract<T> element)
+TYPE sealed class Orleans.Dataflow.Adapters.StreamElementBinding<T>
+  IFACE Orleans.Dataflow.Adapters.IStreamElementEntry
+  method virtual System.String ToString()
+  property Orleans.Dataflow.ElementContract<T> Element { get; }
+TYPE enum Orleans.Dataflow.Grains.DataflowPushOutcome  [Orleans.GenerateSerializerAttribute]
+  IFACE System.IComparable
+  IFACE System.IConvertible
+  IFACE System.IFormattable
+  IFACE System.ISpanFormattable
+  field System.Int32 value__
+  field static const Orleans.Dataflow.Grains.DataflowPushOutcome Accepted = 0
+  field static const Orleans.Dataflow.Grains.DataflowPushOutcome Closed = 2
+  field static const Orleans.Dataflow.Grains.DataflowPushOutcome Dropped = 1
+  field static const Orleans.Dataflow.Grains.DataflowPushOutcome Failed = 3
+TYPE sealed class Orleans.Dataflow.Grains.DurableRunClaim  [Orleans.GenerateSerializerAttribute]
+  .ctor()
+  property System.Byte[] CanonicalDocument { get; set; }  [Orleans.IdAttribute(1)]
+  property System.Int64 Epoch { get; set; }  [Orleans.IdAttribute(0)]
+  property System.Nullable<Orleans.Dataflow.Grains.RunPhase> Outcome { get; set; }  [Orleans.IdAttribute(4)]
+  property System.Nullable<System.Int32> EveryElements { get; set; }  [Orleans.IdAttribute(3)]
+  property System.Nullable<System.TimeSpan> Interval { get; set; }  [Orleans.IdAttribute(2)]
+  property System.String FailureMessage { get; set; }  [Orleans.IdAttribute(6)]
+  property System.String FailureType { get; set; }  [Orleans.IdAttribute(5)]
+TYPE sealed class Orleans.Dataflow.Grains.DurableRunDeclaration  [Orleans.GenerateSerializerAttribute]
+  .ctor()
+  property System.Nullable<System.Int32> EveryElements { get; set; }  [Orleans.IdAttribute(2)]
+  property System.Nullable<System.TimeSpan> Interval { get; set; }  [Orleans.IdAttribute(1)]
+  property System.String RunId { get; set; }  [Orleans.IdAttribute(0)]
+TYPE interface Orleans.Dataflow.Grains.IDataflowPushReceiver
+  IFACE Orleans.IGrainObserver
+  IFACE Orleans.Runtime.IAddressable
+  method abstract System.Threading.Tasks.Task<Orleans.Dataflow.Grains.DataflowPushOutcome> PushAsync(System.Object element)
+TYPE interface Orleans.Dataflow.Grains.IObserverBridgeGrain
+  IFACE Orleans.IGrain
+  IFACE Orleans.IGrainWithStringKey
+  IFACE Orleans.Runtime.IAddressable
+  method abstract System.Threading.Tasks.Task AttachAsync(Orleans.Dataflow.Grains.IDataflowPushReceiver receiver)
+  method abstract System.Threading.Tasks.Task DetachAsync()
+  method abstract System.Threading.Tasks.Task<Orleans.Dataflow.Grains.DataflowPushOutcome> PushAsync(System.Object element)
+  method abstract System.Threading.Tasks.Task<System.Boolean> IsListeningAsync()
+TYPE interface Orleans.Dataflow.Grains.IPipelineCoordinatorGrain
+  IFACE Orleans.IGrain
+  IFACE Orleans.IGrainWithStringKey
+  IFACE Orleans.Runtime.IAddressable
+  method abstract System.Threading.Tasks.Task CancelRunAsync(System.String runId, System.Int64 epoch)  [Orleans.Concurrency.AlwaysInterleaveAttribute]
+  method abstract System.Threading.Tasks.Task ReportDurableRunEndedAsync(System.String runId, Orleans.Dataflow.Grains.RunStatusSnapshot terminal)
+  method abstract System.Threading.Tasks.Task ShutdownRunAsync(System.String runId, System.Int64 epoch)  [Orleans.Concurrency.AlwaysInterleaveAttribute]
+  method abstract System.Threading.Tasks.Task<Orleans.Dataflow.Grains.DurableRunClaim> ClaimDurableRunAsync(System.String runId)
+  method abstract System.Threading.Tasks.Task<Orleans.Dataflow.Grains.PipelineRunTicket> DeclareDurableRunAsync(System.Byte[] canonicalDocument, Orleans.Dataflow.Grains.DurableRunDeclaration declaration)
+  method abstract System.Threading.Tasks.Task<Orleans.Dataflow.Grains.PipelineRunTicket> ReplaceDurableRunAsync(System.Byte[] canonicalDocument, Orleans.Dataflow.Grains.DurableRunDeclaration declaration)
+  method abstract System.Threading.Tasks.Task<Orleans.Dataflow.Grains.PipelineRunTicket> StartRunAsync(System.Byte[] canonicalDocument)
+  method abstract System.Threading.Tasks.Task<Orleans.Dataflow.Grains.RunStatusSnapshot> GetStatusAsync(System.String runId, System.Int64 epoch)  [Orleans.Concurrency.AlwaysInterleaveAttribute]
+TYPE interface Orleans.Dataflow.Grains.IPipelineRunGrain
+  IFACE Orleans.IGrain
+  IFACE Orleans.IGrainWithStringKey
+  IFACE Orleans.Runtime.IAddressable
+  method abstract System.Threading.Tasks.Task CancelAsync(System.Int64 epoch)
+  method abstract System.Threading.Tasks.Task ShutdownAsync(System.Int64 epoch)
+  method abstract System.Threading.Tasks.Task StartAsync(System.Byte[] canonicalDocument, System.Int64 epoch)
+  method abstract System.Threading.Tasks.Task<Orleans.Dataflow.Grains.ResultEnvelope> GetResultAsync(System.Int64 epoch, System.String slotName, System.String graphFingerprint)
+  method abstract System.Threading.Tasks.Task<Orleans.Dataflow.Grains.RunStatusSnapshot> GetStatusAsync(System.Int64 epoch)
+  method abstract System.Threading.Tasks.Task<System.Int64> EnsureStartedAsync(System.Int64 declaredEpoch)
+TYPE interface Orleans.Dataflow.Grains.IReminderTriggerGrain
+  IFACE Orleans.IGrain
+  IFACE Orleans.IGrainWithStringKey
+  IFACE Orleans.Runtime.IAddressable
+  method abstract System.Threading.Tasks.Task StartAsync(Orleans.Dataflow.Grains.IDataflowPushReceiver receiver, System.Int64 periodMilliseconds)
+  method abstract System.Threading.Tasks.Task StopAsync()
+  method abstract System.Threading.Tasks.Task<System.Boolean> IsScheduledAsync()
+TYPE static class Orleans.Dataflow.Grains.OrleansDataflowStorage
+  field static const System.String CoordinatorProviderName = "orleans-dataflow-coordinator"
+TYPE sealed class Orleans.Dataflow.Grains.PipelineFencingException  [Orleans.GenerateSerializerAttribute]
+  BASE System.Exception
+  IFACE System.Runtime.Serialization.ISerializable
+  .ctor()
+  .ctor(System.Int64 currentEpoch, System.Int64 callerEpoch)
+  .ctor(System.String message)
+  .ctor(System.String message, System.Exception innerException)
+  property System.Int64 CallerEpoch { get; set; }  [Orleans.IdAttribute(1)]
+  property System.Int64 CurrentEpoch { get; set; }  [Orleans.IdAttribute(0)]
+TYPE sealed class Orleans.Dataflow.Grains.PipelineRejectedException  [Orleans.GenerateSerializerAttribute]
+  BASE System.Exception
+  IFACE System.Runtime.Serialization.ISerializable
+  .ctor()
+  .ctor(System.String message)
+  .ctor(System.String message, System.Exception innerException)
+TYPE sealed class Orleans.Dataflow.Grains.PipelineResumeRefusedException  [Orleans.GenerateSerializerAttribute]
+  BASE System.Exception
+  IFACE System.Runtime.Serialization.ISerializable
+  .ctor()
+  .ctor(System.String message)
+  .ctor(System.String message, System.Exception innerException)
+  method static Orleans.Dataflow.Grains.PipelineResumeRefusedException Mismatched(System.String run, System.String stored, System.String declared)
+  property System.String DeclaredFingerprint { get; set; }  [Orleans.IdAttribute(1)]
+  property System.String StoredFingerprint { get; set; }  [Orleans.IdAttribute(0)]
+TYPE sealed class Orleans.Dataflow.Grains.PipelineRunFailedException  [Orleans.GenerateSerializerAttribute]
+  BASE System.Exception
+  IFACE System.Runtime.Serialization.ISerializable
+  .ctor()
+  .ctor(System.String failureType, System.String failureMessage, System.String runId)
+  .ctor(System.String message)
+  .ctor(System.String message, System.Exception innerException)
+  property System.String FailureMessage { get; set; }  [Orleans.IdAttribute(1)]
+  property System.String FailureType { get; set; }  [Orleans.IdAttribute(0)]
+  property System.String RunId { get; set; }  [Orleans.IdAttribute(2)]
+TYPE sealed class Orleans.Dataflow.Grains.PipelineRunLostException  [Orleans.GenerateSerializerAttribute]
+  BASE System.Exception
+  IFACE System.Runtime.Serialization.ISerializable
+  .ctor()
+  .ctor(System.String message)
+  .ctor(System.String message, System.Exception innerException)
+TYPE sealed class Orleans.Dataflow.Grains.PipelineRunTicket  [Orleans.GenerateSerializerAttribute]
+  .ctor()
+  property System.Int64 Epoch { get; set; }  [Orleans.IdAttribute(2)]
+  property System.String CatalogFingerprint { get; set; }  [Orleans.IdAttribute(4)]
+  property System.String GraphFingerprint { get; set; }  [Orleans.IdAttribute(3)]
+  property System.String GraphId { get; set; }  [Orleans.IdAttribute(0)]
+  property System.String RunId { get; set; }  [Orleans.IdAttribute(1)]
+TYPE sealed class Orleans.Dataflow.Grains.ResultEnvelope  [Orleans.GenerateSerializerAttribute]
+  .ctor()
+  property Orleans.Dataflow.Grains.RunPhase Phase { get; set; }  [Orleans.IdAttribute(0)]
+  property System.Boolean HasValue { get; set; }  [Orleans.IdAttribute(1)]
+  property System.Object Value { get; set; }  [Orleans.IdAttribute(2)]
+  property System.String FailureMessage { get; set; }  [Orleans.IdAttribute(4)]
+  property System.String FailureType { get; set; }  [Orleans.IdAttribute(3)]
+TYPE sealed class Orleans.Dataflow.Grains.ResultTooLargeException  [Orleans.GenerateSerializerAttribute]
+  BASE System.Exception
+  IFACE System.Runtime.Serialization.ISerializable
+  .ctor()
+  .ctor(System.String message)
+  .ctor(System.String message, System.Exception innerException)
+  .ctor(System.String slotName, System.Int64 bytes, System.Int32 maximumBytes)
+  property System.Int32 MaximumBytes { get; set; }  [Orleans.IdAttribute(2)]
+  property System.Int64 Bytes { get; set; }  [Orleans.IdAttribute(1)]
+  property System.String SlotName { get; set; }  [Orleans.IdAttribute(0)]
+TYPE enum Orleans.Dataflow.Grains.RunPhase  [Orleans.GenerateSerializerAttribute]
+  IFACE System.IComparable
+  IFACE System.IConvertible
+  IFACE System.IFormattable
+  IFACE System.ISpanFormattable
+  field System.Int32 value__
+  field static const Orleans.Dataflow.Grains.RunPhase Canceled = 4
+  field static const Orleans.Dataflow.Grains.RunPhase Completed = 2
+  field static const Orleans.Dataflow.Grains.RunPhase Faulted = 3
+  field static const Orleans.Dataflow.Grains.RunPhase NotStarted = 0
+  field static const Orleans.Dataflow.Grains.RunPhase Running = 1
+TYPE sealed class Orleans.Dataflow.Grains.RunStatusSnapshot  [Orleans.GenerateSerializerAttribute]
+  .ctor()
+  property Orleans.Dataflow.Grains.RunPhase Phase { get; set; }  [Orleans.IdAttribute(0)]
+  property System.Int64 Checkpoints { get; set; }  [Orleans.IdAttribute(7)]
+  property System.Int64 DroppedElements { get; set; }  [Orleans.IdAttribute(4)]
+  property System.Int64 Epoch { get; set; }  [Orleans.IdAttribute(1)]
+  property System.Int64 PoisonElements { get; set; }  [Orleans.IdAttribute(6)]
+  property System.Int64 SupervisedFailures { get; set; }  [Orleans.IdAttribute(5)]
+  property System.String FailureMessage { get; set; }  [Orleans.IdAttribute(3)]
+  property System.String FailureType { get; set; }  [Orleans.IdAttribute(2)]
+  property System.TimeSpan TotalCheckpointHold { get; set; }  [Orleans.IdAttribute(8)]
+TYPE enum Orleans.Dataflow.Hosting.DataflowPlacement
+  IFACE System.IComparable
+  IFACE System.IConvertible
+  IFACE System.IFormattable
+  IFACE System.ISpanFormattable
+  field System.Int32 value__
+  field static const Orleans.Dataflow.Hosting.DataflowPlacement ClusterDefault = 0
+  field static const Orleans.Dataflow.Hosting.DataflowPlacement HashBased = 3
+  field static const Orleans.Dataflow.Hosting.DataflowPlacement PreferLocal = 2
+  field static const Orleans.Dataflow.Hosting.DataflowPlacement Random = 1
+TYPE sealed class Orleans.Dataflow.Hosting.DurablePipelineOptions  [System.Runtime.CompilerServices.RequiredMemberAttribute]
+  .ctor()  [System.ObsoleteAttribute("Constructors of types with required members are not supported in this version of your compiler.", true),System.Runtime.CompilerServices.CompilerFeatureRequiredAttribute("RequiredMembers")]
+  property System.Nullable<System.Int32> EveryElements { get; set; }
+  property System.Nullable<System.TimeSpan> Interval { get; set; }
+  property System.String RunId { get; set; }  [System.Runtime.CompilerServices.RequiredMemberAttribute]
+TYPE interface Orleans.Dataflow.Hosting.IOrleansDataflowBuilder
+  method abstract Orleans.Dataflow.Hosting.IOrleansDataflowBuilder AddBroadcastElement<T>(Orleans.Dataflow.Adapters.BroadcastElementBinding<T> element)
+  method abstract Orleans.Dataflow.Hosting.IOrleansDataflowBuilder AddCatalog(Orleans.Dataflow.Definition.IStageCatalog catalog)
+  method abstract Orleans.Dataflow.Hosting.IOrleansDataflowBuilder AddDotnetStages()
+  method abstract Orleans.Dataflow.Hosting.IOrleansDataflowBuilder AddFactory(Orleans.Dataflow.Identity.ProviderId provider, Orleans.Dataflow.Hosting.IDataflowStageFactory factory)
+  method abstract Orleans.Dataflow.Hosting.IOrleansDataflowBuilder AddGrainCall<TIn, TOut>(Orleans.Dataflow.Adapters.GrainCallBinding<TIn, TOut> binding)
+  method abstract Orleans.Dataflow.Hosting.IOrleansDataflowBuilder AddGrainCallSink<TIn>(Orleans.Dataflow.Adapters.GrainCallSinkBinding<TIn> binding)
+  method abstract Orleans.Dataflow.Hosting.IOrleansDataflowBuilder AddGrainEnumerable<T>(Orleans.Dataflow.Adapters.GrainEnumerableBinding<T> source)
+  method abstract Orleans.Dataflow.Hosting.IOrleansDataflowBuilder AddKeyedGrainCall<TIn, TOut>(Orleans.Dataflow.Adapters.KeyedGrainCallBinding<TIn, TOut> binding)
+  method abstract Orleans.Dataflow.Hosting.IOrleansDataflowBuilder AddObservable<T>(Orleans.Dataflow.Adapters.ObservableBinding<T> source)
+  method abstract Orleans.Dataflow.Hosting.IOrleansDataflowBuilder AddObserverBridge<T>(Orleans.Dataflow.Adapters.ObserverBridgeBinding<T> bridge)
+  method abstract Orleans.Dataflow.Hosting.IOrleansDataflowBuilder AddStreamElement<T>(Orleans.Dataflow.Adapters.StreamElementBinding<T> element)
+  method abstract Orleans.Dataflow.Hosting.IOrleansDataflowBuilder LimitResultSize(System.Int32 maximumBytes)
+  method abstract Orleans.Dataflow.Hosting.IOrleansDataflowBuilder UseCheckpointStore(System.Func<System.IServiceProvider, Orleans.Dataflow.Hosting.ICheckpointStore> store)
+  method abstract Orleans.Dataflow.Hosting.IOrleansDataflowBuilder UsePlacement(Orleans.Dataflow.Hosting.DataflowPlacement runGrains, Orleans.Dataflow.Hosting.DataflowPlacement keyedExecutors)
+TYPE static class Orleans.Dataflow.Hosting.OrleansDataflowClientExtensions  [System.Runtime.CompilerServices.ExtensionAttribute]
+  method static Microsoft.Extensions.DependencyInjection.IServiceCollection AddOrleansDataflowClient(Microsoft.Extensions.DependencyInjection.IServiceCollection services, System.Action<Orleans.Dataflow.Hosting.OrleansDataflowClientOptions> configure = null)  [System.Runtime.CompilerServices.ExtensionAttribute]
+TYPE sealed class Orleans.Dataflow.Hosting.OrleansDataflowClientOptions
+  .ctor()
+  field static readonly System.TimeSpan DefaultPollInterval
+  property System.TimeSpan PollInterval { get; set; }
+TYPE sealed class Orleans.Dataflow.Hosting.OrleansDataflowHost
+  .ctor(Orleans.IGrainFactory grains)
+  .ctor(Orleans.IGrainFactory grains, Orleans.Dataflow.Hosting.OrleansDataflowClientOptions options)
+  method System.Threading.Tasks.Task<Orleans.Dataflow.Hosting.OrleansRunHandle> MaterializeAsync(Orleans.Dataflow.PipelineDefinition pipeline, System.Threading.CancellationToken cancellationToken = default)
+  method System.Threading.Tasks.Task<Orleans.Dataflow.Hosting.OrleansRunHandle> MaterializeDurableAsync(Orleans.Dataflow.PipelineDefinition pipeline, Orleans.Dataflow.Hosting.DurablePipelineOptions durable, System.Threading.CancellationToken cancellationToken = default)
+  method System.Threading.Tasks.Task<Orleans.Dataflow.Hosting.OrleansRunHandle> ReplaceDurableRunAsync(Orleans.Dataflow.PipelineDefinition pipeline, Orleans.Dataflow.Hosting.DurablePipelineOptions durable, System.Threading.CancellationToken cancellationToken = default)
+TYPE static class Orleans.Dataflow.Hosting.OrleansDataflowResults
+  field static const System.Int32 DefaultMaximumResultBytes = 1048576
+TYPE static class Orleans.Dataflow.Hosting.OrleansDataflowSiloBuilderExtensions  [System.Runtime.CompilerServices.ExtensionAttribute]
+  method static Orleans.Hosting.ISiloBuilder AddOrleansDataflow(Orleans.Hosting.ISiloBuilder builder, System.Action<Orleans.Dataflow.Hosting.IOrleansDataflowBuilder> configure)  [System.Runtime.CompilerServices.ExtensionAttribute]
+TYPE sealed class Orleans.Dataflow.Hosting.OrleansRunHandle
+  IFACE System.IAsyncDisposable
+  method System.Threading.Tasks.Task<Orleans.Dataflow.RunSnapshot> SnapshotAsync(System.Threading.CancellationToken cancellationToken = default)
+  method System.Threading.Tasks.Task<TResult> GetValueAsync<TResult>(Orleans.Dataflow.ResultSlot<TResult> slot, System.Threading.CancellationToken cancellationToken = default)
+  method System.Threading.Tasks.ValueTask DisposeAsync()
+  method System.Threading.Tasks.ValueTask ShutdownAsync()
+  method virtual System.String ToString()
+  property Orleans.Dataflow.Grains.PipelineRunTicket Ticket { get; }
+  property System.Int64 Epoch { get; }
+  property System.String RunId { get; }
+  property System.Threading.Tasks.Task Completion { get; }
+  property System.Threading.Tasks.Task<Orleans.Dataflow.RunEnding> WatchTermination { get; }

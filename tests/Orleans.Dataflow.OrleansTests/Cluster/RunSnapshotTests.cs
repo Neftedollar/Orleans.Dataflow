@@ -43,7 +43,9 @@ public sealed class RunSnapshotTests(DataflowCluster cluster)
         // is demonstrably alive when it is read.
         await TestSignals.Reached("snapshot-running");
 
-        RunSnapshot snapshot = await Deadline.Within(handle.SnapshotAsync(), "the run answered a reading");
+        RunSnapshot snapshot = await Deadline.Within(
+            handle.SnapshotAsync(Token),
+            "the run answered a reading");
 
         Assert.Equal(RunSnapshotStatus.Running, snapshot.Status);
         Assert.Equal(0L, snapshot.DroppedElements);
@@ -51,6 +53,39 @@ public sealed class RunSnapshotTests(DataflowCluster cluster)
         Assert.Equal(0L, snapshot.PoisonElements);
         Assert.Equal(0L, snapshot.Checkpoints);
         Assert.Equal(TimeSpan.Zero, snapshot.TotalCheckpointHold);
+
+        await handle.ShutdownAsync();
+        await Deadline.Within(handle.Completion, $"the run {handle.RunId} drained and completed");
+    }
+
+    [Fact]
+    public async Task AnAbandonedReadingStopsTheWaitAndLeavesTheRunRunning()
+    {
+        (PipelineDefinition pipeline, ResultSlot<long> _) =
+            TestPipelines.Doubling("snapshot-abandoned", 3, halt: "snapshot-abandoned");
+
+        await using OrleansRunHandle handle = await cluster.Host.MaterializeAsync(pipeline, Token);
+
+        // The source has parked, so the run is demonstrably alive on both sides of the abandoned reading.
+        await TestSignals.Reached("snapshot-abandoned");
+
+        using CancellationTokenSource abandoned = new();
+        await abandoned.CancelAsync();
+
+        // The token is already down before the reading is asked for, which is what makes "promptly" a fact
+        // rather than a race: the wait is abandoned on the turn after the call is sent, and nothing here
+        // waits for a length of time to find that out.
+        _ = await Assert.ThrowsAnyAsync<OperationCanceledException>(
+            () => handle.SnapshotAsync(abandoned.Token));
+
+        // What the token stopped was one caller's wait and nothing else. The call it abandoned was already
+        // in flight and travels on, the run neither notices nor changes, and the very next reading answers
+        // from the same live run — which is what makes abandoning a reading cheap rather than destructive.
+        RunSnapshot after = await Deadline.Within(
+            handle.SnapshotAsync(Token),
+            "the run answered a reading after an abandoned one");
+
+        Assert.Equal(RunSnapshotStatus.Running, after.Status);
 
         await handle.ShutdownAsync();
         await Deadline.Within(handle.Completion, $"the run {handle.RunId} drained and completed");
@@ -67,7 +102,9 @@ public sealed class RunSnapshotTests(DataflowCluster cluster)
         _ = await Assert.ThrowsAsync<PipelineRunFailedException>(
             () => Deadline.Within(handle.Completion, $"the run {handle.RunId} reported how it ended"));
 
-        RunSnapshot snapshot = await Deadline.Within(handle.SnapshotAsync(), "the ended run answered a reading");
+        RunSnapshot snapshot = await Deadline.Within(
+            handle.SnapshotAsync(Token),
+            "the ended run answered a reading");
 
         Assert.Equal(RunSnapshotStatus.Failed, snapshot.Status);
         Assert.Equal(0L, snapshot.SupervisedFailures);
@@ -93,7 +130,7 @@ public sealed class RunSnapshotTests(DataflowCluster cluster)
             () => Deadline.Within(handle.Completion, $"the run {handle.RunId} reported its cancellation"));
 
         RunSnapshot snapshot = await Deadline.Within(
-            handle.SnapshotAsync(),
+            handle.SnapshotAsync(Token),
             "the cancelled run answered a reading");
 
         // A cancelled run has no ending and still has a place it stopped, which is why a reading has four
@@ -115,7 +152,9 @@ public sealed class RunSnapshotTests(DataflowCluster cluster)
 
         await Deadline.Within(handle.Completion, $"the run {handle.RunId} completed");
 
-        RunSnapshot snapshot = await Deadline.Within(handle.SnapshotAsync(), "the ended run answered a reading");
+        RunSnapshot snapshot = await Deadline.Within(
+            handle.SnapshotAsync(Token),
+            "the ended run answered a reading");
 
         // Two captures, due at the second element and the fourth; the bound is never reached a third time in
         // a stream of five. A counter that stayed at its default over the hop would read zero here, which is
@@ -147,7 +186,7 @@ public sealed class RunSnapshotTests(DataflowCluster cluster)
         await Deadline.Within(handle.Completion, $"the run {handle.RunId} completed");
 
         RunSnapshot answered = await Deadline.Within(
-            handle.SnapshotAsync(),
+            handle.SnapshotAsync(Token),
             "the attempt that ran the run answered a reading");
 
         Assert.Equal(RunSnapshotStatus.Completed, answered.Status);
@@ -165,7 +204,7 @@ public sealed class RunSnapshotTests(DataflowCluster cluster)
             "the activation that ran the run went away");
 
         RunSnapshot remembered = await Deadline.Within(
-            handle.SnapshotAsync(),
+            handle.SnapshotAsync(Token),
             "a fresh activation answered a reading of the ended run");
 
         // The ending survived, because a durable run reports how it ended to its coordinator and the

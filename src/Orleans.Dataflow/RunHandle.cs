@@ -267,6 +267,11 @@ public sealed class RunHandle : IAsyncDisposable
     /// already failed or been canceled before the request arrived; <see cref="Completion"/> is what reports
     /// that. Asking twice, or asking after the run ended, changes nothing.
     /// </para>
+    /// <para>
+    /// It takes no token because the wait is the run's own settling and the request cannot be unsent: a
+    /// caller that must abandon the wait wraps the returned task in its own timeout, and the shutdown
+    /// proceeds regardless.
+    /// </para>
     /// </remarks>
     public ValueTask ShutdownAsync() => _run.ShutdownAsync();
 
@@ -390,6 +395,9 @@ public sealed class RunHandle : IAsyncDisposable
     /// caller's view of the result and leaves the run untouched, and which hands back the very task it was
     /// given when that task has already finished. The cast cannot fail for a slot closing a graph produced:
     /// a slot's type argument is the sink's state type, and the run stored the value that sink produced.
+    /// The suppression also covers nullness, on the same reasoning: the result is exactly as nullable as
+    /// the slot's type argument says, so a non-nullable slot resolves to null only when the graph was fed
+    /// one through a suppressed annotation — the caller's own assertion, not this method's.
     /// </remarks>
     private static async Task<TResult> Resolve<TResult>(Task<object?> resolved, CancellationToken cancellationToken)
     {

@@ -456,6 +456,32 @@ public sealed class DotnetObservableTests
     }
 
     [Fact]
+    public void ABindingFactoryRefusesANameThatIsNotWellFormedTextAndAcceptsExoticTextThatIs()
+    {
+        // The name reaches a document as a JSON string, and a JSON string writer has no exact form for an
+        // unpaired surrogate: it substitutes the replacement character. So a name carrying one used to be
+        // stored as a different name than the one registered here, and two such names collapsed into one.
+        // Refusing at the factory is where this library answers that, before a run exists.
+        ArgumentException refused = Assert.Throws<ArgumentException>(
+            "name",
+            () => ObservableBinding.Create<string>(
+                "notes-\ud83d",
+                NoteContract,
+                static () => new TestObservable<string>()));
+
+        Assert.Contains("name", refused.Message, StringComparison.Ordinal);
+
+        // The refusal is about well-formedness and not about being ASCII: a name a deployment is entitled
+        // to use stays usable, which is the half that keeps this from being an invented grammar.
+        ObservableBinding<string> accepted = ObservableBinding.Create<string>(
+            "notes-\U0001F600-你好",
+            NoteContract,
+            static () => new TestObservable<string>());
+
+        Assert.Equal("notes-\U0001F600-你好", accepted.Name, StringComparer.Ordinal);
+    }
+
+    [Fact]
     public async Task ARealDotnetEventReachesARunThroughTheOneLineWrapAndIsUnhookedWhenTheRunEnds()
     {
         // The reason this vocabulary ships no event stage, spelled out rather than asserted in prose: an

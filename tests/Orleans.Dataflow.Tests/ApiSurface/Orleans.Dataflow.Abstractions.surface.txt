@@ -1,0 +1,514 @@
+# assembly: Orleans.Dataflow.Abstractions
+# public types: 33
+TYPE static class Orleans.Dataflow.Compilation.GraphCompiler
+  method static Orleans.Dataflow.Compilation.GraphValidationReport Validate(Orleans.Dataflow.Definition.GraphDocument document, Orleans.Dataflow.Definition.IStageCatalog catalog)
+TYPE sealed class Orleans.Dataflow.Compilation.GraphValidationDiagnostic
+  IFACE System.IEquatable<Orleans.Dataflow.Compilation.GraphValidationDiagnostic>
+  method Orleans.Dataflow.Compilation.GraphValidationDiagnostic <Clone>$()
+  method System.Boolean Equals(Orleans.Dataflow.Compilation.GraphValidationDiagnostic other)
+  method static Orleans.Dataflow.Compilation.GraphValidationDiagnostic Create(System.String rule, System.String message)
+  method static Orleans.Dataflow.Compilation.GraphValidationDiagnostic Create(System.String rule, System.String message, System.String subject)
+  method virtual System.Boolean Equals(System.Object obj)
+  method virtual System.Int32 GetHashCode()
+  method virtual System.String ToString()
+  operator static System.Boolean op_Equality(Orleans.Dataflow.Compilation.GraphValidationDiagnostic left, Orleans.Dataflow.Compilation.GraphValidationDiagnostic right)
+  operator static System.Boolean op_Inequality(Orleans.Dataflow.Compilation.GraphValidationDiagnostic left, Orleans.Dataflow.Compilation.GraphValidationDiagnostic right)
+  property System.String Message { get; }
+  property System.String Rule { get; }
+  property System.String Subject { get; }
+TYPE sealed class Orleans.Dataflow.Compilation.GraphValidationReport
+  method virtual System.String ToString()
+  property Orleans.Dataflow.Definition.GraphDocument Document { get; }
+  property System.Boolean IsValid { get; }
+  property System.Collections.Generic.IReadOnlyList<Orleans.Dataflow.Compilation.GraphValidationDiagnostic> Diagnostics { get; }
+TYPE struct Orleans.Dataflow.Definition.CapabilityToken  [System.Runtime.CompilerServices.IsReadOnlyAttribute]
+  BASE System.ValueType
+  IFACE System.IComparable
+  IFACE System.IComparable<Orleans.Dataflow.Definition.CapabilityToken>
+  IFACE System.IEquatable<Orleans.Dataflow.Definition.CapabilityToken>
+  method System.Boolean Equals(Orleans.Dataflow.Definition.CapabilityToken other)
+  method System.Int32 CompareTo(Orleans.Dataflow.Definition.CapabilityToken other)
+  method static Orleans.Dataflow.Definition.CapabilityToken Create(System.String value)
+  method static System.Boolean TryCreate(System.String value, out Orleans.Dataflow.Definition.CapabilityToken& token)
+  method virtual System.Boolean Equals(System.Object obj)
+  method virtual System.Int32 GetHashCode()
+  method virtual System.String ToString()
+  operator static System.Boolean op_Equality(Orleans.Dataflow.Definition.CapabilityToken left, Orleans.Dataflow.Definition.CapabilityToken right)
+  operator static System.Boolean op_GreaterThan(Orleans.Dataflow.Definition.CapabilityToken left, Orleans.Dataflow.Definition.CapabilityToken right)
+  operator static System.Boolean op_GreaterThanOrEqual(Orleans.Dataflow.Definition.CapabilityToken left, Orleans.Dataflow.Definition.CapabilityToken right)
+  operator static System.Boolean op_Inequality(Orleans.Dataflow.Definition.CapabilityToken left, Orleans.Dataflow.Definition.CapabilityToken right)
+  operator static System.Boolean op_LessThan(Orleans.Dataflow.Definition.CapabilityToken left, Orleans.Dataflow.Definition.CapabilityToken right)
+  operator static System.Boolean op_LessThanOrEqual(Orleans.Dataflow.Definition.CapabilityToken left, Orleans.Dataflow.Definition.CapabilityToken right)
+  property System.Boolean IsDefault { get; }
+  property System.String Value { get; }
+  property static Orleans.Dataflow.Definition.CapabilityToken EphemeralIdentity { get; }
+  property static Orleans.Dataflow.Definition.CapabilityToken Nondeployable { get; }
+TYPE struct Orleans.Dataflow.Definition.CatalogFingerprint  [System.Runtime.CompilerServices.IsReadOnlyAttribute]
+  BASE System.ValueType
+  IFACE System.IComparable
+  IFACE System.IComparable<Orleans.Dataflow.Definition.CatalogFingerprint>
+  IFACE System.IEquatable<Orleans.Dataflow.Definition.CatalogFingerprint>
+  method System.Boolean Equals(Orleans.Dataflow.Definition.CatalogFingerprint other)
+  method System.Int32 CompareTo(Orleans.Dataflow.Definition.CatalogFingerprint other)
+  method static Orleans.Dataflow.Definition.CatalogFingerprint OfSerialized(System.ReadOnlySpan<System.Byte> canonicalEnvelope)
+  method static Orleans.Dataflow.Definition.CatalogFingerprint Parse(System.String text)
+  method static System.Boolean TryParse(System.String text, out Orleans.Dataflow.Definition.CatalogFingerprint& fingerprint)
+  method virtual System.Boolean Equals(System.Object obj)
+  method virtual System.Int32 GetHashCode()
+  method virtual System.String ToString()
+  operator static System.Boolean op_Equality(Orleans.Dataflow.Definition.CatalogFingerprint left, Orleans.Dataflow.Definition.CatalogFingerprint right)
+  operator static System.Boolean op_GreaterThan(Orleans.Dataflow.Definition.CatalogFingerprint left, Orleans.Dataflow.Definition.CatalogFingerprint right)
+  operator static System.Boolean op_GreaterThanOrEqual(Orleans.Dataflow.Definition.CatalogFingerprint left, Orleans.Dataflow.Definition.CatalogFingerprint right)
+  operator static System.Boolean op_Inequality(Orleans.Dataflow.Definition.CatalogFingerprint left, Orleans.Dataflow.Definition.CatalogFingerprint right)
+  operator static System.Boolean op_LessThan(Orleans.Dataflow.Definition.CatalogFingerprint left, Orleans.Dataflow.Definition.CatalogFingerprint right)
+  operator static System.Boolean op_LessThanOrEqual(Orleans.Dataflow.Definition.CatalogFingerprint left, Orleans.Dataflow.Definition.CatalogFingerprint right)
+  property System.Boolean IsDefault { get; }
+  property System.ReadOnlyMemory<System.Byte> Hash { get; }
+TYPE sealed class Orleans.Dataflow.Definition.GraphDocument
+  IFACE System.IEquatable<Orleans.Dataflow.Definition.GraphDocument>
+  field static const System.Int32 CurrentFormatVersion = 1
+  method Orleans.Dataflow.Definition.GraphDocument <Clone>$()
+  method System.Boolean Equals(Orleans.Dataflow.Definition.GraphDocument other)
+  method static Orleans.Dataflow.Definition.GraphDocument Create(Orleans.Dataflow.Identity.GraphId id, Orleans.Dataflow.Identity.GraphRevision revision, System.Collections.Generic.IEnumerable<Orleans.Dataflow.Definition.CapabilityToken> capabilities, System.Collections.Generic.IEnumerable<Orleans.Dataflow.Definition.StageNode> nodes, System.Collections.Generic.IEnumerable<Orleans.Dataflow.Definition.GraphEdge> edges, System.Collections.Generic.IEnumerable<Orleans.Dataflow.Definition.ResultSlotDefinition> resultSlots)
+  method virtual System.Boolean Equals(System.Object obj)
+  method virtual System.Int32 GetHashCode()
+  method virtual System.String ToString()
+  operator static System.Boolean op_Equality(Orleans.Dataflow.Definition.GraphDocument left, Orleans.Dataflow.Definition.GraphDocument right)
+  operator static System.Boolean op_Inequality(Orleans.Dataflow.Definition.GraphDocument left, Orleans.Dataflow.Definition.GraphDocument right)
+  property Orleans.Dataflow.Identity.GraphId Id { get; }
+  property Orleans.Dataflow.Identity.GraphRevision Revision { get; }
+  property System.Collections.Generic.IReadOnlyList<Orleans.Dataflow.Definition.CapabilityToken> Capabilities { get; }
+  property System.Collections.Generic.IReadOnlyList<Orleans.Dataflow.Definition.GraphEdge> Edges { get; }
+  property System.Collections.Generic.IReadOnlyList<Orleans.Dataflow.Definition.ResultSlotDefinition> ResultSlots { get; }
+  property System.Collections.Generic.IReadOnlyList<Orleans.Dataflow.Definition.StageNode> Nodes { get; }
+  property System.Int32 FormatVersion { get; }
+TYPE struct Orleans.Dataflow.Definition.GraphEdge  [System.Runtime.CompilerServices.IsReadOnlyAttribute]
+  BASE System.ValueType
+  IFACE System.IComparable
+  IFACE System.IComparable<Orleans.Dataflow.Definition.GraphEdge>
+  IFACE System.IEquatable<Orleans.Dataflow.Definition.GraphEdge>
+  method System.Boolean Equals(Orleans.Dataflow.Definition.GraphEdge other)
+  method System.Int32 CompareTo(Orleans.Dataflow.Definition.GraphEdge other)
+  method static Orleans.Dataflow.Definition.GraphEdge Create(Orleans.Dataflow.Definition.PortAddress from, Orleans.Dataflow.Definition.PortAddress to)
+  method virtual System.Boolean Equals(System.Object obj)
+  method virtual System.Int32 GetHashCode()
+  method virtual System.String ToString()
+  operator static System.Boolean op_Equality(Orleans.Dataflow.Definition.GraphEdge left, Orleans.Dataflow.Definition.GraphEdge right)
+  operator static System.Boolean op_GreaterThan(Orleans.Dataflow.Definition.GraphEdge left, Orleans.Dataflow.Definition.GraphEdge right)
+  operator static System.Boolean op_GreaterThanOrEqual(Orleans.Dataflow.Definition.GraphEdge left, Orleans.Dataflow.Definition.GraphEdge right)
+  operator static System.Boolean op_Inequality(Orleans.Dataflow.Definition.GraphEdge left, Orleans.Dataflow.Definition.GraphEdge right)
+  operator static System.Boolean op_LessThan(Orleans.Dataflow.Definition.GraphEdge left, Orleans.Dataflow.Definition.GraphEdge right)
+  operator static System.Boolean op_LessThanOrEqual(Orleans.Dataflow.Definition.GraphEdge left, Orleans.Dataflow.Definition.GraphEdge right)
+  property Orleans.Dataflow.Definition.PortAddress From { get; }
+  property Orleans.Dataflow.Definition.PortAddress To { get; }
+  property System.Boolean IsDefault { get; }
+TYPE struct Orleans.Dataflow.Definition.GraphFingerprint  [System.Runtime.CompilerServices.IsReadOnlyAttribute]
+  BASE System.ValueType
+  IFACE System.IComparable
+  IFACE System.IComparable<Orleans.Dataflow.Definition.GraphFingerprint>
+  IFACE System.IEquatable<Orleans.Dataflow.Definition.GraphFingerprint>
+  method System.Boolean Equals(Orleans.Dataflow.Definition.GraphFingerprint other)
+  method System.Int32 CompareTo(Orleans.Dataflow.Definition.GraphFingerprint other)
+  method static Orleans.Dataflow.Definition.GraphFingerprint OfSerialized(System.ReadOnlySpan<System.Byte> canonicalEnvelope)
+  method static Orleans.Dataflow.Definition.GraphFingerprint Parse(System.String text)
+  method static System.Boolean TryParse(System.String text, out Orleans.Dataflow.Definition.GraphFingerprint& fingerprint)
+  method virtual System.Boolean Equals(System.Object obj)
+  method virtual System.Int32 GetHashCode()
+  method virtual System.String ToString()
+  operator static System.Boolean op_Equality(Orleans.Dataflow.Definition.GraphFingerprint left, Orleans.Dataflow.Definition.GraphFingerprint right)
+  operator static System.Boolean op_GreaterThan(Orleans.Dataflow.Definition.GraphFingerprint left, Orleans.Dataflow.Definition.GraphFingerprint right)
+  operator static System.Boolean op_GreaterThanOrEqual(Orleans.Dataflow.Definition.GraphFingerprint left, Orleans.Dataflow.Definition.GraphFingerprint right)
+  operator static System.Boolean op_Inequality(Orleans.Dataflow.Definition.GraphFingerprint left, Orleans.Dataflow.Definition.GraphFingerprint right)
+  operator static System.Boolean op_LessThan(Orleans.Dataflow.Definition.GraphFingerprint left, Orleans.Dataflow.Definition.GraphFingerprint right)
+  operator static System.Boolean op_LessThanOrEqual(Orleans.Dataflow.Definition.GraphFingerprint left, Orleans.Dataflow.Definition.GraphFingerprint right)
+  property System.Boolean IsDefault { get; }
+  property System.ReadOnlyMemory<System.Byte> Hash { get; }
+TYPE interface Orleans.Dataflow.Definition.IStageCatalog
+  method abstract System.Boolean TryGetSpecification(Orleans.Dataflow.Identity.StageRef stageRef, out Orleans.Dataflow.Definition.StageSpecification& specification)
+  property abstract System.Collections.Generic.IReadOnlyList<Orleans.Dataflow.Definition.StageSpecification> Specifications { get; }
+TYPE interface Orleans.Dataflow.Definition.IStageParameterValidator
+  method abstract System.Collections.Generic.IReadOnlyList<System.String> Validate(Orleans.Dataflow.Serialization.CanonicalJsonValue parameters)
+TYPE struct Orleans.Dataflow.Definition.InputPortSpecification  [System.Runtime.CompilerServices.IsReadOnlyAttribute]
+  BASE System.ValueType
+  IFACE System.IEquatable<Orleans.Dataflow.Definition.InputPortSpecification>
+  method System.Boolean Equals(Orleans.Dataflow.Definition.InputPortSpecification other)
+  method static Orleans.Dataflow.Definition.InputPortSpecification Create(Orleans.Dataflow.Identity.PortId id, Orleans.Dataflow.Identity.ContractReference elementContract)
+  method static Orleans.Dataflow.Definition.InputPortSpecification Create(Orleans.Dataflow.Identity.PortId id, Orleans.Dataflow.Identity.ContractReference elementContract, System.Boolean isOptional)
+  method virtual System.Boolean Equals(System.Object obj)
+  method virtual System.Int32 GetHashCode()
+  method virtual System.String ToString()
+  operator static System.Boolean op_Equality(Orleans.Dataflow.Definition.InputPortSpecification left, Orleans.Dataflow.Definition.InputPortSpecification right)
+  operator static System.Boolean op_Inequality(Orleans.Dataflow.Definition.InputPortSpecification left, Orleans.Dataflow.Definition.InputPortSpecification right)
+  property Orleans.Dataflow.Identity.ContractReference ElementContract { get; }
+  property Orleans.Dataflow.Identity.PortId Id { get; }
+  property System.Boolean IsDefault { get; }
+  property System.Boolean IsOptional { get; }
+TYPE struct Orleans.Dataflow.Definition.OutputPortSpecification  [System.Runtime.CompilerServices.IsReadOnlyAttribute]
+  BASE System.ValueType
+  IFACE System.IEquatable<Orleans.Dataflow.Definition.OutputPortSpecification>
+  method System.Boolean Equals(Orleans.Dataflow.Definition.OutputPortSpecification other)
+  method static Orleans.Dataflow.Definition.OutputPortSpecification Create(Orleans.Dataflow.Identity.PortId id, Orleans.Dataflow.Identity.ContractReference elementContract)
+  method static Orleans.Dataflow.Definition.OutputPortSpecification Create(Orleans.Dataflow.Identity.PortId id, Orleans.Dataflow.Identity.ContractReference elementContract, System.Boolean isIgnorable)
+  method virtual System.Boolean Equals(System.Object obj)
+  method virtual System.Int32 GetHashCode()
+  method virtual System.String ToString()
+  operator static System.Boolean op_Equality(Orleans.Dataflow.Definition.OutputPortSpecification left, Orleans.Dataflow.Definition.OutputPortSpecification right)
+  operator static System.Boolean op_Inequality(Orleans.Dataflow.Definition.OutputPortSpecification left, Orleans.Dataflow.Definition.OutputPortSpecification right)
+  property Orleans.Dataflow.Identity.ContractReference ElementContract { get; }
+  property Orleans.Dataflow.Identity.PortId Id { get; }
+  property System.Boolean IsDefault { get; }
+  property System.Boolean IsIgnorable { get; }
+TYPE struct Orleans.Dataflow.Definition.PortAddress  [System.Runtime.CompilerServices.IsReadOnlyAttribute]
+  BASE System.ValueType
+  IFACE System.IComparable
+  IFACE System.IComparable<Orleans.Dataflow.Definition.PortAddress>
+  IFACE System.IEquatable<Orleans.Dataflow.Definition.PortAddress>
+  method System.Boolean Equals(Orleans.Dataflow.Definition.PortAddress other)
+  method System.Int32 CompareTo(Orleans.Dataflow.Definition.PortAddress other)
+  method static Orleans.Dataflow.Definition.PortAddress Create(Orleans.Dataflow.Identity.NodeId node, Orleans.Dataflow.Identity.PortId port)
+  method virtual System.Boolean Equals(System.Object obj)
+  method virtual System.Int32 GetHashCode()
+  method virtual System.String ToString()
+  operator static System.Boolean op_Equality(Orleans.Dataflow.Definition.PortAddress left, Orleans.Dataflow.Definition.PortAddress right)
+  operator static System.Boolean op_GreaterThan(Orleans.Dataflow.Definition.PortAddress left, Orleans.Dataflow.Definition.PortAddress right)
+  operator static System.Boolean op_GreaterThanOrEqual(Orleans.Dataflow.Definition.PortAddress left, Orleans.Dataflow.Definition.PortAddress right)
+  operator static System.Boolean op_Inequality(Orleans.Dataflow.Definition.PortAddress left, Orleans.Dataflow.Definition.PortAddress right)
+  operator static System.Boolean op_LessThan(Orleans.Dataflow.Definition.PortAddress left, Orleans.Dataflow.Definition.PortAddress right)
+  operator static System.Boolean op_LessThanOrEqual(Orleans.Dataflow.Definition.PortAddress left, Orleans.Dataflow.Definition.PortAddress right)
+  property Orleans.Dataflow.Identity.NodeId Node { get; }
+  property Orleans.Dataflow.Identity.PortId Port { get; }
+  property System.Boolean IsDefault { get; }
+TYPE struct Orleans.Dataflow.Definition.ResultPortSpecification  [System.Runtime.CompilerServices.IsReadOnlyAttribute]
+  BASE System.ValueType
+  IFACE System.IEquatable<Orleans.Dataflow.Definition.ResultPortSpecification>
+  method System.Boolean Equals(Orleans.Dataflow.Definition.ResultPortSpecification other)
+  method static Orleans.Dataflow.Definition.ResultPortSpecification Create(Orleans.Dataflow.Identity.PortId id, Orleans.Dataflow.Identity.ContractReference resultContract)
+  method virtual System.Boolean Equals(System.Object obj)
+  method virtual System.Int32 GetHashCode()
+  method virtual System.String ToString()
+  operator static System.Boolean op_Equality(Orleans.Dataflow.Definition.ResultPortSpecification left, Orleans.Dataflow.Definition.ResultPortSpecification right)
+  operator static System.Boolean op_Inequality(Orleans.Dataflow.Definition.ResultPortSpecification left, Orleans.Dataflow.Definition.ResultPortSpecification right)
+  property Orleans.Dataflow.Identity.ContractReference ResultContract { get; }
+  property Orleans.Dataflow.Identity.PortId Id { get; }
+  property System.Boolean IsDefault { get; }
+TYPE sealed class Orleans.Dataflow.Definition.ResultSlotDefinition
+  IFACE System.IEquatable<Orleans.Dataflow.Definition.ResultSlotDefinition>
+  method Orleans.Dataflow.Definition.ResultSlotDefinition <Clone>$()
+  method System.Boolean Equals(Orleans.Dataflow.Definition.ResultSlotDefinition other)
+  method static Orleans.Dataflow.Definition.ResultSlotDefinition Create(Orleans.Dataflow.Identity.ResultSlotId id, Orleans.Dataflow.Identity.ContractReference resultContract, Orleans.Dataflow.Definition.PortAddress producer)
+  method virtual System.Boolean Equals(System.Object obj)
+  method virtual System.Int32 GetHashCode()
+  method virtual System.String ToString()
+  operator static System.Boolean op_Equality(Orleans.Dataflow.Definition.ResultSlotDefinition left, Orleans.Dataflow.Definition.ResultSlotDefinition right)
+  operator static System.Boolean op_Inequality(Orleans.Dataflow.Definition.ResultSlotDefinition left, Orleans.Dataflow.Definition.ResultSlotDefinition right)
+  property Orleans.Dataflow.Definition.PortAddress Producer { get; }
+  property Orleans.Dataflow.Identity.ContractReference ResultContract { get; }
+  property Orleans.Dataflow.Identity.ResultSlotId Id { get; }
+TYPE sealed class Orleans.Dataflow.Definition.StageCatalog
+  IFACE Orleans.Dataflow.Definition.IStageCatalog
+  method System.Boolean TryGetSpecification(Orleans.Dataflow.Identity.StageRef stageRef, out Orleans.Dataflow.Definition.StageSpecification& specification)
+  method static Orleans.Dataflow.Definition.StageCatalog Create(System.Collections.Generic.IEnumerable<Orleans.Dataflow.Definition.StageSpecification> specifications)
+  method virtual System.String ToString()
+  property System.Collections.Generic.IReadOnlyList<Orleans.Dataflow.Definition.StageSpecification> Specifications { get; }
+TYPE sealed class Orleans.Dataflow.Definition.StageNode
+  IFACE System.IEquatable<Orleans.Dataflow.Definition.StageNode>
+  method Orleans.Dataflow.Definition.StageNode <Clone>$()
+  method System.Boolean Equals(Orleans.Dataflow.Definition.StageNode other)
+  method static Orleans.Dataflow.Definition.StageNode Create(Orleans.Dataflow.Identity.NodeId id, Orleans.Dataflow.Identity.StageRef stage, Orleans.Dataflow.Identity.ContractReference parameterContract, Orleans.Dataflow.Serialization.CanonicalJsonValue parameters)
+  method static Orleans.Dataflow.Definition.StageNode Create(Orleans.Dataflow.Identity.NodeId id, Orleans.Dataflow.Identity.StageRef stage, Orleans.Dataflow.Identity.ContractReference parameterContract, Orleans.Dataflow.Serialization.CanonicalJsonValue parameters, Orleans.Dataflow.Identity.ContractReference executionPolicyContract, Orleans.Dataflow.Serialization.CanonicalJsonValue executionPolicy)
+  method virtual System.Boolean Equals(System.Object obj)
+  method virtual System.Int32 GetHashCode()
+  method virtual System.String ToString()
+  operator static System.Boolean op_Equality(Orleans.Dataflow.Definition.StageNode left, Orleans.Dataflow.Definition.StageNode right)
+  operator static System.Boolean op_Inequality(Orleans.Dataflow.Definition.StageNode left, Orleans.Dataflow.Definition.StageNode right)
+  property Orleans.Dataflow.Identity.ContractReference ParameterContract { get; }
+  property Orleans.Dataflow.Identity.NodeId Id { get; }
+  property Orleans.Dataflow.Identity.StageRef Stage { get; }
+  property Orleans.Dataflow.Serialization.CanonicalJsonValue Parameters { get; }
+  property System.Nullable<Orleans.Dataflow.Identity.ContractReference> ExecutionPolicyContract { get; }
+  property System.Nullable<Orleans.Dataflow.Serialization.CanonicalJsonValue> ExecutionPolicy { get; }
+TYPE sealed class Orleans.Dataflow.Definition.StageSpecification
+  IFACE System.IEquatable<Orleans.Dataflow.Definition.StageSpecification>
+  method Orleans.Dataflow.Definition.StageSpecification <Clone>$()
+  method System.Boolean Equals(Orleans.Dataflow.Definition.StageSpecification other)
+  method static Orleans.Dataflow.Definition.StageSpecification Create(Orleans.Dataflow.Identity.StageRef stage, System.Collections.Generic.IEnumerable<Orleans.Dataflow.Definition.InputPortSpecification> inputPorts, System.Collections.Generic.IEnumerable<Orleans.Dataflow.Definition.OutputPortSpecification> outputPorts, System.Collections.Generic.IEnumerable<Orleans.Dataflow.Definition.ResultPortSpecification> resultPorts, Orleans.Dataflow.Identity.ContractReference parameterContract, System.Collections.Generic.IEnumerable<Orleans.Dataflow.Definition.CapabilityToken> requiredCapabilities)
+  method static Orleans.Dataflow.Definition.StageSpecification Create(Orleans.Dataflow.Identity.StageRef stage, System.Collections.Generic.IEnumerable<Orleans.Dataflow.Definition.InputPortSpecification> inputPorts, System.Collections.Generic.IEnumerable<Orleans.Dataflow.Definition.OutputPortSpecification> outputPorts, System.Collections.Generic.IEnumerable<Orleans.Dataflow.Definition.ResultPortSpecification> resultPorts, Orleans.Dataflow.Identity.ContractReference parameterContract, System.Collections.Generic.IEnumerable<Orleans.Dataflow.Definition.CapabilityToken> requiredCapabilities, Orleans.Dataflow.Definition.IStageParameterValidator parameterValidator)
+  method virtual System.Boolean Equals(System.Object obj)
+  method virtual System.Int32 GetHashCode()
+  method virtual System.String ToString()
+  operator static System.Boolean op_Equality(Orleans.Dataflow.Definition.StageSpecification left, Orleans.Dataflow.Definition.StageSpecification right)
+  operator static System.Boolean op_Inequality(Orleans.Dataflow.Definition.StageSpecification left, Orleans.Dataflow.Definition.StageSpecification right)
+  property Orleans.Dataflow.Definition.IStageParameterValidator ParameterValidator { get; }
+  property Orleans.Dataflow.Identity.ContractReference ParameterContract { get; }
+  property Orleans.Dataflow.Identity.StageRef Stage { get; }
+  property System.Collections.Generic.IReadOnlyList<Orleans.Dataflow.Definition.CapabilityToken> RequiredCapabilities { get; }
+  property System.Collections.Generic.IReadOnlyList<Orleans.Dataflow.Definition.InputPortSpecification> InputPorts { get; }
+  property System.Collections.Generic.IReadOnlyList<Orleans.Dataflow.Definition.OutputPortSpecification> OutputPorts { get; }
+  property System.Collections.Generic.IReadOnlyList<Orleans.Dataflow.Definition.ResultPortSpecification> ResultPorts { get; }
+TYPE struct Orleans.Dataflow.Identity.ContractId  [System.Runtime.CompilerServices.IsReadOnlyAttribute]
+  BASE System.ValueType
+  IFACE System.IComparable
+  IFACE System.IComparable<Orleans.Dataflow.Identity.ContractId>
+  IFACE System.IEquatable<Orleans.Dataflow.Identity.ContractId>
+  method System.Boolean Equals(Orleans.Dataflow.Identity.ContractId other)
+  method System.Int32 CompareTo(Orleans.Dataflow.Identity.ContractId other)
+  method static Orleans.Dataflow.Identity.ContractId Create(System.String value)
+  method static System.Boolean TryCreate(System.String value, out Orleans.Dataflow.Identity.ContractId& identifier)
+  method virtual System.Boolean Equals(System.Object obj)
+  method virtual System.Int32 GetHashCode()
+  method virtual System.String ToString()
+  operator static System.Boolean op_Equality(Orleans.Dataflow.Identity.ContractId left, Orleans.Dataflow.Identity.ContractId right)
+  operator static System.Boolean op_GreaterThan(Orleans.Dataflow.Identity.ContractId left, Orleans.Dataflow.Identity.ContractId right)
+  operator static System.Boolean op_GreaterThanOrEqual(Orleans.Dataflow.Identity.ContractId left, Orleans.Dataflow.Identity.ContractId right)
+  operator static System.Boolean op_Inequality(Orleans.Dataflow.Identity.ContractId left, Orleans.Dataflow.Identity.ContractId right)
+  operator static System.Boolean op_LessThan(Orleans.Dataflow.Identity.ContractId left, Orleans.Dataflow.Identity.ContractId right)
+  operator static System.Boolean op_LessThanOrEqual(Orleans.Dataflow.Identity.ContractId left, Orleans.Dataflow.Identity.ContractId right)
+  property System.Boolean IsDefault { get; }
+  property System.String Value { get; }
+TYPE struct Orleans.Dataflow.Identity.ContractReference  [System.Runtime.CompilerServices.IsReadOnlyAttribute]
+  BASE System.ValueType
+  IFACE System.IComparable
+  IFACE System.IComparable<Orleans.Dataflow.Identity.ContractReference>
+  IFACE System.IEquatable<Orleans.Dataflow.Identity.ContractReference>
+  field static const System.Int32 FirstMajorVersion = 1
+  method System.Boolean Equals(Orleans.Dataflow.Identity.ContractReference other)
+  method System.Int32 CompareTo(Orleans.Dataflow.Identity.ContractReference other)
+  method static Orleans.Dataflow.Identity.ContractReference Create(Orleans.Dataflow.Identity.ContractId contract, System.Int32 majorVersion)
+  method static System.Boolean TryCreate(Orleans.Dataflow.Identity.ContractId contract, System.Int32 majorVersion, out Orleans.Dataflow.Identity.ContractReference& reference)
+  method virtual System.Boolean Equals(System.Object obj)
+  method virtual System.Int32 GetHashCode()
+  method virtual System.String ToString()
+  operator static System.Boolean op_Equality(Orleans.Dataflow.Identity.ContractReference left, Orleans.Dataflow.Identity.ContractReference right)
+  operator static System.Boolean op_GreaterThan(Orleans.Dataflow.Identity.ContractReference left, Orleans.Dataflow.Identity.ContractReference right)
+  operator static System.Boolean op_GreaterThanOrEqual(Orleans.Dataflow.Identity.ContractReference left, Orleans.Dataflow.Identity.ContractReference right)
+  operator static System.Boolean op_Inequality(Orleans.Dataflow.Identity.ContractReference left, Orleans.Dataflow.Identity.ContractReference right)
+  operator static System.Boolean op_LessThan(Orleans.Dataflow.Identity.ContractReference left, Orleans.Dataflow.Identity.ContractReference right)
+  operator static System.Boolean op_LessThanOrEqual(Orleans.Dataflow.Identity.ContractReference left, Orleans.Dataflow.Identity.ContractReference right)
+  property Orleans.Dataflow.Identity.ContractId Contract { get; }
+  property System.Boolean IsDefault { get; }
+  property System.Int32 MajorVersion { get; }
+TYPE struct Orleans.Dataflow.Identity.GraphId  [System.Runtime.CompilerServices.IsReadOnlyAttribute]
+  BASE System.ValueType
+  IFACE System.IComparable
+  IFACE System.IComparable<Orleans.Dataflow.Identity.GraphId>
+  IFACE System.IEquatable<Orleans.Dataflow.Identity.GraphId>
+  method System.Boolean Equals(Orleans.Dataflow.Identity.GraphId other)
+  method System.Int32 CompareTo(Orleans.Dataflow.Identity.GraphId other)
+  method static Orleans.Dataflow.Identity.GraphId Create(System.String value)
+  method static System.Boolean TryCreate(System.String value, out Orleans.Dataflow.Identity.GraphId& identifier)
+  method virtual System.Boolean Equals(System.Object obj)
+  method virtual System.Int32 GetHashCode()
+  method virtual System.String ToString()
+  operator static System.Boolean op_Equality(Orleans.Dataflow.Identity.GraphId left, Orleans.Dataflow.Identity.GraphId right)
+  operator static System.Boolean op_GreaterThan(Orleans.Dataflow.Identity.GraphId left, Orleans.Dataflow.Identity.GraphId right)
+  operator static System.Boolean op_GreaterThanOrEqual(Orleans.Dataflow.Identity.GraphId left, Orleans.Dataflow.Identity.GraphId right)
+  operator static System.Boolean op_Inequality(Orleans.Dataflow.Identity.GraphId left, Orleans.Dataflow.Identity.GraphId right)
+  operator static System.Boolean op_LessThan(Orleans.Dataflow.Identity.GraphId left, Orleans.Dataflow.Identity.GraphId right)
+  operator static System.Boolean op_LessThanOrEqual(Orleans.Dataflow.Identity.GraphId left, Orleans.Dataflow.Identity.GraphId right)
+  property System.Boolean IsDefault { get; }
+  property System.String Value { get; }
+TYPE struct Orleans.Dataflow.Identity.GraphRevision  [System.Runtime.CompilerServices.IsReadOnlyAttribute]
+  BASE System.ValueType
+  IFACE System.IComparable
+  IFACE System.IComparable<Orleans.Dataflow.Identity.GraphRevision>
+  IFACE System.IEquatable<Orleans.Dataflow.Identity.GraphRevision>
+  field static const System.Int32 FirstRevisionNumber = 1
+  method System.Boolean Equals(Orleans.Dataflow.Identity.GraphRevision other)
+  method System.Int32 CompareTo(Orleans.Dataflow.Identity.GraphRevision other)
+  method static Orleans.Dataflow.Identity.GraphRevision Create(System.Int32 value)
+  method static System.Boolean TryCreate(System.Int32 value, out Orleans.Dataflow.Identity.GraphRevision& revision)
+  method virtual System.Boolean Equals(System.Object obj)
+  method virtual System.Int32 GetHashCode()
+  method virtual System.String ToString()
+  operator static System.Boolean op_Equality(Orleans.Dataflow.Identity.GraphRevision left, Orleans.Dataflow.Identity.GraphRevision right)
+  operator static System.Boolean op_GreaterThan(Orleans.Dataflow.Identity.GraphRevision left, Orleans.Dataflow.Identity.GraphRevision right)
+  operator static System.Boolean op_GreaterThanOrEqual(Orleans.Dataflow.Identity.GraphRevision left, Orleans.Dataflow.Identity.GraphRevision right)
+  operator static System.Boolean op_Inequality(Orleans.Dataflow.Identity.GraphRevision left, Orleans.Dataflow.Identity.GraphRevision right)
+  operator static System.Boolean op_LessThan(Orleans.Dataflow.Identity.GraphRevision left, Orleans.Dataflow.Identity.GraphRevision right)
+  operator static System.Boolean op_LessThanOrEqual(Orleans.Dataflow.Identity.GraphRevision left, Orleans.Dataflow.Identity.GraphRevision right)
+  property System.Boolean IsDefault { get; }
+  property System.Int32 Value { get; }
+TYPE struct Orleans.Dataflow.Identity.NodeId  [System.Runtime.CompilerServices.IsReadOnlyAttribute]
+  BASE System.ValueType
+  IFACE System.IComparable
+  IFACE System.IComparable<Orleans.Dataflow.Identity.NodeId>
+  IFACE System.IEquatable<Orleans.Dataflow.Identity.NodeId>
+  field static const System.Char Separator = '/'
+  field static const System.Int32 MaxDepth = 16
+  field static const System.Int32 MaxPathLength = 256
+  method Orleans.Dataflow.Identity.NodeId InScope(System.String scopeSegment)
+  method System.Boolean Equals(Orleans.Dataflow.Identity.NodeId other)
+  method System.Collections.Generic.IReadOnlyList<System.String> GetSegments()
+  method System.Int32 CompareTo(Orleans.Dataflow.Identity.NodeId other)
+  method static Orleans.Dataflow.Identity.NodeId Create(System.String segment)
+  method static Orleans.Dataflow.Identity.NodeId Parse(System.String path)
+  method static System.Boolean TryParse(System.String path, out Orleans.Dataflow.Identity.NodeId& nodeId)
+  method virtual System.Boolean Equals(System.Object obj)
+  method virtual System.Int32 GetHashCode()
+  method virtual System.String ToString()
+  operator static System.Boolean op_Equality(Orleans.Dataflow.Identity.NodeId left, Orleans.Dataflow.Identity.NodeId right)
+  operator static System.Boolean op_GreaterThan(Orleans.Dataflow.Identity.NodeId left, Orleans.Dataflow.Identity.NodeId right)
+  operator static System.Boolean op_GreaterThanOrEqual(Orleans.Dataflow.Identity.NodeId left, Orleans.Dataflow.Identity.NodeId right)
+  operator static System.Boolean op_Inequality(Orleans.Dataflow.Identity.NodeId left, Orleans.Dataflow.Identity.NodeId right)
+  operator static System.Boolean op_LessThan(Orleans.Dataflow.Identity.NodeId left, Orleans.Dataflow.Identity.NodeId right)
+  operator static System.Boolean op_LessThanOrEqual(Orleans.Dataflow.Identity.NodeId left, Orleans.Dataflow.Identity.NodeId right)
+  property System.Boolean IsDefault { get; }
+  property System.Int32 Depth { get; }
+  property System.String Value { get; }
+TYPE struct Orleans.Dataflow.Identity.PortId  [System.Runtime.CompilerServices.IsReadOnlyAttribute]
+  BASE System.ValueType
+  IFACE System.IComparable
+  IFACE System.IComparable<Orleans.Dataflow.Identity.PortId>
+  IFACE System.IEquatable<Orleans.Dataflow.Identity.PortId>
+  method System.Boolean Equals(Orleans.Dataflow.Identity.PortId other)
+  method System.Int32 CompareTo(Orleans.Dataflow.Identity.PortId other)
+  method static Orleans.Dataflow.Identity.PortId Create(System.String value)
+  method static System.Boolean TryCreate(System.String value, out Orleans.Dataflow.Identity.PortId& identifier)
+  method virtual System.Boolean Equals(System.Object obj)
+  method virtual System.Int32 GetHashCode()
+  method virtual System.String ToString()
+  operator static System.Boolean op_Equality(Orleans.Dataflow.Identity.PortId left, Orleans.Dataflow.Identity.PortId right)
+  operator static System.Boolean op_GreaterThan(Orleans.Dataflow.Identity.PortId left, Orleans.Dataflow.Identity.PortId right)
+  operator static System.Boolean op_GreaterThanOrEqual(Orleans.Dataflow.Identity.PortId left, Orleans.Dataflow.Identity.PortId right)
+  operator static System.Boolean op_Inequality(Orleans.Dataflow.Identity.PortId left, Orleans.Dataflow.Identity.PortId right)
+  operator static System.Boolean op_LessThan(Orleans.Dataflow.Identity.PortId left, Orleans.Dataflow.Identity.PortId right)
+  operator static System.Boolean op_LessThanOrEqual(Orleans.Dataflow.Identity.PortId left, Orleans.Dataflow.Identity.PortId right)
+  property System.Boolean IsDefault { get; }
+  property System.String Value { get; }
+TYPE struct Orleans.Dataflow.Identity.ProviderId  [System.Runtime.CompilerServices.IsReadOnlyAttribute]
+  BASE System.ValueType
+  IFACE System.IComparable
+  IFACE System.IComparable<Orleans.Dataflow.Identity.ProviderId>
+  IFACE System.IEquatable<Orleans.Dataflow.Identity.ProviderId>
+  method System.Boolean Equals(Orleans.Dataflow.Identity.ProviderId other)
+  method System.Int32 CompareTo(Orleans.Dataflow.Identity.ProviderId other)
+  method static Orleans.Dataflow.Identity.ProviderId Create(System.String value)
+  method static System.Boolean TryCreate(System.String value, out Orleans.Dataflow.Identity.ProviderId& identifier)
+  method virtual System.Boolean Equals(System.Object obj)
+  method virtual System.Int32 GetHashCode()
+  method virtual System.String ToString()
+  operator static System.Boolean op_Equality(Orleans.Dataflow.Identity.ProviderId left, Orleans.Dataflow.Identity.ProviderId right)
+  operator static System.Boolean op_GreaterThan(Orleans.Dataflow.Identity.ProviderId left, Orleans.Dataflow.Identity.ProviderId right)
+  operator static System.Boolean op_GreaterThanOrEqual(Orleans.Dataflow.Identity.ProviderId left, Orleans.Dataflow.Identity.ProviderId right)
+  operator static System.Boolean op_Inequality(Orleans.Dataflow.Identity.ProviderId left, Orleans.Dataflow.Identity.ProviderId right)
+  operator static System.Boolean op_LessThan(Orleans.Dataflow.Identity.ProviderId left, Orleans.Dataflow.Identity.ProviderId right)
+  operator static System.Boolean op_LessThanOrEqual(Orleans.Dataflow.Identity.ProviderId left, Orleans.Dataflow.Identity.ProviderId right)
+  property System.Boolean IsDefault { get; }
+  property System.String Value { get; }
+TYPE struct Orleans.Dataflow.Identity.ResultSlotId  [System.Runtime.CompilerServices.IsReadOnlyAttribute]
+  BASE System.ValueType
+  IFACE System.IComparable
+  IFACE System.IComparable<Orleans.Dataflow.Identity.ResultSlotId>
+  IFACE System.IEquatable<Orleans.Dataflow.Identity.ResultSlotId>
+  method System.Boolean Equals(Orleans.Dataflow.Identity.ResultSlotId other)
+  method System.Int32 CompareTo(Orleans.Dataflow.Identity.ResultSlotId other)
+  method static Orleans.Dataflow.Identity.ResultSlotId Create(System.String value)
+  method static System.Boolean TryCreate(System.String value, out Orleans.Dataflow.Identity.ResultSlotId& identifier)
+  method virtual System.Boolean Equals(System.Object obj)
+  method virtual System.Int32 GetHashCode()
+  method virtual System.String ToString()
+  operator static System.Boolean op_Equality(Orleans.Dataflow.Identity.ResultSlotId left, Orleans.Dataflow.Identity.ResultSlotId right)
+  operator static System.Boolean op_GreaterThan(Orleans.Dataflow.Identity.ResultSlotId left, Orleans.Dataflow.Identity.ResultSlotId right)
+  operator static System.Boolean op_GreaterThanOrEqual(Orleans.Dataflow.Identity.ResultSlotId left, Orleans.Dataflow.Identity.ResultSlotId right)
+  operator static System.Boolean op_Inequality(Orleans.Dataflow.Identity.ResultSlotId left, Orleans.Dataflow.Identity.ResultSlotId right)
+  operator static System.Boolean op_LessThan(Orleans.Dataflow.Identity.ResultSlotId left, Orleans.Dataflow.Identity.ResultSlotId right)
+  operator static System.Boolean op_LessThanOrEqual(Orleans.Dataflow.Identity.ResultSlotId left, Orleans.Dataflow.Identity.ResultSlotId right)
+  property System.Boolean IsDefault { get; }
+  property System.String Value { get; }
+TYPE struct Orleans.Dataflow.Identity.RunId  [System.Runtime.CompilerServices.IsReadOnlyAttribute]
+  BASE System.ValueType
+  IFACE System.IComparable
+  IFACE System.IComparable<Orleans.Dataflow.Identity.RunId>
+  IFACE System.IEquatable<Orleans.Dataflow.Identity.RunId>
+  method System.Boolean Equals(Orleans.Dataflow.Identity.RunId other)
+  method System.Int32 CompareTo(Orleans.Dataflow.Identity.RunId other)
+  method static Orleans.Dataflow.Identity.RunId Create(System.String value)
+  method static System.Boolean TryCreate(System.String value, out Orleans.Dataflow.Identity.RunId& identifier)
+  method virtual System.Boolean Equals(System.Object obj)
+  method virtual System.Int32 GetHashCode()
+  method virtual System.String ToString()
+  operator static System.Boolean op_Equality(Orleans.Dataflow.Identity.RunId left, Orleans.Dataflow.Identity.RunId right)
+  operator static System.Boolean op_GreaterThan(Orleans.Dataflow.Identity.RunId left, Orleans.Dataflow.Identity.RunId right)
+  operator static System.Boolean op_GreaterThanOrEqual(Orleans.Dataflow.Identity.RunId left, Orleans.Dataflow.Identity.RunId right)
+  operator static System.Boolean op_Inequality(Orleans.Dataflow.Identity.RunId left, Orleans.Dataflow.Identity.RunId right)
+  operator static System.Boolean op_LessThan(Orleans.Dataflow.Identity.RunId left, Orleans.Dataflow.Identity.RunId right)
+  operator static System.Boolean op_LessThanOrEqual(Orleans.Dataflow.Identity.RunId left, Orleans.Dataflow.Identity.RunId right)
+  property System.Boolean IsDefault { get; }
+  property System.String Value { get; }
+TYPE struct Orleans.Dataflow.Identity.StageId  [System.Runtime.CompilerServices.IsReadOnlyAttribute]
+  BASE System.ValueType
+  IFACE System.IComparable
+  IFACE System.IComparable<Orleans.Dataflow.Identity.StageId>
+  IFACE System.IEquatable<Orleans.Dataflow.Identity.StageId>
+  method System.Boolean Equals(Orleans.Dataflow.Identity.StageId other)
+  method System.Int32 CompareTo(Orleans.Dataflow.Identity.StageId other)
+  method static Orleans.Dataflow.Identity.StageId Create(System.String value)
+  method static System.Boolean TryCreate(System.String value, out Orleans.Dataflow.Identity.StageId& identifier)
+  method virtual System.Boolean Equals(System.Object obj)
+  method virtual System.Int32 GetHashCode()
+  method virtual System.String ToString()
+  operator static System.Boolean op_Equality(Orleans.Dataflow.Identity.StageId left, Orleans.Dataflow.Identity.StageId right)
+  operator static System.Boolean op_GreaterThan(Orleans.Dataflow.Identity.StageId left, Orleans.Dataflow.Identity.StageId right)
+  operator static System.Boolean op_GreaterThanOrEqual(Orleans.Dataflow.Identity.StageId left, Orleans.Dataflow.Identity.StageId right)
+  operator static System.Boolean op_Inequality(Orleans.Dataflow.Identity.StageId left, Orleans.Dataflow.Identity.StageId right)
+  operator static System.Boolean op_LessThan(Orleans.Dataflow.Identity.StageId left, Orleans.Dataflow.Identity.StageId right)
+  operator static System.Boolean op_LessThanOrEqual(Orleans.Dataflow.Identity.StageId left, Orleans.Dataflow.Identity.StageId right)
+  property System.Boolean IsDefault { get; }
+  property System.String Value { get; }
+TYPE struct Orleans.Dataflow.Identity.StageRef  [System.Runtime.CompilerServices.IsReadOnlyAttribute]
+  BASE System.ValueType
+  IFACE System.IComparable
+  IFACE System.IComparable<Orleans.Dataflow.Identity.StageRef>
+  IFACE System.IEquatable<Orleans.Dataflow.Identity.StageRef>
+  field static const System.Int32 FirstMajorVersion = 1
+  method System.Boolean Equals(Orleans.Dataflow.Identity.StageRef other)
+  method System.Int32 CompareTo(Orleans.Dataflow.Identity.StageRef other)
+  method static Orleans.Dataflow.Identity.StageRef Create(Orleans.Dataflow.Identity.ProviderId provider, Orleans.Dataflow.Identity.StageId stage, System.Int32 majorVersion)
+  method static System.Boolean TryCreate(Orleans.Dataflow.Identity.ProviderId provider, Orleans.Dataflow.Identity.StageId stage, System.Int32 majorVersion, out Orleans.Dataflow.Identity.StageRef& stageRef)
+  method virtual System.Boolean Equals(System.Object obj)
+  method virtual System.Int32 GetHashCode()
+  method virtual System.String ToString()
+  operator static System.Boolean op_Equality(Orleans.Dataflow.Identity.StageRef left, Orleans.Dataflow.Identity.StageRef right)
+  operator static System.Boolean op_GreaterThan(Orleans.Dataflow.Identity.StageRef left, Orleans.Dataflow.Identity.StageRef right)
+  operator static System.Boolean op_GreaterThanOrEqual(Orleans.Dataflow.Identity.StageRef left, Orleans.Dataflow.Identity.StageRef right)
+  operator static System.Boolean op_Inequality(Orleans.Dataflow.Identity.StageRef left, Orleans.Dataflow.Identity.StageRef right)
+  operator static System.Boolean op_LessThan(Orleans.Dataflow.Identity.StageRef left, Orleans.Dataflow.Identity.StageRef right)
+  operator static System.Boolean op_LessThanOrEqual(Orleans.Dataflow.Identity.StageRef left, Orleans.Dataflow.Identity.StageRef right)
+  property Orleans.Dataflow.Identity.ProviderId Provider { get; }
+  property Orleans.Dataflow.Identity.StageId Stage { get; }
+  property System.Boolean IsDefault { get; }
+  property System.Int32 MajorVersion { get; }
+TYPE struct Orleans.Dataflow.Serialization.CanonicalJsonValue  [System.Runtime.CompilerServices.IsReadOnlyAttribute]
+  BASE System.ValueType
+  IFACE System.IEquatable<Orleans.Dataflow.Serialization.CanonicalJsonValue>
+  field static const System.Int32 MaxCanonicalBytes = 262144
+  field static const System.Int32 MaxDepth = 64
+  method System.Boolean Equals(Orleans.Dataflow.Serialization.CanonicalJsonValue other)
+  method System.Text.Json.JsonElement ToElement()
+  method static Orleans.Dataflow.Serialization.CanonicalJsonValue FromElement(System.Text.Json.JsonElement element)
+  method static Orleans.Dataflow.Serialization.CanonicalJsonValue Parse(System.ReadOnlySpan<System.Byte> utf8Json)
+  method static Orleans.Dataflow.Serialization.CanonicalJsonValue Parse(System.String json)
+  method static System.Boolean TryParse(System.ReadOnlySpan<System.Byte> utf8Json, out Orleans.Dataflow.Serialization.CanonicalJsonValue& value)
+  method static System.Boolean TryParse(System.String json, out Orleans.Dataflow.Serialization.CanonicalJsonValue& value)
+  method virtual System.Boolean Equals(System.Object obj)
+  method virtual System.Int32 GetHashCode()
+  method virtual System.String ToString()
+  operator static System.Boolean op_Equality(Orleans.Dataflow.Serialization.CanonicalJsonValue left, Orleans.Dataflow.Serialization.CanonicalJsonValue right)
+  operator static System.Boolean op_Inequality(Orleans.Dataflow.Serialization.CanonicalJsonValue left, Orleans.Dataflow.Serialization.CanonicalJsonValue right)
+  property System.Boolean IsDefault { get; }
+  property System.Int32 ByteLength { get; }
+  property System.ReadOnlyMemory<System.Byte> CanonicalUtf8Bytes { get; }
+TYPE sealed class Orleans.Dataflow.Serialization.GraphDocumentFormatException
+  BASE System.Exception
+  IFACE System.Runtime.Serialization.ISerializable
+  .ctor()
+  .ctor(System.String message)
+  .ctor(System.String message, System.Exception innerException)
+TYPE static class Orleans.Dataflow.Serialization.GraphDocumentSerializer
+  method static Orleans.Dataflow.Definition.GraphDocument Deserialize(System.ReadOnlySpan<System.Byte> canonicalEnvelope)
+  method static Orleans.Dataflow.Definition.GraphFingerprint Fingerprint(Orleans.Dataflow.Definition.GraphDocument document)
+  method static System.Byte[] Serialize(Orleans.Dataflow.Definition.GraphDocument document)
+TYPE static class Orleans.Dataflow.Serialization.StageCatalogSerializer
+  field static const System.Int32 CurrentFormatVersion = 1
+  method static Orleans.Dataflow.Definition.CatalogFingerprint Fingerprint(Orleans.Dataflow.Definition.StageCatalog catalog)
+  method static System.Byte[] Serialize(Orleans.Dataflow.Definition.StageCatalog catalog)

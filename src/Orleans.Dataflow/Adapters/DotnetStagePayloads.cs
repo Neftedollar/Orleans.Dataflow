@@ -117,9 +117,9 @@ internal static class ObservablePayload
         CanonicalJsonValue.Parse(string.Create(
             CultureInfo.InvariantCulture,
             $"{{\"{CapacityMember}\":{ingress.Capacity}," +
-            $"\"{OutputMember}\":{JsonSerializer.Serialize(output)}," +
+            $"\"{OutputMember}\":{JsonText.Quote(output)}," +
             $"\"{PolicyMember}\":\"{LocalBufferParameters.Spell(ingress.OverflowPolicy)}\"," +
-            $"\"{SourceMember}\":{JsonSerializer.Serialize(source)}}}"));
+            $"\"{SourceMember}\":{JsonText.Quote(source)}}}"));
 
     /// <summary>Reads a payload back into what it declares.</summary>
     /// <param name="parameters">The node's payload, in canonical form.</param>

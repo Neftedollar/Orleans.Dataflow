@@ -1,0 +1,720 @@
+# assembly: Orleans.Dataflow
+# public types: 74
+TYPE enum Orleans.Dataflow.ActiveKeyOverflowPolicy
+  IFACE System.IComparable
+  IFACE System.IConvertible
+  IFACE System.IFormattable
+  IFACE System.ISpanFormattable
+  field System.Int32 value__
+  field static const Orleans.Dataflow.ActiveKeyOverflowPolicy EvictIdle = 1
+  field static const Orleans.Dataflow.ActiveKeyOverflowPolicy Fail = 0
+TYPE static class Orleans.Dataflow.Adapters.DotnetStages
+  method static Orleans.Dataflow.ElementContract<T> Element<T>()
+  method static Orleans.Dataflow.RegisteredSource<System.Int64> Timer()
+  method static Orleans.Dataflow.RegisteredSource<T> Observable<T>(Orleans.Dataflow.Adapters.ObservableBinding<T> source)
+  method static Orleans.Dataflow.Serialization.CanonicalJsonValue ObservableParameters<T>(Orleans.Dataflow.Adapters.ObservableBinding<T> source, Orleans.Dataflow.BufferOptions ingress)
+  method static Orleans.Dataflow.Serialization.CanonicalJsonValue TimerParameters(System.TimeSpan period, System.Int64 tickLimit = 0)
+  property static Orleans.Dataflow.Definition.StageCatalog Catalog { get; }
+  property static Orleans.Dataflow.ElementContract<System.Int64> Tick { get; }
+  property static Orleans.Dataflow.Identity.ContractReference ElementContract { get; }
+  property static Orleans.Dataflow.Identity.ContractReference ObservableParameterContract { get; }
+  property static Orleans.Dataflow.Identity.ContractReference TimerParameterContract { get; }
+  property static Orleans.Dataflow.Identity.ProviderId Provider { get; }
+  property static Orleans.Dataflow.Identity.StageRef ObservableStage { get; }
+  property static Orleans.Dataflow.Identity.StageRef TimerStage { get; }
+TYPE static class Orleans.Dataflow.Adapters.ObservableBinding
+  method static Orleans.Dataflow.Adapters.ObservableBinding<T> Create<T>(System.String name, Orleans.Dataflow.ElementContract<T> output, System.Func<System.IObservable<T>> open)
+TYPE sealed class Orleans.Dataflow.Adapters.ObservableBinding<T>
+  IFACE Orleans.Dataflow.Adapters.IObservableEntry
+  method virtual System.String ToString()
+  property Orleans.Dataflow.ElementContract<T> Output { get; }
+  property System.String Name { get; }
+TYPE delegate Orleans.Dataflow.AsyncUnfoldGenerator<TState, T>
+  BASE System.MulticastDelegate
+  IFACE System.ICloneable
+  IFACE System.Runtime.Serialization.ISerializable
+  .ctor(System.Object object, System.IntPtr method)
+  method virtual System.IAsyncResult BeginInvoke(TState state, System.Threading.CancellationToken cancellationToken, System.AsyncCallback callback, System.Object object)
+  method virtual System.Threading.Tasks.Task<System.Nullable<Orleans.Dataflow.UnfoldStep<TState, T>>> EndInvoke(System.IAsyncResult result)
+  method virtual System.Threading.Tasks.Task<System.Nullable<Orleans.Dataflow.UnfoldStep<TState, T>>> Invoke(TState state, System.Threading.CancellationToken cancellationToken)
+TYPE sealed class Orleans.Dataflow.Authoring.GraphFragment
+  IFACE System.IEquatable<Orleans.Dataflow.Authoring.GraphFragment>
+  method Orleans.Dataflow.Authoring.GraphFragment <Clone>$()
+  method System.Boolean Equals(Orleans.Dataflow.Authoring.GraphFragment other)
+  method static Orleans.Dataflow.Authoring.GraphFragment Create(System.Collections.Generic.IEnumerable<Orleans.Dataflow.Definition.StageNode> nodes, System.Collections.Generic.IEnumerable<Orleans.Dataflow.Definition.GraphEdge> edges, System.Collections.Generic.IEnumerable<Orleans.Dataflow.Definition.PortAddress> openInputs, System.Collections.Generic.IEnumerable<Orleans.Dataflow.Definition.PortAddress> openOutputs)
+  method static Orleans.Dataflow.Authoring.GraphFragment OfStage(Orleans.Dataflow.Definition.StageNode node, System.Collections.Generic.IEnumerable<Orleans.Dataflow.Identity.PortId> openInputs, System.Collections.Generic.IEnumerable<Orleans.Dataflow.Identity.PortId> openOutputs)
+  method virtual System.Boolean Equals(System.Object obj)
+  method virtual System.Int32 GetHashCode()
+  method virtual System.String ToString()
+  operator static System.Boolean op_Equality(Orleans.Dataflow.Authoring.GraphFragment left, Orleans.Dataflow.Authoring.GraphFragment right)
+  operator static System.Boolean op_Inequality(Orleans.Dataflow.Authoring.GraphFragment left, Orleans.Dataflow.Authoring.GraphFragment right)
+  property System.Collections.Generic.IReadOnlyList<Orleans.Dataflow.Definition.GraphEdge> Edges { get; }
+  property System.Collections.Generic.IReadOnlyList<Orleans.Dataflow.Definition.PortAddress> OpenInputs { get; }
+  property System.Collections.Generic.IReadOnlyList<Orleans.Dataflow.Definition.PortAddress> OpenOutputs { get; }
+  property System.Collections.Generic.IReadOnlyList<Orleans.Dataflow.Definition.StageNode> Nodes { get; }
+TYPE static class Orleans.Dataflow.Authoring.GraphFragmentComposer
+  method static Orleans.Dataflow.Authoring.GraphFragment Append(Orleans.Dataflow.Authoring.GraphFragment upstream, Orleans.Dataflow.Authoring.GraphFragment downstream)
+  method static Orleans.Dataflow.Authoring.GraphFragment Connect(Orleans.Dataflow.Authoring.GraphFragment upstream, Orleans.Dataflow.Definition.PortAddress upstreamOutput, Orleans.Dataflow.Authoring.GraphFragment downstream, Orleans.Dataflow.Definition.PortAddress downstreamInput)
+  method static Orleans.Dataflow.Authoring.GraphFragment Import(Orleans.Dataflow.Authoring.GraphFragment fragment, System.String scopeSegment)
+  method static Orleans.Dataflow.Authoring.GraphFragment Wire(Orleans.Dataflow.Authoring.GraphFragment fragment, Orleans.Dataflow.Definition.PortAddress output, Orleans.Dataflow.Definition.PortAddress input)
+  method static Orleans.Dataflow.Definition.GraphDocument Close(Orleans.Dataflow.Authoring.GraphFragment fragment, Orleans.Dataflow.Identity.GraphId id, Orleans.Dataflow.Identity.GraphRevision revision, System.Collections.Generic.IEnumerable<Orleans.Dataflow.Definition.CapabilityToken> capabilities, System.Collections.Generic.IEnumerable<Orleans.Dataflow.Definition.ResultSlotDefinition> resultSlots)
+TYPE sealed class Orleans.Dataflow.Branch<TIn>
+  method virtual System.String ToString()
+TYPE sealed class Orleans.Dataflow.BufferOptions  [System.Runtime.CompilerServices.RequiredMemberAttribute]
+  IFACE System.IEquatable<Orleans.Dataflow.BufferOptions>
+  .ctor()  [System.ObsoleteAttribute("Constructors of types with required members are not supported in this version of your compiler.", true),System.Runtime.CompilerServices.CompilerFeatureRequiredAttribute("RequiredMembers")]
+  method Orleans.Dataflow.BufferOptions <Clone>$()
+  method System.Boolean Equals(Orleans.Dataflow.BufferOptions other)
+  method virtual System.Boolean Equals(System.Object obj)
+  method virtual System.Int32 GetHashCode()
+  method virtual System.String ToString()
+  operator static System.Boolean op_Equality(Orleans.Dataflow.BufferOptions left, Orleans.Dataflow.BufferOptions right)
+  operator static System.Boolean op_Inequality(Orleans.Dataflow.BufferOptions left, Orleans.Dataflow.BufferOptions right)
+  property Orleans.Dataflow.OverflowPolicy OverflowPolicy { get; set; }
+  property System.Int32 Capacity { get; set; }  [System.Runtime.CompilerServices.RequiredMemberAttribute]
+TYPE sealed class Orleans.Dataflow.BufferOverflowException
+  BASE System.Exception
+  IFACE System.Runtime.Serialization.ISerializable
+  .ctor()
+  .ctor(System.String message)
+  .ctor(System.String message, System.Exception innerException)
+TYPE sealed class Orleans.Dataflow.CollectOptions  [System.Runtime.CompilerServices.RequiredMemberAttribute]
+  IFACE System.IEquatable<Orleans.Dataflow.CollectOptions>
+  .ctor()  [System.ObsoleteAttribute("Constructors of types with required members are not supported in this version of your compiler.", true),System.Runtime.CompilerServices.CompilerFeatureRequiredAttribute("RequiredMembers")]
+  method Orleans.Dataflow.CollectOptions <Clone>$()
+  method System.Boolean Equals(Orleans.Dataflow.CollectOptions other)
+  method virtual System.Boolean Equals(System.Object obj)
+  method virtual System.Int32 GetHashCode()
+  method virtual System.String ToString()
+  operator static System.Boolean op_Equality(Orleans.Dataflow.CollectOptions left, Orleans.Dataflow.CollectOptions right)
+  operator static System.Boolean op_Inequality(Orleans.Dataflow.CollectOptions left, Orleans.Dataflow.CollectOptions right)
+  property System.Int32 MaxElements { get; set; }  [System.Runtime.CompilerServices.RequiredMemberAttribute]
+TYPE sealed class Orleans.Dataflow.CollectOverflowException
+  BASE System.Exception
+  IFACE System.Runtime.Serialization.ISerializable
+  .ctor()
+  .ctor(System.String message)
+  .ctor(System.String message, System.Exception innerException)
+TYPE sealed class Orleans.Dataflow.DistinctOptions  [System.Runtime.CompilerServices.RequiredMemberAttribute]
+  IFACE System.IEquatable<Orleans.Dataflow.DistinctOptions>
+  .ctor()  [System.ObsoleteAttribute("Constructors of types with required members are not supported in this version of your compiler.", true),System.Runtime.CompilerServices.CompilerFeatureRequiredAttribute("RequiredMembers")]
+  method Orleans.Dataflow.DistinctOptions <Clone>$()
+  method System.Boolean Equals(Orleans.Dataflow.DistinctOptions other)
+  method virtual System.Boolean Equals(System.Object obj)
+  method virtual System.Int32 GetHashCode()
+  method virtual System.String ToString()
+  operator static System.Boolean op_Equality(Orleans.Dataflow.DistinctOptions left, Orleans.Dataflow.DistinctOptions right)
+  operator static System.Boolean op_Inequality(Orleans.Dataflow.DistinctOptions left, Orleans.Dataflow.DistinctOptions right)
+  property Orleans.Dataflow.KeyOverflowPolicy OverflowPolicy { get; set; }
+  property System.Int32 MaxTrackedKeys { get; set; }  [System.Runtime.CompilerServices.RequiredMemberAttribute]
+TYPE sealed class Orleans.Dataflow.DurableRunOptions  [System.Runtime.CompilerServices.RequiredMemberAttribute]
+  .ctor()  [System.ObsoleteAttribute("Constructors of types with required members are not supported in this version of your compiler.", true),System.Runtime.CompilerServices.CompilerFeatureRequiredAttribute("RequiredMembers")]
+  property Orleans.Dataflow.Hosting.ICheckpointStore Store { get; set; }  [System.Runtime.CompilerServices.RequiredMemberAttribute]
+  property Orleans.Dataflow.Identity.RunId RunId { get; set; }  [System.Runtime.CompilerServices.RequiredMemberAttribute]
+  property System.Nullable<System.Int32> EveryElements { get; set; }
+  property System.Nullable<System.TimeSpan> Interval { get; set; }
+TYPE static class Orleans.Dataflow.ElementContract
+  method static Orleans.Dataflow.ElementContract<T> For<T>(System.String contractId, System.Int32 majorVersion)
+TYPE struct Orleans.Dataflow.ElementContract<T>  [System.Runtime.CompilerServices.IsReadOnlyAttribute]
+  BASE System.ValueType
+  IFACE System.IEquatable<Orleans.Dataflow.ElementContract<T>>
+  method System.Boolean Equals(Orleans.Dataflow.ElementContract<T> other)
+  method virtual System.Boolean Equals(System.Object obj)
+  method virtual System.Int32 GetHashCode()
+  method virtual System.String ToString()
+  operator static System.Boolean op_Equality(Orleans.Dataflow.ElementContract<T> left, Orleans.Dataflow.ElementContract<T> right)
+  operator static System.Boolean op_Inequality(Orleans.Dataflow.ElementContract<T> left, Orleans.Dataflow.ElementContract<T> right)
+  property Orleans.Dataflow.Identity.ContractReference Reference { get; }
+  property System.Boolean IsDefault { get; }
+  property System.Type ElementType { get; }
+TYPE static class Orleans.Dataflow.Flow
+  method static Orleans.Dataflow.Flow<T, T> For<T>()
+TYPE sealed class Orleans.Dataflow.Flow<TIn, TOut>
+  method Orleans.Dataflow.Branch<TIn> To(Orleans.Dataflow.RegisteredSink<TOut> sink, System.String occurrenceName, Orleans.Dataflow.Serialization.CanonicalJsonValue parameters)
+  method Orleans.Dataflow.Branch<TIn> To(Orleans.Dataflow.Sink<TOut> sink)
+  method Orleans.Dataflow.Branch<TIn> To(System.Func<Orleans.Dataflow.SinkFactory<TOut>, Orleans.Dataflow.Sink<TOut>> sink)
+  method Orleans.Dataflow.Branch<TIn> To<TResult>(Orleans.Dataflow.RegisteredSinkWithResult<TOut, TResult> sink, System.String occurrenceName, Orleans.Dataflow.Serialization.CanonicalJsonValue parameters, System.String slotName, out Orleans.Dataflow.ResultSlot<TResult>& slot)
+  method Orleans.Dataflow.Branch<TIn> To<TResult>(Orleans.Dataflow.SinkWithResult<TOut, TResult> sink)  [System.ObsoleteAttribute("A result-bearing sink needs a name for its result: write To(sink, "name", out var slot). To run the sink on this branch and deliberately discard its result, write To(sink.ToSink()).", true)]
+  method Orleans.Dataflow.Branch<TIn> To<TResult>(Orleans.Dataflow.SinkWithResult<TOut, TResult> sink, System.String slotName, out Orleans.Dataflow.ResultSlot<TResult>& slot)
+  method Orleans.Dataflow.Branch<TIn> To<TResult>(System.Func<Orleans.Dataflow.SinkFactory<TOut>, Orleans.Dataflow.SinkWithResult<TOut, TResult>> sink)  [System.ObsoleteAttribute("A result-bearing sink needs a name for its result: write To(s => s.Count(), "name", out var slot). To run the sink on this branch and deliberately discard its result, write To(s => s.Count().ToSink()).", true)]
+  method Orleans.Dataflow.Branch<TIn> To<TResult>(System.Func<Orleans.Dataflow.SinkFactory<TOut>, Orleans.Dataflow.SinkWithResult<TOut, TResult>> sink, System.String slotName, out Orleans.Dataflow.ResultSlot<TResult>& slot)
+  method Orleans.Dataflow.Flow<TIn, System.Collections.Generic.IReadOnlyList<TOut>> Grouped(System.Int32 size)
+  method Orleans.Dataflow.Flow<TIn, System.Collections.Generic.IReadOnlyList<TOut>> GroupedWithin(System.Int32 maxElements, System.Int32 maxWeight, System.TimeSpan window, System.Func<TOut, System.Int32> cost)
+  method Orleans.Dataflow.Flow<TIn, System.Collections.Generic.IReadOnlyList<TOut>> GroupedWithin(System.Int32 maxElements, System.TimeSpan window)
+  method Orleans.Dataflow.Flow<TIn, System.Collections.Generic.IReadOnlyList<TOut>> Sliding(System.Int32 size, System.Int32 step)
+  method Orleans.Dataflow.Flow<TIn, TNext> Durable<TNext>(Orleans.Dataflow.Flow<TOut, TNext> scope)
+  method Orleans.Dataflow.Flow<TIn, TNext> GroupBy<TKey, TNext>(Orleans.Dataflow.GroupByOptions options, System.Func<TOut, TKey> keySelector, Orleans.Dataflow.Flow<TOut, TNext> group)
+  method Orleans.Dataflow.Flow<TIn, TNext> MergeMap<TNext>(Orleans.Dataflow.ParallelismOptions options, System.Func<TOut, System.Collections.Generic.IAsyncEnumerable<TNext>> selector)
+  method Orleans.Dataflow.Flow<TIn, TNext> MergeMap<TNext>(Orleans.Dataflow.ParallelismOptions options, System.Func<TOut, System.Collections.Generic.IEnumerable<TNext>> selector)
+  method Orleans.Dataflow.Flow<TIn, TNext> Select<TNext>(System.Func<TOut, TNext> selector)
+  method Orleans.Dataflow.Flow<TIn, TNext> SelectAsync<TNext>(Orleans.Dataflow.ParallelismOptions options, System.Func<TOut, System.Threading.CancellationToken, System.Threading.Tasks.Task<TNext>> selector)
+  method Orleans.Dataflow.Flow<TIn, TNext> SelectAsyncUnordered<TNext>(Orleans.Dataflow.ParallelismOptions options, System.Func<TOut, System.Threading.CancellationToken, System.Threading.Tasks.Task<TNext>> selector)
+  method Orleans.Dataflow.Flow<TIn, TNext> SelectMany<TNext>(System.Func<TOut, System.Collections.Generic.IEnumerable<TNext>> selector)
+  method Orleans.Dataflow.Flow<TIn, TNext> SelectValueTaskAsync<TNext>(Orleans.Dataflow.ParallelismOptions options, System.Func<TOut, System.Threading.CancellationToken, System.Threading.Tasks.ValueTask<TNext>> selector)
+  method Orleans.Dataflow.Flow<TIn, TNext> SelectValueTaskAsyncUnordered<TNext>(Orleans.Dataflow.ParallelismOptions options, System.Func<TOut, System.Threading.CancellationToken, System.Threading.Tasks.ValueTask<TNext>> selector)
+  method Orleans.Dataflow.Flow<TIn, TNext> Supervised<TNext>(Orleans.Dataflow.SupervisionOptions options, Orleans.Dataflow.Flow<TOut, TNext> scope)
+  method Orleans.Dataflow.Flow<TIn, TNext> Supervised<TNext>(Orleans.Dataflow.SupervisionOptions options, Orleans.Dataflow.Flow<TOut, TNext> scope, TNext fallback)
+  method Orleans.Dataflow.Flow<TIn, TNext> Via<TNext>(Orleans.Dataflow.Flow<TOut, TNext> flow)
+  method Orleans.Dataflow.Flow<TIn, TNext> Via<TNext>(Orleans.Dataflow.RegisteredFlow<TOut, TNext> flow, System.String occurrenceName, Orleans.Dataflow.Serialization.CanonicalJsonValue parameters)
+  method Orleans.Dataflow.Flow<TIn, TOut> Buffer(Orleans.Dataflow.BufferOptions options)
+  method Orleans.Dataflow.Flow<TIn, TOut> DeduplicateConsecutive()
+  method Orleans.Dataflow.Flow<TIn, TOut> Delay(System.TimeSpan delay, Orleans.Dataflow.BufferOptions holdback)
+  method Orleans.Dataflow.Flow<TIn, TOut> Distinct(Orleans.Dataflow.DistinctOptions options)
+  method Orleans.Dataflow.Flow<TIn, TOut> InitialDelay(System.TimeSpan delay)
+  method Orleans.Dataflow.Flow<TIn, TOut> Skip(System.Int32 count)
+  method Orleans.Dataflow.Flow<TIn, TOut> SkipWhile(System.Func<TOut, System.Boolean> predicate)
+  method Orleans.Dataflow.Flow<TIn, TOut> SkipWithin(System.TimeSpan window)
+  method Orleans.Dataflow.Flow<TIn, TOut> Take(System.Int32 count)
+  method Orleans.Dataflow.Flow<TIn, TOut> TakeThrough(System.Func<TOut, System.Boolean> predicate)
+  method Orleans.Dataflow.Flow<TIn, TOut> TakeWhile(System.Func<TOut, System.Boolean> predicate)
+  method Orleans.Dataflow.Flow<TIn, TOut> TakeWithin(System.TimeSpan window)
+  method Orleans.Dataflow.Flow<TIn, TOut> Throttle(Orleans.Dataflow.ThrottleOptions options)
+  method Orleans.Dataflow.Flow<TIn, TOut> Throttle(Orleans.Dataflow.ThrottleOptions options, System.Func<TOut, System.Int32> cost)
+  method Orleans.Dataflow.Flow<TIn, TOut> Timeout(System.TimeSpan gap)
+  method Orleans.Dataflow.Flow<TIn, TOut> Valve(System.String controlName, Orleans.Dataflow.ValveMode initialMode = 0)
+  method Orleans.Dataflow.Flow<TIn, TOut> Where(System.Func<TOut, System.Boolean> predicate)
+  method Orleans.Dataflow.Flow<TIn, TState> Scan<TState>(TState seed, System.Func<TState, TOut, TState> folder)
+  method Orleans.Dataflow.Flow<TIn, TState> Scan<TState>(TState seed, System.Func<TState, TOut, TState> folder, System.Func<TState, Orleans.Dataflow.Serialization.CanonicalJsonValue> export, System.Func<Orleans.Dataflow.Serialization.CanonicalJsonValue, TState> restore)
+  method Orleans.Dataflow.Flow<TIn, TState> ScanAsync<TState>(TState seed, System.Func<TState, TOut, System.Threading.CancellationToken, System.Threading.Tasks.Task<TState>> folder)
+  method virtual System.String ToString()
+TYPE sealed class Orleans.Dataflow.Fork<T1, T2>
+  method Orleans.Dataflow.Source<System.ValueTuple<T1, T2>> Zip()
+  method Orleans.Dataflow.Source<TOut> Zip<TOut>(System.Func<T1, T2, TOut> combine)
+  method virtual System.String ToString()
+TYPE sealed class Orleans.Dataflow.GroupByOptions  [System.Runtime.CompilerServices.RequiredMemberAttribute]
+  IFACE System.IEquatable<Orleans.Dataflow.GroupByOptions>
+  .ctor()  [System.ObsoleteAttribute("Constructors of types with required members are not supported in this version of your compiler.", true),System.Runtime.CompilerServices.CompilerFeatureRequiredAttribute("RequiredMembers")]
+  method Orleans.Dataflow.GroupByOptions <Clone>$()
+  method System.Boolean Equals(Orleans.Dataflow.GroupByOptions other)
+  method virtual System.Boolean Equals(System.Object obj)
+  method virtual System.Int32 GetHashCode()
+  method virtual System.String ToString()
+  operator static System.Boolean op_Equality(Orleans.Dataflow.GroupByOptions left, Orleans.Dataflow.GroupByOptions right)
+  operator static System.Boolean op_Inequality(Orleans.Dataflow.GroupByOptions left, Orleans.Dataflow.GroupByOptions right)
+  property Orleans.Dataflow.ActiveKeyOverflowPolicy OverflowPolicy { get; set; }
+  property System.Int32 MaxActiveKeys { get; set; }  [System.Runtime.CompilerServices.RequiredMemberAttribute]
+TYPE sealed class Orleans.Dataflow.Hosting.CheckpointConflictException
+  BASE System.Exception
+  IFACE System.Runtime.Serialization.ISerializable
+  .ctor()
+  .ctor(System.String message)
+  .ctor(System.String message, System.Exception innerException)
+  method static Orleans.Dataflow.Hosting.CheckpointConflictException Superseded(Orleans.Dataflow.Identity.GraphId graph, Orleans.Dataflow.Identity.RunId run, System.String presented, System.String stored)
+  property System.String Presented { get; }
+  property System.String Stored { get; }
+TYPE struct Orleans.Dataflow.Hosting.DataflowRunTokens  [System.Runtime.CompilerServices.IsReadOnlyAttribute]
+  BASE System.ValueType
+  IFACE System.IEquatable<Orleans.Dataflow.Hosting.DataflowRunTokens>
+  .ctor(System.String RunIdentity, System.Threading.CancellationToken RunToken, System.Threading.CancellationToken StopToken)
+  method System.Boolean Equals(Orleans.Dataflow.Hosting.DataflowRunTokens other)
+  method System.Void Deconstruct(out System.String& RunIdentity, out System.Threading.CancellationToken& RunToken, out System.Threading.CancellationToken& StopToken)
+  method virtual System.Boolean Equals(System.Object obj)
+  method virtual System.Int32 GetHashCode()
+  method virtual System.String ToString()
+  operator static System.Boolean op_Equality(Orleans.Dataflow.Hosting.DataflowRunTokens left, Orleans.Dataflow.Hosting.DataflowRunTokens right)
+  operator static System.Boolean op_Inequality(Orleans.Dataflow.Hosting.DataflowRunTokens left, Orleans.Dataflow.Hosting.DataflowRunTokens right)
+  property System.String RunIdentity { get; set; }
+  property System.Threading.CancellationToken RunToken { get; set; }
+  property System.Threading.CancellationToken StopToken { get; set; }
+TYPE abstract class Orleans.Dataflow.Hosting.DataflowSinkMark
+  .ctor(protected)()
+  method abstract System.Void RestoreTo(Orleans.Dataflow.Serialization.CanonicalJsonValue mark)
+  property abstract Orleans.Dataflow.Serialization.CanonicalJsonValue Mark { get; }
+TYPE abstract class Orleans.Dataflow.Hosting.DataflowSourceCursor
+  .ctor(protected)()
+  method abstract System.Void Delivered()
+  method abstract System.Void RestoreTo(Orleans.Dataflow.Serialization.CanonicalJsonValue position)
+  property abstract Orleans.Dataflow.Serialization.CanonicalJsonValue Position { get; }
+TYPE struct Orleans.Dataflow.Hosting.DataflowStageRequest  [System.Runtime.CompilerServices.IsReadOnlyAttribute]
+  BASE System.ValueType
+  IFACE System.IEquatable<Orleans.Dataflow.Hosting.DataflowStageRequest>
+  .ctor(Orleans.Dataflow.Definition.StageNode Node, Orleans.Dataflow.Definition.StageSpecification Specification)
+  method System.Boolean Equals(Orleans.Dataflow.Hosting.DataflowStageRequest other)
+  method System.Void Deconstruct(out Orleans.Dataflow.Definition.StageNode& Node, out Orleans.Dataflow.Definition.StageSpecification& Specification)
+  method virtual System.Boolean Equals(System.Object obj)
+  method virtual System.Int32 GetHashCode()
+  method virtual System.String ToString()
+  operator static System.Boolean op_Equality(Orleans.Dataflow.Hosting.DataflowStageRequest left, Orleans.Dataflow.Hosting.DataflowStageRequest right)
+  operator static System.Boolean op_Inequality(Orleans.Dataflow.Hosting.DataflowStageRequest left, Orleans.Dataflow.Hosting.DataflowStageRequest right)
+  property Orleans.Dataflow.Definition.StageNode Node { get; set; }
+  property Orleans.Dataflow.Definition.StageSpecification Specification { get; set; }
+TYPE sealed class Orleans.Dataflow.Hosting.DataflowStageRuntime
+  method static Orleans.Dataflow.Hosting.DataflowStageRuntime Balance()
+  method static Orleans.Dataflow.Hosting.DataflowStageRuntime Broadcast()
+  method static Orleans.Dataflow.Hosting.DataflowStageRuntime CombineLatest(System.Func<System.Object[], System.Object> combine)
+  method static Orleans.Dataflow.Hosting.DataflowStageRuntime Concat()
+  method static Orleans.Dataflow.Hosting.DataflowStageRuntime Element(System.Func<System.Object, System.Object> map)
+  method static Orleans.Dataflow.Hosting.DataflowStageRuntime ElementAsync(System.Func<System.Object, System.Threading.CancellationToken, System.Threading.Tasks.ValueTask<System.Object>> map, System.Int32 maxConcurrency, System.Boolean ordered)
+  method static Orleans.Dataflow.Hosting.DataflowStageRuntime Interleave(System.Int32 segmentSize)
+  method static Orleans.Dataflow.Hosting.DataflowStageRuntime Merge()
+  method static Orleans.Dataflow.Hosting.DataflowStageRuntime Partition(System.Func<System.Object, System.Int32> route)
+  method static Orleans.Dataflow.Hosting.DataflowStageRuntime Source(System.Func<Orleans.Dataflow.Hosting.DataflowRunTokens, System.Collections.Generic.IAsyncEnumerable<System.Object>> open)
+  method static Orleans.Dataflow.Hosting.DataflowStageRuntime Source(System.Func<Orleans.Dataflow.Hosting.DataflowRunTokens, System.Collections.Generic.IAsyncEnumerable<System.Object>> open, Orleans.Dataflow.Hosting.DataflowSourceCursor cursor)
+  method static Orleans.Dataflow.Hosting.DataflowStageRuntime Terminal(System.Func<System.Object> seed, System.Func<System.Object, System.Object, System.Object> fold, System.Func<System.Object, System.Object> finish, System.Boolean producesResult)
+  method static Orleans.Dataflow.Hosting.DataflowStageRuntime Terminal(System.Func<System.Object> seed, System.Func<System.Object, System.Object, System.Object> fold, System.Func<System.Object, System.Object> finish, System.Boolean producesResult, Orleans.Dataflow.Hosting.DataflowSinkMark mark)
+  method static Orleans.Dataflow.Hosting.DataflowStageRuntime Unzip(System.Collections.Generic.IReadOnlyList<System.Func<System.Object, System.Object>> parts)
+  method static Orleans.Dataflow.Hosting.DataflowStageRuntime Zip(System.Func<System.Object[], System.Object> combine)
+TYPE interface Orleans.Dataflow.Hosting.ICheckpointStore
+  method abstract System.Threading.Tasks.ValueTask ClearAsync(Orleans.Dataflow.Identity.GraphId graph, Orleans.Dataflow.Identity.RunId run, System.String expectedETag, System.Threading.CancellationToken cancellationToken = default)
+  method abstract System.Threading.Tasks.ValueTask<System.Nullable<Orleans.Dataflow.Hosting.StoredCheckpoint>> ReadAsync(Orleans.Dataflow.Identity.GraphId graph, Orleans.Dataflow.Identity.RunId run, System.Threading.CancellationToken cancellationToken = default)
+  method abstract System.Threading.Tasks.ValueTask<System.String> WriteAsync(Orleans.Dataflow.Identity.GraphId graph, Orleans.Dataflow.Identity.RunId run, Orleans.Dataflow.Serialization.CanonicalJsonValue checkpoint, System.String expectedETag, System.Threading.CancellationToken cancellationToken = default)
+TYPE interface Orleans.Dataflow.Hosting.IDataflowStageFactory
+  method abstract Orleans.Dataflow.Hosting.DataflowStageRuntime Create(Orleans.Dataflow.Hosting.DataflowStageRequest request)
+TYPE interface Orleans.Dataflow.Hosting.ILocalDataflowBuilder
+  method abstract Orleans.Dataflow.Hosting.ILocalDataflowBuilder AddCatalog(Orleans.Dataflow.Definition.IStageCatalog catalog)
+  method abstract Orleans.Dataflow.Hosting.ILocalDataflowBuilder AddDotnetStages()
+  method abstract Orleans.Dataflow.Hosting.ILocalDataflowBuilder AddFactory(Orleans.Dataflow.Identity.ProviderId provider, Orleans.Dataflow.Hosting.IDataflowStageFactory factory)
+  method abstract Orleans.Dataflow.Hosting.ILocalDataflowBuilder AddObservable<T>(Orleans.Dataflow.Adapters.ObservableBinding<T> source)
+TYPE struct Orleans.Dataflow.Hosting.StoredCheckpoint  [System.Runtime.CompilerServices.IsReadOnlyAttribute]
+  BASE System.ValueType
+  IFACE System.IEquatable<Orleans.Dataflow.Hosting.StoredCheckpoint>
+  .ctor(Orleans.Dataflow.Serialization.CanonicalJsonValue Document, System.String ETag)
+  method System.Boolean Equals(Orleans.Dataflow.Hosting.StoredCheckpoint other)
+  method System.Void Deconstruct(out Orleans.Dataflow.Serialization.CanonicalJsonValue& Document, out System.String& ETag)
+  method virtual System.Boolean Equals(System.Object obj)
+  method virtual System.Int32 GetHashCode()
+  method virtual System.String ToString()
+  operator static System.Boolean op_Equality(Orleans.Dataflow.Hosting.StoredCheckpoint left, Orleans.Dataflow.Hosting.StoredCheckpoint right)
+  operator static System.Boolean op_Inequality(Orleans.Dataflow.Hosting.StoredCheckpoint left, Orleans.Dataflow.Hosting.StoredCheckpoint right)
+  property Orleans.Dataflow.Serialization.CanonicalJsonValue Document { get; set; }
+  property System.String ETag { get; set; }
+TYPE interface Orleans.Dataflow.IIngressQueue<in T>
+  method abstract System.Threading.Tasks.ValueTask<Orleans.Dataflow.QueueOfferOutcome> OfferAsync(T element, System.Threading.CancellationToken cancellationToken = default)
+  method abstract System.Void Complete()
+  method abstract System.Void Fail(System.Exception exception)
+TYPE interface Orleans.Dataflow.IValve
+  method abstract System.Void Close()
+  method abstract System.Void Open()
+  property abstract System.Boolean IsOpen { get; }
+TYPE enum Orleans.Dataflow.KeyOverflowPolicy
+  IFACE System.IComparable
+  IFACE System.IConvertible
+  IFACE System.IFormattable
+  IFACE System.ISpanFormattable
+  field System.Int32 value__
+  field static const Orleans.Dataflow.KeyOverflowPolicy EvictOldest = 1
+  field static const Orleans.Dataflow.KeyOverflowPolicy Fail = 0
+TYPE sealed class Orleans.Dataflow.LocalDataflowHost
+  .ctor()
+  .ctor(System.Action<Orleans.Dataflow.Hosting.ILocalDataflowBuilder> configure)
+  .ctor(System.TimeProvider timeProvider)
+  .ctor(System.TimeProvider timeProvider, System.Action<Orleans.Dataflow.Hosting.ILocalDataflowBuilder> configure)
+  method System.Threading.Tasks.ValueTask<Orleans.Dataflow.RunHandle> MaterializeAsync(Orleans.Dataflow.RunnableGraph graph, System.Threading.CancellationToken cancellationToken = default)
+  method System.Threading.Tasks.ValueTask<Orleans.Dataflow.RunHandle> MaterializeDurableAsync(Orleans.Dataflow.RunnableGraph graph, Orleans.Dataflow.DurableRunOptions durable, System.Threading.CancellationToken cancellationToken = default)
+  method System.Threading.Tasks.ValueTask<Orleans.Dataflow.RunHandle> MaterializeFromCheckpointAsync(Orleans.Dataflow.RunnableGraph graph, Orleans.Dataflow.DurableRunOptions durable, System.Threading.CancellationToken cancellationToken = default)
+TYPE static class Orleans.Dataflow.LocalStageCatalog
+  property static Orleans.Dataflow.Definition.IStageCatalog Instance { get; }
+TYPE enum Orleans.Dataflow.OverflowPolicy
+  IFACE System.IComparable
+  IFACE System.IConvertible
+  IFACE System.IFormattable
+  IFACE System.ISpanFormattable
+  field System.Int32 value__
+  field static const Orleans.Dataflow.OverflowPolicy Backpressure = 0
+  field static const Orleans.Dataflow.OverflowPolicy DropBuffer = 3
+  field static const Orleans.Dataflow.OverflowPolicy DropNewest = 2
+  field static const Orleans.Dataflow.OverflowPolicy DropOldest = 1
+  field static const Orleans.Dataflow.OverflowPolicy Fail = 4
+TYPE sealed class Orleans.Dataflow.ParallelismOptions  [System.Runtime.CompilerServices.RequiredMemberAttribute]
+  IFACE System.IEquatable<Orleans.Dataflow.ParallelismOptions>
+  .ctor()  [System.ObsoleteAttribute("Constructors of types with required members are not supported in this version of your compiler.", true),System.Runtime.CompilerServices.CompilerFeatureRequiredAttribute("RequiredMembers")]
+  method Orleans.Dataflow.ParallelismOptions <Clone>$()
+  method System.Boolean Equals(Orleans.Dataflow.ParallelismOptions other)
+  method virtual System.Boolean Equals(System.Object obj)
+  method virtual System.Int32 GetHashCode()
+  method virtual System.String ToString()
+  operator static System.Boolean op_Equality(Orleans.Dataflow.ParallelismOptions left, Orleans.Dataflow.ParallelismOptions right)
+  operator static System.Boolean op_Inequality(Orleans.Dataflow.ParallelismOptions left, Orleans.Dataflow.ParallelismOptions right)
+  property System.Int32 MaxConcurrency { get; set; }  [System.Runtime.CompilerServices.RequiredMemberAttribute]
+TYPE sealed class Orleans.Dataflow.PipelineDefinition
+  method Orleans.Dataflow.ResultSlot<TResult> ResultSlot<TResult>(System.String name, Orleans.Dataflow.ResultContract<TResult> contract)
+  method virtual System.String ToString()
+  property Orleans.Dataflow.Definition.GraphDocument Document { get; }
+  property Orleans.Dataflow.Definition.GraphFingerprint Fingerprint { get; }
+  property Orleans.Dataflow.Identity.GraphId Id { get; }
+  property Orleans.Dataflow.Identity.GraphRevision Revision { get; }
+TYPE enum Orleans.Dataflow.QueueOfferOutcome
+  IFACE System.IComparable
+  IFACE System.IConvertible
+  IFACE System.IFormattable
+  IFACE System.ISpanFormattable
+  field System.Int32 value__
+  field static const Orleans.Dataflow.QueueOfferOutcome Accepted = 0
+  field static const Orleans.Dataflow.QueueOfferOutcome Closed = 2
+  field static const Orleans.Dataflow.QueueOfferOutcome Dropped = 1
+  field static const Orleans.Dataflow.QueueOfferOutcome Failed = 3
+TYPE sealed class Orleans.Dataflow.RateLimitExceededException
+  BASE System.Exception
+  IFACE System.Runtime.Serialization.ISerializable
+  .ctor()
+  .ctor(System.String message)
+  .ctor(System.String message, System.Exception innerException)
+TYPE sealed class Orleans.Dataflow.RegisteredFanIn<TFirst, TSecond, TOut>
+  method virtual System.String ToString()
+  property Orleans.Dataflow.Definition.StageSpecification Specification { get; }
+  property Orleans.Dataflow.ElementContract<TFirst> First { get; }
+  property Orleans.Dataflow.ElementContract<TOut> Output { get; }
+  property Orleans.Dataflow.ElementContract<TSecond> Second { get; }
+  property Orleans.Dataflow.Identity.StageRef Stage { get; }
+TYPE sealed class Orleans.Dataflow.RegisteredFanIn<TIn, TOut>
+  method virtual System.String ToString()
+  property Orleans.Dataflow.Definition.StageSpecification Specification { get; }
+  property Orleans.Dataflow.ElementContract<TIn> Input { get; }
+  property Orleans.Dataflow.ElementContract<TOut> Output { get; }
+  property Orleans.Dataflow.Identity.StageRef Stage { get; }
+  property System.Int32 Inputs { get; }
+TYPE sealed class Orleans.Dataflow.RegisteredFanOut<TIn, TLeft, TRight>
+  method virtual System.String ToString()
+  property Orleans.Dataflow.Definition.StageSpecification Specification { get; }
+  property Orleans.Dataflow.ElementContract<TIn> Input { get; }
+  property Orleans.Dataflow.ElementContract<TLeft> Left { get; }
+  property Orleans.Dataflow.ElementContract<TRight> Right { get; }
+  property Orleans.Dataflow.Identity.StageRef Stage { get; }
+TYPE sealed class Orleans.Dataflow.RegisteredFanOut<TIn, TOut>
+  method virtual System.String ToString()
+  property Orleans.Dataflow.Definition.StageSpecification Specification { get; }
+  property Orleans.Dataflow.ElementContract<TIn> Input { get; }
+  property Orleans.Dataflow.ElementContract<TOut> Output { get; }
+  property Orleans.Dataflow.Identity.StageRef Stage { get; }
+  property System.Int32 Legs { get; }
+TYPE sealed class Orleans.Dataflow.RegisteredFlow<TIn, TOut>
+  method virtual System.String ToString()
+  property Orleans.Dataflow.Definition.StageSpecification Specification { get; }
+  property Orleans.Dataflow.ElementContract<TIn> Input { get; }
+  property Orleans.Dataflow.ElementContract<TOut> Output { get; }
+  property Orleans.Dataflow.Identity.StageRef Stage { get; }
+TYPE sealed class Orleans.Dataflow.RegisteredSink<TIn>
+  method virtual System.String ToString()
+  property Orleans.Dataflow.Definition.StageSpecification Specification { get; }
+  property Orleans.Dataflow.ElementContract<TIn> Input { get; }
+  property Orleans.Dataflow.Identity.StageRef Stage { get; }
+TYPE sealed class Orleans.Dataflow.RegisteredSinkWithResult<TIn, TResult>
+  method virtual System.String ToString()
+  property Orleans.Dataflow.Definition.StageSpecification Specification { get; }
+  property Orleans.Dataflow.ElementContract<TIn> Input { get; }
+  property Orleans.Dataflow.Identity.StageRef Stage { get; }
+  property Orleans.Dataflow.ResultContract<TResult> Result { get; }
+TYPE sealed class Orleans.Dataflow.RegisteredSource<TOut>
+  method virtual System.String ToString()
+  property Orleans.Dataflow.Definition.StageSpecification Specification { get; }
+  property Orleans.Dataflow.ElementContract<TOut> Output { get; }
+  property Orleans.Dataflow.Identity.StageRef Stage { get; }
+TYPE static class Orleans.Dataflow.RegisteredStage
+  method static Orleans.Dataflow.RegisteredFanIn<TFirst, TSecond, TOut> FanIn<TFirst, TSecond, TOut>(Orleans.Dataflow.Definition.IStageCatalog catalog, Orleans.Dataflow.Identity.StageRef stage, Orleans.Dataflow.ElementContract<TFirst> first, Orleans.Dataflow.ElementContract<TSecond> second, Orleans.Dataflow.ElementContract<TOut> output)
+  method static Orleans.Dataflow.RegisteredFanIn<TIn, TOut> FanIn<TIn, TOut>(Orleans.Dataflow.Definition.IStageCatalog catalog, Orleans.Dataflow.Identity.StageRef stage, Orleans.Dataflow.ElementContract<TIn> input, Orleans.Dataflow.ElementContract<TOut> output)
+  method static Orleans.Dataflow.RegisteredFanOut<TIn, TLeft, TRight> FanOut<TIn, TLeft, TRight>(Orleans.Dataflow.Definition.IStageCatalog catalog, Orleans.Dataflow.Identity.StageRef stage, Orleans.Dataflow.ElementContract<TIn> input, Orleans.Dataflow.ElementContract<TLeft> left, Orleans.Dataflow.ElementContract<TRight> right)
+  method static Orleans.Dataflow.RegisteredFanOut<TIn, TOut> FanOut<TIn, TOut>(Orleans.Dataflow.Definition.IStageCatalog catalog, Orleans.Dataflow.Identity.StageRef stage, Orleans.Dataflow.ElementContract<TIn> input, Orleans.Dataflow.ElementContract<TOut> output)
+  method static Orleans.Dataflow.RegisteredFlow<TIn, TOut> Flow<TIn, TOut>(Orleans.Dataflow.Definition.IStageCatalog catalog, Orleans.Dataflow.Identity.StageRef stage, Orleans.Dataflow.ElementContract<TIn> input, Orleans.Dataflow.ElementContract<TOut> output)
+  method static Orleans.Dataflow.RegisteredSink<TIn> Sink<TIn>(Orleans.Dataflow.Definition.IStageCatalog catalog, Orleans.Dataflow.Identity.StageRef stage, Orleans.Dataflow.ElementContract<TIn> input)
+  method static Orleans.Dataflow.RegisteredSinkWithResult<TIn, TResult> SinkWithResult<TIn, TResult>(Orleans.Dataflow.Definition.IStageCatalog catalog, Orleans.Dataflow.Identity.StageRef stage, Orleans.Dataflow.ElementContract<TIn> input, Orleans.Dataflow.ResultContract<TResult> result)
+  method static Orleans.Dataflow.RegisteredSource<TOut> Source<TOut>(Orleans.Dataflow.Definition.IStageCatalog catalog, Orleans.Dataflow.Identity.StageRef stage, Orleans.Dataflow.ElementContract<TOut> output)
+TYPE static class Orleans.Dataflow.ResultContract
+  method static Orleans.Dataflow.ResultContract<TResult> For<TResult>(System.String contractId, System.Int32 majorVersion)
+TYPE struct Orleans.Dataflow.ResultContract<TResult>  [System.Runtime.CompilerServices.IsReadOnlyAttribute]
+  BASE System.ValueType
+  IFACE System.IEquatable<Orleans.Dataflow.ResultContract<TResult>>
+  method System.Boolean Equals(Orleans.Dataflow.ResultContract<TResult> other)
+  method virtual System.Boolean Equals(System.Object obj)
+  method virtual System.Int32 GetHashCode()
+  method virtual System.String ToString()
+  operator static System.Boolean op_Equality(Orleans.Dataflow.ResultContract<TResult> left, Orleans.Dataflow.ResultContract<TResult> right)
+  operator static System.Boolean op_Inequality(Orleans.Dataflow.ResultContract<TResult> left, Orleans.Dataflow.ResultContract<TResult> right)
+  property Orleans.Dataflow.Identity.ContractReference Reference { get; }
+  property System.Boolean IsDefault { get; }
+  property System.Type ResultType { get; }
+TYPE struct Orleans.Dataflow.ResultSlot<TResult>  [System.Runtime.CompilerServices.IsReadOnlyAttribute]
+  BASE System.ValueType
+  IFACE System.IEquatable<Orleans.Dataflow.ResultSlot<TResult>>
+  method System.Boolean Equals(Orleans.Dataflow.ResultSlot<TResult> other)
+  method virtual System.Boolean Equals(System.Object obj)
+  method virtual System.Int32 GetHashCode()
+  method virtual System.String ToString()
+  operator static System.Boolean op_Equality(Orleans.Dataflow.ResultSlot<TResult> left, Orleans.Dataflow.ResultSlot<TResult> right)
+  operator static System.Boolean op_Inequality(Orleans.Dataflow.ResultSlot<TResult> left, Orleans.Dataflow.ResultSlot<TResult> right)
+  property Orleans.Dataflow.Definition.GraphFingerprint Graph { get; }
+  property Orleans.Dataflow.Identity.ResultSlotId Id { get; }
+  property System.Boolean IsDefault { get; }
+TYPE enum Orleans.Dataflow.RetryExhaustion
+  IFACE System.IComparable
+  IFACE System.IConvertible
+  IFACE System.IFormattable
+  IFACE System.ISpanFormattable
+  field System.Int32 value__
+  field static const Orleans.Dataflow.RetryExhaustion Fail = 0
+  field static const Orleans.Dataflow.RetryExhaustion RestartStage = 2
+  field static const Orleans.Dataflow.RetryExhaustion Resume = 1
+TYPE sealed class Orleans.Dataflow.RunEnding
+  method static Orleans.Dataflow.RunEnding Failed(System.String failureType, System.String failureMessage)
+  method virtual System.String ToString()
+  property Orleans.Dataflow.RunEndingKind Kind { get; }
+  property System.String FailureMessage { get; }
+  property System.String FailureType { get; }
+  property static Orleans.Dataflow.RunEnding Completed { get; }
+TYPE enum Orleans.Dataflow.RunEndingKind
+  IFACE System.IComparable
+  IFACE System.IConvertible
+  IFACE System.IFormattable
+  IFACE System.ISpanFormattable
+  field System.Int32 value__
+  field static const Orleans.Dataflow.RunEndingKind Completed = 0
+  field static const Orleans.Dataflow.RunEndingKind Failed = 1
+TYPE sealed class Orleans.Dataflow.RunHandle
+  IFACE System.IAsyncDisposable
+  method Orleans.Dataflow.RunSnapshot Snapshot()
+  method System.Threading.Tasks.Task PauseAsync(System.Threading.CancellationToken cancellationToken = default)
+  method System.Threading.Tasks.Task ResumeAsync()
+  method System.Threading.Tasks.Task<TResult> GetValueAsync<TResult>(Orleans.Dataflow.ResultSlot<TResult> slot, System.Threading.CancellationToken cancellationToken = default)
+  method System.Threading.Tasks.ValueTask DisposeAsync()
+  method System.Threading.Tasks.ValueTask ShutdownAsync()
+  method virtual System.String ToString()
+  property System.Boolean IsPaused { get; }
+  property System.Threading.Tasks.Task Completion { get; }
+  property System.Threading.Tasks.Task<Orleans.Dataflow.RunEnding> WatchTermination { get; }
+TYPE sealed class Orleans.Dataflow.RunSnapshot  [System.Runtime.CompilerServices.RequiredMemberAttribute]
+  IFACE System.IEquatable<Orleans.Dataflow.RunSnapshot>
+  .ctor()  [System.ObsoleteAttribute("Constructors of types with required members are not supported in this version of your compiler.", true),System.Runtime.CompilerServices.CompilerFeatureRequiredAttribute("RequiredMembers")]
+  method Orleans.Dataflow.RunSnapshot <Clone>$()
+  method System.Boolean Equals(Orleans.Dataflow.RunSnapshot other)
+  method virtual System.Boolean Equals(System.Object obj)
+  method virtual System.Int32 GetHashCode()
+  method virtual System.String ToString()
+  operator static System.Boolean op_Equality(Orleans.Dataflow.RunSnapshot left, Orleans.Dataflow.RunSnapshot right)
+  operator static System.Boolean op_Inequality(Orleans.Dataflow.RunSnapshot left, Orleans.Dataflow.RunSnapshot right)
+  property Orleans.Dataflow.RunSnapshotStatus Status { get; set; }  [System.Runtime.CompilerServices.RequiredMemberAttribute]
+  property System.Int64 Checkpoints { get; set; }  [System.Runtime.CompilerServices.RequiredMemberAttribute]
+  property System.Int64 DroppedElements { get; set; }  [System.Runtime.CompilerServices.RequiredMemberAttribute]
+  property System.Int64 PoisonElements { get; set; }  [System.Runtime.CompilerServices.RequiredMemberAttribute]
+  property System.Int64 SupervisedFailures { get; set; }  [System.Runtime.CompilerServices.RequiredMemberAttribute]
+  property System.TimeSpan TotalCheckpointHold { get; set; }  [System.Runtime.CompilerServices.RequiredMemberAttribute]
+TYPE enum Orleans.Dataflow.RunSnapshotStatus
+  IFACE System.IComparable
+  IFACE System.IConvertible
+  IFACE System.IFormattable
+  IFACE System.ISpanFormattable
+  field System.Int32 value__
+  field static const Orleans.Dataflow.RunSnapshotStatus Canceled = 3
+  field static const Orleans.Dataflow.RunSnapshotStatus Completed = 1
+  field static const Orleans.Dataflow.RunSnapshotStatus Failed = 2
+  field static const Orleans.Dataflow.RunSnapshotStatus Running = 0
+TYPE sealed class Orleans.Dataflow.RunnableGraph
+  method Orleans.Dataflow.PipelineDefinition AsPipeline(Orleans.Dataflow.Identity.GraphId id, Orleans.Dataflow.Identity.GraphRevision revision)
+  method Orleans.Dataflow.ResultSlot<TControl> Control<TControl>(System.String name)
+  method System.Boolean TryGetControl<TControl>(System.String name, out Orleans.Dataflow.ResultSlot<TControl>& slot)
+  method virtual System.String ToString()
+  property Orleans.Dataflow.Definition.GraphDocument Document { get; }
+  property Orleans.Dataflow.Definition.GraphFingerprint Fingerprint { get; }
+  property System.Collections.Generic.IReadOnlyList<Orleans.Dataflow.Identity.ResultSlotId> ResultSlots { get; }
+TYPE static class Orleans.Dataflow.Sink
+  method static Orleans.Dataflow.Sink<T> ForEach<T>(System.Action<T> callback)
+  method static Orleans.Dataflow.Sink<T> ForEachAsync<T>(Orleans.Dataflow.ParallelismOptions options, System.Func<T, System.Threading.CancellationToken, System.Threading.Tasks.Task> callback)
+  method static Orleans.Dataflow.Sink<T> Ignore<T>()
+  method static Orleans.Dataflow.Sink<T> ToChannel<T>(System.Threading.Channels.ChannelWriter<T> writer)
+  method static Orleans.Dataflow.SinkFactory<T> For<T>()
+  method static Orleans.Dataflow.SinkWithResult<T, System.Collections.Generic.IReadOnlyList<T>> Collect<T>(Orleans.Dataflow.CollectOptions options)
+  method static Orleans.Dataflow.SinkWithResult<T, System.Int64> Count<T>()
+  method static Orleans.Dataflow.SinkWithResult<T, T> First<T>()
+  method static Orleans.Dataflow.SinkWithResult<T, T> FirstOrDefault<T>()
+  method static Orleans.Dataflow.SinkWithResult<T, T> Last<T>()
+  method static Orleans.Dataflow.SinkWithResult<T, T> LastOrDefault<T>()
+  method static Orleans.Dataflow.SinkWithResult<T, TState> Aggregate<T, TState>(TState seed, System.Func<TState, T, TState> folder)
+  method static Orleans.Dataflow.SinkWithResult<T, TState> AggregateAsync<T, TState>(TState seed, System.Func<TState, T, System.Threading.CancellationToken, System.Threading.Tasks.Task<TState>> folder)
+TYPE sealed class Orleans.Dataflow.Sink<T>
+  method virtual System.String ToString()
+TYPE sealed class Orleans.Dataflow.SinkFactory<T>
+  method Orleans.Dataflow.Sink<T> ForEach(System.Action<T> callback)
+  method Orleans.Dataflow.Sink<T> ForEachAsync(Orleans.Dataflow.ParallelismOptions options, System.Func<T, System.Threading.CancellationToken, System.Threading.Tasks.Task> callback)
+  method Orleans.Dataflow.Sink<T> Ignore()
+  method Orleans.Dataflow.Sink<T> ToChannel(System.Threading.Channels.ChannelWriter<T> writer)
+  method Orleans.Dataflow.SinkWithResult<T, System.Collections.Generic.IReadOnlyList<T>> Collect(Orleans.Dataflow.CollectOptions options)
+  method Orleans.Dataflow.SinkWithResult<T, System.Int64> Count()
+  method Orleans.Dataflow.SinkWithResult<T, T> First()
+  method Orleans.Dataflow.SinkWithResult<T, T> FirstOrDefault()
+  method Orleans.Dataflow.SinkWithResult<T, T> Last()
+  method Orleans.Dataflow.SinkWithResult<T, T> LastOrDefault()
+  method Orleans.Dataflow.SinkWithResult<T, TState> Aggregate<TState>(TState seed, System.Func<TState, T, TState> folder)
+  method Orleans.Dataflow.SinkWithResult<T, TState> AggregateAsync<TState>(TState seed, System.Func<TState, T, System.Threading.CancellationToken, System.Threading.Tasks.Task<TState>> folder)
+  method virtual System.String ToString()
+TYPE sealed class Orleans.Dataflow.SinkWithResult<TIn, TResult>
+  method Orleans.Dataflow.Sink<TIn> ToSink()
+  method virtual System.String ToString()
+  operator static Orleans.Dataflow.Sink<TIn> op_Explicit(Orleans.Dataflow.SinkWithResult<TIn, TResult> sink)
+TYPE static class Orleans.Dataflow.Source  [System.Runtime.CompilerServices.ExtensionAttribute]
+  method static Orleans.Dataflow.RunnableGraph UnzipTo<TLeft, TRight>(Orleans.Dataflow.Source<System.ValueTuple<TLeft, TRight>> source, Orleans.Dataflow.Branch<TLeft> left, Orleans.Dataflow.Branch<TRight> right)  [System.Runtime.CompilerServices.ExtensionAttribute]
+  method static Orleans.Dataflow.Source<System.Int32> Range(System.Int32 start, System.Int32 count)
+  method static Orleans.Dataflow.Source<System.Int64> Tick(System.TimeSpan initialDelay, System.TimeSpan interval)
+  method static Orleans.Dataflow.Source<T> Cycle<T>(System.Collections.Generic.IEnumerable<T> elements)
+  method static Orleans.Dataflow.Source<T> Empty<T>()
+  method static Orleans.Dataflow.Source<T> Failed<T>(System.Exception exception)
+  method static Orleans.Dataflow.Source<T> From<T>(System.Collections.Generic.IEnumerable<T> elements)
+  method static Orleans.Dataflow.Source<T> FromAsyncEnumerable<T>(System.Collections.Generic.IAsyncEnumerable<T> elements)
+  method static Orleans.Dataflow.Source<T> FromAsyncFactory<T>(System.Func<System.Threading.CancellationToken, System.Threading.Tasks.Task<T>> factory)
+  method static Orleans.Dataflow.Source<T> FromChannel<T>(System.Threading.Channels.ChannelReader<T> reader)
+  method static Orleans.Dataflow.Source<T> FromFactory<T>(System.Func<T> factory)
+  method static Orleans.Dataflow.Source<T> FromRegistered<T>(Orleans.Dataflow.RegisteredSource<T> source, System.String occurrenceName, Orleans.Dataflow.Serialization.CanonicalJsonValue parameters)
+  method static Orleans.Dataflow.Source<T> FromTask<T>(System.Threading.Tasks.Task<T> task)
+  method static Orleans.Dataflow.Source<T> Never<T>()
+  method static Orleans.Dataflow.Source<T> Queue<T>(Orleans.Dataflow.BufferOptions options, System.String controlName)
+  method static Orleans.Dataflow.Source<T> Repeat<T>(T value, System.Int32 count)
+  method static Orleans.Dataflow.Source<T> Single<T>(T value)
+  method static Orleans.Dataflow.Source<T> Unfold<TState, T>(TState seed, Orleans.Dataflow.UnfoldGenerator<TState, T> generator)
+  method static Orleans.Dataflow.Source<T> UnfoldAsync<TState, T>(TState seed, Orleans.Dataflow.AsyncUnfoldGenerator<TState, T> generator)
+TYPE sealed class Orleans.Dataflow.Source<T>
+  method Orleans.Dataflow.Fork<T1, T2> Fork<T1, T2>(Orleans.Dataflow.Flow<T, T1> left, Orleans.Dataflow.Flow<T, T2> right)
+  method Orleans.Dataflow.RunnableGraph BalanceTo(Orleans.Dataflow.Branch<T>[] branches)
+  method Orleans.Dataflow.RunnableGraph BroadcastTo(Orleans.Dataflow.Branch<T>[] branches)
+  method Orleans.Dataflow.RunnableGraph FanOutTo<TLeft, TRight>(Orleans.Dataflow.RegisteredFanOut<T, TLeft, TRight> junction, System.String occurrenceName, Orleans.Dataflow.Serialization.CanonicalJsonValue parameters, Orleans.Dataflow.Branch<TLeft> left, Orleans.Dataflow.Branch<TRight> right)
+  method Orleans.Dataflow.RunnableGraph FanOutTo<TOut>(Orleans.Dataflow.RegisteredFanOut<T, TOut> junction, System.String occurrenceName, Orleans.Dataflow.Serialization.CanonicalJsonValue parameters, Orleans.Dataflow.Branch<TOut>[] branches)
+  method Orleans.Dataflow.RunnableGraph PartitionTo(System.Func<T, System.Int32> router, Orleans.Dataflow.Branch<T>[] branches)
+  method Orleans.Dataflow.RunnableGraph To(Orleans.Dataflow.RegisteredSink<T> sink, System.String occurrenceName, Orleans.Dataflow.Serialization.CanonicalJsonValue parameters)
+  method Orleans.Dataflow.RunnableGraph To(Orleans.Dataflow.Sink<T> sink)
+  method Orleans.Dataflow.RunnableGraph To(System.Func<Orleans.Dataflow.SinkFactory<T>, Orleans.Dataflow.Sink<T>> sink)
+  method Orleans.Dataflow.RunnableGraph To<TResult>(Orleans.Dataflow.RegisteredSinkWithResult<T, TResult> sink, System.String occurrenceName, Orleans.Dataflow.Serialization.CanonicalJsonValue parameters, System.String slotName, out Orleans.Dataflow.ResultSlot<TResult>& slot)
+  method Orleans.Dataflow.RunnableGraph To<TResult>(Orleans.Dataflow.SinkWithResult<T, TResult> sink)  [System.ObsoleteAttribute("A result-bearing sink needs a name for its result: write To(sink, "name") for the tuple form or To(sink, "name", out var slot) for the fluent form. To run the sink and deliberately discard its result, write To(sink.ToSink()).", true)]
+  method Orleans.Dataflow.RunnableGraph To<TResult>(Orleans.Dataflow.SinkWithResult<T, TResult> sink, System.String slotName, out Orleans.Dataflow.ResultSlot<TResult>& slot)
+  method Orleans.Dataflow.RunnableGraph To<TResult>(System.Func<Orleans.Dataflow.SinkFactory<T>, Orleans.Dataflow.SinkWithResult<T, TResult>> sink)  [System.ObsoleteAttribute("A result-bearing sink needs a name for its result: write To(s => s.Aggregate(seed, folder), "name") for the tuple form or To(s => s.Aggregate(seed, folder), "name", out var slot) for the fluent form. To run the sink and deliberately discard its result, write To(s => s.Aggregate(seed, folder).ToSink()).", true)]
+  method Orleans.Dataflow.RunnableGraph To<TResult>(System.Func<Orleans.Dataflow.SinkFactory<T>, Orleans.Dataflow.SinkWithResult<T, TResult>> sink, System.String slotName, out Orleans.Dataflow.ResultSlot<TResult>& slot)
+  method Orleans.Dataflow.Source<System.Collections.Generic.IReadOnlyList<T>> Grouped(System.Int32 size)
+  method Orleans.Dataflow.Source<System.Collections.Generic.IReadOnlyList<T>> GroupedWithin(System.Int32 maxElements, System.Int32 maxWeight, System.TimeSpan window, System.Func<T, System.Int32> cost)
+  method Orleans.Dataflow.Source<System.Collections.Generic.IReadOnlyList<T>> GroupedWithin(System.Int32 maxElements, System.TimeSpan window)
+  method Orleans.Dataflow.Source<System.Collections.Generic.IReadOnlyList<T>> Sliding(System.Int32 size, System.Int32 step)
+  method Orleans.Dataflow.Source<System.ValueTuple<T, T2>> Zip<T2>(Orleans.Dataflow.Source<T2> other)
+  method Orleans.Dataflow.Source<T> AlsoTo(Orleans.Dataflow.Branch<T> side)
+  method Orleans.Dataflow.Source<T> Append(Orleans.Dataflow.Source<T> tail)
+  method Orleans.Dataflow.Source<T> Append(T[] elements)
+  method Orleans.Dataflow.Source<T> Buffer(Orleans.Dataflow.BufferOptions options)
+  method Orleans.Dataflow.Source<T> Concat(Orleans.Dataflow.Source<T> next)
+  method Orleans.Dataflow.Source<T> DeduplicateConsecutive()
+  method Orleans.Dataflow.Source<T> Delay(System.TimeSpan delay, Orleans.Dataflow.BufferOptions holdback)
+  method Orleans.Dataflow.Source<T> Distinct(Orleans.Dataflow.DistinctOptions options)
+  method Orleans.Dataflow.Source<T> DivertTo(System.Func<T, System.Boolean> predicate, Orleans.Dataflow.Branch<T> side)
+  method Orleans.Dataflow.Source<T> InitialDelay(System.TimeSpan delay)
+  method Orleans.Dataflow.Source<T> Interleave(Orleans.Dataflow.Source<T> other, System.Int32 segmentSize)
+  method Orleans.Dataflow.Source<T> Merge(Orleans.Dataflow.Source<T> other)
+  method Orleans.Dataflow.Source<T> Merge(Orleans.Dataflow.Source<T> second, Orleans.Dataflow.Source<T> third)
+  method Orleans.Dataflow.Source<T> Prepend(Orleans.Dataflow.Source<T> head)
+  method Orleans.Dataflow.Source<T> Prepend(T[] elements)
+  method Orleans.Dataflow.Source<T> Skip(System.Int32 count)
+  method Orleans.Dataflow.Source<T> SkipWhile(System.Func<T, System.Boolean> predicate)
+  method Orleans.Dataflow.Source<T> SkipWithin(System.TimeSpan window)
+  method Orleans.Dataflow.Source<T> Take(System.Int32 count)
+  method Orleans.Dataflow.Source<T> TakeThrough(System.Func<T, System.Boolean> predicate)
+  method Orleans.Dataflow.Source<T> TakeWhile(System.Func<T, System.Boolean> predicate)
+  method Orleans.Dataflow.Source<T> TakeWithin(System.TimeSpan window)
+  method Orleans.Dataflow.Source<T> Throttle(Orleans.Dataflow.ThrottleOptions options)
+  method Orleans.Dataflow.Source<T> Throttle(Orleans.Dataflow.ThrottleOptions options, System.Func<T, System.Int32> cost)
+  method Orleans.Dataflow.Source<T> Timeout(System.TimeSpan gap)
+  method Orleans.Dataflow.Source<T> Valve(System.String controlName, Orleans.Dataflow.ValveMode initialMode = 0)
+  method Orleans.Dataflow.Source<T> Where(System.Func<T, System.Boolean> predicate)
+  method Orleans.Dataflow.Source<TNext> MergeMap<TNext>(Orleans.Dataflow.ParallelismOptions options, System.Func<T, System.Collections.Generic.IAsyncEnumerable<TNext>> selector)
+  method Orleans.Dataflow.Source<TNext> MergeMap<TNext>(Orleans.Dataflow.ParallelismOptions options, System.Func<T, System.Collections.Generic.IEnumerable<TNext>> selector)
+  method Orleans.Dataflow.Source<TNext> SelectMany<TNext>(System.Func<T, System.Collections.Generic.IEnumerable<TNext>> selector)
+  method Orleans.Dataflow.Source<TOut> CombineLatest<T2, TOut>(Orleans.Dataflow.Source<T2> other, System.Func<T, T2, TOut> combine)
+  method Orleans.Dataflow.Source<TOut> Durable<TOut>(Orleans.Dataflow.Flow<T, TOut> scope)
+  method Orleans.Dataflow.Source<TOut> FanIn<TOut>(Orleans.Dataflow.RegisteredFanIn<T, TOut> junction, System.String occurrenceName, Orleans.Dataflow.Serialization.CanonicalJsonValue parameters, Orleans.Dataflow.Source<T>[] others)
+  method Orleans.Dataflow.Source<TOut> FanIn<TSecond, TOut>(Orleans.Dataflow.RegisteredFanIn<T, TSecond, TOut> junction, System.String occurrenceName, Orleans.Dataflow.Serialization.CanonicalJsonValue parameters, Orleans.Dataflow.Source<TSecond> other)
+  method Orleans.Dataflow.Source<TOut> ForkMerge<TOut>(Orleans.Dataflow.Flow<T, TOut> left, Orleans.Dataflow.Flow<T, TOut> right)
+  method Orleans.Dataflow.Source<TOut> GroupBy<TKey, TOut>(Orleans.Dataflow.GroupByOptions options, System.Func<T, TKey> keySelector, Orleans.Dataflow.Flow<T, TOut> group)
+  method Orleans.Dataflow.Source<TOut> Select<TOut>(System.Func<T, TOut> selector)
+  method Orleans.Dataflow.Source<TOut> SelectAsync<TOut>(Orleans.Dataflow.ParallelismOptions options, System.Func<T, System.Threading.CancellationToken, System.Threading.Tasks.Task<TOut>> selector)
+  method Orleans.Dataflow.Source<TOut> SelectAsyncUnordered<TOut>(Orleans.Dataflow.ParallelismOptions options, System.Func<T, System.Threading.CancellationToken, System.Threading.Tasks.Task<TOut>> selector)
+  method Orleans.Dataflow.Source<TOut> SelectValueTaskAsync<TOut>(Orleans.Dataflow.ParallelismOptions options, System.Func<T, System.Threading.CancellationToken, System.Threading.Tasks.ValueTask<TOut>> selector)
+  method Orleans.Dataflow.Source<TOut> SelectValueTaskAsyncUnordered<TOut>(Orleans.Dataflow.ParallelismOptions options, System.Func<T, System.Threading.CancellationToken, System.Threading.Tasks.ValueTask<TOut>> selector)
+  method Orleans.Dataflow.Source<TOut> Supervised<TOut>(Orleans.Dataflow.SupervisionOptions options, Orleans.Dataflow.Flow<T, TOut> scope)
+  method Orleans.Dataflow.Source<TOut> Supervised<TOut>(Orleans.Dataflow.SupervisionOptions options, Orleans.Dataflow.Flow<T, TOut> scope, TOut fallback)
+  method Orleans.Dataflow.Source<TOut> Via<TOut>(Orleans.Dataflow.Flow<T, TOut> flow)
+  method Orleans.Dataflow.Source<TOut> Via<TOut>(Orleans.Dataflow.RegisteredFlow<T, TOut> flow, System.String occurrenceName, Orleans.Dataflow.Serialization.CanonicalJsonValue parameters)
+  method Orleans.Dataflow.Source<TOut> Zip<T2, TOut>(Orleans.Dataflow.Source<T2> other, System.Func<T, T2, TOut> combine)
+  method Orleans.Dataflow.Source<TState> Scan<TState>(TState seed, System.Func<TState, T, TState> folder)
+  method Orleans.Dataflow.Source<TState> Scan<TState>(TState seed, System.Func<TState, T, TState> folder, System.Func<TState, Orleans.Dataflow.Serialization.CanonicalJsonValue> export, System.Func<Orleans.Dataflow.Serialization.CanonicalJsonValue, TState> restore)
+  method Orleans.Dataflow.Source<TState> ScanAsync<TState>(TState seed, System.Func<TState, T, System.Threading.CancellationToken, System.Threading.Tasks.Task<TState>> folder)
+  method System.ValueTuple<Orleans.Dataflow.RunnableGraph, Orleans.Dataflow.ResultSlot<TResult>> To<TResult>(Orleans.Dataflow.RegisteredSinkWithResult<T, TResult> sink, System.String occurrenceName, Orleans.Dataflow.Serialization.CanonicalJsonValue parameters, System.String slotName)
+  method System.ValueTuple<Orleans.Dataflow.RunnableGraph, Orleans.Dataflow.ResultSlot<TResult>> To<TResult>(Orleans.Dataflow.SinkWithResult<T, TResult> sink, System.String slotName)
+  method System.ValueTuple<Orleans.Dataflow.RunnableGraph, Orleans.Dataflow.ResultSlot<TResult>> To<TResult>(System.Func<Orleans.Dataflow.SinkFactory<T>, Orleans.Dataflow.SinkWithResult<T, TResult>> sink, System.String slotName)
+  method virtual System.String ToString()
+TYPE sealed class Orleans.Dataflow.StreamTimeoutException
+  BASE System.TimeoutException
+  IFACE System.Runtime.Serialization.ISerializable
+  .ctor()
+  .ctor(System.String message)
+  .ctor(System.String message, System.Exception innerException)
+TYPE enum Orleans.Dataflow.SupervisionForm
+  IFACE System.IComparable
+  IFACE System.IConvertible
+  IFACE System.IFormattable
+  IFACE System.ISpanFormattable
+  field System.Int32 value__
+  field static const Orleans.Dataflow.SupervisionForm Recover = 3
+  field static const Orleans.Dataflow.SupervisionForm RestartStage = 1
+  field static const Orleans.Dataflow.SupervisionForm Resume = 0
+  field static const Orleans.Dataflow.SupervisionForm Retry = 2
+TYPE sealed class Orleans.Dataflow.SupervisionOptions  [System.Runtime.CompilerServices.RequiredMemberAttribute]
+  IFACE System.IEquatable<Orleans.Dataflow.SupervisionOptions>
+  .ctor()  [System.ObsoleteAttribute("Constructors of types with required members are not supported in this version of your compiler.", true),System.Runtime.CompilerServices.CompilerFeatureRequiredAttribute("RequiredMembers")]
+  method Orleans.Dataflow.SupervisionOptions <Clone>$()
+  method System.Boolean Equals(Orleans.Dataflow.SupervisionOptions other)
+  method virtual System.Boolean Equals(System.Object obj)
+  method virtual System.Int32 GetHashCode()
+  method virtual System.String ToString()
+  operator static System.Boolean op_Equality(Orleans.Dataflow.SupervisionOptions left, Orleans.Dataflow.SupervisionOptions right)
+  operator static System.Boolean op_Inequality(Orleans.Dataflow.SupervisionOptions left, Orleans.Dataflow.SupervisionOptions right)
+  property Orleans.Dataflow.RetryExhaustion OnExhaustion { get; set; }
+  property Orleans.Dataflow.SupervisionForm Form { get; set; }  [System.Runtime.CompilerServices.RequiredMemberAttribute]
+  property System.Collections.Generic.IReadOnlyList<System.TimeSpan> Backoff { get; set; }
+  property System.Int32 MaxAttempts { get; set; }
+TYPE enum Orleans.Dataflow.ThrottleMode
+  IFACE System.IComparable
+  IFACE System.IConvertible
+  IFACE System.IFormattable
+  IFACE System.ISpanFormattable
+  field System.Int32 value__
+  field static const Orleans.Dataflow.ThrottleMode Enforcing = 1
+  field static const Orleans.Dataflow.ThrottleMode Shaping = 0
+TYPE sealed class Orleans.Dataflow.ThrottleOptions  [System.Runtime.CompilerServices.RequiredMemberAttribute]
+  IFACE System.IEquatable<Orleans.Dataflow.ThrottleOptions>
+  .ctor()  [System.ObsoleteAttribute("Constructors of types with required members are not supported in this version of your compiler.", true),System.Runtime.CompilerServices.CompilerFeatureRequiredAttribute("RequiredMembers")]
+  method Orleans.Dataflow.ThrottleOptions <Clone>$()
+  method System.Boolean Equals(Orleans.Dataflow.ThrottleOptions other)
+  method virtual System.Boolean Equals(System.Object obj)
+  method virtual System.Int32 GetHashCode()
+  method virtual System.String ToString()
+  operator static System.Boolean op_Equality(Orleans.Dataflow.ThrottleOptions left, Orleans.Dataflow.ThrottleOptions right)
+  operator static System.Boolean op_Inequality(Orleans.Dataflow.ThrottleOptions left, Orleans.Dataflow.ThrottleOptions right)
+  property Orleans.Dataflow.ThrottleMode Mode { get; set; }
+  property System.Int32 Elements { get; set; }  [System.Runtime.CompilerServices.RequiredMemberAttribute]
+  property System.Nullable<System.Int32> MaximumBurst { get; set; }
+  property System.TimeSpan Per { get; set; }  [System.Runtime.CompilerServices.RequiredMemberAttribute]
+TYPE sealed class Orleans.Dataflow.TrackedKeyOverflowException
+  BASE System.Exception
+  IFACE System.Runtime.Serialization.ISerializable
+  .ctor()
+  .ctor(System.String message)
+  .ctor(System.String message, System.Exception innerException)
+TYPE delegate Orleans.Dataflow.UnfoldGenerator<TState, T>
+  BASE System.MulticastDelegate
+  IFACE System.ICloneable
+  IFACE System.Runtime.Serialization.ISerializable
+  .ctor(System.Object object, System.IntPtr method)
+  method virtual System.Boolean EndInvoke(out T& value, out TState& next, System.IAsyncResult result)
+  method virtual System.Boolean Invoke(TState state, out T& value, out TState& next)
+  method virtual System.IAsyncResult BeginInvoke(TState state, out T& value, out TState& next, System.AsyncCallback callback, System.Object object)
+TYPE struct Orleans.Dataflow.UnfoldStep<TState, T>  [System.Runtime.CompilerServices.IsReadOnlyAttribute]
+  BASE System.ValueType
+  IFACE System.IEquatable<Orleans.Dataflow.UnfoldStep<TState, T>>
+  .ctor(T Value, TState Next)
+  method System.Boolean Equals(Orleans.Dataflow.UnfoldStep<TState, T> other)
+  method System.Void Deconstruct(out T& Value, out TState& Next)
+  method virtual System.Boolean Equals(System.Object obj)
+  method virtual System.Int32 GetHashCode()
+  method virtual System.String ToString()
+  operator static System.Boolean op_Equality(Orleans.Dataflow.UnfoldStep<TState, T> left, Orleans.Dataflow.UnfoldStep<TState, T> right)
+  operator static System.Boolean op_Inequality(Orleans.Dataflow.UnfoldStep<TState, T> left, Orleans.Dataflow.UnfoldStep<TState, T> right)
+  property T Value { get; set; }
+  property TState Next { get; set; }
+TYPE enum Orleans.Dataflow.ValveMode
+  IFACE System.IComparable
+  IFACE System.IConvertible
+  IFACE System.IFormattable
+  IFACE System.ISpanFormattable
+  field System.Int32 value__
+  field static const Orleans.Dataflow.ValveMode Closed = 1
+  field static const Orleans.Dataflow.ValveMode Open = 0

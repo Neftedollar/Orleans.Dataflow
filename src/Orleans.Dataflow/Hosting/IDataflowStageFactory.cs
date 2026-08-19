@@ -74,4 +74,29 @@ public interface IDataflowStageFactory
 /// services beyond what it was constructed with, so a stage's behavior can never depend on which graph it
 /// happens to be standing in.
 /// </remarks>
-public readonly record struct DataflowStageRequest(StageNode Node, StageSpecification Specification);
+public readonly record struct DataflowStageRequest(StageNode Node, StageSpecification Specification)
+{
+    private readonly StageNode _node = Node;
+    private readonly StageSpecification _specification = Specification;
+
+    /// <summary>Gets the node as the document declares it.</summary>
+    /// <value>Never <see langword="null"/>.</value>
+    /// <exception cref="InvalidOperationException">This instance is the uninitialized default.</exception>
+    public StageNode Node
+    {
+        get => _node ?? throw DefaultAccess();
+        init => _node = value;
+    }
+
+    /// <summary>Gets the specification the node's stage reference resolved to.</summary>
+    /// <value>Never <see langword="null"/>.</value>
+    /// <exception cref="InvalidOperationException">This instance is the uninitialized default.</exception>
+    public StageSpecification Specification
+    {
+        get => _specification ?? throw DefaultAccess();
+        init => _specification = value;
+    }
+
+    private static InvalidOperationException DefaultAccess() =>
+        new($"The default {nameof(DataflowStageRequest)} describes no node. A factory receives its requests from the host; nothing constructs the uninitialized struct on purpose.");
+}

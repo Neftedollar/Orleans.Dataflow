@@ -12,6 +12,11 @@
     <PackageVersion Include="Microsoft.Orleans.Streaming" Version="10.2.2" />
     <PackageVersion Include="Microsoft.Orleans.TestingHost" Version="10.2.2" />
     <PackageVersion Include="FSharp.Core" Version="10.1.201" />
+    <!--
+      The reader behind the public-surface baselines. Test-only: the guard reads an assembly as metadata
+      rather than loading it, so nothing in it executes and nothing of it ships.
+    -->
+    <PackageVersion Include="System.Reflection.MetadataLoadContext" Version="10.0.0" />
     <PackageVersion Include="xunit.v3.mtp-v2" Version="4.0.0" />
   </ItemGroup>
 </Project>

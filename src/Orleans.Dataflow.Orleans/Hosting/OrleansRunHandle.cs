@@ -168,11 +168,13 @@ public sealed class OrleansRunHandle : IAsyncDisposable
     public Task<RunEnding> WatchTermination => _watch.Value;
 
     /// <summary>Takes one reading of this run's observable state.</summary>
+    /// <param name="cancellationToken">A token that stops this wait; it does not affect the run.</param>
     /// <returns>A task carrying the reading: status and the answering attempt's counters.</returns>
     /// <exception cref="PipelineRunLostException">
     /// The run is no longer active in the cluster and left nothing to continue, so there is no state to
     /// read.
     /// </exception>
+    /// <exception cref="OperationCanceledException"><paramref name="cancellationToken"/> fired.</exception>
     /// <remarks>
     /// <para>
     /// The remote counterpart of <see cref="RunHandle.Snapshot"/>, and one grain call per reading: unlike
@@ -186,14 +188,22 @@ public sealed class OrleansRunHandle : IAsyncDisposable
     /// activation is gone comes from the coordinator's register, which records outcomes and not
     /// diagnostics, so the counters there read zero. The continuous record is the metrics pipeline's.
     /// </para>
+    /// <para>
+    /// <b>The token cancels the caller's wait and nothing else.</b> It is applied with
+    /// <see cref="Task.WaitAsync(CancellationToken)"/>, so a monitor that gives up on a reading stops
+    /// waiting for it: the call it sent is already in flight and travels on, the grain answers it as it
+    /// would have, and the run neither notices nor changes. It is also observed between the two attempts
+    /// this method may make, so a token that fires while a fencing refusal is being adopted stops the
+    /// retry rather than paying for a second hop nobody is waiting for.
+    /// </para>
     /// </remarks>
-    public async Task<RunSnapshot> SnapshotAsync()
+    public async Task<RunSnapshot> SnapshotAsync(CancellationToken cancellationToken = default)
     {
         RunStatusSnapshot status;
 
         try
         {
-            status = await _run.GetStatusAsync(Epoch).ConfigureAwait(false);
+            status = await _run.GetStatusAsync(Epoch).WaitAsync(cancellationToken).ConfigureAwait(false);
         }
         catch (PipelineFencingException refused)
         {
@@ -202,7 +212,9 @@ public sealed class OrleansRunHandle : IAsyncDisposable
                 throw;
             }
 
-            status = await _run.GetStatusAsync(Epoch).ConfigureAwait(false);
+            cancellationToken.ThrowIfCancellationRequested();
+
+            status = await _run.GetStatusAsync(Epoch).WaitAsync(cancellationToken).ConfigureAwait(false);
         }
 
         return status.Phase switch
@@ -257,6 +269,14 @@ public sealed class OrleansRunHandle : IAsyncDisposable
     /// <c>[GenerateSerializer]</c> with <c>[Id]</c> on every member, or a registered serializer. A type
     /// that does not fails when a result is first sent rather than when the pipeline was written, which is
     /// the documented shape of that requirement and not a surprise this call can prevent.
+    /// </para>
+    /// <para>
+    /// What comes back is the envelope's boxed value, cast to the slot's own type argument and suppressed
+    /// rather than checked. The cast cannot fail for a slot a pipeline declared: a slot's type argument is
+    /// the sink's state type, and the run stored the value that sink produced. The suppression also covers
+    /// nullness, on the same reasoning: the result is exactly as nullable as the slot's type argument says,
+    /// so a non-nullable slot resolves to null only when the graph was fed one through a suppressed
+    /// annotation — the caller's own assertion, not this method's.
     /// </para>
     /// </remarks>
     public async Task<TResult> GetValueAsync<TResult>(
@@ -341,16 +361,25 @@ public sealed class OrleansRunHandle : IAsyncDisposable
     /// <summary>Asks this run to stop gracefully.</summary>
     /// <returns>A task that completes when the request has been delivered.</returns>
     /// <remarks>
+    /// <para>
     /// The run stops pulling from its source and everything already admitted keeps flowing, so an
     /// aggregate resolves its slot with the state accumulated so far and <see cref="Completion"/> reports
     /// success. The returned task reports only that the request was delivered; that the drain has finished
     /// is what <see cref="Completion"/> reports, and awaiting the drain inside a grain call would park an
-    /// activation for as long as the graph takes. It returns <see cref="Task"/> where the local handle's
-    /// returns <see cref="ValueTask"/>, and the asymmetry is deliberate: this method is a grain call and a
-    /// grain call is a <see cref="Task"/>, while the local one completes synchronously often enough for the
-    /// cheaper shape to be worth having.
+    /// activation for as long as the graph takes.
+    /// </para>
+    /// <para>
+    /// It takes no token because the request cannot be unsent and the wait is only its delivery, which
+    /// Orleans' response timeout already bounds: a caller that must abandon even that bounded wait wraps
+    /// the returned task in its own timeout, and the shutdown proceeds regardless.
+    /// </para>
+    /// <para>
+    /// It returns <see cref="ValueTask"/>, which is <see cref="RunHandle.ShutdownAsync"/>'s shape: the two
+    /// handles answer the same request, and a caller writing against both should not have to remember
+    /// which one it is holding.
+    /// </para>
     /// </remarks>
-    public async Task ShutdownAsync()
+    public async ValueTask ShutdownAsync()
     {
         try
         {

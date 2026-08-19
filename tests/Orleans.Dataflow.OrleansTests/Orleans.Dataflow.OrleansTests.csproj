@@ -5,6 +5,7 @@
   </PropertyGroup>
   <ItemGroup>
     <PackageReference Include="xunit.v3.mtp-v2" />
+    <PackageReference Include="System.Reflection.MetadataLoadContext" />
     <!--
       TestingHost carries the whole silo host transitively: Runtime (which is what Server is a meta-package
       over), Sdk with its code generator, Persistence.Memory, Reminders, and Streaming. Referencing Server
@@ -19,5 +20,8 @@
       shipped consumers, and a silo is where the factory half of it can be answered.
     -->
     <ProjectReference Include="../../src/Orleans.Dataflow.Testing/Orleans.Dataflow.Testing.csproj" />
+  </ItemGroup>
+  <ItemGroup>
+    <Compile Include="../shared/PublicSurfaceDump.cs" Link="ApiSurface/PublicSurfaceDump.cs" />
   </ItemGroup>
 </Project>

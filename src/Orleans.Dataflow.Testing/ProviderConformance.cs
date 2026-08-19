@@ -2,6 +2,7 @@ using System.Globalization;
 using System.Reflection;
 using System.Text;
 using System.Text.Json;
+using Orleans.Dataflow.Adapters;
 using Orleans.Dataflow.Definition;
 using Orleans.Dataflow.Hosting;
 using Orleans.Dataflow.Identity;
@@ -1333,7 +1334,7 @@ public sealed class ProviderConformance
                 _ = json.Append(',');
             }
 
-            _ = json.Append(JsonSerializer.Serialize(property.Name))
+            _ = json.Append(JsonText.Quote(property.Name))
                 .Append(':')
                 .Append(target ? raw : property.Value.GetRawText());
             first = false;
@@ -1346,7 +1347,7 @@ public sealed class ProviderConformance
                 _ = json.Append(',');
             }
 
-            _ = json.Append(JsonSerializer.Serialize(member)).Append(':').Append(raw);
+            _ = json.Append(JsonText.Quote(member)).Append(':').Append(raw);
         }
 
         return CanonicalJsonValue.Parse(json.Append('}').ToString());

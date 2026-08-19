@@ -65,9 +65,11 @@ vocabulary, registered spellings, and pipelines, with every spelling proven
 byte-identical to its C# twin. Not yet here: the 1.0 qualification pass — the
 [capability matrix](docs/CAPABILITY-MATRIX.md) tracks honest per-capability
 status, the [roadmap](docs/ROADMAP.md) orders the work ahead,
-[operations](docs/OPERATIONS.md) is the deployment runbook, and
+[operations](docs/OPERATIONS.md) is the deployment runbook,
 [benchmarks](docs/BENCHMARKS.md) is what the runtime costs and holds, with the
-grade of those numbers stated beside them.
+grade of those numbers stated beside them, and
+[compatibility](docs/COMPATIBILITY.md) is what it runs on and what its public
+API guarantee covers.
 
 ## Development policy before 1.0.0
 

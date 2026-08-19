@@ -71,11 +71,25 @@ public readonly record struct OrleansStreamAddress
     /// <param name="key">The stream key.</param>
     /// <returns>The address.</returns>
     /// <exception cref="ArgumentNullException">Any argument is <see langword="null"/>.</exception>
-    /// <exception cref="ArgumentException">Any argument is empty or white space.</exception>
+    /// <exception cref="ArgumentException">
+    /// Any argument is empty, is white space, or is not well-formed Unicode text. The message names which
+    /// of the three parts was wrong.
+    /// </exception>
     /// <remarks>
-    /// The three parts are checked for emptiness and for nothing else. Orleans imposes no grammar on a
-    /// stream namespace or key beyond their being text, and inventing one here would refuse addresses a
-    /// working deployment already uses.
+    /// <para>
+    /// The three parts are checked for emptiness and for being well-formed text, and for nothing else.
+    /// Orleans imposes no grammar on a stream namespace or key beyond their being text, and inventing one
+    /// here would refuse addresses a working deployment already uses.
+    /// </para>
+    /// <para>
+    /// <b>Well-formedness is not a grammar; it is the condition under which the address means one thing.</b>
+    /// A string carrying an unpaired surrogate has no exact UTF-8 form, and the JSON writer that puts this
+    /// address into a graph document substitutes <c>U+FFFD</c> for each one. Two distinct ill-formed keys
+    /// therefore used to collapse to the same payload bytes — two keys aliasing one stream — and the
+    /// document written named a key that is not the string the caller is holding. Refusing before the run
+    /// exists is this library's standing answer to that shape of problem, and it is why the check is here
+    /// and not at the writer, which can no longer tell which of three arguments was at fault.
+    /// </para>
     /// </remarks>
     public static OrleansStreamAddress Create(string provider, string streamNamespace, string key)
     {
@@ -114,11 +128,18 @@ public readonly record struct OrleansStreamAddress
     public override string ToString() =>
         IsDefault ? DefaultText : $"{_provider}/{_namespace}/{_key}";
 
-    /// <summary>Refuses a part that is null, empty, or white space.</summary>
+    /// <summary>Refuses a part that is null, empty, white space, or not well-formed text.</summary>
     /// <param name="value">The part.</param>
     /// <param name="parameter">The parameter name to report it under.</param>
     /// <exception cref="ArgumentNullException"><paramref name="value"/> is <see langword="null"/>.</exception>
-    /// <exception cref="ArgumentException"><paramref name="value"/> is empty or white space.</exception>
+    /// <exception cref="ArgumentException">
+    /// <paramref name="value"/> is empty, is white space, or carries an unpaired surrogate.
+    /// </exception>
+    /// <remarks>
+    /// The well-formedness scanner is the core package's, shared with the JSON string writer that would
+    /// otherwise have substituted for the same characters. One implementation of "is this text" is what
+    /// keeps the refusal here and the writing there from ever disagreeing about which strings are whole.
+    /// </remarks>
     private static void Require(string value, string parameter)
     {
         ArgumentNullException.ThrowIfNull(value, parameter);
@@ -127,6 +148,13 @@ public readonly record struct OrleansStreamAddress
         {
             throw new ArgumentException(
                 "A stream address names a provider, a namespace, and a key, and none of the three is empty.",
+                parameter);
+        }
+
+        if (!JsonText.IsWellFormed(value))
+        {
+            throw new ArgumentException(
+                $"The {parameter} of a stream address carries an unpaired surrogate, so it is not well-formed text and has no exact form on the wire. A document written from it would substitute the replacement character for that character, which would let two different addresses name one stream and would name a key that is not the one given here.",
                 parameter);
         }
     }

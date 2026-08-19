@@ -1,0 +1,91 @@
+# assembly: Orleans.Dataflow.Testing
+# public types: 15
+TYPE sealed class Orleans.Dataflow.Testing.FaultInjectedException
+  BASE System.Exception
+  IFACE System.Runtime.Serialization.ISerializable
+  .ctor()
+  .ctor(System.String message)
+  .ctor(System.String message, System.Exception innerException)
+  property System.Int64 Arrival { get; }
+TYPE enum Orleans.Dataflow.Testing.FaultPointMode
+  IFACE System.IComparable
+  IFACE System.IConvertible
+  IFACE System.IFormattable
+  IFACE System.ISpanFormattable
+  field System.Int32 value__
+  field static const Orleans.Dataflow.Testing.FaultPointMode Always = 2
+  field static const Orleans.Dataflow.Testing.FaultPointMode Never = 0
+  field static const Orleans.Dataflow.Testing.FaultPointMode Once = 1
+TYPE interface Orleans.Dataflow.Testing.IFaultPoint
+  method abstract System.Void Arm(Orleans.Dataflow.Testing.FaultPointMode mode, System.Int64 firstFailure = 1)
+  method abstract System.Void Disarm()
+  property abstract System.Int64 ElementsSeen { get; }
+  property abstract System.Int64 FaultsThrown { get; }
+TYPE interface Orleans.Dataflow.Testing.IMarkingSink
+  property abstract System.Int64 Mark { get; }
+TYPE interface Orleans.Dataflow.Testing.ISinkProbe<T>
+  method abstract System.Threading.Tasks.ValueTask ExpectCompletedAsync(System.Threading.CancellationToken cancellationToken = default)
+  method abstract System.Threading.Tasks.ValueTask<System.Exception> ExpectFailedAsync(System.Threading.CancellationToken cancellationToken = default)
+  method abstract System.Threading.Tasks.ValueTask<T> ReceiveAsync(System.Threading.CancellationToken cancellationToken = default)
+TYPE interface Orleans.Dataflow.Testing.ISourceProbe<in T>
+  method abstract System.Threading.Tasks.ValueTask EmitAsync(T element, System.Threading.CancellationToken cancellationToken = default)
+  method abstract System.Void Complete()
+  method abstract System.Void Fail(System.Exception exception)
+  property abstract System.Int64 PullsObserved { get; }
+TYPE sealed class Orleans.Dataflow.Testing.InMemoryCheckpointStore
+  IFACE Orleans.Dataflow.Hosting.ICheckpointStore
+  .ctor()
+  method System.Boolean Holds(Orleans.Dataflow.Identity.GraphId graph, Orleans.Dataflow.Identity.RunId run)
+  method System.Threading.Tasks.ValueTask ClearAsync(Orleans.Dataflow.Identity.GraphId graph, Orleans.Dataflow.Identity.RunId run, System.String expectedETag, System.Threading.CancellationToken cancellationToken = default)
+  method System.Threading.Tasks.ValueTask<System.Nullable<Orleans.Dataflow.Hosting.StoredCheckpoint>> ReadAsync(Orleans.Dataflow.Identity.GraphId graph, Orleans.Dataflow.Identity.RunId run, System.Threading.CancellationToken cancellationToken = default)
+  method System.Threading.Tasks.ValueTask<System.String> WriteAsync(Orleans.Dataflow.Identity.GraphId graph, Orleans.Dataflow.Identity.RunId run, Orleans.Dataflow.Serialization.CanonicalJsonValue checkpoint, System.String expectedETag, System.Threading.CancellationToken cancellationToken = default)
+  method System.Void Supersede(Orleans.Dataflow.Identity.GraphId graph, Orleans.Dataflow.Identity.RunId run)
+  property System.Int32 Count { get; }
+TYPE sealed class Orleans.Dataflow.Testing.ProbeTerminatedException
+  BASE System.InvalidOperationException
+  IFACE System.Runtime.Serialization.ISerializable
+  .ctor()
+  .ctor(System.String message)
+  .ctor(System.String message, System.Exception innerException)
+TYPE sealed class Orleans.Dataflow.Testing.ProviderConformance
+  method System.Void Check(System.String check)
+  method System.Void CheckAll()
+  method static Orleans.Dataflow.Testing.ProviderConformance Create(Orleans.Dataflow.Identity.ProviderId provider, Orleans.Dataflow.Definition.IStageCatalog catalog, Orleans.Dataflow.Hosting.IDataflowStageFactory factory, System.Collections.Generic.IEnumerable<Orleans.Dataflow.Testing.ProviderStageSample> samples)
+  method virtual System.String ToString()
+  property static System.Collections.Generic.IReadOnlyList<System.String> Checks { get; }
+TYPE sealed class Orleans.Dataflow.Testing.ProviderConformanceException
+  BASE System.Exception
+  IFACE System.Runtime.Serialization.ISerializable
+  .ctor()
+  .ctor(System.String message)
+  .ctor(System.String message, System.Exception innerException)
+  property System.Collections.Generic.IReadOnlyList<System.String> Failures { get; }
+TYPE sealed class Orleans.Dataflow.Testing.ProviderStageSample
+  method static Orleans.Dataflow.Testing.ProviderStageSample Create(Orleans.Dataflow.Identity.StageRef stage, Orleans.Dataflow.Serialization.CanonicalJsonValue parameters)
+  method static Orleans.Dataflow.Testing.ProviderStageSample Create(Orleans.Dataflow.Identity.StageRef stage, Orleans.Dataflow.Serialization.CanonicalJsonValue parameters, System.Collections.Generic.IEnumerable<System.String> optionalMembers)
+  method virtual System.String ToString()
+  property Orleans.Dataflow.Identity.StageRef Stage { get; }
+  property Orleans.Dataflow.Serialization.CanonicalJsonValue Parameters { get; }
+  property System.Collections.Generic.IReadOnlyList<System.String> OptionalMembers { get; }
+TYPE sealed class Orleans.Dataflow.Testing.TestClock
+  BASE System.TimeProvider
+  .ctor()
+  .ctor(System.DateTimeOffset start)
+  method System.Threading.Tasks.Task WaitForTimersAsync(System.Int32 count, System.Threading.CancellationToken cancellationToken = default)
+  method System.Void Advance(System.TimeSpan delta)
+  method virtual System.DateTimeOffset GetUtcNow()
+  method virtual System.Int64 GetTimestamp()
+  method virtual System.String ToString()
+  method virtual System.Threading.ITimer CreateTimer(System.Threading.TimerCallback callback, System.Object state, System.TimeSpan dueTime, System.TimeSpan period)
+  property System.Int32 PendingTimers { get; }
+  property virtual System.Int64 TimestampFrequency { get; }
+TYPE static class Orleans.Dataflow.Testing.TestFlow
+  method static Orleans.Dataflow.Flow<T, T> FaultPoint<T>(Orleans.Dataflow.Testing.FaultPointMode mode, System.Int32 firstFailure)
+  method static Orleans.Dataflow.Flow<T, T> FaultPoint<T>(Orleans.Dataflow.Testing.FaultPointMode mode, System.Int32 firstFailure, System.Func<System.Int64, System.Exception> fault)
+  method static Orleans.Dataflow.Flow<T, T> FaultPoint<T>(System.String controlName, Orleans.Dataflow.Testing.FaultPointMode mode, System.Int32 firstFailure)
+  method static Orleans.Dataflow.Flow<T, T> FaultPoint<T>(System.String controlName, Orleans.Dataflow.Testing.FaultPointMode mode, System.Int32 firstFailure, System.Func<System.Int64, System.Exception> fault)
+TYPE static class Orleans.Dataflow.Testing.TestSink
+  method static Orleans.Dataflow.Sink<T> Marking<T>(System.String controlName, System.Action<T> commit)
+  method static Orleans.Dataflow.Sink<T> Probe<T>(System.String controlName)
+TYPE static class Orleans.Dataflow.Testing.TestSource
+  method static Orleans.Dataflow.Source<T> Probe<T>(System.String controlName)

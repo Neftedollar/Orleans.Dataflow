@@ -85,14 +85,18 @@ public sealed class LostRunObservationTests(MultiSiloCluster cluster) : IAsyncLi
         Assert.Equal(0, await cluster.ActivationsOfAsync(run));
 
         PipelineRunLostException lost = await Assert.ThrowsAsync<PipelineRunLostException>(
-            () => Deadline.Within(handle.SnapshotAsync(), $"the reading of {handle.RunId} answered"));
+            () => Deadline.Within(
+                handle.SnapshotAsync(TestContext.Current.CancellationToken),
+                $"the reading of {handle.RunId} answered"));
 
         Assert.Contains(handle.RunId, lost.Message, StringComparison.Ordinal);
 
         // A monitor is not a poll loop and does not retry: it reports the same loss again rather than
         // converging on something else.
         _ = await Assert.ThrowsAsync<PipelineRunLostException>(
-            () => Deadline.Within(handle.SnapshotAsync(), $"the second reading of {handle.RunId} answered"));
+            () => Deadline.Within(
+                handle.SnapshotAsync(TestContext.Current.CancellationToken),
+                $"the second reading of {handle.RunId} answered"));
 
         await handle.DisposeAsync();
     }
@@ -122,7 +126,7 @@ public sealed class LostRunObservationTests(MultiSiloCluster cluster) : IAsyncLi
         // reading resumes it and then reports a run that is running. Nothing here waits for a resume to be
         // triggered by something else, because nothing else triggers one.
         RunSnapshot resumed = await Deadline.Within(
-            handle.SnapshotAsync(),
+            handle.SnapshotAsync(TestContext.Current.CancellationToken),
             $"the durable run {handle.RunId} answered a reading after its host died");
 
         Assert.Equal(RunSnapshotStatus.Running, resumed.Status);

@@ -451,4 +451,37 @@ public sealed class DataflowStageRuntime
 public readonly record struct DataflowRunTokens(
     string RunIdentity,
     CancellationToken RunToken,
-    CancellationToken StopToken);
+    CancellationToken StopToken)
+{
+    private readonly string _runIdentity = RunIdentity;
+    private readonly CancellationToken _runToken = RunToken;
+    private readonly CancellationToken _stopToken = StopToken;
+
+    /// <summary>Gets the identity of the run opening the source.</summary>
+    /// <value>Never <see langword="null"/>.</value>
+    /// <exception cref="InvalidOperationException">This instance is the uninitialized default.</exception>
+    public string RunIdentity
+    {
+        get => _runIdentity ?? throw DefaultAccess();
+        init => _runIdentity = value;
+    }
+
+    /// <summary>Gets the token that cancels the run.</summary>
+    /// <exception cref="InvalidOperationException">This instance is the uninitialized default.</exception>
+    public CancellationToken RunToken
+    {
+        get => _runIdentity is null ? throw DefaultAccess() : _runToken;
+        init => _runToken = value;
+    }
+
+    /// <summary>Gets the token that asks the source to stop producing.</summary>
+    /// <exception cref="InvalidOperationException">This instance is the uninitialized default.</exception>
+    public CancellationToken StopToken
+    {
+        get => _runIdentity is null ? throw DefaultAccess() : _stopToken;
+        init => _stopToken = value;
+    }
+
+    private static InvalidOperationException DefaultAccess() =>
+        new($"The default {nameof(DataflowRunTokens)} names no run. A source receives its tokens from the host when the run opens it; a default token here would spell a run that never stops.");
+}

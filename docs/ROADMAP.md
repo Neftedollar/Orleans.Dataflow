@@ -347,6 +347,43 @@ harness alive. The honesty grade is printed on every report: bounds to
 within a factor, throughput to within an order of magnitude, recovery a
 floor that excludes detection and network.
 
+**M8.3 — API and binary-compatibility review, both frontends (done
+2026-08-19).** The review ran evidence-first: a sweep over six dimensions
+(nullability, cancellation, variance, trim/AOT, binary surface, the F#
+surface) that probed guards by mutation instead of reading them —
+deleting a variance annotation while leaving `PublicAPI.Unshipped.txt`
+untouched builds green, which proved the analyzer records neither
+variance, base types, nor attributes. The answer is a reflection surface
+snapshot per assembly (`MetadataLoadContext`, deterministic text, five
+checked-in baselines): it records what the analyzer is blind to —
+including `[Id(n)]` numbering, the wire contract a round-trip test can
+never catch renumbered, since a round-trip within one build always
+agrees with itself — and it is the first surface guard the F# assembly
+has at all. Fixes the evidence demanded: three provider-seam structs
+gained the default-access guard the other twenty-eight already had
+(their `NullReferenceException`s were reached by running, not read);
+`IIngressQueue<T>` became `IIngressQueue<in T>` — the one sound-and-
+missing variance on the surface, binary-breaking to add later;
+`OrleansRunHandle.ShutdownAsync` now returns `ValueTask`, deliberately
+reversing the M6-recorded asymmetry — two handles answering the same
+request should not make a caller remember which one it holds; and
+`SnapshotAsync` takes an optional token that cancels the caller's wait
+and nothing else. The deepest cut started as an AOT cleanup: every
+`JsonSerializer` call in the tree was a string-escaper in disguise, and
+the byte-equivalence probe for its replacement found the two encoders
+disagree on unpaired surrogates — the serializer silently substitutes
+U+FFFD, which let two distinct ill-formed stream keys collapse into one
+stream and masked a rule `CanonicalJsonValue.Parse` had held all along.
+The swap (29 sites, trim diagnostics 66 → 8) therefore shipped with a
+sanitizing helper pinned byte-identical by seeded sweeps, and with the
+rule restored at the edge: ten public registration methods across
+fifteen string arguments now refuse ill-formed UTF-16 by name, instead
+of writing a document that names a key the caller does not hold.
+`docs/COMPATIBILITY.md` records the platform matrix, the isolation of
+Orleans behind one assembly, what the API guarantee covers and excludes,
+and the honest per-assembly trim/AOT stance: no claim at 1.0, and
+Orleans 10.2.2 itself makes none.
+
 Deliverables:
 
 - all approved P0/P1 capability rows at Qualified or explicitly deferred with a release-blocking rationale;

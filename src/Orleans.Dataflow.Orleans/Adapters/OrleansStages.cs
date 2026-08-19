@@ -802,12 +802,16 @@ public static class OrleansStages
     /// <param name="key">The channel's key.</param>
     /// <returns>The address, in <see cref="BroadcastSourceNamespace"/>.</returns>
     /// <exception cref="ArgumentNullException">Either argument is <see langword="null"/>.</exception>
-    /// <exception cref="ArgumentException">Either argument is empty or white space.</exception>
+    /// <exception cref="ArgumentException">
+    /// Either argument is empty, is white space, or is not well-formed text.
+    /// </exception>
     /// <remarks>
     /// What a publisher writes to, and the one place the reserved namespace is spelled on the authoring
     /// side. A broadcast sink handed this address publishes into runs rather than into whatever the author
     /// happened to type, which is the whole reason the helper exists: two spellings of the namespace would
-    /// be a publication into silence.
+    /// be a publication into silence. The well-formedness half of the refusal is
+    /// <see cref="OrleansStreamAddress.Create(string, string, string)"/>'s and is not repeated here, so the
+    /// two spellings of a channel address refuse the same strings for the same stated reason.
     /// </remarks>
     public static OrleansStreamAddress BroadcastSourceChannel(string provider, string key)
     {
@@ -835,8 +839,9 @@ public static class OrleansStages
     /// <paramref name="ingress"/> is <see langword="null"/>.
     /// </exception>
     /// <exception cref="ArgumentException">
-    /// <paramref name="provider"/> or <paramref name="channel"/> is empty or white space, or
-    /// <paramref name="ingress"/> declares the backpressuring policy, which a shared relay cannot honor.
+    /// <paramref name="provider"/> or <paramref name="channel"/> is empty, is white space, or is not
+    /// well-formed text, or <paramref name="ingress"/> declares the backpressuring policy, which a shared
+    /// relay cannot honor.
     /// </exception>
     public static CanonicalJsonValue BroadcastSourceParameters<T>(
         BroadcastElementBinding<T> element,
@@ -846,8 +851,8 @@ public static class OrleansStages
     {
         ArgumentNullException.ThrowIfNull(element);
         ArgumentNullException.ThrowIfNull(ingress);
-        ArgumentException.ThrowIfNullOrWhiteSpace(provider);
-        ArgumentException.ThrowIfNullOrWhiteSpace(channel);
+        RequireChannelPart(provider);
+        RequireChannelPart(channel);
 
         if (ingress.OverflowPolicy is OverflowPolicy.Backpressure)
         {
@@ -1228,6 +1233,41 @@ public static class OrleansStages
         {
             throw new ArgumentException(
                 $"An Orleans adapter's payload requires a created {nameof(OrleansStreamAddress)}; the default value addresses nothing.",
+                parameter);
+        }
+    }
+
+    /// <summary>Refuses a channel part that is null, empty, white space, or not well-formed text.</summary>
+    /// <param name="value">The part.</param>
+    /// <param name="parameter">The caller's own parameter name, supplied by the compiler.</param>
+    /// <exception cref="ArgumentNullException"><paramref name="value"/> is <see langword="null"/>.</exception>
+    /// <exception cref="ArgumentException">
+    /// <paramref name="value"/> is empty, is white space, or carries an unpaired surrogate.
+    /// </exception>
+    /// <remarks>
+    /// The two parts of a broadcast channel are the one pair that reaches a payload without passing through
+    /// either a named binding or an <see cref="OrleansStreamAddress"/>, so the check they were missing is
+    /// made here rather than left to the writer. The well-formedness scanner is the core package's, the
+    /// same one the JSON string writer uses: one implementation of "is this text" is what keeps the refusal
+    /// here and the writing there from ever disagreeing about which strings are whole.
+    /// </remarks>
+    private static void RequireChannelPart(
+        string value,
+        [System.Runtime.CompilerServices.CallerArgumentExpression(nameof(value))] string? parameter = null)
+    {
+        ArgumentNullException.ThrowIfNull(value, parameter);
+
+        if (string.IsNullOrWhiteSpace(value))
+        {
+            throw new ArgumentException(
+                $"A broadcast channel is addressed by a non-empty {parameter}, because it is what a document carries in place of a CLR member.",
+                parameter);
+        }
+
+        if (!JsonText.IsWellFormed(value))
+        {
+            throw new ArgumentException(
+                $"The {parameter} of a broadcast channel carries an unpaired surrogate, so it is not well-formed text and has no exact form on the wire. A document written from it would substitute the replacement character for that character, which would let two different channels be addressed as one and would store a name that is not the one given here.",
                 parameter);
         }
     }

@@ -941,17 +941,25 @@ public static class BroadcastElementBinding
 /// The checks every named binding's factory applies to the name and the contracts it is given.
 /// </summary>
 /// <remarks>
-/// One place, so that four factories refuse the same things in the same words. A name is deliberately only
-/// checked for emptiness: it is a key in a deployment's own registry and never an identifier the definition
-/// plane parses, so imposing the identifier grammar on it would refuse names a deployment is entitled to
-/// use.
+/// One place, so that five factories refuse the same things in the same words. A name is checked for
+/// emptiness and for being well-formed text, and for nothing else: it is a key in a deployment's own
+/// registry and never an identifier the definition plane parses, so imposing the identifier grammar on it
+/// would refuse names a deployment is entitled to use. Well-formedness is not a grammar — it is the
+/// condition under which the name has an exact form on the wire at all.
 /// </remarks>
 internal static class OrleansBindingNames
 {
-    /// <summary>Refuses a name that is null, empty, or white space.</summary>
+    /// <summary>Refuses a name that is null, empty, white space, or not well-formed text.</summary>
     /// <param name="name">The name.</param>
     /// <exception cref="ArgumentNullException"><paramref name="name"/> is <see langword="null"/>.</exception>
-    /// <exception cref="ArgumentException"><paramref name="name"/> is empty or white space.</exception>
+    /// <exception cref="ArgumentException">
+    /// <paramref name="name"/> is empty, is white space, or carries an unpaired surrogate.
+    /// </exception>
+    /// <remarks>
+    /// The well-formedness scanner is the core package's, the same one the JSON string writer uses, and
+    /// sharing it is the point: one implementation of "is this text" is what keeps the refusal here and the
+    /// writing there from ever disagreeing about which names are whole.
+    /// </remarks>
     internal static void Require(string name)
     {
         ArgumentNullException.ThrowIfNull(name);
@@ -960,6 +968,13 @@ internal static class OrleansBindingNames
         {
             throw new ArgumentException(
                 "A named Orleans binding is addressed by a non-empty name, because the name is what a document carries in place of a CLR member.",
+                nameof(name));
+        }
+
+        if (!JsonText.IsWellFormed(name))
+        {
+            throw new ArgumentException(
+                "The name of a named Orleans binding carries an unpaired surrogate, so it is not well-formed text and has no exact form on the wire. A document written from it would substitute the replacement character for that character, which would let two different names address one binding and would store a name that is not the one registered here.",
                 nameof(name));
         }
     }

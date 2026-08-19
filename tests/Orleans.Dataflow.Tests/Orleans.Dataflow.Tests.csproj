@@ -5,7 +5,17 @@
   </PropertyGroup>
   <ItemGroup>
     <PackageReference Include="xunit.v3.mtp-v2" />
+    <PackageReference Include="System.Reflection.MetadataLoadContext" />
     <ProjectReference Include="../../src/Orleans.Dataflow/Orleans.Dataflow.csproj" />
     <ProjectReference Include="../../src/Orleans.Dataflow.Testing/Orleans.Dataflow.Testing.csproj" />
+    <!--
+      Referenced for its metadata rather than for its API: the F# frontend carries no PublicAPI analyzer,
+      so the surface guard here is the only thing that records its shape at all, and the guard needs the
+      assembly and FSharp.Core beside it in this project's output to read either one.
+    -->
+    <ProjectReference Include="../../src/Orleans.Dataflow.FSharp/Orleans.Dataflow.FSharp.fsproj" />
+  </ItemGroup>
+  <ItemGroup>
+    <Compile Include="../shared/PublicSurfaceDump.cs" Link="ApiSurface/PublicSurfaceDump.cs" />
   </ItemGroup>
 </Project>

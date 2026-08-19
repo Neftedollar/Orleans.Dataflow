@@ -52,11 +52,11 @@ internal static class StreamSourcePayload
         CanonicalJsonValue.Parse(string.Create(
             CultureInfo.InvariantCulture,
             $"{{\"{CapacityMember}\":{ingress.Capacity}," +
-            $"\"{ElementMember}\":{JsonSerializer.Serialize(element)}," +
-            $"\"{KeyMember}\":{JsonSerializer.Serialize(address.Key)}," +
-            $"\"{NamespaceMember}\":{JsonSerializer.Serialize(address.Namespace)}," +
+            $"\"{ElementMember}\":{JsonText.Quote(element)}," +
+            $"\"{KeyMember}\":{JsonText.Quote(address.Key)}," +
+            $"\"{NamespaceMember}\":{JsonText.Quote(address.Namespace)}," +
             $"\"{PolicyMember}\":\"{LocalBufferParameters.Spell(ingress.OverflowPolicy)}\"," +
-            $"\"{ProviderMember}\":{JsonSerializer.Serialize(address.Provider)}}}"));
+            $"\"{ProviderMember}\":{JsonText.Quote(address.Provider)}}}"));
 
     /// <summary>Reads a payload back into what it declares.</summary>
     /// <param name="parameters">The node's payload, in canonical form.</param>
@@ -159,10 +159,10 @@ internal static class StreamSinkPayload
     internal static CanonicalJsonValue Write(string element, OrleansStreamAddress address) =>
         CanonicalJsonValue.Parse(string.Create(
             CultureInfo.InvariantCulture,
-            $"{{\"{StreamSourcePayload.ElementMember}\":{JsonSerializer.Serialize(element)}," +
-            $"\"{StreamSourcePayload.KeyMember}\":{JsonSerializer.Serialize(address.Key)}," +
-            $"\"{StreamSourcePayload.NamespaceMember}\":{JsonSerializer.Serialize(address.Namespace)}," +
-            $"\"{StreamSourcePayload.ProviderMember}\":{JsonSerializer.Serialize(address.Provider)}}}"));
+            $"{{\"{StreamSourcePayload.ElementMember}\":{JsonText.Quote(element)}," +
+            $"\"{StreamSourcePayload.KeyMember}\":{JsonText.Quote(address.Key)}," +
+            $"\"{StreamSourcePayload.NamespaceMember}\":{JsonText.Quote(address.Namespace)}," +
+            $"\"{StreamSourcePayload.ProviderMember}\":{JsonText.Quote(address.Provider)}}}"));
 
     /// <summary>Reads a payload back into what it declares.</summary>
     /// <param name="parameters">The node's payload, in canonical form.</param>
@@ -272,7 +272,7 @@ internal static class GrainCallPayload
     {
         string outputMember = output is null
             ? string.Empty
-            : $",\"{OutputMember}\":{JsonSerializer.Serialize(output)}";
+            : $",\"{OutputMember}\":{JsonText.Quote(output)}";
         string timeoutMember = timeout is null
             ? string.Empty
             : string.Create(
@@ -281,8 +281,8 @@ internal static class GrainCallPayload
 
         return CanonicalJsonValue.Parse(string.Create(
             CultureInfo.InvariantCulture,
-            $"{{\"{CallMember}\":{JsonSerializer.Serialize(call)}," +
-            $"\"{InputMember}\":{JsonSerializer.Serialize(input)}," +
+            $"{{\"{CallMember}\":{JsonText.Quote(call)}," +
+            $"\"{InputMember}\":{JsonText.Quote(input)}," +
             $"\"{MaxInFlightMember}\":{maxInFlight}{outputMember}{timeoutMember}}}"));
     }
 
@@ -415,11 +415,11 @@ internal static class KeyedGrainCallPayload
 
         return CanonicalJsonValue.Parse(string.Create(
             CultureInfo.InvariantCulture,
-            $"{{\"{GrainCallPayload.CallMember}\":{JsonSerializer.Serialize(call)}," +
+            $"{{\"{GrainCallPayload.CallMember}\":{JsonText.Quote(call)}," +
             $"\"{DistributedMember}\":{(distributed ? "true" : "false")}," +
-            $"\"{GrainCallPayload.InputMember}\":{JsonSerializer.Serialize(input)}," +
+            $"\"{GrainCallPayload.InputMember}\":{JsonText.Quote(input)}," +
             $"\"{GrainCallPayload.MaxInFlightMember}\":{maxInFlight}," +
-            $"\"{GrainCallPayload.OutputMember}\":{JsonSerializer.Serialize(output)}{timeoutMember}}}"));
+            $"\"{GrainCallPayload.OutputMember}\":{JsonText.Quote(output)}{timeoutMember}}}"));
     }
 
     /// <summary>Reads a payload back into what it declares.</summary>
@@ -546,8 +546,8 @@ internal static class GrainEnumerablePayload
     /// <returns>The canonical payload.</returns>
     internal static CanonicalJsonValue Write(string source, string output) =>
         CanonicalJsonValue.Parse(
-            $"{{\"{OutputMember}\":{JsonSerializer.Serialize(output)}," +
-            $"\"{SourceMember}\":{JsonSerializer.Serialize(source)}}}");
+            $"{{\"{OutputMember}\":{JsonText.Quote(output)}," +
+            $"\"{SourceMember}\":{JsonText.Quote(source)}}}");
 
     /// <summary>Reads a payload back into what it declares.</summary>
     /// <param name="parameters">The node's payload, in canonical form.</param>
@@ -730,9 +730,9 @@ internal static class ObserverBridgePayload
     internal static CanonicalJsonValue Write(string bridge, string output, BufferOptions ingress) =>
         CanonicalJsonValue.Parse(string.Create(
             CultureInfo.InvariantCulture,
-            $"{{\"{BridgeMember}\":{JsonSerializer.Serialize(bridge)}," +
+            $"{{\"{BridgeMember}\":{JsonText.Quote(bridge)}," +
             $"\"{CapacityMember}\":{ingress.Capacity}," +
-            $"\"{OutputMember}\":{JsonSerializer.Serialize(output)}," +
+            $"\"{OutputMember}\":{JsonText.Quote(output)}," +
             $"\"{PolicyMember}\":\"{LocalBufferParameters.Spell(ingress.OverflowPolicy)}\"}}"));
 
     /// <summary>Reads a payload back into what it declares.</summary>
@@ -838,11 +838,11 @@ internal static class BroadcastSinkPayload
         string key,
         bool fireAndForgetDelivery) =>
         CanonicalJsonValue.Parse(
-            $"{{\"{ElementMember}\":{JsonSerializer.Serialize(element)}," +
+            $"{{\"{ElementMember}\":{JsonText.Quote(element)}," +
             $"\"{FireAndForgetMember}\":{(fireAndForgetDelivery ? "true" : "false")}," +
-            $"\"{KeyMember}\":{JsonSerializer.Serialize(key)}," +
-            $"\"{NamespaceMember}\":{JsonSerializer.Serialize(channelNamespace)}," +
-            $"\"{ProviderMember}\":{JsonSerializer.Serialize(provider)}}}");
+            $"\"{KeyMember}\":{JsonText.Quote(key)}," +
+            $"\"{NamespaceMember}\":{JsonText.Quote(channelNamespace)}," +
+            $"\"{ProviderMember}\":{JsonText.Quote(provider)}}}");
 
     /// <summary>Reads a payload back into what it declares.</summary>
     /// <param name="parameters">The node's payload, in canonical form.</param>
@@ -979,10 +979,10 @@ internal static class BroadcastSourcePayload
         CanonicalJsonValue.Parse(string.Create(
             CultureInfo.InvariantCulture,
             $"{{\"{CapacityMember}\":{ingress.Capacity}," +
-            $"\"{ElementMember}\":{JsonSerializer.Serialize(element)}," +
-            $"\"{KeyMember}\":{JsonSerializer.Serialize(key)}," +
+            $"\"{ElementMember}\":{JsonText.Quote(element)}," +
+            $"\"{KeyMember}\":{JsonText.Quote(key)}," +
             $"\"{PolicyMember}\":\"{LocalBufferParameters.Spell(ingress.OverflowPolicy)}\"," +
-            $"\"{ProviderMember}\":{JsonSerializer.Serialize(provider)}}}"));
+            $"\"{ProviderMember}\":{JsonText.Quote(provider)}}}"));
 
     /// <summary>Reads a payload back into what it declares.</summary>
     /// <param name="parameters">The node's payload, in canonical form.</param>
