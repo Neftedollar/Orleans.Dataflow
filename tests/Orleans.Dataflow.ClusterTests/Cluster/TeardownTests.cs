@@ -192,15 +192,22 @@ public sealed class TeardownTests(DataflowCluster cluster)
 
         // The other half of which token a sink carries, and the reason it is the run token rather than the
         // stop token: a shutdown stops production and lets everything already admitted reach the terminal,
-        // so a call in flight here must survive it. Released after the shutdown was asked for, every element
-        // still reaches the ledger and the run still ends cleanly; carrying the stop token instead, this
-        // call is cancelled the instant the shutdown lands and the elements behind it are lost.
+        // so a call in flight here must survive it. Released after the shutdown was asked for, the parked
+        // call finishes and the run ends cleanly; carrying the stop token instead, this call is cancelled
+        // the instant the shutdown lands, the element it was carrying is lost, and the run fails rather
+        // than completing.
         TestSignals.Raise(AdapterLedgerGrain.DrainRelease);
 
         await Deadline.Within(handle.Completion, "the run to drain and complete");
 
+        // Both assertions are about the call that was in flight, and neither is about how many elements
+        // came after it. A shutdown stops production, so how much of the feed had been admitted when this
+        // one landed is a property of how far the source had run ahead — which is a scheduling fact and
+        // not a promise the run makes. Asserting a count here asserted that production had finished, which
+        // is exactly what a shutdown is entitled not to let happen.
         Assert.Equal(TaskStatus.RanToCompletion, handle.Completion.Status);
-        Assert.Equal(4, AdapterObservations.Recorded.Count);
+        Assert.NotEmpty(AdapterObservations.Recorded);
+        Assert.Equal(0, AdapterObservations.InFlight);
     }
 
     [Fact]
