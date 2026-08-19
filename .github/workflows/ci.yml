@@ -33,3 +33,9 @@ jobs:
         run: dotnet build Orleans.Dataflow.slnx --no-restore --configuration Release
       - name: Test
         run: dotnet test Orleans.Dataflow.slnx --no-build --no-restore --configuration Release
+      # Tiny sizes, one run of everything, and nothing asserted about timing: what this step checks is that
+      # every benchmark scenario — including the one that deploys a cluster and kills a silo — still runs to
+      # completion, which is the only way a harness nobody runs on a schedule does not quietly rot. The
+      # harness exits non-zero when a scenario fails, so no extra assertion is needed here.
+      - name: Benchmark smoke
+        run: dotnet run --project benchmarks/Orleans.Dataflow.Benchmarks/Orleans.Dataflow.Benchmarks.csproj --no-build --no-restore --configuration Release -- --smoke

@@ -64,8 +64,10 @@ As of M7 the F# frontend ships beside it: the full linear and junction
 vocabulary, registered spellings, and pipelines, with every spelling proven
 byte-identical to its C# twin. Not yet here: the 1.0 qualification pass — the
 [capability matrix](docs/CAPABILITY-MATRIX.md) tracks honest per-capability
-status, the [roadmap](docs/ROADMAP.md) orders the work ahead, and
-[operations](docs/OPERATIONS.md) is the deployment runbook.
+status, the [roadmap](docs/ROADMAP.md) orders the work ahead,
+[operations](docs/OPERATIONS.md) is the deployment runbook, and
+[benchmarks](docs/BENCHMARKS.md) is what the runtime costs and holds, with the
+grade of those numbers stated beside them.
 
 ## Development policy before 1.0.0
 

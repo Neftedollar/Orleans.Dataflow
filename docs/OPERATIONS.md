@@ -74,6 +74,13 @@ and is exact at a bound of one). A run that completes writes no checkpoint —
 its outcome is recorded on the coordinator's register instead, which is what
 keeps a finished run finished across activations.
 
+The cadence you choose is a trade against how much is replayed after a crash
+and how long the resumed run takes to start delivering again.
+[BENCHMARKS.md](BENCHMARKS.md) measures both on an in-process cluster, and
+states plainly what that measurement leaves out — no network, no real store,
+and no failure detection, which makes its recovery latency a floor rather than
+an estimate.
+
 ## Runbook: replacing a durable run
 
 `ReplaceDurableRunAsync` is the deployment saying "destroy what the name

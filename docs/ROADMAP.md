@@ -325,6 +325,28 @@ GOAL.md's own design, resting on the conformance-kit-proven extension
 contract). The benchmarks row is the one P1 Research row with no
 deferral: it is M8.2's work.
 
+**M8.2 — load, bounded-memory, and recovery evidence (done 2026-08-19).**
+Boundedness became a contract and a measurement at once. The suite gains
+growth-ratio assertions over six representative shapes — peak live heap
+must not grow with stream length while allocation must grow linearly
+inside a two-sided band, beside a collecting control built to grow so a
+blind instrument fails rather than passes — and a dependency-free
+harness publishes provenance-stamped numbers (docs/BENCHMARKS.md): peaks
+of 144 bytes to 17 KB against declared bounds over a million elements,
+four to six orders of magnitude under the control; throughput spanning
+two orders of magnitude with the cost landing on boundary crossings;
+silo-kill recovery at a 16 ms median with the replay window exactly the
+cadence's arithmetic. Building the instrument found five measurement
+defects the numbers would otherwise have inherited — GC.GetTotalMemory's
+±5% making a retained megabyte read zero, run residue polluting
+baselines, cross-test contamination of allocation ratios, and a recovery
+latency that came out negative because an in-process silo announces its
+own death — each closed in the instrument, and the assertions were run
+against the control to prove they can fail. A CI smoke step keeps the
+harness alive. The honesty grade is printed on every report: bounds to
+within a factor, throughput to within an order of magnitude, recovery a
+floor that excludes detection and network.
+
 Deliverables:
 
 - all approved P0/P1 capability rows at Qualified or explicitly deferred with a release-blocking rationale;

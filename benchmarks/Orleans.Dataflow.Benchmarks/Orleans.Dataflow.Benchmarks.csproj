@@ -1,0 +1,26 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <!--
+      Workstation, non-concurrent, and stated rather than inherited. The memory pass reads a live set,
+      and a live set read under a collector that defers work is a statement about the collector's budget
+      rather than about the graph. Workstation non-concurrent makes the forced collection the harness asks
+      for the whole story. It is a measurement choice and not a deployment recommendation — a silo runs
+      server GC, which is why docs/BENCHMARKS.md says the throughput numbers here are not silo numbers.
+    -->
+    <ServerGarbageCollection>false</ServerGarbageCollection>
+    <ConcurrentGarbageCollection>false</ConcurrentGarbageCollection>
+  </PropertyGroup>
+  <ItemGroup>
+    <!--
+      TestingHost carries the whole in-process silo host, which is what the recovery scenario needs to kill
+      one: the same dependency the Orleans test project takes, and taken here for the same reason. Nothing
+      else is referenced — the harness is deliberately dependency-free beyond the library and its host.
+    -->
+    <PackageReference Include="Microsoft.Orleans.TestingHost" />
+    <ProjectReference Include="../../src/Orleans.Dataflow/Orleans.Dataflow.csproj" />
+    <ProjectReference Include="../../src/Orleans.Dataflow.Orleans/Orleans.Dataflow.Orleans.csproj" />
+    <!-- The shipped in-memory checkpoint store, which is what the recovery scenario resumes through. -->
+    <ProjectReference Include="../../src/Orleans.Dataflow.Testing/Orleans.Dataflow.Testing.csproj" />
+  </ItemGroup>
+</Project>
