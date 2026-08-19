@@ -443,6 +443,38 @@ Still open, and deliberately: coordinator states are created per caller-chosen
 graph identity, and a claim hands the canonical document to any caller — both
 are the single-trust-domain verdict rather than oversights.
 
+**M8.5 — runnable samples (first half, done 2026-08-19).** `samples/` is one
+console application whose eight scenarios — first pipeline, backpressure,
+asynchronous work, junctions, windowing, failure, cluster, durable resume — are
+each authored twice, once in C# and once in F#, both running in the same
+process. It is not a brochure: the runner compares the two authorings'
+fingerprints and their observations and exits non-zero when any pair disagrees,
+so the equal-frontends claim is checked on every CI run rather than asserted in
+a README. Twelve graph pairs, twelve identical, sixty-six observations in
+agreement. Both projects use only the public API — no friend access, no test
+facilities, a real generic-host silo for the cluster scenario, and the sample's
+own fifty-line `ICheckpointStore` for the durable one, whose doc states which
+two of the contract's three duties it honors and which it fakes.
+
+Building it produced the clean-room evidence M8.5 exists to collect, and it is
+better evidence than a checklist because it came from someone using the surface
+rather than reviewing it. **Fingerprint equality does not imply behavioural
+equality** — changing an F# predicate's constant left the fingerprint identical,
+because delegate bodies never enter a document, and only the observation
+comparison caught the divergence. That is now demonstrated deliberately rather
+than assumed. **A registered flow cannot drop elements**: the published stage
+vocabulary has no filtering shape, so a provider that wants one folds it into a
+terminal — worth deciding on before 1.0. **Ordered asynchronous mapping holds a
+finished result until the ones before it are emitted**, so callbacks that wait
+on each other deadlock rather than degrade; the hazard was undocumented and now
+is. Nested supervision scopes are refused, so "retry, then fall back" is two
+graphs rather than one, which is the first thing a reader will try.
+
+What M8.5 still owes: the conceptual and API documentation itself, the
+migration and versioning policy, and a getting-started verified by someone who
+did not write the library — the samples make that verification possible rather
+than substituting for it.
+
 Deliverables:
 
 - all approved P0/P1 capability rows at Qualified or explicitly deferred with a release-blocking rationale;

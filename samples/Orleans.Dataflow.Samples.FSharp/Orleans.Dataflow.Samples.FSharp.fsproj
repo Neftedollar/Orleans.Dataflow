@@ -1,0 +1,39 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <Description>The F# authoring of every Orleans.Dataflow sample scenario, plus the small kernel both frontends share.</Description>
+    <!-- Directory.Build.props pins the C# language version, which is not a valid F# one. -->
+    <LangVersion>latest</LangVersion>
+  </PropertyGroup>
+  <ItemGroup>
+    <!--
+      The shared kernel comes first and the eight authorings follow, one file per scenario. F# compiles in
+      file order and a file may only use what precedes it, so this list is also the dependency order: the
+      domain nothing depends on, then what the runner reads back, then the coordination the two timing
+      scenarios need, then the registered vocabulary the cluster scenario deploys.
+    -->
+    <Compile Include="Domain.fs" />
+    <Compile Include="Reporting.fs" />
+    <Compile Include="Coordination.fs" />
+    <Compile Include="Vocabulary.fs" />
+    <Compile Include="FirstPipeline.fs" />
+    <Compile Include="Backpressure.fs" />
+    <Compile Include="AsyncWork.fs" />
+    <Compile Include="Junctions.fs" />
+    <Compile Include="Windowing.fs" />
+    <Compile Include="Failure.fs" />
+    <Compile Include="Cluster.fs" />
+    <Compile Include="Durable.fs" />
+  </ItemGroup>
+  <ItemGroup>
+    <!--
+      Named rather than implied. Under central package management an implicit FSharp.Core neither restores
+      nor copies to the output folder, and the failure surfaces at run time as "could not load FSharp.Core"
+      rather than at build time as anything.
+    -->
+    <PackageReference Include="FSharp.Core" />
+    <ProjectReference Include="../../src/Orleans.Dataflow/Orleans.Dataflow.csproj" />
+    <ProjectReference Include="../../src/Orleans.Dataflow.FSharp/Orleans.Dataflow.FSharp.fsproj" />
+    <!-- The cluster scenario materializes its pipeline through the ordinary client host. -->
+    <ProjectReference Include="../../src/Orleans.Dataflow.Orleans/Orleans.Dataflow.Orleans.csproj" />
+  </ItemGroup>
+</Project>

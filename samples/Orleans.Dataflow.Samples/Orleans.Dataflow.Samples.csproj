@@ -1,0 +1,25 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <RootNamespace>Orleans.Dataflow.Samples</RootNamespace>
+  </PropertyGroup>
+  <ItemGroup>
+    <!--
+      Server is the silo meta-package: Runtime, the Sdk with its code generator, and the in-memory grain
+      storage the cluster scenario registers the coordinator's state provider over. It is what a deployment
+      references to host a silo, which is the point — the cluster scenario is meant to be readable as the
+      registration an operator writes rather than as a test fixture. Nothing test-only is referenced
+      anywhere in this application, deliberately: the samples are also the evidence that the public API is
+      enough on its own.
+    -->
+    <PackageReference Include="Microsoft.Orleans.Server" />
+    <ProjectReference Include="../../src/Orleans.Dataflow/Orleans.Dataflow.csproj" />
+    <ProjectReference Include="../../src/Orleans.Dataflow.Orleans/Orleans.Dataflow.Orleans.csproj" />
+    <!--
+      The F# half of the sample, holding the F# authoring of every scenario and the small kernel both
+      frontends share. Both authorings must run in one process, because comparing them is the whole point,
+      so one of the two has to be a library and the other the application that drives it.
+    -->
+    <ProjectReference Include="../Orleans.Dataflow.Samples.FSharp/Orleans.Dataflow.Samples.FSharp.fsproj" />
+  </ItemGroup>
+</Project>

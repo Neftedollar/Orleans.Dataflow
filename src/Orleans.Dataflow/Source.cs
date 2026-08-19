@@ -1023,10 +1023,20 @@ public sealed class Source<T>
     /// <see cref="ParallelismOptions.MaxConcurrency"/> is below one.
     /// </exception>
     /// <remarks>
+    /// <para>
     /// Up to <see cref="ParallelismOptions.MaxConcurrency"/> callbacks run at once and their results are
     /// emitted in the order their elements arrived, so a slow callback holds up emission but not admission.
     /// The callback receives the run's own cancellation token, which is cancelled both when the run is
     /// cancelled and when anything in the run fails.
+    /// </para>
+    /// <para>
+    /// <b>A finished result waits for the ones before it, which is what ordering costs.</b> Callbacks that
+    /// wait on each other therefore deadlock rather than degrade: an element whose callback cannot finish
+    /// until a later element's does can only be satisfied if that later element is admitted, and it is not
+    /// admitted while the window is full of results waiting to be emitted in order. A mapping whose
+    /// callbacks coordinate belongs in the unordered form, where a finished result is emitted as soon as it
+    /// exists.
+    /// </para>
     /// </remarks>
     public Source<TOut> SelectAsync<TOut>(
         ParallelismOptions options,

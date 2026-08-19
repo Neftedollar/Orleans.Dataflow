@@ -9,6 +9,10 @@
   <Folder Name="/benchmarks/">
     <Project Path="benchmarks/Orleans.Dataflow.Benchmarks/Orleans.Dataflow.Benchmarks.csproj" />
   </Folder>
+  <Folder Name="/samples/">
+    <Project Path="samples/Orleans.Dataflow.Samples/Orleans.Dataflow.Samples.csproj" />
+    <Project Path="samples/Orleans.Dataflow.Samples.FSharp/Orleans.Dataflow.Samples.FSharp.fsproj" />
+  </Folder>
   <Folder Name="/tests/">
     <Project Path="tests/Orleans.Dataflow.FSharpTests/Orleans.Dataflow.FSharpTests.fsproj" />
     <Project Path="tests/Orleans.Dataflow.OrleansTests/Orleans.Dataflow.OrleansTests.csproj" />

@@ -26,6 +26,10 @@ Three documents explain the system; everything else assumes them.
   by section number more often than they cite anything else, so a comment reading "ADR 0004
   section 7" is pointing at a numbered section of this file.
 
+To run something rather than read something, [`samples/`](samples) is one console application whose
+eight scenarios are each authored twice — once in C#, once in F# — and which fails if the two
+authorings do not produce byte-identical documents.
+
 Below those, [`docs/design/`](docs/design) holds one semantics contract per area — the
 [local](docs/design/LOCAL-RUNTIME.md) and [Orleans](docs/design/ORLEANS-RUNTIME.md)
 runtimes, the [definition model](docs/design/DEFINITION-MODEL.md), the

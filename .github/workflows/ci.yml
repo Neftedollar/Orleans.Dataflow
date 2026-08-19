@@ -39,3 +39,11 @@ jobs:
       # harness exits non-zero when a scenario fails, so no extra assertion is needed here.
       - name: Benchmark smoke
         run: dotnet run --project benchmarks/Orleans.Dataflow.Benchmarks/Orleans.Dataflow.Benchmarks.csproj --no-build --no-restore --configuration Release -- --smoke
+      # The smallest sizes that still exercise every scenario, including the one that stands up a silo:
+      # what this step checks is that the samples still run and that each scenario's two authorings — one
+      # C#, one F# — still build byte-identical documents, which is the claim the samples exist to make.
+      # A sample nobody runs on a schedule rots faster than anything else in a repository, and this one
+      # would rot silently, because a drifting frontend still compiles. The application exits non-zero when
+      # a scenario fails or when a pair disagrees, so no extra assertion is needed here.
+      - name: Samples smoke
+        run: dotnet run --project samples/Orleans.Dataflow.Samples/Orleans.Dataflow.Samples.csproj --no-build --no-restore --configuration Release -- --smoke
