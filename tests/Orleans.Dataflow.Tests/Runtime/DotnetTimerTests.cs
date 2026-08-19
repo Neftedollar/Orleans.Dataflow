@@ -18,6 +18,13 @@ namespace Orleans.Dataflow.Tests.Runtime;
 /// is quick, and every assertion would hold at any period.
 /// </para>
 /// <para>
+/// One test does wait for periods to pass, and it is the exception that states the rule: the claim that a
+/// slow consumer loses no tick is empty unless the consumer really was held across several of them. The wait
+/// is a rendezvous on a second <see cref="PeriodicTimer"/> of the same period rather than a delay of a
+/// length chosen by hand — this stage builds its own timer, so there is no clock a test could move — and the
+/// assertion that follows names a sequence of indices and no duration at all.
+/// </para>
+/// <para>
 /// The pipelines below mix a registered source with lambda operators, which is the local host's own
 /// affordance: the push vocabulary declares the same opaque element contract every local port declares, so
 /// a timer heads a chain of ordinary operators with nothing in between.
@@ -60,6 +67,59 @@ public sealed class DotnetTimerTests
         await run.Completion;
 
         Assert.Equal([0L, 1L, 2L], await run.GetValueAsync(seen, TestToken));
+    }
+
+    [Fact]
+    public async Task AConsumerSlowerThanThePeriodMissesNoTickBecauseThePullIsTheBackpressure()
+    {
+        // The row's claim, and the one place this stage differs from the local tick source: the timer is
+        // awaited on the run's own source thread and has no ingress behind it, so a consumer that is slower
+        // than the period makes the next tick later and never makes a tick vanish. TickSourceTests holds a
+        // consumer across three intervals and the numbering jumps to say how many were skipped; this holds
+        // one across three periods and the numbering is contiguous, because the index counts the ticks this
+        // run emitted rather than the periods that elapsed.
+        TimeSpan period = TimeSpan.FromMilliseconds(2);
+        Gate gate = new();
+        LocalDataflowHost host = TimerHost();
+        RunnableGraph graph = Source
+            .FromRegistered(
+                DotnetStages.Timer(),
+                "ticks",
+                DotnetStages.TimerParameters(period, tickLimit: 5))
+            .Select(tick =>
+            {
+                gate.Wait();
+
+                return tick;
+            })
+            .To(sink => sink.Collect(new CollectOptions { MaxElements = 8 }), "seen", out ResultSlot<IReadOnlyList<long>> seen);
+
+        await using RunHandle run = await host.MaterializeAsync(graph, TestToken);
+
+        // The run is inside the author's function holding the first tick, so the source is not awaiting the
+        // timer at all while the periods below come due.
+        await gate.Reached;
+
+        // Three whole periods, waited for rather than slept through, and on the very instrument the adapter
+        // uses. This file has no controlled clock because the stage builds a PeriodicTimer of its own, so
+        // "the consumer was held across three periods" is made a fact by a second timer of the same period
+        // reaching its third tick — and every assertion below would hold for any number of periods, which is
+        // why none of them names one.
+        using (PeriodicTimer elapsing = new(period))
+        {
+            for (int elapsed = 0; elapsed < 3; elapsed++)
+            {
+                Assert.True(await elapsing.WaitForNextTickAsync(TestToken));
+            }
+        }
+
+        gate.Open();
+
+        await run.Completion;
+
+        // Contiguous from zero with no gap anywhere: nothing was queued while the consumer was held and
+        // nothing was dropped, which is what "no ingress, no drops" means when the only pacing is the pull.
+        Assert.Equal([0L, 1L, 2L, 3L, 4L], await run.GetValueAsync(seen, TestToken));
     }
 
     [Fact]

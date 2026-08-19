@@ -293,7 +293,37 @@ Exit criteria:
 - the F# API does not depend on overload guessing, SRTP tricks, serialized closures, or mutable builders;
 - F#/C# compatibility tests prove both frontends produce compatible graph definitions with identical runtime semantics.
 
-## M8 — 1.0 qualification
+## M8 — 1.0 qualification (in flight; phase log below)
+
+**M8.1 — the qualification sweep (done 2026-08-19).** Every P0/P1
+capability row now reads Qualified or carries an explicit 1.0 verdict.
+The protocol: an evidence reconnaissance located the named tests behind
+every row whose cell stated a contract without naming proof (31 rows
+audited test-by-test, assertions read against the sentences); the
+architect judged each row against the Qualified bar — contract, failure,
+and integration tests proving the documented behavior — flipping 70 rows
+in all, four of them with a named boundary (element-denominated bounds;
+memory-provider scope; provider-batching backpressure; Orleans' own
+reminder semantics; the registered timer's real clock). Ten gaps the
+audit named were closed with tests rather than judged around: blueprint
+thread-safety under measured overlap, the structural
+nothing-on-the-wire-carries-credit sweep with a non-vacuity guard, F#
+`Async` cancellation observed via `Async.OnCancel` (probed first —
+async cancellation travels a continuation no `with` clause sees), the
+channel source through a real checkpoint and resume, the unheard-stream
+twin that makes publication-is-not-consumption a fact, timer tick
+contiguity under a held consumer, the observer bridge's previously
+unasserted `Failed` outcome, the broadcast ingress failing policy, a
+checked fold's overflow faulting instance-identical, and the .NET event
+wrap spelled and unhook-tested instead of described. Two rows that had
+advanced with empty proof cells (async mapping, slicing) got their
+sentences. Six P1 rows stay Research with explicit
+deferred-not-release-blocking verdicts (partition ownership,
+restart-section, resource unfold, controlled grain group, Kafka,
+database/outbox — the last two are optional provider packages by
+GOAL.md's own design, resting on the conformance-kit-proven extension
+contract). The benchmarks row is the one P1 Research row with no
+deferral: it is M8.2's work.
 
 Deliverables:
 

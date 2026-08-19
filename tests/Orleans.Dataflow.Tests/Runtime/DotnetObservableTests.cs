@@ -455,6 +455,54 @@ public sealed class DotnetObservableTests
             () => ObservableBinding.Create<string>("named", NoteContract, null!));
     }
 
+    [Fact]
+    public async Task ARealDotnetEventReachesARunThroughTheOneLineWrapAndIsUnhookedWhenTheRunEnds()
+    {
+        // The reason this vocabulary ships no event stage, spelled out rather than asserted in prose: an
+        // event is one adapter away from an IObservable — subscribe adds the handler, dispose removes it —
+        // and NoteBoard below is a real .NET event with nothing else on it. The half that matters is the
+        // second one. A wrap that only added would leave the publisher raising at a run that has gone, and
+        // that is exactly the lifetime a missing stage would otherwise have to be trusted about.
+        NoteBoard board = new();
+        ObservableBinding<string> binding = ObservableBinding.Create(
+            "board-notes",
+            NoteContract,
+            () => new EventObservable(board));
+        LocalDataflowHost host = HostFor(binding);
+        RunnableGraph graph = Source
+            .FromRegistered(
+                DotnetStages.Observable(binding),
+                "notes",
+                DotnetStages.ObservableParameters(binding, new BufferOptions { Capacity = 4 }))
+            .Take(2)
+            .To(sink => sink.Collect(new CollectOptions { MaxElements = 8 }), "seen", out ResultSlot<IReadOnlyList<string>> seen);
+
+        await using RunHandle run = await host.MaterializeAsync(graph, TestToken);
+
+        // A run subscribes at its first pull, which is a moment no caller controls, so the publisher's own
+        // add accessor is what says "the wrap is attached now".
+        await board.Handled;
+
+        Assert.Equal(1, board.Handlers);
+
+        board.Raise("a");
+        board.Raise("b");
+
+        await run.Completion;
+        await board.Unhandled;
+
+        // The subscription's disposal ran the remove accessor, so the event holds nothing: an assertion
+        // about the publisher's own handler list rather than about the adapter's bookkeeping.
+        Assert.Equal(0, board.Handlers);
+
+        // And a raise after the run is over reaches nobody, which is the same fact stated as a number: the
+        // deliveries stop at the two the run consumed.
+        board.Raise("c");
+
+        Assert.Equal(2, board.Deliveries);
+        Assert.Equal(["a", "b"], await run.GetValueAsync(seen, TestToken));
+    }
+
     /// <summary>Builds the ordinary graph: subscribe to one binding and collect what arrives.</summary>
     /// <param name="binding">The binding the document names.</param>
     /// <param name="ingress">The bounded ingress the pushes land in.</param>
@@ -470,4 +518,114 @@ public sealed class DotnetObservableTests
                 "notes",
                 DotnetStages.ObservableParameters(binding, ingress))
             .To(sink => sink.Collect(new CollectOptions { MaxElements = 16 }), "seen", out seen);
+
+    /// <summary>A publisher with one ordinary .NET event on it, and deliberately nothing else.</summary>
+    /// <remarks>
+    /// Written with explicit accessors rather than as a field-like event for one reason: the test's claim is
+    /// about the handler list, so adding and removing have to be observable. The list itself is what a
+    /// field-like event would hold, and nothing here changes what the event means.
+    /// </remarks>
+    private sealed class NoteBoard
+    {
+        private readonly Lock _gate = new();
+        private readonly TaskCompletionSource _handled = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        private readonly TaskCompletionSource _unhandled = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        private EventHandler<string>? _noted;
+        private int _deliveries;
+
+        /// <summary>One note, raised at whoever is subscribed, on the calling thread.</summary>
+        internal event EventHandler<string> Noted
+        {
+            add
+            {
+                lock (_gate)
+                {
+                    _noted += value;
+                }
+
+                _ = _handled.TrySetResult();
+            }
+
+            remove
+            {
+                lock (_gate)
+                {
+                    _noted -= value;
+                }
+
+                _ = _unhandled.TrySetResult();
+            }
+        }
+
+        /// <summary>Gets the task that completes once something has subscribed to the event.</summary>
+        internal Task Handled => _handled.Task;
+
+        /// <summary>Gets the task that completes once a subscription has been removed again.</summary>
+        internal Task Unhandled => _unhandled.Task;
+
+        /// <summary>Gets how many handlers the event is holding right now.</summary>
+        internal int Handlers
+        {
+            get
+            {
+                lock (_gate)
+                {
+                    return _noted?.GetInvocationList().Length ?? 0;
+                }
+            }
+        }
+
+        /// <summary>Gets how many raises found a handler to deliver to.</summary>
+        internal int Deliveries => Volatile.Read(ref _deliveries);
+
+        /// <summary>Raises the event, counting the raise only when there was somebody to deliver it to.</summary>
+        /// <param name="note">The note.</param>
+        internal void Raise(string note)
+        {
+            EventHandler<string>? subscribed;
+
+            lock (_gate)
+            {
+                subscribed = _noted;
+            }
+
+            if (subscribed is null)
+            {
+                return;
+            }
+
+            _ = Interlocked.Increment(ref _deliveries);
+
+            subscribed(this, note);
+        }
+    }
+
+    /// <summary>The whole of what wrapping a .NET event in an <see cref="IObservable{T}"/> takes.</summary>
+    /// <param name="board">The publisher whose event is being wrapped.</param>
+    /// <remarks>
+    /// Subscribing adds a handler that forwards to the observer; disposing removes it. That is the adapter
+    /// DotnetStages describes in place of an event stage, written here at the size the description claims.
+    /// </remarks>
+    private sealed class EventObservable(NoteBoard board) : IObservable<string>
+    {
+        /// <inheritdoc/>
+        public IDisposable Subscribe(IObserver<string> observer)
+        {
+            ArgumentNullException.ThrowIfNull(observer);
+
+            void Handler(object? sender, string note) => observer.OnNext(note);
+
+            board.Noted += Handler;
+
+            return new Unsubscribe(() => board.Noted -= Handler);
+        }
+    }
+
+    /// <summary>The disposal half of the wrap.</summary>
+    /// <param name="remove">What to do when the run lets go.</param>
+    private sealed class Unsubscribe(Action remove) : IDisposable
+    {
+        /// <inheritdoc/>
+        public void Dispose() => remove();
+    }
 }

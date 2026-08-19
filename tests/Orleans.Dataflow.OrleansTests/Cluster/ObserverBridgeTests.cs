@@ -135,6 +135,54 @@ public sealed class ObserverBridgeTests(DataflowCluster cluster)
     }
 
     [Fact]
+    public async Task AFullIngressUnderTheFailingPolicyTellsThePusherAndFaultsTheRun()
+    {
+        (PipelineDefinition pipeline, ResultSlot<long> _) = AdapterPipelines.GatedBridge(
+            "bridge-fails",
+            AdapterVocabulary.OrderBridge,
+            new BufferOptions { Capacity = 1, OverflowPolicy = OverflowPolicy.Fail },
+            "bridge-fails-entered",
+            "bridge-fails-release",
+            "bridge-fails-seen",
+            signalAt: int.MaxValue);
+
+        await using OrleansRunHandle handle = await cluster.Host.MaterializeAsync(pipeline, Token);
+        IObserverBridgeGrain bridge = Bridge(handle, AdapterVocabulary.OrderBridge.Name);
+
+        await Poll.UntilAsync(bridge.IsListeningAsync, "the run attached its receiver to the bridge");
+
+        Assert.Equal(DataflowPushOutcome.Accepted, await bridge.PushAsync(new AdapterOrder("push-1", 1)));
+
+        // The same arrangement the dropping test uses, so that the only difference between the two is the
+        // policy the document declared: the run is held inside the gate with the first element, the second
+        // push takes the queue's one place, and the third meets a full queue.
+        await TestSignals.Reached("bridge-fails-entered");
+
+        Assert.Equal(DataflowPushOutcome.Accepted, await bridge.PushAsync(new AdapterOrder("push-2", 2)));
+
+        // The third outcome, and the only one that is a statement about the run rather than about an
+        // element: a dropped push leaves the run alive and this one does not, so the pusher is told
+        // something different because something different happened.
+        Assert.Equal(DataflowPushOutcome.Failed, await bridge.PushAsync(new AdapterOrder("push-3", 3)));
+
+        TestSignals.Raise("bridge-fails-release");
+
+        PipelineRunFailedException failed =
+            await Assert.ThrowsAsync<PipelineRunFailedException>(() => handle.Completion);
+
+        Assert.Equal(typeof(BufferOverflowException).FullName, failed.FailureType);
+        Assert.Contains("overflow policy is 'Fail'", failed.FailureMessage, StringComparison.Ordinal);
+
+        // And the bridge let the run go on that answer rather than on the run's ending, which is what keeps
+        // a failed ingress from being asked a second time: every later push is refused outright.
+        await Poll.UntilAsync(
+            async () => !await bridge.IsListeningAsync(),
+            "the bridge stopped listening when its run's ingress failed");
+
+        Assert.Equal(DataflowPushOutcome.Closed, await bridge.PushAsync(new AdapterOrder("push-4", 4)));
+    }
+
+    [Fact]
     public async Task APushIntoAFullIngressUnderBackpressureWaitsForTheRunToMakeRoom()
     {
         (PipelineDefinition pipeline, ResultSlot<long> slot) = AdapterPipelines.GatedBridge(

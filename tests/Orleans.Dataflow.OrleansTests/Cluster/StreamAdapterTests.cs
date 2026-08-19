@@ -251,6 +251,61 @@ public sealed class StreamAdapterTests(DataflowCluster cluster)
     }
 
     [Fact]
+    public async Task AStreamSinkPublishingAtNobodyStillCompletesBecauseAcknowledgementIsNotConsumption()
+    {
+        AdapterObservations.Reset();
+
+        // The negative that gives the sink's acknowledgement boundary its meaning, run as a pair so that
+        // the difference between the two halves is the only variable: one graph, two streams, and a
+        // consumer grain on the first of them. What the run does is identical either way — the publications
+        // are acknowledged by the provider and the run ends — which is precisely the claim that
+        // acknowledgement is not end-to-end processing.
+        OrleansStreamAddress heard = AdapterPipelines.Stream("acknowledged-heard");
+        OrleansStreamAddress unheard = AdapterPipelines.Stream("acknowledged-unheard");
+
+        IAdapterStreamGrain consumer = cluster.Cluster.Client.GetGrain<IAdapterStreamGrain>("acknowledged-consumer");
+
+        await consumer.CollectAsync(heard.Provider, heard.Namespace, heard.Key);
+
+        await using (OrleansRunHandle watched = await cluster.Host.MaterializeAsync(
+            AdapterPipelines.FeedToStream("stream-acknowledged-heard", heard),
+            Token))
+        {
+            await watched.Completion;
+        }
+
+        await Poll.UntilAsync(() => AdapterObservations.Published.Count == 4, "the consumer grain read every price");
+
+        // What this graph publishes, by value, so that the unwatched run below is a claim about a known
+        // list rather than about an unknown one.
+        Assert.Equal(
+            [("order-1", 10L), ("order-2", 20L), ("order-3", 30L), ("order-4", 40L)],
+            AdapterObservations.Published.Select(static price => (price.Id, price.Total)));
+
+        Assert.Equal(0, await PriceSubscriptionsAsync(unheard));
+
+        await using (OrleansRunHandle unwatched = await cluster.Host.MaterializeAsync(
+            AdapterPipelines.FeedToStream("stream-acknowledged-unheard", unheard),
+            Token))
+        {
+            await unwatched.Completion;
+
+            RunStatusSnapshot status = await cluster.Cluster.Client
+                .GetGrain<IPipelineRunGrain>($"{unwatched.Ticket.GraphId}/{unwatched.RunId}")
+                .GetStatusAsync(unwatched.Epoch);
+
+            Assert.Equal(RunPhase.Completed, status.Phase);
+        }
+
+        // Four publications acknowledged and nothing consumed anywhere. The subscription count is this
+        // silo's client identity, so what it rules out is the run having subscribed to its own output; what
+        // rules out a consumer is that no grain was ever pointed at this stream, and the ledger the watched
+        // half filled is the evidence that a consumer would have shown up in it.
+        Assert.Equal(0, await PriceSubscriptionsAsync(unheard));
+        Assert.Equal(4, AdapterObservations.Published.Count);
+    }
+
+    [Fact]
     public async Task ACompletedRunLeavesNoSubscriptionBehind()
     {
         AdapterObservations.Reset();
@@ -388,6 +443,24 @@ public sealed class StreamAdapterTests(DataflowCluster cluster)
     {
         IList<StreamSubscriptionHandle<AdapterOrder>> handles = await Provider()
             .GetStream<AdapterOrder>(StreamId.Create(stream.Namespace, stream.Key))
+            .GetAllSubscriptionHandles();
+
+        return handles.Count;
+    }
+
+    /// <summary>Counts the subscriptions this silo's own client identity holds on one stream of prices.</summary>
+    /// <param name="stream">The stream.</param>
+    /// <returns>The count.</returns>
+    /// <remarks>
+    /// The same question as <see cref="SubscriptionsAsync"/> asked of the element type a stream sink
+    /// publishes, because a stream this suite publishes to carries prices and the ones it consumes carry
+    /// orders. It is a separate method rather than a type argument on the other so that the neighbouring
+    /// tests keep reading as questions about the stream they name.
+    /// </remarks>
+    private async Task<int> PriceSubscriptionsAsync(OrleansStreamAddress stream)
+    {
+        IList<StreamSubscriptionHandle<AdapterPrice>> handles = await Provider()
+            .GetStream<AdapterPrice>(StreamId.Create(stream.Namespace, stream.Key))
             .GetAllSubscriptionHandles();
 
         return handles.Count;

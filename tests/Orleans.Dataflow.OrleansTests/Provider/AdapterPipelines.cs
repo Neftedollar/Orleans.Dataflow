@@ -143,6 +143,34 @@ internal static class AdapterPipelines
         return graph.AsPipeline(GraphId.Create(id), GraphRevision.Create(1));
     }
 
+    /// <summary>Builds a pipeline that reads a grain enumeration, prices it, and publishes the prices.</summary>
+    /// <param name="id">The pipeline's identity.</param>
+    /// <param name="prices">The stream of prices to publish to.</param>
+    /// <returns>The pipeline.</returns>
+    /// <remarks>
+    /// The end-to-end pipeline with its stream source replaced by a finite one, so that a run of it ends on
+    /// its own rather than on a stop the test asks for. That is what lets a test say "the run completed"
+    /// about a graph whose terminal is a publication, without the completion having been arranged.
+    /// </remarks>
+    internal static PipelineDefinition FeedToStream(string id, OrleansStreamAddress prices)
+    {
+        RunnableGraph graph = Source
+            .FromRegistered(
+                OrleansStages.GrainEnumerable(AdapterVocabulary.Feed),
+                "feed",
+                OrleansStages.GrainEnumerableParameters(AdapterVocabulary.Feed))
+            .Via(
+                OrleansStages.GrainCall(AdapterVocabulary.Pricing),
+                "priced",
+                OrleansStages.GrainCallParameters(AdapterVocabulary.Pricing, maxInFlight: 1))
+            .To(
+                OrleansStages.StreamSink(AdapterVocabulary.PriceElement),
+                "published",
+                OrleansStages.StreamSinkParameters(AdapterVocabulary.PriceElement, prices));
+
+        return graph.AsPipeline(GraphId.Create(id), GraphRevision.Create(1));
+    }
+
     /// <summary>Builds a pipeline that reads a grain enumeration, prices it, and records the prices.</summary>
     /// <param name="id">The pipeline's identity.</param>
     /// <param name="source">The enumeration binding to open.</param>

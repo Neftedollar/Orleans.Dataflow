@@ -196,6 +196,56 @@ type OperatorBehaviorTests() =
         }
 
     [<Fact>]
+    member _.``a parked mapAsync computation observes the cancellation of the run that started it``() : Task =
+        task {
+            let entered = TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously)
+            let observed = TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously)
+            let parked = TaskCompletionSource<int>(TaskCreationOptions.RunContinuationsAsynchronously)
+
+            let graph =
+                Source.ofSeq [ 1 ]
+                |> Source.mapAsync (parallelism 1) (fun value ->
+                    async {
+                        // Async.OnCancel rather than a `with` clause, and the difference is the whole point:
+                        // cancellation in an F# workflow travels on a continuation of its own that no
+                        // exception handler sees, so a try/with here would pass by never running. A
+                        // registration on the workflow's own token fires when that token is cancelled, and
+                        // firing is the observation this test is about.
+                        let! registration = Async.OnCancel(fun () -> observed.TrySetResult() |> ignore)
+                        use _ = registration
+
+                        entered.TrySetResult() |> ignore
+
+                        let! held = Async.AwaitTask parked.Task
+
+                        return value + held
+                    })
+                |> Source.toSink Sink.ignore
+
+            let! run = host.MaterializeAsync(graph, token ())
+
+            // The computation is inside its own await with nothing to complete it, which is the one state a
+            // test can cancel a workflow in and know that what it observed was observed while parked.
+            do! entered.Task
+
+            let disposing = run.DisposeAsync().AsTask()
+
+            // The two tests above prove the run's token reaches the author's computation; this proves the
+            // computation is actually told when that token is cancelled. A stage that started the workflow
+            // beside the token rather than with it would leave this waiting forever.
+            do! observed.Task
+
+            // Released only now, and only so that nothing is left holding a continuation on a task that
+            // would never complete. The observation above had already happened, and it happened while the
+            // computation was still parked on this very task.
+            parked.TrySetResult 0 |> ignore
+
+            do! disposing
+
+            do! Assert.ThrowsAnyAsync<OperationCanceledException>(fun () -> run.Completion) :> Task
+        }
+
+    [<Fact>]
     member _.``mapValueTask transforms every element and preserves input order``() : Task =
         task {
             let! observed =

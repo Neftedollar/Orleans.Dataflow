@@ -299,6 +299,75 @@ public sealed class WireContractTests(DataflowCluster cluster)
         }
     }
 
+    [Fact]
+    public void NothingOnTheWireCarriesTheVocabularyOfACreditProtocol()
+    {
+        // The structural half of the capability matrix's credit row. This library's backpressure is the pull
+        // and the declared ingress bound, and a keyed call's credit is its own reply arriving — so there is
+        // no credit, demand, grant, window, or permit anywhere a message could carry one. Asserted as a
+        // sweep over the same contracts and interfaces the identity sweep walks, and for the same reason:
+        // the day somebody adds a grant message, this is what says so, rather than a design review that may
+        // not happen.
+        string[] protocol = ["Credit", "Demand", "Grant", "Window", "Permit"];
+
+        Type[] wire =
+        [
+            typeof(PipelineRunTicket),
+            typeof(RunStatusSnapshot),
+            typeof(ResultEnvelope),
+            typeof(PipelineCoordinatorState),
+            typeof(DurableRunDeclaration),
+            typeof(DurableRunClaim),
+            typeof(DurableRunRecord),
+        ];
+
+        foreach (Type contract in wire)
+        {
+            // A sweep over an empty list passes for the wrong reason, and a contract that lost its members
+            // to a refactoring is exactly how that would happen quietly.
+            Assert.NotEmpty(contract.GetProperties());
+
+            foreach (System.Reflection.PropertyInfo member in contract.GetProperties())
+            {
+                foreach (string word in protocol)
+                {
+                    Assert.False(
+                        member.Name.Contains(word, StringComparison.OrdinalIgnoreCase),
+                        $"{contract.Name}.{member.Name} names '{word}', which is the vocabulary of a credit protocol this library does not have.");
+                }
+            }
+        }
+
+        System.Reflection.MethodInfo[] calls =
+        [
+            .. typeof(IPipelineCoordinatorGrain).GetMethods(),
+            .. typeof(IPipelineRunGrain).GetMethods(),
+            .. typeof(IReminderTriggerGrain).GetMethods(),
+            .. typeof(IObserverBridgeGrain).GetMethods(),
+            .. typeof(IKeyedExecutorGrain).GetMethods(),
+            .. typeof(IDataflowPushReceiver).GetMethods(),
+        ];
+
+        Assert.NotEmpty(calls);
+
+        foreach (System.Reflection.MethodInfo member in calls)
+        {
+            foreach (string word in protocol)
+            {
+                Assert.False(
+                    member.Name.Contains(word, StringComparison.OrdinalIgnoreCase),
+                    $"{member.DeclaringType!.Name}.{member.Name} names '{word}', so this interface has a credit protocol on it.");
+
+                foreach (System.Reflection.ParameterInfo argument in member.GetParameters())
+                {
+                    Assert.False(
+                        argument.Name!.Contains(word, StringComparison.OrdinalIgnoreCase),
+                        $"{member.DeclaringType!.Name}.{member.Name} takes an argument named '{argument.Name}', so a caller is being asked to carry credit.");
+                }
+            }
+        }
+    }
+
     /// <summary>Sends a value through Orleans' serializer and reads it back.</summary>
     /// <typeparam name="T">The type being checked.</typeparam>
     /// <param name="value">The value.</param>

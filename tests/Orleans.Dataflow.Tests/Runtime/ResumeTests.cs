@@ -1,3 +1,4 @@
+using System.Threading.Channels;
 using Orleans.Dataflow.Hosting;
 using Orleans.Dataflow.Identity;
 using Orleans.Dataflow.Runtime;
@@ -402,6 +403,64 @@ public sealed class ResumeTests
     }
 
     [Fact]
+    public async Task AResumedRunOfAChannelSourceReadsWhateverTheChannelHoldsWhenItReopens()
+    {
+        InMemoryCheckpointStore store = new();
+        List<int> before = [];
+        List<int> after = [];
+        Channel<int> channel = Channel.CreateUnbounded<int>();
+
+        // The second source with no cursor, and it has none for a different reason than a queue: the reader
+        // is state the author owns, a run drains it rather than re-enumerating it, and there is no position
+        // a checkpoint could name. What a resume therefore reads is whatever the channel holds when the new
+        // attempt reopens it, which is the whole of "starts from now" said with elements.
+        await channel.Writer.WriteAsync(1, TestToken);
+        await channel.Writer.WriteAsync(2, TestToken);
+
+        await using (RunHandle attempt = await Host.MaterializeDurableAsync(
+            Channelled(channel, before),
+            Durable(store, "channelled", everyElements: 2),
+            TestToken))
+        {
+            while (attempt.Checkpoints == 0L)
+            {
+                TestToken.ThrowIfCancellationRequested();
+
+                await Task.Yield();
+            }
+
+            await attempt.ShutdownAsync();
+            await attempt.Completion;
+        }
+
+        LocalCheckpoint checkpoint = await StoredAsync(store, "channelled", TestToken);
+
+        Assert.Empty(checkpoint.Cursors);
+        Assert.Equal(2L, Mark(checkpoint));
+        Assert.Equal([1, 2], before);
+
+        // Written after the first attempt ended and before the second one starts, so the two elements the
+        // resumed run reads are exactly the ones the channel is holding for it.
+        await channel.Writer.WriteAsync(3, TestToken);
+        await channel.Writer.WriteAsync(4, TestToken);
+        channel.Writer.Complete();
+
+        await using (RunHandle attempt = await Host.MaterializeFromCheckpointAsync(
+            Channelled(channel, after),
+            Durable(store, "channelled", everyElements: 2),
+            TestToken))
+        {
+            await attempt.Completion;
+        }
+
+        // Nothing is replayed and nothing is skipped, because neither is a thing a channel can do: the
+        // resumed attempt saw the elements written since, and the mark it continued from is the only part of
+        // this run a checkpoint carried at all.
+        Assert.Equal([3, 4], after);
+        Assert.Equal(4L, Mark(await StoredAsync(store, "channelled", TestToken)));
+    }
+
+    [Fact]
     public async Task AnElementHeldBetweenACursorAndItsMarkIsLostByAResumeAndTheCheckpointSaysHowMany()
     {
         InMemoryCheckpointStore store = new();
@@ -448,6 +507,19 @@ public sealed class ResumeTests
         Assert.Equal(3, 8 - (first[0].Count * 1));
         Assert.DoesNotContain(second.SelectMany(group => group), element => element is 6 or 7 or 8);
     }
+
+    /// <summary>The graph the channel proof runs: a reader the author owns, into one marking sink.</summary>
+    /// <param name="channel">The channel whose reader the source drains.</param>
+    /// <param name="committed">The list the sink's side effect appends to.</param>
+    /// <returns>The closed graph.</returns>
+    /// <remarks>
+    /// Built twice per test — once for the attempt that stops and once for the attempt that resumes — and
+    /// the two are the same graph: a reader is a binding rather than content, exactly as a lambda is, so
+    /// both closures produce one fingerprint and the resume is a resume of this document.
+    /// </remarks>
+    private static RunnableGraph Channelled(Channel<int> channel, List<int> committed) =>
+        Source.FromChannel(channel.Reader)
+            .To(TestSink.Marking<int>("mark", committed.Add));
 
     /// <summary>The graph the loss-window measurement runs: a batch between the cursor and the mark.</summary>
     /// <param name="committed">The list the sink's side effect appends each committed group to.</param>

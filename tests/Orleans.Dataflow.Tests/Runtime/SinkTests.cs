@@ -91,6 +91,53 @@ public sealed class SinkTests
     }
 
     [Fact]
+    public async Task AFoldWhoseCheckedArithmeticOverflowsFaultsTheRunWithTheAuthorsOwnException()
+    {
+        // What a fold does about overflow is the author's arithmetic and nothing this runtime adds. A folder
+        // written with `checked` raises at the element that overflows, and the run reports that very
+        // instance: a runtime that caught and rewrapped it would make every author's catch block a guess,
+        // and one that folded through its own unchecked accumulator would silently decide numeric semantics
+        // an author had already spelled out.
+        RecordingEnumerable<int> elements = new(1, 2, 3);
+        OverflowException? raised = null;
+
+        RunnableGraph graph = Source.From(elements)
+            .To(
+                s => s.Aggregate(
+                    long.MaxValue - 1L,
+                    (sum, value) =>
+                    {
+                        try
+                        {
+                            return checked(sum + value);
+                        }
+                        catch (OverflowException failure)
+                        {
+                            // Captured on its way out rather than constructed here: the instance this test
+                            // compares against has to be the one the CLR raised for the author's own
+                            // expression, or the comparison proves nothing.
+                            raised = failure;
+
+                            throw;
+                        }
+                    }),
+                "total",
+                out ResultSlot<long> total);
+
+        await using RunHandle run = await Host.MaterializeAsync(graph, TestToken);
+
+        OverflowException faulted = await Assert.ThrowsAsync<OverflowException>(() => run.Completion);
+
+        Assert.Same(raised, faulted);
+        Assert.Same(faulted, await Assert.ThrowsAsync<OverflowException>(() => run.GetValueAsync(total, TestToken)));
+
+        // The seed plus one fits and the second element is the one that does not, so the run stopped at the
+        // element whose arithmetic failed rather than at the end of the sequence.
+        Assert.Equal(2, elements.Pulls);
+        Assert.Equal(1, elements.Releases);
+    }
+
+    [Fact]
     public async Task ForEachAsyncRunsUpToItsBoundOfCallbacksAtOnceAndNoMore()
     {
         TaskCompletionSource[] entered =

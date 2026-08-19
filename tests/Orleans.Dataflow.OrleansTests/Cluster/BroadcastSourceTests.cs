@@ -223,6 +223,52 @@ public sealed class BroadcastSourceTests(DataflowCluster cluster)
     }
 
     [Fact]
+    public async Task AFullIngressUnderTheFailingPolicyFailsTheRunAndTellsThePublisherNothing()
+    {
+        const string channel = "source-fails";
+
+        (PipelineDefinition pipeline, ResultSlot<long> _) = AdapterPipelines.GatedBroadcast(
+            "broadcast-source-fails",
+            AdapterVocabulary.BroadcastProvider,
+            channel,
+            new BufferOptions { Capacity = 1, OverflowPolicy = OverflowPolicy.Fail },
+            "source-fails-entered",
+            "source-fails-release",
+            "source-fails-seen",
+            signalAt: int.MaxValue);
+
+        await using OrleansRunHandle handle = await cluster.Host.MaterializeAsync(pipeline, Token);
+
+        await Attached(channel, 1);
+
+        _ = await Publish(AdapterVocabulary.BroadcastProvider, channel, "order-1");
+
+        // The dropping test's arrangement with one word changed in the document, so that the policy is the
+        // only difference: the run is held inside the gate with the first element, the second element takes
+        // the queue's one place, and the third arrives at a queue that is full.
+        await TestSignals.Reached("source-fails-entered");
+
+        Assert.Equal("published", await Publish(AdapterVocabulary.BroadcastProvider, channel, "order-2"));
+
+        // The publication that fails a run still succeeds, and that is the point: this provider awaits its
+        // subscribers, so a run that answered with a failure would otherwise have made its own trouble the
+        // publisher's. A subscriber has no standing to fail a channel it never told anything about itself.
+        Assert.Equal("published", await Publish(AdapterVocabulary.BroadcastProvider, channel, "order-3"));
+
+        // And the relay let the run go on that answer rather than waiting for it to end: Failed says nobody
+        // is listening any more, which is exactly what the dropping test asserts the negative of.
+        Assert.Equal(0, await Relay(channel).ListenerCountAsync());
+
+        TestSignals.Raise("source-fails-release");
+
+        PipelineRunFailedException failed = await Assert.ThrowsAsync<PipelineRunFailedException>(
+            () => Deadline.Within(handle.Completion, "the run failed on a full ingress"));
+
+        Assert.Equal(typeof(BufferOverflowException).FullName, failed.FailureType);
+        Assert.Contains("overflow policy is 'Fail'", failed.FailureMessage, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public async Task ARunThatEndsDetachesFromTheRelayAndTheRelayHoldsNothing()
     {
         const string channel = "source-detaches";
