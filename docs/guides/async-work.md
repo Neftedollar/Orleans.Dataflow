@@ -31,8 +31,9 @@ async Task LookUpAsync(string name, bool unordered)
     Countdown rest = new(Declared - 1);
     List<int> arrived = [];
 
-    // One call per reading. The first reading's call finishes last in its batch,
-    // so the difference between the two operators is a fact rather than a race.
+    // One call per reading. Reading 1's call is held until the rest of its batch
+    // has gone past, so the difference between the two operators is a fact rather
+    // than a race.
     async Task<int> PriceAsync(int reading, CancellationToken token)
     {
         await concurrency.EnterAsync(token);
@@ -41,7 +42,7 @@ async Task LookUpAsync(string name, bool unordered)
         {
             await rest.WaitAsync(token);
         }
-        else
+        else if (!unordered)
         {
             rest.Signal();
         }
@@ -51,10 +52,27 @@ async Task LookUpAsync(string name, bool unordered)
 
     Source<int> feed = Source.From(readings);
 
+    // Which of the two announces the rest of the batch is forced by the operator.
+    // Unordered is about emission, and a call returning is not emission — its
+    // result is still on its way to the sink — so there the sink announces, and
+    // reading 1 cannot come out first however the calls happen to be scheduled.
+    // Ordered cannot do the same: it holds a finished result until everything
+    // before it has been emitted, so a reading 1 waiting on emissions would be
+    // waiting for ones that cannot happen until reading 1 is emitted. There the
+    // calls announce themselves, and the answer is the operator's guarantee
+    // rather than the arrangement's.
     RunnableGraph graph = (unordered
             ? feed.SelectAsyncUnordered(inFours, PriceAsync)
             : feed.SelectAsync(inFours, PriceAsync))
-        .To(s => s.ForEach(arrived.Add));
+        .To(s => s.ForEach(price =>
+        {
+            arrived.Add(price);
+
+            if (unordered)
+            {
+                rest.Signal();
+            }
+        }));
 
     await using RunHandle run = await host.MaterializeAsync(graph);
 
@@ -179,10 +197,10 @@ dotnet run
 ```
 ordered    peak calls in flight 4  emitted 10 20 30 40 50 60 70 80
 ordered    in feed order: True   first reading emitted first: True
-unordered  peak calls in flight 4  emitted 20 30 40 10 50 60 70 80
+unordered  peak calls in flight 4  emitted 20 30 40 10 50 70 80 60
 unordered  in feed order: False   first reading emitted first: False
 ordered    still waiting when the two-second budget ran out, emitted 0
-unordered  finished, emitted 20 30 40 10 50 60 70 80
+unordered  finished, emitted 20 30 40 50 10 70 80 60
 ```
 
 The `unordered` lists are one real run: their exact order varies between runs,
@@ -214,7 +232,15 @@ allowed out.
   finished last, and reading 1 was still emitted first, because everything behind
   it waited.
 - **`SelectAsyncUnordered`** — each result is emitted as soon as it exists. Reading
-  1 came out fourth, because that is when it was ready.
+  1 came out after the rest of its batch, because that is when it was ready.
+
+The arrangement that produces those two lines is worth a second look, because it
+is the same trap in miniature. `first reading emitted first` is a statement about
+*emission*, and a call returning is not that — its result is still travelling to
+the sink, and the gap between the two events is real. So the unordered run has the
+sink announce each reading as it emits it. Only the ordered run can let the calls
+announce themselves, and it must: an ordered run whose calls waited on emission
+would deadlock for exactly the reason the next section gives.
 
 Ordered is the sensible default: most downstream code has an opinion about order
 even when it does not say so. Choose unordered when the calls vary a lot in

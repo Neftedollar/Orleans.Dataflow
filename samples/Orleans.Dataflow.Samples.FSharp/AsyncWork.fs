@@ -44,8 +44,9 @@ module AsyncWork =
             observations.Add(Observation.Of("declared-max-concurrency", declared))
             observations.Add(Observation.Of("orders-mapped", orders.Count))
 
-            // One authoring, run twice: everything except the operator's name is shared, so what the two
-            // runs differ by is the operator and not the arrangement around it.
+            // One authoring, run twice: the operator is what the two runs differ by, together with the one
+            // part of the arrangement the operator's own contract forces to differ with it — which of the
+            // two announces the rest of the batch. The note above the graph below is where that is argued.
             let attempt (name: string) (unordered: bool) =
                 task {
                     let concurrency = Concurrency declared
@@ -61,7 +62,9 @@ module AsyncWork =
 
                             if order.Sequence = 0 then
                                 do! others.WaitAsync token
-                            else
+                            elif not unordered then
+                                // Ordered only. See the sink below for who announces these orders in the
+                                // unordered run, and why it cannot be this line.
                                 others.Signal()
 
                             return OrderDocument.ofEvent order
@@ -73,10 +76,33 @@ module AsyncWork =
                         else
                             Source.mapTask options accept
 
+                    // Where the two runs stop being one arrangement, and the reason the callback above has a
+                    // branch in it. What the first order has to outlast is the rest of its batch being
+                    // *emitted*, and a callback returning is not that: its result is still on its way to the
+                    // sink, so an arrangement that counted returns would be counting the wrong event, and
+                    // would flip whenever the first order's result overtook one still in flight.
+                    //
+                    // Unordered: the sink announces each order as it emits it, which is the event the
+                    // observation is about, so the first order cannot be emitted first however the machine
+                    // schedules the batch.
+                    //
+                    // Ordered: the callbacks announce themselves instead, and they must. An ordered mapping
+                    // holds a finished result until everything before it has been emitted, so a first order
+                    // waiting to see the rest of its batch emitted would be waiting for emissions that
+                    // cannot happen until it is emitted itself — the same deadlock the note on Countdown
+                    // warns about, one step further in. Nothing is lost by it: an ordered mapping emits the
+                    // first order first because that is what ordered means, so this run's answer is the
+                    // operator's guarantee rather than the arrangement's.
                     let graph =
                         Source.ofSeq orders
                         |> mapping
-                        |> Source.toSink (Sink.forEach (fun (document: OrderDocument) -> arrived.Add document.OrderId))
+                        |> Source.toSink (
+                            Sink.forEach (fun (document: OrderDocument) ->
+                                arrived.Add document.OrderId
+
+                                if unordered then
+                                    others.Signal())
+                        )
 
                     use! run = host.MaterializeAsync(graph, cancellationToken)
 

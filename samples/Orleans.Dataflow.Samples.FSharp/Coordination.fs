@@ -149,16 +149,33 @@ type Concurrency(declared: int) =
 /// <remarks>
 /// <para>
 /// How the asynchronous scenario turns the difference between an ordered and an unordered mapping into a
-/// fact rather than a race. The first order's work waits until the rest of the first concurrent batch has
-/// finished, so those orders always complete before it does. An ordered mapping emits the first order first
-/// regardless, because ordering is about emission and not about completion; an unordered one emits it after
-/// them. Neither answer depends on how the machine was feeling.
+/// fact rather than a race. The first order's work waits until the rest of its concurrent batch has gone
+/// past, so an ordered mapping emits the first order first regardless — ordering is about emission and not
+/// about completion — and an unordered one emits it after them. Neither answer depends on how the machine
+/// was feeling.
 /// </para>
 /// <para>
-/// <b>The batch and not the whole feed, deliberately.</b> An ordered mapping holds a completed result until
-/// everything before it has been emitted, so making the first order wait for an order outside the declared
-/// concurrency window would wait for an order that can never be admitted. That is a deadlock rather than a
-/// demonstration, and it is the shape of mistake a bound this explicit is good at catching.
+/// <b>Who announces themselves is the whole subtlety, and it differs by run.</b> "A callback returned" and
+/// "that callback's element reached the sink" are two events with a gap between them: the result is handed
+/// to the stage's loop, which emits it on its own thread. An unordered run measures the second event, so the
+/// sink is what announces each order there; a first order that waited on callbacks returning instead would
+/// be racing that gap, and would occasionally be emitted first — which is the opposite of what the run says
+/// it demonstrates. This is not a scheduling detail a keener
+/// <see cref="T:System.Threading.Tasks.TaskCompletionSource"/> could close: no completion of a callback
+/// makes its element already emitted.
+/// </para>
+/// <para>
+/// <b>An ordered run must not do that.</b> An ordered mapping holds a finished result until everything
+/// before it has been emitted, so a first order waiting for the rest of its batch to be emitted would be
+/// waiting for emissions that cannot happen until it is emitted itself. There the callbacks announce
+/// themselves and nothing is lost by it, because the answer that run reports is the operator's guarantee
+/// rather than the arrangement's.
+/// </para>
+/// <para>
+/// <b>The batch and not the whole feed, deliberately.</b> The same hazard one step out: making the first
+/// order wait for an order outside the declared concurrency window would wait for an order that can never be
+/// admitted. That is a deadlock rather than a demonstration, and it is the shape of mistake a bound this
+/// explicit is good at catching.
 /// </para>
 /// <para>
 /// A tally of nothing is already complete, so a scenario that runs one element does not hang.
@@ -175,6 +192,12 @@ type Countdown(count: int) =
             reached.TrySetResult() |> ignore
 
     /// <summary>Announces one thing.</summary>
+    /// <remarks>
+    /// Called from inside a sink as readily as from inside a callback, which is to say from a run's own
+    /// segment thread as readily as from the thread pool. The tally is taken under the lock and the wait
+    /// completes asynchronously, so a sink that announces the last of a tally hands whatever was waiting on
+    /// it to the pool rather than running it inline on the thread that is in the middle of emitting.
+    /// </remarks>
     member _.Signal() =
         Monitor.Enter padlock
 
