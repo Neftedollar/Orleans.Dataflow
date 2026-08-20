@@ -237,6 +237,66 @@ stage renumbers everything after it, and nothing durable can be anchored to them
 A document containing any of them declares the capability `ephemeral-identity`
 about itself for exactly that reason.
 
+### Naming one
+
+A registered stage takes its name where it is attached — `Via(discount,
+"discount", …)`. A local stage is named with `Named`, which names the occurrence
+the value you are holding ends at:
+
+```csharp
+RunnableGraph graph = Source.From(readings).Named("intake")
+    .Buffer(new BufferOptions { Capacity = 8 }).Named("queue")
+    .Where(reading => reading >= 6).Named("keep")
+    .To(s => s.Count().Named("tally"), "seen", out ResultSlot<long> seen);
+```
+
+```fsharp
+let graph, seen =
+    Source.ofSeq readings |> Source.named "intake"
+    |> Source.buffer (BufferOptions(Capacity = 8)) |> Source.named "queue"
+    |> Source.filter (fun reading -> reading >= 6) |> Source.named "keep"
+    |> Source.toResult "seen" (Sink.count |> Sink.namedResult "tally")
+```
+
+Name every occurrence and the document stops declaring `ephemeral-identity`; its
+node identifiers are `intake`, `keep`, `queue`, `tally` instead of `stage-0001`
+and its siblings. Leave one unnamed and the token comes back — and the
+unnamed node is visible in the document, still carrying its number, which is
+usually enough to find what you missed.
+
+Three things about `Named` are worth knowing before you meet them.
+
+**A name is written once and never changed.** Naming an occurrence that already
+has a name is refused rather than performed, and the refusal shows both names. A
+name is an identity that a checkpoint, a diagnostic, and a document reader all
+anchor to, so replacing one quietly would move every anchor pointing at it.
+
+**Two occurrences may not share a name**, for the same reason two nodes may not
+share an identifier. The refusal is the one the fragment algebra already makes,
+and it lists every shared identifier.
+
+**A junction whose call does not hand back a value takes its name as an
+argument.** `BroadcastTo`, `BalanceTo`, `PartitionTo` and `UnzipTo` close the
+graph, and `Fork` hands back two open ends, so there is nothing left to write
+`Named` on:
+
+```csharp
+RunnableGraph graph = Source.Range(1, 10).Named("intake").BroadcastTo("fan", evens, odds);
+// nodes: even-out, fan, intake, keep-even, keep-odd, odd-out — and no ephemeral-identity
+```
+
+That is the same shape a registered junction has always had —
+`FanOutTo(junction, "fan", parameters, branches)` — rather than a rule of its
+own.
+
+Two places have no naming spelling and say so. The stages inside a group flow or
+a supervision scope are not nodes of the document at all, so a name written on
+one is refused: name the occurrence that *runs* the flow instead. And
+`Prepend(elements)` and `Append(elements)` build a source occurrence the
+shorthand cannot reach, so a graph using them keeps the token — write
+`Prepend(Source.From(elements).Named("header"))` when you need that occurrence
+named.
+
 ## Identity and revision
 
 A `RunnableGraph` is anonymous: its document carries the placeholder identity

@@ -594,6 +594,44 @@ this page that cannot be called.
 | `flow.Via(registeredFlow, occurrenceName, parameters)` | `Flow.andThenRegistered stage occurrenceName parameters flow` | The flow form of the same. |
 | `graph.AsPipeline(id, revision)` | `Pipeline.define id revision graph` | Gives a closed graph an identity and a [revision](glossary.md#revision), producing the `PipelineDefinition` a cluster can run. Refuses a graph carrying a delegate or an auto-generated occurrence name, listing every violation at once. |
 
+### Naming an occurrence
+
+An unnamed stage gets a positional identifier — `stage-0001` — and a document
+containing one declares `ephemeral-identity`. `Named` replaces that with a name
+of yours, on the occurrence the value you are holding ends at.
+
+| C# | F# | Names |
+|---|---|---|
+| `source.Named(name)` | `Source.named name source` | the occurrence at the source's open output |
+| `flow.Named(name)` | `Flow.named name flow` | the occurrence at the flow's open output |
+| `sink.Named(name)` | `Sink.named name sink` | the terminal |
+| `sinkWithResult.Named(name)` | `Sink.namedResult name sink` | the terminal that yields a value |
+
+The six junction calls that hand back no linear value take the name as an
+argument instead, exactly as a registered junction always has:
+
+| C# | F# |
+|---|---|
+| `BroadcastTo(name, branches…)` | `Source.broadcastToNamed name branches source` |
+| `BalanceTo(name, branches…)` | `Source.balanceToNamed name branches source` |
+| `PartitionTo(router, name, branches…)` | `Source.partitionToNamed router name branches source` |
+| `UnzipTo(name, left, right)` | `Source.unzipToNamed name left right source` |
+| `Fork(name, left, right)` | `Source.forkNamed name left right source` |
+| `ForkMerge(name, left, right)` | `Source.forkMergeNamed name left right source` |
+
+```csharp
+RunnableGraph graph = Source.Range(1, 10).Named("intake").BroadcastTo("fan", evens, odds);
+```
+
+A name is one identifier segment under the [node identifier](glossary.md#node)
+grammar. Naming an occurrence twice is refused rather than performed, two
+occurrences may not share a name, and a name written on a stage inside a group
+flow or a supervision scope is refused — those stages are not nodes of the
+document. `Prepend(elements)` and `Append(elements)` build a source occurrence
+the shorthand cannot name; write `Prepend(Source.From(elements).Named("header"))`
+when you need it named. See
+[occurrence names](../concepts/graphs-and-identity.md#occurrence-names).
+
 A `Flow<TIn, TOut>` with nothing attached to either end is a legitimate value to
 keep in a variable and use in three pipelines.
 
