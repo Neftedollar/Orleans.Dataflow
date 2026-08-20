@@ -116,28 +116,35 @@ because a host has no algebra to give an idiomatic spelling to.
 
 ### The local builder
 
-`Orleans.Dataflow.Hosting.ILocalDataflowBuilder`. Four members, and each one is
+`Orleans.Dataflow.Hosting.ILocalDataflowBuilder`. Five members, and each one is
 member-for-member the mirror of the silo builder's where the two hosts have the
 same question to answer.
 
 | Member | What it registers |
 |---|---|
+| `AddProvider(provider)` | A [`StageProvider`](provider-sdk.md#declaring-a-catalog-and-its-code-together) — both halves of one vocabulary, from the value that holds both. Exactly `AddCatalog` plus `AddFactory`. |
 | `AddCatalog(catalog)` | The stage specifications this host accepts. Callable more than once; the host's catalog is the union. Registering one stage reference twice is refused. |
 | `AddFactory(provider, factory)` | The [`IDataflowStageFactory`](provider-sdk.md#the-factory) that builds every stage of one provider. One factory per provider. |
 | `AddDotnetStages()` | The `dotnet` vocabulary — the timer and the observable source. See [adapters](adapters.md#the-net-vocabulary). |
 | `AddObservable(binding)` | Names an `IObservable<T>` this host may open, with its element contract. |
 
 ```csharp
+LocalDataflowHost host = new(builder => builder.AddProvider(myVocabulary));
+```
+
+**The two halves can be registered separately because different processes need
+different halves.** A catalog is all a validator needs; only a host that will
+*run* the graph needs a factory. A host with the catalog and no factory validates
+a document and refuses it at materialization, naming the provider that has
+nothing to build it. `AddProvider` is for the ordinary case where one deployment
+publishes both; the separate calls are for a vocabulary that genuinely ships as
+two packages.
+
+```csharp
 LocalDataflowHost host = new(builder => builder
     .AddCatalog(providerCatalog)
     .AddFactory(providerId, new MyStageFactory()));
 ```
-
-**The two halves are registered separately because different processes need
-different halves.** A catalog is all a validator needs; only a host that will
-*run* the graph needs a factory. A host with the catalog and no factory validates
-a document and refuses it at materialization, naming the provider that has
-nothing to build it.
 
 The very catalog, the very factory, and the very bindings a silo is given can be
 given to this host, so one declaration serves both runtimes and a graph written
@@ -164,7 +171,7 @@ _ = builder.UseOrleans(silo =>
     _ = silo.AddMemoryGrainStorage(OrleansDataflowStorage.CoordinatorProviderName);
 
     // The whole of registering this library on a silo: the vocabulary its documents may name, and
-    // the factory that builds those stages when a run is materialized.
+    // the code that builds those stages when a run is materialized.
     _ = silo.AddOrleansDataflow(dataflow => dataflow
         .AddCatalog(SampleVocabulary.Catalog())
         .AddFactory(SampleVocabulary.Provider, new SampleStageFactory()));
@@ -198,18 +205,20 @@ the host from starting rather than surfacing at the first pipeline. What they
 resolve to is one immutable value built from the silo's own container, so every
 activation sees the same catalog and the same factories, and a run is always
 materialized against exactly the catalog the coordinator validated its document
-with. `AddOrleansDataflow` throws `ArgumentException` when no catalog was
-registered, or when one stage reference, one provider, or one Orleans binding
-name was registered twice.
+with. `AddOrleansDataflow` throws `ArgumentException` when the silo
+publishes **no vocabulary at all** — no provider, no catalog, and none of the
+vocabularies this package ships — or when one stage reference, one provider, or
+one Orleans binding name was registered twice.
 
 ### The silo builder
 
-`Orleans.Dataflow.Hosting.IOrleansDataflowBuilder`. Fourteen members: four shared
+`Orleans.Dataflow.Hosting.IOrleansDataflowBuilder`. Fifteen members: five shared
 with the local builder, seven that name Orleans bindings, three that are silo
 settings.
 
 | Member | What it registers |
 |---|---|
+| `AddProvider(provider)` | As the local builder. |
 | `AddCatalog(catalog)` | As the local builder. |
 | `AddFactory(provider, factory)` | As the local builder. |
 | `AddDotnetStages()` | As the local builder. |
@@ -384,7 +393,7 @@ operator's decision. See [runbooks](../operations/runbooks.md).
 
 - [Run handles](run-handles.md) — what each materializing call hands you.
 - [Options](options.md) — every value these calls take.
-- [Provider SDK](provider-sdk.md) — what goes into `AddCatalog` and `AddFactory`.
+- [Provider SDK](provider-sdk.md) — what goes into `AddProvider`.
 - [Adapters](adapters.md) — what each `Add…` binding makes addressable.
 - [Deploying](../operations/deploying.md) — what the deployment owes the library
   in production.

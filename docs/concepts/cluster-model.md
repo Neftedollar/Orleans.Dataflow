@@ -96,6 +96,8 @@ _ = builder.UseOrleans(silo =>
         .AddCatalog(SampleVocabulary.Catalog())
         .AddFactory(SampleVocabulary.Provider, new SampleStageFactory()));
 
+    // A vocabulary whose two halves ship together is one call: dataflow.AddProvider(vocabulary).
+
     _ = silo.Services.AddOrleansDataflowClient();
 });
 ```

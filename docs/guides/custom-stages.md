@@ -14,32 +14,36 @@ to end.
 
 ## The two halves
 
-| Half | What it is | Where it lives | Who needs it |
-|---|---|---|---|
-| **Definition** | Which stages exist, what their ports carry, what their payloads mean. | A [catalog](../reference/glossary.md#catalog): `StageCatalog` of `StageSpecification`. | Anyone authoring a pipeline, and anyone validating one. |
-| **Runtime** | What a stage *does*. | An `IDataflowStageFactory`. | Only a host that will run the graph. |
+| Half | What it is | Who needs it |
+|---|---|---|
+| **Definition** | Which stages exist, what their ports carry, what their payloads mean. A [catalog](../reference/glossary.md#catalog). | Anyone authoring a pipeline, and anyone validating one. |
+| **Runtime** | What a stage *does*. | Only a host that will run the graph. |
 
-A silo registers both. A silo that registered a catalog without the matching
-factory accepts a document at the coordinator and refuses it at materialization,
-naming the missing provider. That split is deliberate: a validator needs to know
-that `sales/discount@v1` exists and takes a `percent`; it does not need to know
-how discounting works.
+The split is what makes a document portable: a validator needs to know that
+`sales/discount@v1` exists and takes a `percent`; it does not need to know how
+discounting works. A host that has the definition and not the runtime accepts a
+document and then cannot build it, which it says by name.
 
-## The definition half
+**You state each stage once and get both halves.** `StageProvider` holds a
+provider's whole vocabulary — each stage's declaration beside the code that
+builds it — and hands out the definition half and the runtime half from the same
+value. Declaring a stage in the catalog and forgetting to implement it, or
+implementing one you never declared, are the same mistake, and stating the fact
+once is what removes it.
+
+## Declaring a vocabulary
+
+This is `sales`: a feed of orders, a discount applied to each, and a tally of the
+ones worth keeping.
 
 ```csharp
 public static class SalesVocabulary
 {
-    public static ProviderId Provider { get; } = ProviderId.Create("sales");
-
-    public static StageRef FeedStage { get; } =
-        StageRef.Create(Provider, StageId.Create("order-feed"), StageRef.FirstMajorVersion);
-
-    public static StageRef DiscountStage { get; } =
-        StageRef.Create(Provider, StageId.Create("discount"), StageRef.FirstMajorVersion);
-
-    public static StageRef TallyStage { get; } =
-        StageRef.Create(Provider, StageId.Create("tally"), StageRef.FirstMajorVersion);
+    // A name a machine that never saw your assembly can resolve: who published the stage, which of
+    // their stages it is, and which generation of it. `For` starts at the first generation.
+    public static StageRef FeedStage { get; } = StageRef.For("sales", "order-feed");
+    public static StageRef DiscountStage { get; } = StageRef.For("sales", "discount");
+    public static StageRef TallyStage { get; } = StageRef.For("sales", "tally");
 
     // A contract identifier and a major version — deliberately not a CLR type name. What makes two
     // stages connectable is that they agree on this, which is a fact a document can state and a silo
@@ -52,112 +56,152 @@ public static class SalesVocabulary
 
     public static ResultContract<long> TallyContract { get; } = ResultContract.For<long>("sales-tally", 1);
 
+    // A payload binds to no CLR type, so its contract has no <T>: an identifier and a version.
     public static ContractReference FeedParameterContract { get; } =
-        ContractReference.Create(ContractId.Create("sales-order-feed-parameters"), 1);
+        ContractReference.For("sales-order-feed-parameters");
 
-    // … one per stage.
+    public static ContractReference DiscountParameterContract { get; } =
+        ContractReference.For("sales-discount-parameters");
 
+    public static ContractReference TallyParameterContract { get; } =
+        ContractReference.For("sales-tally-parameters");
+
+    // The member names, spelled once, read and written through these constants only.
     public const string CountMember = "count";
     public const string PercentMember = "percent";
     public const string LabelMember = "label";
     public const string MinimumAmountMember = "minimum-amount";
 
-    public static StageCatalog Catalog() =>
-        StageCatalog.Create(
-        [
-            StageSpecification.Source(
-                FeedStage,
-                FeedParameterContract,
-                Port.Out("out", OrderEventContract),
-                new PayloadValidator("order feed", (CountMember, JsonValueKind.Number))),
-            StageSpecification.Flow(
-                DiscountStage,
-                DiscountParameterContract,
-                Port.In("in", OrderEventContract),
-                Port.Out("out", OrderDocumentContract),
-                new PayloadValidator("discounting flow", (PercentMember, JsonValueKind.Number))),
-            StageSpecification.Sink(
-                TallyStage,
-                TallyParameterContract,
-                Port.In("in", OrderDocumentContract),
-                Port.Result("total", TallyContract),
-                new PayloadValidator(
-                    "tallying terminal",
-                    (LabelMember, JsonValueKind.String),
-                    (MinimumAmountMember, JsonValueKind.Number))),
-        ]);
+    public static StageProvider Vocabulary { get; } = StageProvider.Create("sales")
+        .Source(
+            FeedStage,
+            FeedParameterContract,
+            Port.Out("out", OrderEventContract),
+            new PayloadValidator("order feed", (CountMember, JsonValueKind.Number)),
+            request =>
+            {
+                int count = ReadFeedCount(request.Node.Parameters);
 
-    // Typed handles, resolved against the catalog so a typo is an authoring-time diagnostic rather than
-    // a deployment-time refusal.
-    private static readonly IStageCatalog Authoring = Catalog();
-
-    public static RegisteredSource<OrderEvent> Feed { get; } =
-        RegisteredStage.Source(Authoring, FeedStage, OrderEventContract);
-
-    public static RegisteredFlow<OrderEvent, OrderDocument> Discount { get; } =
-        RegisteredStage.Flow(Authoring, DiscountStage, OrderEventContract, OrderDocumentContract);
-
-    public static RegisteredSinkWithResult<OrderDocument, long> Tally { get; } =
-        RegisteredStage.SinkWithResult(Authoring, TallyStage, OrderDocumentContract, TallyContract);
-
-    // Payload writers. One per stage, and the only place the member names are spelled for writing.
-    public static CanonicalJsonValue FeedParameters(int count) =>
-        CanonicalJsonValue.Parse(
-            string.Create(CultureInfo.InvariantCulture, $"{{\"{CountMember}\":{count}}}"));
-
-    // … and one reader per member, which is what the factory below calls.
-}
-```
-
-The shape to copy is the sample's own vocabulary,
-[`samples/Orleans.Dataflow.Samples.FSharp/Vocabulary.fs`](../../samples/Orleans.Dataflow.Samples.FSharp/Vocabulary.fs)
-— a catalog is a published artifact rather than a language artifact, which is why
-the sample's lives in the F# project and is consumed from C#. The same three
-stages read the same way there:
-
-```fsharp
-StageCatalog.Create
-    [
-        StageSpecification.Source(FeedStage, FeedParameterContract, Port.Out("out", OrderEventContract))
-        StageSpecification.Flow(
+                return DataflowStageRuntime.Source(_ => Orders(count));
+            })
+        .Flow(
             DiscountStage,
             DiscountParameterContract,
             Port.In("in", OrderEventContract),
-            Port.Out("out", OrderDocumentContract)
-        )
-        StageSpecification.Sink(
+            Port.Out("out", OrderDocumentContract),
+            new PayloadValidator("discounting flow", (PercentMember, JsonValueKind.Number)),
+            request =>
+            {
+                decimal percent = ReadDiscountPercent(request.Node.Parameters);
+
+                return DataflowStageRuntime.Element(element =>
+                {
+                    OrderEvent order = (OrderEvent)element!;
+
+                    return new OrderDocument(
+                        order.Sequence,
+                        order.OrderId,
+                        order.Region,
+                        order.Amount - (order.Amount * percent / 100m));
+                });
+            })
+        .Sink(
             TallyStage,
             TallyParameterContract,
             Port.In("in", OrderDocumentContract),
-            Port.Result("total", TallyContract)
-        )
-    ]
+            Port.Result("total", TallyContract),
+            new PayloadValidator(
+                "tallying terminal",
+                (LabelMember, JsonValueKind.String),
+                (MinimumAmountMember, JsonValueKind.Number)),
+            request =>
+            {
+                decimal minimum = ReadTallyMinimum(request.Node.Parameters);
+
+                // Every terminal is a fold. The seed is made once per run rather than handed over as
+                // a value, so two runs of one pipeline never share it.
+                return DataflowStageRuntime.Terminal(
+                    static () => 0L,
+                    (state, element) => ((OrderDocument)element!).Amount >= minimum ? (long)state! + 1L : state,
+                    finish: null,
+                    producesResult: true);
+            });
+
+    // Typed handles, resolved against this vocabulary's own catalog so a typo is an authoring-time
+    // diagnostic rather than a deployment-time refusal.
+    public static RegisteredSource<OrderEvent> Feed { get; } =
+        RegisteredStage.Source(Vocabulary.Catalog, FeedStage, OrderEventContract);
+
+    public static RegisteredFlow<OrderEvent, OrderDocument> Discount { get; } =
+        RegisteredStage.Flow(Vocabulary.Catalog, DiscountStage, OrderEventContract, OrderDocumentContract);
+
+    public static RegisteredSinkWithResult<OrderDocument, long> Tally { get; } =
+        RegisteredStage.SinkWithResult(Vocabulary.Catalog, TallyStage, OrderDocumentContract, TallyContract);
+
+    // Payload writers, one per stage, and the only place a member name is spelled for writing.
+    public static CanonicalJsonValue FeedParameters(int count) =>
+        StageParameters.Create().Add(CountMember, count).Build();
+
+    public static CanonicalJsonValue DiscountParameters(int percent) =>
+        StageParameters.Create().Add(PercentMember, percent).Build();
+
+    public static CanonicalJsonValue TallyParameters(string label, int minimum) =>
+        StageParameters.Create().Add(LabelMember, label).Add(MinimumAmountMember, minimum).Build();
+
+    // … and one reader per member, which is what the build delegates above call.
+    public static int ReadFeedCount(CanonicalJsonValue parameters) =>
+        parameters.ToElement().GetProperty(CountMember).GetInt32();
+
+    private static async IAsyncEnumerable<object?> Orders(int count)
+    {
+        for (long index = 1; index <= count; index++)
+        {
+            yield return new OrderEvent(index, $"order-{index}", "eu", index * 5m);
+        }
+    }
+}
 ```
+
+Four things about that are the whole discipline.
+
+**Each build delegate is handed one node and answers with one behaviour.** It is
+never told about the graph, the run, or the cluster — which is what lets these
+three stages be composed into a pipeline the provider has never seen.
+
+**A stage is built once per occurrence per run**, so whatever a delegate's
+closure captures is fresh per run. That is why a terminal is given a seed
+*factory* rather than a seed: a mutable accumulator handed over as a value would
+be one object that two runs both wrote into.
+
+**Values arrive as `object`.** A document never names an element type, so the
+engine works untyped and a build delegate is the one place that knows what your
+elements are.
+
+**A vocabulary closes when it is first used** — when its catalog is read, or when
+a host asks it to build a node. Declaring another stage after that is refused,
+because a deployment registers the vocabulary it declared and a stage added
+afterwards would leave the registration describing something that no longer
+exists. Declaring every stage in one expression, as above, means you never meet
+the rule.
 
 ### Declaring a stage
 
 A specification always has six things in it — input ports, output ports, result
 ports, a parameter contract, required capabilities, and an optional payload check
 — because that is what a catalog stores. An *author* almost never has six things
-to say, so the factory you call names the shape you are declaring and asks for
+to say, so the method you call names the shape you are declaring and asks for
 only the ports that shape has.
 
-| Shape | Factory | Ports it asks for |
+| Shape | Method | Ports it asks for |
 |---|---|---|
-| Source | `StageSpecification.Source(stage, parameters, out)` | one output |
-| Flow | `StageSpecification.Flow(stage, parameters, in, out)` | one input, one output |
-| Sink | `StageSpecification.Sink(stage, parameters, in)` | one input |
-| Sink with a result | `StageSpecification.Sink(stage, parameters, in, result)` | one input, one result |
-| Fan-out junction | `StageSpecification.FanOut(stage, parameters, in, outs)` | one input, a collection of outputs |
-| Fan-in junction | `StageSpecification.FanIn(stage, parameters, ins, out)` | a collection of inputs, one output |
+| Source | `.Source(stage, parameters, out, build)` | one output |
+| Flow | `.Flow(stage, parameters, in, out, build)` | one input, one output |
+| Sink | `.Sink(stage, parameters, in, build)` | one input |
+| Sink with a result | `.Sink(stage, parameters, in, result, build)` | one input, one result |
+| Anything else | `.Add(specification, build)` | whatever the specification declares |
 
-The names are `DataflowStageRuntime`'s own, so a provider's two halves read as one
-pair — [the shapes it builds](#the-shapes-available) map onto these one for one,
-except that `Flow` covers both the synchronous and the asynchronous element stage
-(whether a transformation awaits is a property of the code that stays behind, not
-of the ports a document connects) and a terminal is a `Sink` whether or not it
-yields a result. Each factory takes an `IStageParameterValidator` as a last
-argument when the stage checks its payloads, which is what the catalog above does.
+Each takes an `IStageParameterValidator` before the build delegate when the stage
+checks its payloads, which is what the vocabulary above does at every stage.
 
 `Port.In`, `Port.Out`, and `Port.Result` take the port name as plain text and the
 contract as the `ElementContract<T>` or `ResultContract<T>` you already declared,
@@ -165,26 +209,66 @@ so a port costs one call. They are typed on purpose: `Port.In` will not take a
 result contract and `Port.Result` will not take an element one. Overloads taking
 a `ContractReference` are there for a provider whose ports carry whatever a
 deployment binds to them — the shipped Orleans adapters are written that way —
-and `InputPortSpecification.Create` and its siblings remain for a caller who
-already holds a `PortId`. An optional input or an ignorable output says so with a
-third argument: `Port.In("side", contract, isOptional: true)`.
+and an optional input or an ignorable output says so with a third argument:
+`Port.In("side", contract, isOptional: true)`.
 
-**`StageSpecification.Create` is the general form**, and the escape hatch for
-everything the shapes do not cover — a stage that requires a capability of its
-host, one that declares several result ports, one whose ports form no shape at
-all. Everything after the stage and its parameter contract is optional and
-written by name:
+**`.Add` is the general form**, and the escape hatch for everything the named
+shapes do not cover — a junction, a stage that requires a capability of its host,
+one that declares several result ports. Its specification is built by
+`StageSpecification.Create`, where everything after the stage and its parameter
+contract is optional and written by name:
 
 ```csharp
-StageSpecification.Create(
-    DurableSinkStage,
-    DurableSinkParameterContract,
-    inputPorts: [Port.In("in", OrderDocumentContract)],
-    requiredCapabilities: [CapabilityToken.Create("durable-state")]);
+provider.Add(
+    StageSpecification.Create(
+        DurableSinkStage,
+        DurableSinkParameterContract,
+        inputPorts: [Port.In("in", OrderDocumentContract)],
+        requiredCapabilities: [CapabilityToken.Create("durable-state")]),
+    request => /* … */);
 ```
 
 An omitted collection declares none of that kind, so nothing has to be written
-just to say that a stage has no result ports.
+just to say that a stage has no result ports. `StageSpecification.FanOut` and
+`StageSpecification.FanIn` are the junction shapes, and take a collection of
+ports where the linear shapes take one.
+
+`StageSpecification`'s own named shapes — `Source`, `Flow`, `Sink` — are the same
+set without a delegate, and they are what a catalog published on its own is built
+from. [When the halves ship apart](#when-the-halves-ship-apart) is where that
+happens.
+
+### Writing a payload
+
+A payload is a JSON object: the numbers, words, and flags that configure one
+*use* of a stage. `StageParameters` writes one a member at a time.
+
+```csharp
+StageParameters.Create()
+    .Add("label", "accepted-orders")
+    .Add("minimum-amount", 20)
+    .Build();
+```
+
+`Add` takes whole numbers, words, flags, nested builders, ordered lists of any of
+those, and `AddNull` for a member whose value is JSON `null`. A stage that takes
+no parameters at all carries `CanonicalJsonValue.Empty` rather than a builder
+with nothing in it.
+
+Composing the JSON as a string is still possible and is the wrong default. The
+builder cannot express a trailing comma, a fraction the
+[canonical form](../reference/glossary.md#canonical-json) does not admit, or a
+number formatted under whatever culture the machine happens to be set to. What it
+produces goes through the very parse a hand-written string would have gone
+through, so the stored bytes are the same either way — the builder removes the
+ways of getting them wrong, not a step.
+
+Two members of the API are worth knowing about because they are narrow on
+purpose. Numbers are `long` and there is no floating-point sibling: the canonical
+form admits integers and nothing else, so a value that is genuinely fractional is
+written as the units it is counted in. And `Add(name, CanonicalJsonValue)` is the
+escape hatch for a stage whose payload embeds another payload whole — a scope
+holding the chain inside it, a policy read from somewhere else.
 
 ### The parameter validator
 
@@ -237,8 +321,8 @@ Four rules the type demands and the [conformance kit](#proving-it-with-the-confo
 - **Report every violation, not the first.** A caller fixing one problem per run
   learns the shape of the contract one rejection at a time.
 - **Refuse a member you never declared.** This is what stops a payload written
-  against a newer version of your stage from reaching a factory that will ignore
-  half of it.
+  against a newer version of your stage from reaching a build delegate that will
+  ignore half of it.
 - **Be pure and fast.** No I/O, no clock, no ambient culture, no mutable state,
   and the same answer for the same payload in every process — a report has to be
   reproducible from the document and the catalog alone.
@@ -247,78 +331,6 @@ A validator is behaviour, so it is never serialised and never contributes to the
 catalog fingerprint. Two catalogs whose specifications agree but whose validators
 differ share a fingerprint, and that limit is worth knowing before you rely on
 the fingerprint to mean "these silos will refuse the same documents".
-
-## The runtime half
-
-```csharp
-public sealed class SalesStageFactory : IDataflowStageFactory
-{
-    public DataflowStageRuntime Create(DataflowStageRequest request)
-    {
-        StageNode node = request.Node;
-
-        if (node.Stage == SalesVocabulary.FeedStage)
-        {
-            int count = SalesVocabulary.ReadFeedCount(node.Parameters);
-
-            return DataflowStageRuntime.Source(tokens => Orders(count, tokens));
-        }
-
-        if (node.Stage == SalesVocabulary.DiscountStage)
-        {
-            decimal percent = SalesVocabulary.ReadDiscountPercent(node.Parameters);
-
-            return DataflowStageRuntime.Element(element =>
-            {
-                OrderEvent order = (OrderEvent)element!;
-
-                return new OrderDocument(
-                    order.Sequence,
-                    order.OrderId,
-                    order.Region,
-                    order.Amount - (order.Amount * percent / 100m));
-            });
-        }
-
-        if (node.Stage == SalesVocabulary.TallyStage)
-        {
-            decimal minimum = SalesVocabulary.ReadTallyMinimum(node.Parameters);
-
-            // Every terminal is a fold. The seed is made once per run rather than handed over as a
-            // value, so two runs of one pipeline never share it.
-            return DataflowStageRuntime.Terminal(
-                static () => 0L,
-                (state, element) => ((OrderDocument)element!).Amount >= minimum ? (long)state! + 1L : state,
-                finish: null,
-                producesResult: true);
-        }
-
-        throw new InvalidOperationException(
-            $"The node '{node.Id}' is an occurrence of '{node.Stage}', which this provider does not implement.");
-    }
-}
-```
-
-That is
-[`samples/Orleans.Dataflow.Samples/SampleStageFactory.cs`](../../samples/Orleans.Dataflow.Samples/SampleStageFactory.cs)
-almost line for line, and three things about it are the whole discipline.
-
-**One factory per provider, dispatching on the node's stage reference.** The
-final `throw` is not defensive noise — the conformance kit asserts that a factory
-refuses a stage its catalog does not declare, by name.
-
-**Nothing here reads the graph, the run, or the cluster.** A stage is handed its
-own node and answers with its own behaviour, which is what lets the same three
-stages be composed into a pipeline this factory has never seen.
-
-**A stage runtime is built once per node per run**, so whatever your closures
-capture is fresh per run. That is why a terminal is given a seed *factory* rather
-than a seed: a mutable accumulator handed over as a value would be one object
-that two runs both wrote into.
-
-The values are untyped because a document never names an element type, so the
-engine works in `object` and the factory is the one place that knows what your
-elements are.
 
 ### The shapes available
 
@@ -333,6 +345,11 @@ runs — a stage that wants a seventh is asking for a new engine primitive.
 | Terminal | `Terminal(seed, fold, finish, producesResult)` | Plus overloads taking `DataflowRunTokens` and/or a `DataflowSinkMark`. |
 | Fan-out junction | `Broadcast()`, `Balance()`, `Partition(route)`, `Unzip(parts)` | Ports in the specification's own order, which is ordinal by port name. |
 | Fan-in junction | `Merge()`, `Concat()`, `Interleave(size)`, `Zip(combine)`, `CombineLatest(combine)` | Same ordering rule. |
+
+They map onto the declaration shapes one for one, except that `Flow` covers both
+the synchronous and the asynchronous element stage — whether a transformation
+awaits is a property of the code that stays behind, not of the ports a document
+connects — and a terminal is a `Sink` whether or not it yields a result.
 
 Registering a junction is what lets a branching graph be a
 [pipeline](../reference/glossary.md#pipeline) rather than nondeployable.
@@ -387,7 +404,7 @@ Two consequences worth planning for:
   fixed set where you can.
 - **Bump the stage's major version when the payload's meaning changes.**
   `StageRef` carries one, and a document written against the old meaning names
-  the old version.
+  the old version. `StageRef.For("sales", "tally", 2)` is the second generation.
 
 ## Cursors and marks for durability
 
@@ -438,32 +455,31 @@ loses nothing. Lean that way when the two moments cannot be separated exactly.
 On a silo:
 
 ```csharp
-silo.AddOrleansDataflow(dataflow => dataflow
-    .AddCatalog(SalesVocabulary.Catalog())
-    .AddFactory(SalesVocabulary.Provider, new SalesStageFactory()));
+silo.AddOrleansDataflow(dataflow => dataflow.AddProvider(SalesVocabulary.Vocabulary));
 ```
 
-On a local host — **the same two calls**, which is what makes "a provider's stages
-run in either runtime" a checkable claim rather than an intention:
+On a local host — **the same call**, which is what makes "a provider's stages run
+in either runtime" a checkable claim rather than an intention:
 
 ```csharp
-LocalDataflowHost host = new(builder => builder
-    .AddCatalog(SalesVocabulary.Catalog())
-    .AddFactory(SalesVocabulary.Provider, new SalesStageFactory()));
+LocalDataflowHost host = new(builder => builder.AddProvider(SalesVocabulary.Vocabulary));
 ```
 
-`AddCatalog` is callable more than once and the host's catalog is the union — a
-deployment composes vocabularies from several packages. Registering one stage
-reference twice, or one provider twice, is refused when the host is built, because
-two specifications for one reference are two answers to one question rather than a
-merge.
+A host composes vocabularies from several packages: `AddProvider` is callable
+once per provider, and the host's catalog is the union of everything registered.
+Registering one stage reference twice, or one provider twice, is refused when the
+host is built, because two specifications for one reference are two answers to
+one question rather than a merge.
 
-Authoring against it is ordinary — and this is `SalesVocabulary` from the top of
-this page, the three stages it publishes: `Feed` produces order events, `Discount`
-turns each into a document, and `Tally` counts the ones worth keeping. Each is a
-typed handle, so the chain below is checked the same way an ordinary pipeline is;
-what a registered stage adds is the occurrence name — your name for *this* use of
-it — and the parameters that use carries into the document.
+A silo with **no vocabulary at all** is refused at startup, by name. It could
+resolve no stage reference, so every document it was handed would be refused, and
+saying so when the silo starts is better than saying it once per document.
+
+Authoring against it is ordinary — `Feed` produces order events, `Discount` turns
+each into a document, and `Tally` counts the ones worth keeping. Each is a typed
+handle, so the chain below is checked the same way an ordinary pipeline is; what
+a registered stage adds is the occurrence name — your name for *this* use of it —
+and the parameters that use carries into the document.
 
 ```csharp
 (RunnableGraph graph, ResultSlot<long> accepted) = Source
@@ -479,8 +495,11 @@ Running it prints:
 ```text
 graph       sha256:7b05dd25bf86934073ee2e71ef92be6829c341924bc5fd46a98d3203b25ae854
 pipeline    sha256:45fab1eb59877959653cac593a61c585becb2ff707676de64c2db9de7518ab3b
-accepted    10
+accepted    8
 ```
+
+Twelve orders at five, ten, fifteen and up; a tenth off each; eight of them still
+at twenty or above.
 
 The two fingerprints differ **by design**: declaring an identity re-closes the
 document under that identity, so a pipeline's fingerprint is the fingerprint of
@@ -488,6 +507,100 @@ the deployable document. It is also why a graph's result slot and a pipeline's
 are recovered differently — a closed graph's slot binds to that built instance, a
 pipeline's binds to the fingerprint and the lineage, which is what lets a run
 started by one process be read by another.
+
+Neither fingerprint depends on the code behind the names. Rewrite `Orders` to
+emit different amounts and both lines above stay the same, because behaviour
+reaches no document — which is the portability being bought and the limit that
+comes with it.
+
+## When the halves ship apart
+
+A vocabulary published for other people to use sometimes travels as two packages:
+a contracts package that authors and validators reference, and a deployment
+package that implements it. The halves are then genuinely separate artifacts, and
+they are registered separately.
+
+```csharp
+// In the contracts package: the definition half, with no code behind it. The names, the contracts,
+// and the payload writers and readers are declared here too — everything from the vocabulary above
+// except the build delegates.
+public static class SalesContracts
+{
+    public static ProviderId Provider { get; } = ProviderId.Create("sales");
+
+    // … the stage references, the contracts, the member names, and the payload writers.
+
+    public static StageCatalog Catalog() =>
+        StageCatalog.Create(
+        [
+            StageSpecification.Source(FeedStage, FeedParameterContract, Port.Out("out", OrderEventContract)),
+            StageSpecification.Flow(
+                DiscountStage,
+                DiscountParameterContract,
+                Port.In("in", OrderEventContract),
+                Port.Out("out", OrderDocumentContract)),
+            StageSpecification.Sink(
+                TallyStage,
+                TallyParameterContract,
+                Port.In("in", OrderDocumentContract),
+                Port.Result("total", TallyContract)),
+        ]);
+}
+```
+
+```csharp
+// In the deployment package: the runtime half, one factory per provider,
+// dispatching on the node's stage reference.
+public sealed class SalesStageFactory : IDataflowStageFactory
+{
+    public DataflowStageRuntime Create(DataflowStageRequest request)
+    {
+        StageNode node = request.Node;
+
+        if (node.Stage == SalesContracts.FeedStage)
+        {
+            return DataflowStageRuntime.Source(_ => Orders(SalesContracts.ReadFeedCount(node.Parameters)));
+        }
+
+        // … one branch per stage.
+
+        throw new InvalidOperationException(
+            $"The node '{node.Id}' is an occurrence of '{node.Stage}', which this provider does not implement.");
+    }
+}
+```
+
+```csharp
+LocalDataflowHost host = new(builder => builder
+    .AddCatalog(SalesContracts.Catalog())
+    .AddFactory(SalesContracts.Provider, new SalesStageFactory()));
+```
+
+The final `throw` is not defensive noise — the conformance kit asserts that a
+factory refuses a stage its catalog does not declare, by name. A `StageProvider`
+throws the same way and lists what it does declare.
+
+`AddCatalog` and `AddFactory` are what `AddProvider` does, and they take the same
+values; `StageProvider.Catalog` is an ordinary `StageCatalog`, publishable on its
+own and fingerprinted like any other. So this is the same seam with the two ends
+written in two places, and the reason to choose it is that the two ends really do
+ship in two places. When one deployment does both, saying it once is strictly
+better.
+
+The pipeline at the top of this section, authored against this split vocabulary
+and run on this host, prints
+`graph sha256:7b05dd25bf86934073ee2e71ef92be6829c341924bc5fd46a98d3203b25ae854`
+and `accepted 8` — the same document and the same answer as the single
+declaration above it. Which registration you choose is a fact about your source
+tree and about nothing else.
+
+The samples are written this way on purpose, and demonstrate a second thing while
+they are at it: their catalog is declared in F# and consumed from C#, because a
+catalog is a published artifact rather than a language artifact. The vocabulary
+is in
+[`samples/Orleans.Dataflow.Samples.FSharp/Vocabulary.fs`](../../samples/Orleans.Dataflow.Samples.FSharp/Vocabulary.fs)
+and the factory in
+[`samples/Orleans.Dataflow.Samples/SampleStageFactory.cs`](../../samples/Orleans.Dataflow.Samples/SampleStageFactory.cs).
 
 ## Proving it with the conformance kit
 
@@ -499,9 +612,9 @@ the first thing to drift.
 
 ```csharp
 ProviderConformance kit = ProviderConformance.Create(
-    SalesVocabulary.Provider,
-    SalesVocabulary.Catalog(),
-    new SalesStageFactory(),
+    SalesVocabulary.Vocabulary.Provider,
+    SalesVocabulary.Vocabulary.Catalog,
+    SalesVocabulary.Vocabulary,
     [
         ProviderStageSample.Create(SalesVocabulary.FeedStage, SalesVocabulary.FeedParameters(4)),
         ProviderStageSample.Create(SalesVocabulary.DiscountStage, SalesVocabulary.DiscountParameters(10)),

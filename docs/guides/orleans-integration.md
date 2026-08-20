@@ -77,40 +77,24 @@ public static class OrleansVocabulary
                 grains.GetGrain<ILedgerGrain>("ledger").RecordAsync(priced, token));
 }
 
-// This deployment's own vocabulary. A silo registers at least one catalog even when its pipelines are
-// built entirely from the shipped adapters, so this is also the smallest legal one: a pass-through flow
-// whose ports declare the adapters' own opaque contract.
+// This deployment's own vocabulary: one pass-through flow, to show how a stage of yours stands between
+// two adapters. Declaring it and implementing it are one expression.
 public static class AuditVocabulary
 {
-    public static ProviderId Provider { get; } = ProviderId.Create("orders");
+    public static StageRef Audit { get; } = StageRef.For("orders", "audit");
 
-    public static StageRef Audit { get; } =
-        StageRef.Create(Provider, StageId.Create("audit"), StageRef.FirstMajorVersion);
+    public static ContractReference NoParameters { get; } = ContractReference.For("orders-no-parameters");
 
-    public static ContractReference NoParameters { get; } =
-        ContractReference.Create(ContractId.Create("orders-no-parameters"), 1);
-
-    public static StageCatalog Catalog() =>
-        StageCatalog.Create(
-        [
+    public static StageProvider Vocabulary { get; } = StageProvider.Create("orders")
+        .Flow(
+            Audit,
+            NoParameters,
             // The adapters' element contract is a ContractReference rather than an ElementContract<T>,
             // because a port facing one carries whatever this deployment binds to it. Port.In and Port.Out
             // take either form.
-            StageSpecification.Flow(
-                Audit,
-                NoParameters,
-                Port.In("in", OrleansStages.ElementContract),
-                Port.Out("out", OrleansStages.ElementContract)),
-        ]);
-}
-
-public sealed class AuditStageFactory : IDataflowStageFactory
-{
-    public DataflowStageRuntime Create(DataflowStageRequest request) =>
-        request.Node.Stage == AuditVocabulary.Audit
-            ? DataflowStageRuntime.Element(element => element)
-            : throw new InvalidOperationException(
-                $"The node '{request.Node.Id}' names '{request.Node.Stage}', which this provider does not implement.");
+            Port.In("in", OrleansStages.ElementContract),
+            Port.Out("out", OrleansStages.ElementContract),
+            _ => DataflowStageRuntime.Element(element => element));
 }
 
 IHost silo = Host.CreateApplicationBuilder().UseOrleans(silo =>
@@ -121,8 +105,7 @@ IHost silo = Host.CreateApplicationBuilder().UseOrleans(silo =>
     silo.AddMemoryStreams(OrleansVocabulary.StreamProvider);
 
     silo.AddOrleansDataflow(dataflow => dataflow
-        .AddCatalog(AuditVocabulary.Catalog())
-        .AddFactory(AuditVocabulary.Provider, new AuditStageFactory())
+        .AddProvider(AuditVocabulary.Vocabulary)
         .AddStreamElement(OrleansVocabulary.PlacedElement)
         .AddGrainCall(OrleansVocabulary.Pricing)
         .AddGrainCallSink(OrleansVocabulary.Recording));
@@ -153,12 +136,12 @@ RunnableGraph graph = Source
         OrleansStages.GrainCallParameters(OrleansVocabulary.Pricing, maxInFlight: 4))
     .Via(
         RegisteredStage.Flow(
-            AuditVocabulary.Catalog(),
+            AuditVocabulary.Vocabulary.Catalog,
             AuditVocabulary.Audit,
             OrleansStages.Element<OrderPriced>(),
             OrleansStages.Element<OrderPriced>()),
         "audited",
-        CanonicalJsonValue.Parse("{}"))
+        CanonicalJsonValue.Empty)
     .To(
         OrleansStages.GrainCallSink(OrleansVocabulary.Recording),
         "recorded",
@@ -201,11 +184,13 @@ handed to `AddGrainCall` on the silo and to `OrleansStages.GrainCall` on the
 authoring side. The document that results carries the *name* `price-order` and
 never the delegate, which is what lets a silo in another process run it.
 
-**A silo registers at least one catalog**, even when everything in the pipeline
-is a shipped adapter. `AuditVocabulary` above is the deployment's own vocabulary
-— a single pass-through flow whose ports declare `OrleansStages.ElementContract`,
-which is how one of your stages stands between two adapters. Building a silo
-without an `AddCatalog` call fails at startup, by name.
+**A stage of your own stands between two adapters by declaring their contract.**
+`AuditVocabulary` above is a single pass-through flow whose ports carry
+`OrleansStages.ElementContract`, which is what makes it connectable to a stream
+source on one side and a grain call on the other. A pipeline built entirely from
+shipped adapters needs no vocabulary of its own — every binding registration
+publishes one — so this stage is here because the pipeline uses it, not because
+the silo would be refused without it.
 
 **Your element types must satisfy Orleans serialization.** They cross a stream
 and a grain boundary, so `[GenerateSerializer]` with `[Id]` on every member, or a

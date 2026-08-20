@@ -10,7 +10,7 @@ name. A **[registered stage](glossary.md#registered-stage)** is the other kind. 
 is a stage reference, a major version, and a canonical payload — so the silo that
 runs it needs nothing from the process that authored it.
 
-**A provider ships two halves**, and they are registered separately because
+**A provider has two halves**, and they can be registered separately because
 different processes need different halves:
 
 | Half | What it is | Who needs it |
@@ -21,8 +21,18 @@ different processes need different halves:
 A host with the catalog and no factory validates a document and refuses it at
 materialization, naming the provider that has nothing to build it.
 
-Both go in through the same two calls, on
+**A `StageProvider` is both halves stated once**, and is the shape to reach for
+when one deployment ships them together. Its `Catalog` is the definition half and
+the object itself is the factory, so one registration puts both in, on
 [either builder](hosting.md#the-local-builder):
+
+```csharp
+LocalDataflowHost host = new(builder => builder.AddProvider(myVocabulary));
+```
+
+The two calls underneath are still there and still take the same values, for a
+provider whose halves genuinely ship apart — a catalog in a contracts package, a
+factory in the deployment that implements it:
 
 ```csharp
 LocalDataflowHost host = new(builder => builder
@@ -31,8 +41,8 @@ LocalDataflowHost host = new(builder => builder
 ```
 
 **The claim this seam makes: a provider writes its stages once and they run in
-either runtime.** The very catalog and the very factory a silo is given can be
-given to a `LocalDataflowHost`.
+either runtime.** The very vocabulary a silo is given can be given to a
+`LocalDataflowHost`.
 
 **Examples on this page** are lifted verbatim from `samples/`, where they compile
 and run in continuous integration: the vocabulary from
@@ -53,6 +63,14 @@ which is the provider, a `StageId`, and a major version.
 let Provider = ProviderId.Create "samples"
 let FeedStage = StageRef.Create(Provider, StageId.Create "order-feed", StageRef.FirstMajorVersion)
 ```
+
+`StageRef.Create` is the form for a caller holding those values already, which a
+vocabulary published as a library does. `StageRef.For("samples", "order-feed")`
+says the same thing from plain text, validating it identically and starting at
+the first major version; a later generation names it, `For("samples", "tally", 2)`.
+`ContractReference.For("samples-tally-parameters")` is the same shortening for a
+payload contract. The values are equal either way, so which spelling a
+vocabulary uses reaches no document.
 
 **A document may not name a CLR type**, so what makes two stages connectable is
 that they agree on a *contract reference* — an identifier and a major version —
@@ -152,6 +170,46 @@ name, rather than failing halfway through.
 deployment composes vocabularies from several packages. Registering one stage
 reference twice is refused, because two specifications for one reference are two
 answers to one question.
+
+### Declaring a catalog and its code together
+
+`StageProvider` carries the same specifications and the delegate that builds each
+one. Its declaration methods mirror the specification factories above, with the
+build delegate last:
+
+| Method | Declares |
+|---|---|
+| `StageProvider.Create(provider)` | an empty vocabulary; takes a `ProviderId` or the text of one |
+| `.Source(stage, parameters, out, build)` | what `StageSpecification.Source` does, plus its code |
+| `.Flow(stage, parameters, in, out, build)` | what `StageSpecification.Flow` does, plus its code |
+| `.Sink(stage, parameters, in, build)` | what `StageSpecification.Sink` does, plus its code |
+| `.Sink(stage, parameters, in, result, build)` | the same, yielding a result |
+| `.Add(specification, build)` | any specification at all, including junctions, plus its code |
+| `.Catalog` | the definition half, an ordinary `StageCatalog` |
+| `.Provider` | the `ProviderId` every declared stage must belong to |
+
+Each declaration method takes an `IStageParameterValidator` before the build
+delegate when the stage checks its payloads, exactly as the specification
+factories do. `build` is a `Func<DataflowStageRequest, DataflowStageRuntime>` —
+the body of one branch of a hand-written factory, without the dispatch.
+
+Three refusals are worth knowing before you meet them:
+
+- **A stage of another provider** is refused where it is declared, rather than
+  becoming a catalog entry this factory would never be asked to build.
+- **A stage declared twice** is refused, for the reason `AddCatalog` refuses it.
+- **A stage declared after first use** is refused. A vocabulary closes when its
+  catalog is read or a host asks it to build a node; a stage added after that
+  would leave the registration describing something that no longer exists, and
+  would write into a table a running host is reading. That closure is also what
+  makes the thread-safety `IDataflowStageFactory` requires true rather than
+  assumed.
+
+A vocabulary declared this way has no CLR type of its own — the registered
+factory is the library's `StageProvider`, not yours — which matters in exactly
+one place: the [conformance kit](#the-conformance-kit)'s check that no core
+option type names anything of the provider under test locates your code through
+the build delegates' declaring types instead.
 
 **The local vocabulary is a catalog too.** `LocalStageCatalog.Instance` is the
 `IStageCatalog` of every stage the [operator](operators.md) surface builds —
@@ -379,9 +437,14 @@ three.
 
 ```fsharp
 let FeedParameters (count: int) : CanonicalJsonValue =
-    CanonicalJsonValue.Parse(
-        System.String.Format(CultureInfo.InvariantCulture, "{{\"{0}\":{1}}}", CountMember, count)
-    )
+    StageParameters.Create().Add(CountMember, count).Build()
+
+let TallyParameters (label: string) (minimumAmount: int) : CanonicalJsonValue =
+    StageParameters
+        .Create()
+        .Add(LabelMember, label)
+        .Add(MinimumAmountMember, minimumAmount)
+        .Build()
 
 let ReadFeedCount (parameters: CanonicalJsonValue) : int =
     match (payloadOf "order feed" parameters).TryGetProperty CountMember with
@@ -403,6 +466,32 @@ The builders are sugar over the raw payload and nothing more, which is what make
 them safe to adopt: a builder writes byte for byte what the literal wrote, so
 documents and fingerprints are unchanged. The definition plane never learns that a
 builder exists.
+
+`StageParameters` is what a typed writer is built from, and it is what makes that
+byte-identity structural rather than asserted: `Build` ends in the very
+`CanonicalJsonValue.Parse` a hand-composed string would have gone through, so the
+canonical form's rules — members sorted, duplicates refused, depth and size
+bounded — are inherited rather than restated. `Add` takes whole numbers, words,
+flags, nested builders, ordered lists of any of those, and one canonical value
+whole; `AddNull` writes a member whose value is JSON `null`, which is a different
+statement from omitting it. A stage with no parameters at all carries
+`CanonicalJsonValue.Empty`.
+
+Two of its boundaries are deliberate. Numbers are `long` and there is no
+floating-point overload, because the canonical form admits integers and nothing
+else — a fraction has no canonical spelling, so the API cannot express one rather
+than refusing it a call later. And text with no UTF-8 encoding is refused where
+the author wrote it: the underlying writer would substitute the replacement
+character for an unpaired surrogate where the text spelling refuses one by name,
+and two spellings of one payload have to meet at the same bytes or refuse
+together.
+
+Nothing in it is reflection. It writes values it already holds rather than
+serialising a CLR type graph, so no type name is read, none is written, and there
+is nothing for trimming or Native AOT to fail to see. That is the reason it is
+explicit rather than a `Serialize(myOptions)` convenience: a reflection
+serializer would put a CLR name one attribute away from a document that must
+never contain one.
 
 **No string in a payload may resolve to a CLR type**, and none may be
 assembly-qualified. A document causes no code loading; a conformance check asserts

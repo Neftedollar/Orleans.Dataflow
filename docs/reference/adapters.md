@@ -114,7 +114,7 @@ types to:
 | Member | On | What it is |
 |---|---|---|
 | `Provider` | both | the `ProviderId` — `dotnet` and `orleans` |
-| `Catalog` | both | the `StageCatalog` a host registers with `AddCatalog` |
+| `Catalog` | both | the `StageCatalog` a host registers |
 | `Element<T>()` | both | the element contract this vocabulary carries values under |
 | `ElementContract` | both | that contract's own `ContractReference` |
 | `Tick` | both | the `ElementContract<long>` a timer or a reminder emits |

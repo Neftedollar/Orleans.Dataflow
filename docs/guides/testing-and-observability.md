@@ -219,22 +219,20 @@ dying. That duty belongs to your real store, and
 Two things, in this order.
 
 **Run the conformance kit.** `ProviderConformance` is nine structural checks over
-your catalog and your factory. Drive it as a theory with
+your vocabulary's two halves. Drive it as a theory with
 `ProviderConformance.Checks` as the data, so a failure reads as the sentence that
 stopped being true. The full worked example is in
 [Writing a custom stage](custom-stages.md#proving-it-with-the-conformance-kit).
 
 **Then run the stage.** Register it on a `LocalDataflowHost` — the same
-`AddCatalog` and `AddFactory` calls a silo makes — and author an ordinary graph
-over it. No cluster is involved, so the test is fast and the failure messages are
-your own. `SalesVocabulary` and `SalesStageFactory` below are the worked pair from
-[Writing a custom stage](custom-stages.md) — a catalog that names three stages and
-the factory that builds them; substitute your own:
+`AddProvider` call a silo makes — and author an ordinary graph over it. No
+cluster is involved, so the test is fast and the failure messages are your own.
+`SalesVocabulary` below is the worked vocabulary from
+[Writing a custom stage](custom-stages.md) — three stages and the code behind
+them; substitute your own:
 
 ```csharp
-LocalDataflowHost host = new(builder => builder
-    .AddCatalog(SalesVocabulary.Catalog())
-    .AddFactory(SalesVocabulary.Provider, new SalesStageFactory()));
+LocalDataflowHost host = new(builder => builder.AddProvider(SalesVocabulary.Vocabulary));
 ```
 
 Reach for a cluster only for what a cluster decides: placement, failover, silos

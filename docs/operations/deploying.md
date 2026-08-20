@@ -8,9 +8,7 @@ what the deployment owes the library.
 Every silo that may host runs:
 
 ```csharp
-silo.AddOrleansDataflow(dataflow => dataflow
-    .AddCatalog(YourVocabulary.Catalog())
-    .AddFactory(YourVocabulary.Provider, new YourStageFactory()));
+silo.AddOrleansDataflow(dataflow => dataflow.AddProvider(YourVocabulary));
 ```
 
 Every silo that may host a **durable** run additionally:
@@ -32,9 +30,11 @@ runs were durable while their register died with the process.
 
 Four rules that will fail a silo at startup rather than at run time:
 
-- **At least one `AddCatalog` call**, even when every stage in your pipelines is
-  a shipped adapter. Without one a silo can resolve no stage reference, so every
-  document it is handed is refused.
+- **At least one vocabulary.** Your own, through `AddProvider` or `AddCatalog`,
+  or one this package ships — every Orleans binding registration publishes the
+  adapter stages, and `AddDotnetStages` publishes the .NET ones. A silo with none
+  of them can resolve no stage reference, so every document it is handed would be
+  refused, and it is told so when it starts rather than once per document.
 - **One factory per provider**, and one specification per stage reference.
   Registering either twice is refused, because two answers to one question is not
   a merge. `AddCatalog` itself is callable many times and the silo's catalog is
@@ -42,7 +42,8 @@ Four rules that will fail a silo at startup rather than at run time:
 - **A silo that registers a catalog without the matching factory** accepts a
   document at the coordinator and refuses it at materialization, naming the
   missing provider. That is legal and sometimes what you want; it is not usually
-  what you meant.
+  what you meant — and it is why `AddProvider` exists, since a vocabulary
+  declared and registered as one value cannot reach that state.
 - **A silo with no checkpoint store runs no durable pipeline.** Its ordinary runs
   are unaffected; what it refuses — at the declaration, by name, before anything
   has run — is a request for a run whose position must survive. Proven by
