@@ -217,6 +217,45 @@ public sealed class ValveTests
     }
 
     [Fact]
+    public async Task NoCancellationOfARunHeldAtAClosedValveEverDeliversTheElement()
+    {
+        // The test above states the rule once, and once is what a race defeats. A cancellation reaching the
+        // gate before the wait was entered used to leave through the door a shutdown leaves by and deliver
+        // the element: measured at 270 leaks in 4,000 cancellations, which the suite saw as one failure in
+        // 3,060 tests roughly every other run and no reading of the code found. So this asserts the same
+        // rule over enough cancellations that a reintroduction cannot hide behind luck.
+        //
+        // Five hundred rounds against a per-round leak rate of 6.75% misses a reintroduced defect with
+        // probability 0.9325^500, which is about 7e-16. A round costs 0.17ms, so the whole test costs well
+        // under a second: the certainty here is bought with time nobody notices.
+        const int Rounds = 500;
+
+        List<int> leaked = [];
+
+        for (int round = 0; round < Rounds; round++)
+        {
+            List<int> observed = [];
+
+            RunnableGraph graph = Source.From([1, 2, 3])
+                .Valve("gate", ValveMode.Closed)
+                .To(s => s.ForEach(observed.Add));
+
+            RunHandle run = await Host.MaterializeAsync(graph, TestToken);
+
+            await run.DisposeAsync();
+
+            Assert.Equal(TaskStatus.Canceled, run.Completion.Status);
+
+            if (observed.Count != 0)
+            {
+                leaked.Add(round);
+            }
+        }
+
+        Assert.Equal([], leaked);
+    }
+
+    [Fact]
     public async Task TwoRunsOfOneGraphHaveTwoValves()
     {
         List<int> observed = [];
