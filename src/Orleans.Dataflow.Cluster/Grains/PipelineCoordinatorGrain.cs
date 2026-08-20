@@ -578,18 +578,31 @@ internal sealed class PipelineCoordinatorGrain(
     /// <summary>Refuses a document this silo cannot validate or cannot build.</summary>
     /// <param name="document">The decoded document.</param>
     /// <exception cref="PipelineRejectedException">
-    /// The document does not validate against this silo's catalog, or a provider it names has no
-    /// registered runtime factory.
+    /// The document names a <c>local</c> stage no deployment could build, it does not validate against this
+    /// silo's catalog, or a provider it names has no registered runtime factory.
     /// </exception>
     /// <remarks>
-    /// The two checks are separate because they fail for different reasons and a deployment fixes them
-    /// differently: an unknown stage is a document this silo's vocabulary does not contain, and a missing
-    /// factory is a vocabulary this silo published but cannot execute. Both are reported in full — every
-    /// diagnostic, every missing provider — because a caller reconciling a document with a deployment
-    /// needs the whole list.
+    /// <para>
+    /// The three checks are separate because they fail for different reasons and a deployment fixes them
+    /// differently: a lambda stage is a document that could never leave the process that authored it, an
+    /// unknown stage is a document this silo's vocabulary does not contain, and a missing factory is a
+    /// vocabulary this silo published but cannot execute. All are reported in full — every diagnostic, every
+    /// missing provider — because a caller reconciling a document with a deployment needs the whole list.
+    /// </para>
+    /// <para>
+    /// The lambda check speaks first, ahead of the catalog. A <c>local</c> reference is this library's own
+    /// vocabulary and whether some deployment happens to publish it is beside the point: what stops it
+    /// deploying is a property of the stage, and "this stage's behavior is a delegate the authoring process
+    /// closed over" is a sentence an author can act on where "no such stage here" is not.
+    /// </para>
     /// </remarks>
     private void Refuse(GraphDocument document)
     {
+        if (LocalPlumbing.Refusal(document) is { } refusal)
+        {
+            throw new PipelineRejectedException(refusal);
+        }
+
         GraphValidationReport report = GraphCompiler.Validate(document, registry.Catalog);
 
         if (!report.IsValid)
@@ -601,7 +614,10 @@ internal sealed class PipelineCoordinatorGrain(
 
         foreach (StageNode node in document.Nodes)
         {
-            if (!registry.Factories.TryGetFactory(node.Stage.Provider, out _))
+            // Plumbing needs no factory and no registration: the run builds a buffer, a take, or a junction
+            // out of the node itself, which is the whole of why this library registers no 'local' provider.
+            if (!LocalPlumbing.Rehydrates(node.Stage) &&
+                !registry.Factories.TryGetFactory(node.Stage.Provider, out _))
             {
                 unbuildable.Add($"'{node.Id}' is an occurrence of '{node.Stage}'");
             }

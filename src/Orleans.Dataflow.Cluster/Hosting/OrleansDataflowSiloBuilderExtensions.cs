@@ -38,10 +38,18 @@ public static class OrleansDataflowSiloBuilderExtensions
     /// </para>
     /// <para>
     /// The Orleans adapter vocabulary is published exactly when this silo registers at least one Orleans
-    /// binding. A deployment that uses no adapter therefore keeps precisely the catalog it wrote — and
-    /// precisely the catalog fingerprint it had — while a deployment that registers one stream element or
-    /// one named call gets all ten adapter stages, because they ship as one vocabulary and a half-published
-    /// one would fail at the first element instead of at the start.
+    /// binding. A deployment that uses no adapter therefore keeps precisely the catalog it wrote, while a
+    /// deployment that registers one stream element or one named call gets all ten adapter stages, because
+    /// they ship as one vocabulary and a half-published one would fail at the first element instead of at
+    /// the start.
+    /// </para>
+    /// <para>
+    /// The local plumbing vocabulary is published by every silo and is not a registration at all (ADR 0009).
+    /// The local stages a document states completely are implemented by this engine — a buffer is a queueing
+    /// boundary the run builds structurally, not a stage some provider ships — so every silo that can run a
+    /// pipeline can run them, and none of them has or needs a runtime factory. What that costs is one
+    /// catalog fingerprint: a silo publishes more stages than its deployment wrote, because it really can
+    /// execute more stages than its deployment wrote.
     /// </para>
     /// <para>
     /// The grains themselves need no registration and get none. Orleans discovers them from the generated
@@ -299,6 +307,17 @@ public static class OrleansDataflowSiloBuilderExtensions
                     $"A silo running Orleans.Dataflow publishes at least one vocabulary. Without one it can resolve no stage reference, so every document it is handed is refused; call {nameof(IOrleansDataflowBuilder.AddProvider)} or {nameof(IOrleansDataflowBuilder.AddCatalog)} with the vocabulary this deployment publishes, or {nameof(IOrleansDataflowBuilder.AddDotnetStages)} or one of the Orleans binding registrations to publish a vocabulary this package ships.");
             }
 
+            // Named before the merge below rather than discovered inside it. A deployment that registers the
+            // local vocabulary is making a mistake this package can explain — the plumbing is published for
+            // it and the rest is not publishable at all — and the message a duplicate stage reference would
+            // produce explains none of that.
+            if (_specifications.Find(specification =>
+                specification.Stage.Provider == Authoring.LocalVocabulary.Provider) is { } local)
+            {
+                throw new ArgumentException(
+                    $"The stage '{local.Stage}' belongs to the '{Authoring.LocalVocabulary.Provider}' provider, which a deployment does not register: the local stages a document states completely are published by this silo itself and need no factory, and the local stages whose behavior is a delegate cannot be published at all, because the delegate is bound in the process that authored the graph and reaches no document. Register this deployment's own vocabulary and leave the local one to the host.");
+            }
+
             _registry = _adapters.Build();
             _dotnet.Validate();
 
@@ -318,6 +337,15 @@ public static class OrleansDataflowSiloBuilderExtensions
                 specifications.AddRange(_dotnet.Specifications);
                 keys.Add(_dotnet.Factory);
             }
+
+            // Published by every silo, unconditionally and with no factory beside it. The local stages a
+            // document states completely — a buffer, a take, a skip, a delay, the timing windows, the
+            // junctions, the discarding and first-element terminals — are implemented by this engine rather
+            // than by a provider, so every silo that can run a pipeline at all can run them; a deployment
+            // that had to remember to register them would refuse documents it was perfectly able to execute,
+            // and there is no registration that could go wrong to make it not. It is not a vocabulary for
+            // the purposes of the check above: plumbing between stages nobody registered joins nothing.
+            specifications.AddRange(LocalPlumbing.Catalog.Specifications);
 
             _catalog = StageCatalog.Create(specifications);
             _ = new StageRuntimeRegistry(keys);

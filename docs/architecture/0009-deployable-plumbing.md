@@ -1,6 +1,7 @@
 # ADR 0009: Deployable plumbing
 
-- Status: Proposed
+- Status: Accepted, and **incomplete in a way this record states rather than
+  hides** — see "What the measurement missed"
 - Date: 2026-08-20
 - Depends on: [ADR 0001](0001-definition-runtime-authoring-planes.md) (no
   delegate enters a document — the rule this ADR does not weaken and leans on),
@@ -172,6 +173,51 @@ run names their stages, and the refusal says so. A derived default may be
 reconsidered for the non-durable tier, where nothing anchors, and is out of scope
 here.
 
+## What the measurement missed
+
+The table at the top of this record measured `AsPipeline`'s refusal. It never
+measured **validation**, and validation refuses the same document for a reason
+that has nothing to do with either capability token:
+
+```text
+[element-contract-mismatch] feed#out -> stage-0002#in: … 'probe-reading@v1' … accepts 'local-opaque@v1'
+[element-contract-mismatch] stage-0002#out -> tally#in: … 'local-opaque@v1' … accepts 'probe-reading@v1'
+```
+
+Every local port declares the opaque contract `local-opaque@v1`, because a local
+graph's element types live in the CLR and never in the document. A registered
+port declares whatever its provider registered. The compiler's
+`element-contract-mismatch` rule compares an edge's two contracts for equality,
+so plumbing standing between two stages that *type* their elements produces one
+diagnostic per edge across the seam — against any catalog, before any token is
+consulted.
+
+**So the token removal is necessary and it is not sufficient**, and the case this
+record opened with — plumbing between stages that are already registered — is
+still refused where those stages declare real contracts. What works today is
+plumbing between registered stages whose ports declare the opaque contract, which
+is an honest declaration for a vocabulary carrying boxed values and is the only
+shape in which the two compose. That is what the deployable tests are written
+over, and both fixture files say so at the top.
+
+The gap is pinned by a test that asserts the two diagnostics and asserts that
+nothing this record governs is what refuses them, so the day the plane can carry
+a contract through a transparent stage, the test fails and says so.
+
+**The next decision, not taken here.** Three shapes are visible, in increasing
+order of how much they buy and how much they cost:
+
+| Shape | What it means |
+|---|---|
+| a well-known transparent contract | the rule unifies `local-opaque@v1` against anything, and any stage can opt out of contract checking by declaring it |
+| contract inference through a transparent node | the edge in fixes the occurrence's contract and the edge out must match it — a real compiler feature, and the right answer |
+| a contract on the plumbing node itself | strongest, and a document-format change |
+
+The middle one is the one to design. It is deliberately not designed here,
+because relaxing the mismatch rule reverses a decision recorded in the
+Abstractions package and deserves its own record rather than a paragraph in this
+one.
+
 ## What this does not do
 
 **It does not make lambdas deployable.** `Select` and `Where` are unchanged and
@@ -187,11 +233,30 @@ in the document — so a graph that used to declare `nondeployable` and now does
 not has a different fingerprint. That is correct and is the point: it is a
 different document, because it says something different about itself.
 
-**It does not cover `FirstOrDefault` and `LastOrDefault`.** Their default is a
-CLR value with no canonical spelling. They keep `nondeployable` and the refusal
-names them. Whether any other kind smuggles a CLR value through the seed the same
-way is a question for the implementation to settle in code: these two were found
-by reading, and reading is how the first list of anything is wrong.
+**It does not cover `FirstOrDefault`, `LastOrDefault`, or `Valve`** — twenty-one
+kinds rehydrate, not twenty-two. The first two carry a CLR default with no
+canonical spelling. **The third was found by building it and is the better
+finding.** A valve binds nothing, so it belongs in the behaviour-free set — but
+it produces a runtime *control*, an object an author reaches by name inside the
+process that built the graph, and a cluster run surfaces no controls at all. A
+rehydrated valve would hold a switch nobody could flip: a no-op or a permanent
+stall. Worse, the planner throws for a control-bearing node whose document
+declares no slot, and nothing in validation requires that slot — so a
+hand-written document with a valve would validate and then fail to build, which
+is precisely the state this record forbids.
+
+The consequence is worth stating because it is a small divergence from what this
+record first said: `nondeployable` on the catalog tracks **rehydratability**
+rather than "carries behaviour". The alternative would let `local/valve@v1` pass
+`AsPipeline` on a client and be refused by the silo, and a split between the two
+is worse than the divergence.
+
+Whether any *other* kind smuggles a CLR value through its seed was settled in
+code rather than by reading: a sweep over every graph the authoring surface can
+close looks each local node up by the stage reference in its own document and
+checks the constructed binding against the vocabulary's predicate and seed.
+`Count` does carry a seed — `0L` — but it is the vocabulary's constant rather
+than an author's, which is why the predicate and the seed are two questions.
 
 **It does not claim the deployable and local paths run identically.** They run
 the same planner over the same payloads, which is a much stronger start than two

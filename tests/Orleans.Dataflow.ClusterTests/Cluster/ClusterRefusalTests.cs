@@ -214,6 +214,23 @@ public sealed class ClusterRefusalTests(DataflowCluster cluster)
         Assert.Contains("names no provider", reported, StringComparison.Ordinal);
     }
 
+    [Fact]
+    public async Task TheLocalVocabularyIsNotSomethingADeploymentRegisters()
+    {
+        // Since ADR 0009 a silo publishes the local stages a document states completely, by itself and with
+        // no factory beside them, so a deployment that registers the local catalog is registering half a
+        // vocabulary it cannot execute and half a vocabulary it already has. Without this the mistake would
+        // still be refused — the merged catalog would hold every plumbing reference twice — but the message
+        // would be about duplicates rather than about what the deployment actually got wrong.
+        string reported = await RefusedSilo(dataflow => dataflow
+            .AddCatalog(LocalStageCatalog.Instance)
+            .AddCatalog(TestVocabulary.Catalog())
+            .AddFactory(TestVocabulary.Provider, new TestStageFactory()));
+
+        Assert.Contains("provider, which a deployment does not register", reported, StringComparison.Ordinal);
+        Assert.DoesNotContain("repeats the stage reference", reported, StringComparison.Ordinal);
+    }
+
     /// <summary>Deploys a silo with a broken registration and reports what stopped it.</summary>
     /// <param name="configure">The registration to make.</param>
     /// <returns>The text of everything the failure said, inner exceptions included.</returns>

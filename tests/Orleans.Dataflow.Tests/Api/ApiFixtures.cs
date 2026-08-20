@@ -34,6 +34,58 @@ internal static class ApiFixtures
     internal static StageRef LocalStage(string stage) =>
         StageRef.Create(ProviderId.Create("local"), StageId.Create(stage), 1);
 
+    /// <summary>The local stages a document states completely, written out rather than derived.</summary>
+    /// <value>
+    /// The stage identifier texts of every shape a deployable run rebuilds from a node (ADR 0009), sorted
+    /// ordinally.
+    /// </value>
+    /// <remarks>
+    /// The independent statement of the vocabulary's own predicate. Asking
+    /// <c>LocalVocabulary.RunsFromTheDocumentAlone</c> here would agree with the catalog whatever either of
+    /// them said, because the catalog is built from it; a list written by hand is what makes a shape that
+    /// silently changed sides fail a test rather than move both answers together. Three shapes bind no
+    /// behavior and are deliberately absent: <c>first-or-default</c> and <c>last-or-default</c> carry a CLR
+    /// default no document names, and <c>valve</c> produces a control an author reaches by name in the
+    /// process that built the graph.
+    /// </remarks>
+    internal static IReadOnlyList<string> DeployableLocalStages { get; } =
+    [
+        "balance",
+        "broadcast",
+        "buffer",
+        "concat",
+        "count",
+        "delay",
+        "empty",
+        "first",
+        "ignore",
+        "initial-delay",
+        "interleave",
+        "last",
+        "merge",
+        "never",
+        "range",
+        "skip",
+        "skip-within",
+        "take",
+        "take-within",
+        "tick",
+        "timeout",
+    ];
+
+    /// <summary>Reports whether a document holds a stage whose behavior is bound in this process.</summary>
+    /// <param name="document">The document to read.</param>
+    /// <returns><see langword="true"/> when some node is a local stage this list does not admit.</returns>
+    /// <remarks>
+    /// The cause <c>nondeployable</c> tracks, read off the document against
+    /// <see cref="DeployableLocalStages"/>. It used to be "some node's provider is <c>local</c>", which was
+    /// the same answer until plumbing stopped requiring the token.
+    /// </remarks>
+    internal static bool HoldsBoundBehavior(GraphDocument document) =>
+        document.Nodes.Any(node =>
+            node.Stage.Provider.Value == "local" &&
+            !DeployableLocalStages.Contains(node.Stage.Stage.Value));
+
     /// <summary>Builds a contract reference at major version 1 from its contract identifier text.</summary>
     /// <param name="contract">The contract identifier segment, such as <c>local-opaque</c>.</param>
     /// <returns>The contract reference.</returns>

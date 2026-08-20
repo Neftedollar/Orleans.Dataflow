@@ -52,6 +52,13 @@ internal sealed class LocalStageDescriptor : StageOccurrence
     /// <param name="parameters">The parameter payload the node carries.</param>
     /// <param name="controlSlot">The name of the runtime control the shape produces, when it produces one.</param>
     /// <param name="controlType">The type of that control, when there is one.</param>
+    /// <exception cref="InvalidOperationException">
+    /// <paramref name="kind"/> is one <see cref="LocalVocabulary.CarriesBehavior"/> denies and a behavior or
+    /// a seed of the caller's was passed for it anyway. That is a defect in this assembly rather than
+    /// anything an author can reach, and it is checked rather than trusted because the vocabulary's answer
+    /// is what a deployable run rehydrates an occurrence from: a shape that quietly grew a delegate while
+    /// still being classified as free of one would produce a rehydrated node missing exactly that delegate.
+    /// </exception>
     private LocalStageDescriptor(
         LocalStageKind kind,
         object? behavior,
@@ -60,6 +67,18 @@ internal sealed class LocalStageDescriptor : StageOccurrence
         ResultSlotId? controlSlot = null,
         Type? controlType = null)
     {
+        if (!LocalVocabulary.CarriesBehavior(kind) && behavior is not null)
+        {
+            throw new InvalidOperationException(
+                $"The shape '{kind}' is declared to bind no behavior and is being constructed with one. {nameof(LocalVocabulary)}.{nameof(LocalVocabulary.CarriesBehavior)} is what decides which occurrences a deployable run can rebuild from a document alone, so a shape that gains a delegate has to be reclassified there in the same change.");
+        }
+
+        if (LocalVocabulary.RunsFromTheDocumentAlone(kind) && !Equals(seed, LocalVocabulary.SeedOf(kind)))
+        {
+            throw new InvalidOperationException(
+                $"The shape '{kind}' is declared to be recoverable from a document alone and is being constructed with a seed of its caller's. Such a shape's initial state belongs to the shape rather than to the occurrence, because a document names neither a value nor its type; a shape that gains a seed of the author's belongs beside 'first-or-default' and 'last-or-default' in {nameof(LocalVocabulary)}.{nameof(LocalVocabulary.RunsFromTheDocumentAlone)}.");
+        }
+
         Kind = kind;
         Behavior = behavior;
         Seed = seed;
@@ -178,10 +197,10 @@ internal sealed class LocalStageDescriptor : StageOccurrence
 
     /// <inheritdoc/>
     /// <value>
-    /// <see cref="CapabilityToken.Nondeployable"/>, for every local shape without exception. A delegate is
-    /// not durable topology, and neither is a buffer whose only implementation lives in this process'
-    /// local provider: the token is a statement about where the stage can run, not about whether the
-    /// author happened to write a lambda for it.
+    /// <see cref="CapabilityToken.Nondeployable"/> for every shape whose behavior is bound in this process,
+    /// and nothing at all for the shapes a document states completely. The token is a statement about where
+    /// a stage can run: a delegate is not durable topology and never will be, while a buffer's capacity is
+    /// a number every host of this library can already read and act on (ADR 0009).
     /// </value>
     internal override IReadOnlyList<CapabilityToken> RequiredCapabilities =>
         LocalVocabulary.RequiredCapabilitiesOf(Kind);
@@ -196,6 +215,35 @@ internal sealed class LocalStageDescriptor : StageOccurrence
     /// this method is the copy it performs once the answer is yes.
     /// </remarks>
     internal LocalStageDescriptor Named(NodeId name) => new(this, name);
+
+    /// <summary>Rebuilds one behavior-free occurrence from the node a document declares it as.</summary>
+    /// <param name="kind">The shape the node's stage reference names.</param>
+    /// <param name="parameters">The node's own payload, carried over verbatim.</param>
+    /// <returns>The descriptor a run plans that node from.</returns>
+    /// <exception cref="ArgumentOutOfRangeException">
+    /// <paramref name="kind"/> is not a shape <see cref="LocalVocabulary.RunsFromTheDocumentAlone"/>
+    /// admits. The caller decides what a document that names one is answered with; this refuses to build a
+    /// half of an occurrence whose other half is missing.
+    /// </exception>
+    /// <remarks>
+    /// The deployable path's whole of ADR 0009. There is no second reader here and deliberately so: the
+    /// payload travels as the bytes the document holds, and every number inside it is read later by the very
+    /// code a locally authored graph's is — so fusion, the buffer boundary rule, and cycle relief are one
+    /// implementation rather than two that have to be kept in step. What this method supplies is the half a
+    /// document cannot hold, and for these shapes that half is empty.
+    /// </remarks>
+    internal static LocalStageDescriptor Rehydrated(LocalStageKind kind, CanonicalJsonValue parameters)
+    {
+        if (!LocalVocabulary.RunsFromTheDocumentAlone(kind))
+        {
+            throw new ArgumentOutOfRangeException(
+                nameof(kind),
+                kind,
+                "The shape is not one a document states completely, so an occurrence of it cannot be rebuilt from a node.");
+        }
+
+        return new(kind, behavior: null, LocalVocabulary.SeedOf(kind), parameters);
+    }
 
     /// <summary>Creates a source over an in-memory sequence.</summary>
     /// <param name="elements">The sequence, as the authoring value received it.</param>

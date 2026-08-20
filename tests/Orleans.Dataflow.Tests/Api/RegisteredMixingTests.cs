@@ -82,20 +82,24 @@ public sealed class RegisteredMixingTests
     public void EachTokenAppearsExactlyWhenItsOwnCauseIsPresent()
     {
         // The conditional emission, swept rather than sampled: 'nondeployable' tracks the presence of a
-        // local stage and 'ephemeral-identity' tracks the presence of a machine-made identifier. Each is
-        // compared against its own cause read off the document, so a builder that emitted either for the
-        // wrong reason would fail here even while the other one still looked right.
+        // stage whose behavior is bound in this process and 'ephemeral-identity' tracks the presence of a
+        // machine-made identifier. Each is compared against its own cause read off the document, so a
+        // builder that emitted either for the wrong reason would fail here even while the other one still
+        // looked right.
+        //
+        // The first cause used to be "some node's provider is local", and ADR 0009 is exactly the change
+        // that separated the two: a buffer is a local node that binds nothing, so the cause is now the
+        // shape rather than the provider.
         foreach ((string name, RunnableGraph graph) in MixedGraphs())
         {
             bool numbered = graph.Document.Nodes.Any(
                 node => node.Id.Value.StartsWith("stage-", StringComparison.Ordinal));
-            bool local = graph.Document.Nodes.Any(node => node.Stage.Provider.Value == "local");
 
             Assert.Equal(
                 numbered,
                 graph.Document.Capabilities.Contains(CapabilityToken.EphemeralIdentity));
             Assert.Equal(
-                local,
+                HoldsBoundBehavior(graph.Document),
                 graph.Document.Capabilities.Contains(CapabilityToken.Nondeployable));
             Assert.False(name is null);
         }
@@ -118,35 +122,66 @@ public sealed class RegisteredMixingTests
         Assert.Equal(["nondeployable"], Capabilities(named.Document));
         Assert.Equal(["index-out", "normalize", "orders-in"], NodeIds(named.Document));
 
-        // The other three corners of the square are the sweep's, and every one of them still reports its own
-        // cause: an unnamed occurrence anywhere brings the token back, whatever kind of stage it is.
+        // The other corners are the sweep's, and each token is derived from the document rather than from
+        // the fixtures that happen to be in the list. Both derivations used to read "some node's provider is
+        // 'local'", and both were made false by a different half of ADR 0009: naming separates a local stage
+        // from a positional identifier, and plumbing separates a local stage from bound behavior. A sweep
+        // that kept the old derivation would still pass here — no fixture below is named — and would say
+        // nothing, which is the failure mode a sweep is most prone to.
         foreach ((string name, RunnableGraph graph) in MixedGraphs())
         {
             bool ephemeral = graph.Document.Capabilities.Contains(CapabilityToken.EphemeralIdentity);
             bool nondeployable = graph.Document.Capabilities.Contains(CapabilityToken.Nondeployable);
 
-            Assert.Equal(ephemeral, nondeployable);
-            Assert.False(name is null);
+            // 'ephemeral-identity' says the identifiers are positions, and a position is exactly an
+            // identifier this surface allocated rather than an author writing one.
+            bool positional = graph.Document.Nodes.Any(
+                node => node.Id.Value.StartsWith("stage-", StringComparison.Ordinal));
+
+            // 'nondeployable' says a stage's behavior never reaches the document, which is now a narrower
+            // set than "is a local stage" — read against the hand-written list rather than the vocabulary's
+            // own predicate, so a shape that changes sides fails here instead of moving both answers.
+            bool bound = HoldsBoundBehavior(graph.Document);
+
+            Assert.Equal(positional, ephemeral);
+            Assert.Equal(bound, nondeployable);
+            Assert.True(!nondeployable || graph.Document.Nodes.Any(node => node.Stage.Provider.Value == "local"), name);
         }
     }
 
     [Fact]
-    public void ABufferMakesAGraphNondeployableEvenThoughItCarriesNoDelegate()
+    public void ABufferDoesNotMakeAGraphNondeployableBecauseItCarriesNoDelegate()
     {
-        // The one local stage whose whole behavior is written down. It is still nondeployable, and that is
-        // a statement about where it can run rather than about whether the author wrote a lambda for it:
-        // 'local/buffer@v1' resolves in the local provider and nowhere else, so a document naming it is
-        // executable only by the process that has that provider. Every local stage specification requires
-        // the token, and the builder declares what its occurrences require.
+        // The one local stage whose whole behavior is written down, and the measurement ADR 0009 was
+        // written from. The token is a statement about where a stage can run: a delegate is bound in the
+        // authoring process and reaches no document, while a buffer's capacity and policy are in the node
+        // and every host of this library reads them from there. So 'nondeployable' is absent and
+        // 'ephemeral-identity' is not — the buffer is unnamed, which is a fact about identifiers rather
+        // than about behavior, and is the only thing between this graph and a pipeline.
         RunnableGraph graph = Source.FromRegistered(OrderSource, "orders-in", SourceParameters)
             .Buffer(new BufferOptions { Capacity = 4 })
             .Via(Normalize, "normalize", NormalizeParameters)
             .To(IndexSink, "index-out", IndexParameters);
 
-        Assert.Equal(["ephemeral-identity", "nondeployable"], Capabilities(graph.Document));
+        Assert.Equal(["ephemeral-identity"], Capabilities(graph.Document));
         Assert.Equal("local/buffer@v1", Assert.Single(
             graph.Document.Nodes,
             node => node.Id.Value == "stage-0002").Stage.ToString());
+    }
+
+    [Fact]
+    public void ALambdaBesideThePlumbingBringsTheTokenBack()
+    {
+        // The other half of the same sentence, so that the absence above is a derivation rather than a
+        // buffer-shaped hole. One 'where' in the same chain is behavior the authoring process closed over,
+        // and its presence is what the token tracks — beside a buffer that contributes nothing.
+        RunnableGraph graph = Source.FromRegistered(OrderSource, "orders-in", SourceParameters)
+            .Buffer(new BufferOptions { Capacity = 4 })
+            .Where(order => order.IsValid)
+            .Via(Normalize, "normalize", NormalizeParameters)
+            .To(IndexSink, "index-out", IndexParameters);
+
+        Assert.Equal(["ephemeral-identity", "nondeployable"], Capabilities(graph.Document));
     }
 
     [Fact]

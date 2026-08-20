@@ -393,20 +393,152 @@ public sealed class CatalogValidationTests
     }
 
     [Fact]
-    public void EveryLocalStageRequiresTheNondeployableCapabilityAndOnlyTheDurableScopeRequiresMore()
+    public void ALocalStageRequiresNondeployableExactlyWhenItsBehaviorIsBoundInThisProcess()
     {
-        // One exception in the whole vocabulary, and it is the one shape that asks a host for a promise
-        // rather than only for an execution: a durable scope expects its stages' state to survive a
-        // process, so a host that does not know the word 'durable-state' must refuse the document instead
-        // of running it without durability. The tokens are in the specification's own canonical order,
-        // which is the identifier sort and not the order the vocabulary happened to list them in.
+        // ADR 0009's half of the catalog. The token is a statement about where a stage can run, so it is
+        // required by the shapes whose behavior is a delegate the authoring process closed over and by no
+        // others: a buffer's capacity, a take's count and a junction's rule are in the node, and every host
+        // of this library reads them from there. The list of shapes that need nothing is written by hand in
+        // ApiFixtures rather than asked of the vocabulary, so a shape that silently changed sides fails here
+        // instead of moving both answers at once.
+        //
+        // One shape needs more than the token: a durable scope asks a host for a promise rather than only
+        // for an execution, so a host that does not know the word 'durable-state' must refuse the document
+        // instead of running it without durability. The tokens are in the specification's own canonical
+        // order, which is the identifier sort and not the order the vocabulary happened to list them in.
         foreach (StageSpecification specification in LocalStageCatalog.Instance.Specifications)
         {
+            string stage = specification.Stage.Stage.Value;
+
             Assert.Equal(
-                specification.Stage.Stage.Value is "durable"
-                    ? [CapabilityToken.Create("durable-state"), CapabilityToken.Nondeployable]
-                    : [CapabilityToken.Nondeployable],
+                stage switch
+                {
+                    "durable" => [CapabilityToken.Create("durable-state"), CapabilityToken.Nondeployable],
+                    _ when DeployableLocalStages.Contains(stage) => [],
+                    _ => [CapabilityToken.Nondeployable],
+                },
                 specification.RequiredCapabilities);
+        }
+
+        // And the list really is a proper part of the vocabulary rather than all of it or none of it, so
+        // that a predicate answering the same thing everywhere would fail this even while every arm above
+        // still agreed with it.
+        Assert.Equal(21, DeployableLocalStages.Count);
+        Assert.Equal(
+            DeployableLocalStages,
+            LocalStageCatalog.Instance.Specifications
+                .Where(specification => specification.RequiredCapabilities.Count == 0)
+                .Select(specification => specification.Stage.Stage.Value));
+    }
+
+    [Fact]
+    public void WhatTheAuthoringSurfaceBindsAgreesWithWhatTheVocabularySaysItBinds()
+    {
+        // The classification re-derived from constructed occurrences instead of read off the switch that
+        // declares it. Every graph this API can close is swept, every local node of it is looked up by the
+        // stage reference its document carries, and the binding behind it is compared with what the
+        // vocabulary promised: a shape called behavior-free that bound something, or a rehydratable shape
+        // whose seed was the author's rather than its own, fails here.
+        //
+        // The seed half is the one that matters most. ADR 0009 names 'first-or-default' and
+        // 'last-or-default' as the two shapes that smuggle a CLR value through the seed, and the list was
+        // not verified when it was written; this is the verification, and it is over values a run would
+        // actually have executed rather than over a reading of the factories.
+        HashSet<string> swept = new(StringComparer.Ordinal);
+
+        foreach ((string name, RunnableGraph graph) in Everything())
+        {
+            foreach (StageNode node in graph.Document.Nodes)
+            {
+                if (!LocalVocabulary.TryReadStage(node.Stage.ToString(), out LocalStageKind kind))
+                {
+                    continue;
+                }
+
+                _ = swept.Add(node.Stage.Stage.Value);
+
+                LocalStageDescriptor descriptor = graph.LocalBindings[node.Id];
+
+                Assert.Equal(LocalVocabulary.CarriesBehavior(kind), descriptor.Behavior is not null);
+
+                if (LocalVocabulary.RunsFromTheDocumentAlone(kind))
+                {
+                    Assert.Equal(LocalVocabulary.SeedOf(kind), descriptor.Seed);
+                    Assert.Contains(node.Stage.Stage.Value, DeployableLocalStages);
+                }
+                else if (!LocalVocabulary.CarriesBehavior(kind))
+                {
+                    // The completeness claim, read the other way round. A shape that binds nothing and is
+                    // still refused is refused for one of exactly two reasons, and this is the one about
+                    // seeds: only the two defaulting sinks carry a value here, and 'valve' — the third
+                    // refusal — carries none, because what disqualifies it is its control.
+                    Assert.True(
+                        descriptor.Seed is null ||
+                            kind is LocalStageKind.FirstOrDefault or LocalStageKind.LastOrDefault,
+                        $"{node.Stage} binds no behavior and carries a seed of its own, which no shape but the two defaulting sinks may");
+                }
+
+                Assert.False(name is null);
+            }
+        }
+
+        // A sweep that touched three shapes would agree with anything, so what it reached is stated. These
+        // are the shapes the linear and result-bearing surfaces here can express; the junctions are swept by
+        // JunctionAuthoringTests, which validates every one of them against this same catalog.
+        Assert.Subset(
+            swept,
+            new HashSet<string>(StringComparer.Ordinal)
+            {
+                "buffer",
+                "count",
+                "delay",
+                "empty",
+                "first",
+                "first-or-default",
+                "from-enumerable",
+                "ignore",
+                "initial-delay",
+                "range",
+                "select",
+                "skip",
+                "skip-within",
+                "take",
+                "take-within",
+                "tick",
+                "timeout",
+                "valve",
+                "where",
+            });
+    }
+
+    [Fact]
+    public void TheThreeBehaviorFreeShapesThatStillRequireTheTokenSayWhyInTheirOwnTerms()
+    {
+        // The three shapes that bind no behavior and are still not deployable, named here so that the
+        // exclusions are a decision on the record rather than a gap in a list. 'first-or-default' and
+        // 'last-or-default' carry default(T) for an element type no document names, so a rehydrated
+        // occurrence would resolve null where the authored one resolved zero; 'valve' produces a runtime
+        // control, and a control is an object an author reaches by name inside the process that built the
+        // graph, which a run on a silo has nobody to hand back to.
+        foreach (string stage in (string[])["first-or-default", "last-or-default", "valve"])
+        {
+            Assert.True(
+                LocalStageCatalog.Instance.TryGetSpecification(
+                    LocalStage(stage),
+                    out StageSpecification? specification));
+            Assert.Equal([CapabilityToken.Nondeployable], specification!.RequiredCapabilities);
+            Assert.DoesNotContain(stage, DeployableLocalStages);
+        }
+
+        // Their siblings that differ in exactly the disqualifying property do deploy, which is what makes
+        // the three refusals specific rather than a shrug at anything unfamiliar.
+        foreach (string stage in (string[])["first", "last"])
+        {
+            Assert.True(
+                LocalStageCatalog.Instance.TryGetSpecification(
+                    LocalStage(stage),
+                    out StageSpecification? specification));
+            Assert.Empty(specification!.RequiredCapabilities);
         }
     }
 
@@ -678,6 +810,37 @@ public sealed class CatalogValidationTests
             Assert.True(
                 LocalStageCatalog.Instance.TryGetSpecification(specification.Stage, out StageSpecification? resolved));
             Assert.Same(specification, resolved);
+        }
+    }
+
+    /// <summary>Enumerates every graph this file builds, whichever helper builds it.</summary>
+    /// <returns>The named graphs.</returns>
+    /// <remarks>
+    /// The representative shapes, every source, and every termination over one long chain of operators.
+    /// Written as one sequence so that a claim about "every graph this surface can express" is made against
+    /// the same set the validation claims are made against, rather than against a subset chosen for it.
+    /// </remarks>
+    private static IEnumerable<(string Name, RunnableGraph Graph)> Everything()
+    {
+        foreach ((string name, RunnableGraph graph) in RepresentativeGraphs())
+        {
+            yield return (name, graph);
+        }
+
+        Source<long> chained = Source.From<long>([1L, 2L, 3L])
+            .Buffer(new BufferOptions { Capacity = 2 })
+            .Take(2)
+            .Skip(1)
+            .Delay(TimeSpan.FromSeconds(1), new BufferOptions { Capacity = 2 })
+            .InitialDelay(TimeSpan.FromSeconds(1))
+            .Timeout(TimeSpan.FromHours(1))
+            .TakeWithin(TimeSpan.FromHours(1))
+            .SkipWithin(TimeSpan.FromTicks(1))
+            .Valve("gate", ValveMode.Open);
+
+        foreach ((string name, RunnableGraph graph) in Terminations(chained))
+        {
+            yield return ($"chained {name}", graph);
         }
     }
 

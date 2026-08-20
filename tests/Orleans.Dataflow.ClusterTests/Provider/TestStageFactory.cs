@@ -21,7 +21,10 @@ internal sealed class TestStageFactory : IDataflowStageFactory
     {
         StageNode node = request.Node;
 
-        if (node.Stage == TestVocabulary.Range)
+        // The two opaque stages are the two ordinary ones under a different declaration, so they are built
+        // by the same code: what differs between them is the element contract their specifications declare,
+        // which is a statement in the catalog rather than anything a runtime does.
+        if (node.Stage == TestVocabulary.OpaqueRange || node.Stage == TestVocabulary.Range)
         {
             if (!TestRangeParameters.TryRead(
                 node.Parameters,
@@ -151,7 +154,7 @@ internal sealed class TestStageFactory : IDataflowStageFactory
                 producesResult: true);
         }
 
-        if (node.Stage == TestVocabulary.Sum)
+        if (node.Stage == TestVocabulary.Sum || node.Stage == TestVocabulary.OpaqueSum)
         {
             return DataflowStageRuntime.Terminal(
                 static () => 0L,

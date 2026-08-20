@@ -74,8 +74,8 @@ internal static class PipelineMaterializer
     /// <returns>The started run.</returns>
     /// <exception cref="ArgumentNullException">Any reference argument is <see langword="null"/>.</exception>
     /// <exception cref="InvalidOperationException">
-    /// The document does not validate against <paramref name="catalog"/>, or it is not the one linear
-    /// chain of resolvable stages this runtime executes.
+    /// The document names a <c>local</c> stage no deployment could build, it does not validate against
+    /// <paramref name="catalog"/>, or it is not a shape of resolvable stages this runtime executes.
     /// </exception>
     /// <remarks>
     /// The run is started before this method returns, exactly as the local host's is, and an already
@@ -96,6 +96,14 @@ internal static class PipelineMaterializer
         ArgumentNullException.ThrowIfNull(factories);
         ArgumentNullException.ThrowIfNull(runIdentity);
 
+        // Asked before the catalog, because it is the sharper sentence and it is true whatever a deployment
+        // publishes: what stops a lambda stage from deploying is the lambda, not the catalog it was looked
+        // up in. Every other local node becomes an occurrence below, from the document and nothing else.
+        if (LocalPlumbing.Refusal(document) is { } refusal)
+        {
+            throw new InvalidOperationException(refusal);
+        }
+
         GraphValidationReport report = GraphCompiler.Validate(document, catalog);
 
         if (!report.IsValid)
@@ -103,14 +111,13 @@ internal static class PipelineMaterializer
             throw new InvalidOperationException(Describe(report));
         }
 
-        // The system clock, and not an option of this seam. Every stage of this runtime that reads a clock
-        // is a stage of the local vocabulary, and the local vocabulary has no binding here: a document
-        // materialized through this path is registered stages only, so nothing it holds can ask the time.
-        // When a registered stage ever needs one, it arrives through the runtime-factory seam beside the
-        // tokens rather than through here.
+        // The system clock, and not an option of this seam. The stages that read one are the plumbing this
+        // path now rehydrates — a delay, a tick, the two windows — and they read the run's clock exactly as
+        // a locally authored graph's do. When a registered stage ever needs one, it arrives through the
+        // runtime-factory seam beside the tokens rather than through here.
         LocalRunPlan plan = LocalRunPlanner.Compile(
             document,
-            new Dictionary<Identity.NodeId, Authoring.LocalStageDescriptor>(),
+            LocalPlumbing.Bindings(document),
             new StageRuntimeBinder(catalog, factories),
             runIdentity,
             TimeProvider.System);
@@ -136,8 +143,8 @@ internal static class PipelineMaterializer
     /// <returns>The started run.</returns>
     /// <exception cref="ArgumentNullException">Any required reference argument is <see langword="null"/>.</exception>
     /// <exception cref="InvalidOperationException">
-    /// The document does not validate, it is not one this runtime executes, or the checkpoint names a node
-    /// this graph has no such seam for.
+    /// The document names a <c>local</c> stage no deployment could build, it does not validate, it is not
+    /// one this runtime executes, or the checkpoint names a node this graph has no such seam for.
     /// </exception>
     /// <remarks>
     /// <para>
@@ -171,6 +178,11 @@ internal static class PipelineMaterializer
         ArgumentNullException.ThrowIfNull(runIdentity);
         ArgumentNullException.ThrowIfNull(durable);
 
+        if (LocalPlumbing.Refusal(document) is { } refusal)
+        {
+            throw new InvalidOperationException(refusal);
+        }
+
         GraphValidationReport report = GraphCompiler.Validate(document, catalog);
 
         if (!report.IsValid)
@@ -180,7 +192,7 @@ internal static class PipelineMaterializer
 
         LocalRunPlan plan = LocalRunPlanner.Compile(
             document,
-            new Dictionary<Identity.NodeId, Authoring.LocalStageDescriptor>(),
+            LocalPlumbing.Bindings(document),
             new StageRuntimeBinder(catalog, factories),
             runIdentity,
             TimeProvider.System);

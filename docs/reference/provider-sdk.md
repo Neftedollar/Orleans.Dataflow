@@ -215,9 +215,57 @@ the build delegates' declaring types instead.
 `IStageCatalog` of every stage the [operator](operators.md) surface builds —
 `local/buffer@v1`, `local/select@v1`, and the rest — and it is what a bare
 `LocalDataflowHost` resolves against. It is exposed so a tool that validates a
-document knows the whole vocabulary rather than only the registered half. Local
-stages as a class are nondeployable: a buffer carries no delegate, but
-`local/buffer@v1` resolves in this process's provider and nowhere else.
+document knows the whole vocabulary rather than only the registered half.
+
+**Local stages are not nondeployable as a class.** A stage requires the token
+when its behaviour is a delegate the authoring process closed over — `select`,
+`where`, a router, a sink callback. The plumbing shapes state themselves
+completely in the node: a buffer's capacity and policy, a take's count, a delay's
+duration. Twenty-one of them therefore require no token, a silo publishes them
+alongside your vocabulary without any registration of yours, and the engine
+rebuilds each from the document alone rather than through a factory.
+
+### Deployable plumbing
+
+Twenty-one local shapes state themselves completely in their node, so a host can
+run one without anything of yours:
+
+`balance`, `broadcast`, `buffer`, `concat`, `count`, `delay`, `empty`, `first`,
+`ignore`, `initial-delay`, `interleave`, `last`, `merge`, `never`, `range`,
+`skip`, `skip-within`, `take`, `take-within`, `tick`, `timeout`.
+
+`AddOrleansDataflow` publishes them alongside your vocabulary, unconditionally
+and with no registration to get wrong — they are implemented by the engine rather
+than by a provider, and a deployment that had to remember them would refuse
+documents it can execute. Registering a `local/*` specification of your own is
+refused at silo start, by name.
+
+There is no `local` factory, and that is the design rather than an omission. A
+buffer is not a source, an element, or a terminal — it is a queueing boundary the
+engine implements, which is why it relieves a cycle and a delay does not — so
+publishing one through this seam would mean adding a seventh runtime shape.
+Instead a node of these kinds is rebuilt into the very descriptor a locally
+authored graph produces, and planned by the same code reading the same bytes.
+Fusion, the buffer boundary rule and cycle relief are therefore one
+implementation rather than two kept in step.
+
+Three behaviour-free shapes are deliberately absent. `first-or-default` and
+`last-or-default` carry a CLR default value no document can name. `valve`
+produces a [control](run-handles.md#result-slots-and-control-slots) — an object
+an author flips by name inside the process that built the graph — and a cluster
+run surfaces no controls, so a rehydrated valve would hold a switch nobody could
+reach. All three keep `nondeployable` and a document naming one is refused by
+name.
+
+**What this does not yet unblock.** Every local port declares the opaque contract
+`local-opaque@v1`, because a local graph's element types live in the CLR and not
+in the document. So plumbing standing between two registered stages whose ports
+declare *real* contracts is still refused — by `element-contract-mismatch`, one
+diagnostic per edge across the seam, independently of any capability token. What
+composes today is plumbing between registered stages whose ports declare the
+opaque contract, which is the honest declaration for a vocabulary carrying boxed
+values. Carrying a contract *through* a transparent stage is a compiler feature
+and a decision of its own.
 
 ---
 
@@ -653,10 +701,11 @@ definition-plane one. A graph you intend to deploy is registered end to end, and
 `AsPipeline` tells you so by name.
 
 **Capability tokens are conditional and causal.** `nondeployable` appears exactly
-when a local-provider stage is present — local stages as a class are
-nondeployable, since a buffer carries no delegate but resolves in this process's
-provider and nowhere else. `ephemeral-identity` appears exactly when an occurrence
-is auto-named. A document's capabilities are the union of every occurrence's
+when some stage's behaviour is a delegate the authoring process closed over,
+which since the plumbing shapes became deployable is a narrower set than "some
+local stage is present". `ephemeral-identity` appears exactly when an occurrence
+carries an identifier this surface allocated rather than a name its author wrote
+— see [naming an occurrence](operators.md#naming-an-occurrence). A document's capabilities are the union of every occurrence's
 declared requirements, so a registered stage requiring a capability closes into a
 document that declares it, and `AsPipeline` refuses any capability the target
 catalog does not know.

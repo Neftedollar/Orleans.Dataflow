@@ -24,9 +24,12 @@ namespace Orleans.Dataflow;
 /// </para>
 /// <para>
 /// Every element port declares the same opaque element contract, because a local graph's element types live
-/// in the C# type system and never in the document; and every stage requires the <c>nondeployable</c>
-/// capability, which is how a document that contains one is stopped before it can be persisted, resumed, or
-/// placed remotely.
+/// in the C# type system and never in the document. The <c>nondeployable</c> capability is required by the
+/// stages whose behavior is bound in the authoring process and by those alone (ADR 0009): that is how a
+/// document holding a lambda is stopped before it can be persisted, resumed, or placed remotely, and it is
+/// why a document whose only local stages are plumbing is not. Which of them is which is
+/// <see cref="LocalVocabulary.RunsFromTheDocumentAlone"/>'s answer, read here through
+/// <see cref="LocalVocabulary.RequiredCapabilitiesOf"/> rather than restated.
 /// </para>
 /// <para>
 /// Parameters split the vocabulary in two, and the split is "what can a document state honestly" rather
@@ -79,27 +82,9 @@ public static class LocalStageCatalog
 
         for (int index = 0; index < kinds.Length; index++)
         {
-            specifications[index] = Specification(kinds[index]);
+            specifications[index] = LocalVocabulary.SpecificationOf(kinds[index]);
         }
 
         return StageCatalog.Create(specifications);
-
-        StageSpecification Specification(LocalStageKind kind)
-        {
-            IReadOnlyList<InputPortSpecification> inputs = LocalVocabulary.InputPortsOf(kind);
-            IReadOnlyList<OutputPortSpecification> outputs = LocalVocabulary.OutputPortsOf(kind);
-            ResultPortSpecification[] results = LocalVocabulary.ResultPortOf(kind) is { } result
-                ? [result]
-                : [];
-
-            return StageSpecification.Create(
-                LocalVocabulary.StageOf(kind),
-                LocalVocabulary.ParameterContractOf(kind),
-                inputs,
-                outputs,
-                results,
-                LocalVocabulary.RequiredCapabilitiesOf(kind),
-                LocalVocabulary.ParameterValidatorOf(kind));
-        }
     }
 }

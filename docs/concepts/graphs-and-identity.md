@@ -333,7 +333,7 @@ disqualifying:
 
 | Token | What it says | How a graph gets it |
 |---|---|---|
-| `nondeployable` | A stage's behavior is bound in this process and reaches no document. | Any lambda-backed stage: `Select(x => …)`, `Where(…)`, a routing function, a fallback value, a sink callback. |
+| `nondeployable` | A stage's behavior is bound in this process and reaches no document. | Any lambda-backed stage: `Select(x => …)`, `Where(…)`, a routing function, a fallback value, a sink callback. **Not** the plumbing shapes — a buffer, a take, a delay — whose whole configuration is in the node; see [deployable plumbing](../reference/provider-sdk.md#deployable-plumbing). |
 | `ephemeral-identity` | Node identifiers are positions rather than author-chosen names. | Any unnamed occurrence. |
 
 `AsPipeline` refuses a document declaring either, listing **every** violation
