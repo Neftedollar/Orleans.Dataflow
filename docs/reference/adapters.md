@@ -365,6 +365,25 @@ for it, and Orleans batches the transport underneath at its own default.
 source that needs no ingress buffer: a run that stops pulling stops the grain from
 producing.
 
+**And that backpressure has a time limit, which is the most important thing on
+this page.** Orleans keeps the grain-side enumerator alive between pulls and
+reclaims it once it has been idle too long; the next pull then comes back
+cancelled, and outside a shutdown that is reported as a failed run. So a consumer
+slow enough to leave the enumeration untouched for that long does not merely slow
+the source down — it kills the run.
+
+The threshold is derived from the messaging response timeout, which defaults to
+thirty seconds, and **this project has not measured it.** Treat "tens of seconds
+of idleness" as the bound and, if a run of yours depends on more, raise
+`SiloMessagingOptions.ResponseTimeout` and confirm the behaviour yourself rather
+than trusting this paragraph. Note also that a larger transport batch makes this
+*worse* rather than better: a batch drained slowly on the consumer's side widens
+the gap between the pulls the grain actually sees.
+
+Where a consumer may legitimately stall for minutes, this adapter is the wrong
+one. Push the elements through a stream instead, where the buffering is the
+deployment's to size and no per-call resource is being held open.
+
 **Delivery.** At-most-once within one call; there is no redelivery of an element
 the run took.
 
@@ -374,9 +393,12 @@ the run took.
 application cursor the grain owns, and nothing in this adapter keeps one.
 
 **Cancellation.** Cooperative and carried by the run's own token. Orleans defaults
-`MessagingOptions.CancelRequestOnTimeout` to false, so a response timeout does not
-cancel the grain-side enumeration — a grain that ignores the token delays the
-run's stop until it next yields. Disposal is awaited on every terminal path.
+`CancelRequestOnTimeout` to false — checked against the shipped
+`SiloMessagingOptions` and `ClientMessagingOptions` of Orleans 10.0.0, because
+the published documentation says the opposite and the assembly is what runs — so
+a response timeout does not cancel the grain-side enumeration, and a grain that
+ignores the token delays the run's stop until it next yields. Disposal is awaited
+on every terminal path.
 
 **Resource bounds.** One enumeration per run per occurrence.
 
