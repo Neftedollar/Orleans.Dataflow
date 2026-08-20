@@ -120,6 +120,8 @@ public sealed class DataflowCluster : IAsyncLifetime
                 .AddGrainEnumerable(AdapterVocabulary.Feed)
                 .AddGrainEnumerable(AdapterVocabulary.KeyedFeed)
                 .AddGrainEnumerable(AdapterVocabulary.EndlessFeed)
+                .AddGrainEnumerable(AdapterVocabulary.SeverableFeed)
+                .AddGrainEnumerable(AdapterVocabulary.SeverableRunningFeed)
                 .AddObserverBridge(AdapterVocabulary.OrderBridge)
                 .AddObserverBridge(AdapterVocabulary.NarrowBridge)
                 .AddBroadcastElement(AdapterVocabulary.BroadcastOrder)

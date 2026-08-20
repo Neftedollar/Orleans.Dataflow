@@ -31,8 +31,18 @@ jobs:
         run: dotnet restore Orleans.Dataflow.slnx --configfile NuGet.Config
       - name: Build
         run: dotnet build Orleans.Dataflow.slnx --no-restore --configuration Release
-      - name: Test
-        run: dotnet test Orleans.Dataflow.slnx --no-build --no-restore --configuration Release
+      # One project at a time, deliberately. Running the solution runs the three test executables at once,
+      # and one of these suites measures a resource the whole machine shares: the bounded-memory tests read
+      # live heap after a forced collection, which is a statement about a graph only while nothing else is
+      # allocating. Beside two other suites it measures the machine instead, and reports a graph holding
+      # four megabytes it never held. Sequential runs cost about half a minute and make every number here
+      # mean what it says.
+      - name: Test core
+        run: dotnet test tests/Orleans.Dataflow.Tests/Orleans.Dataflow.Tests.csproj --no-build --no-restore --configuration Release
+      - name: Test F#
+        run: dotnet test tests/Orleans.Dataflow.FSharpTests/Orleans.Dataflow.FSharpTests.fsproj --no-build --no-restore --configuration Release
+      - name: Test cluster
+        run: dotnet test tests/Orleans.Dataflow.ClusterTests/Orleans.Dataflow.ClusterTests.csproj --no-build --no-restore --configuration Release
       # Tiny sizes, one run of everything, and nothing asserted about timing: what this step checks is that
       # every benchmark scenario — including the one that deploys a cluster and kills a silo — still runs to
       # completion, which is the only way a harness nobody runs on a schedule does not quietly rot. The

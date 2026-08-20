@@ -1,3 +1,4 @@
+using Orleans.Dataflow.Grains;
 using Orleans.Dataflow.Hosting;
 using Orleans.Dataflow.ClusterTests.Provider;
 using Xunit;
@@ -112,5 +113,66 @@ public sealed class GrainEnumerableAdapterTests(DataflowCluster cluster)
         Assert.True(await handle.GetValueAsync(slot, Token) >= 1L);
 
         await Poll.UntilAsync(() => AdapterObservations.Disposed == 1, "the grain-side enumeration was disposed");
+    }
+
+    [Fact]
+    public async Task AShutdownDrainsEvenWhenThePullInFlightComesBackCancelled()
+    {
+        AdapterObservations.Reset();
+
+        (PipelineDefinition pipeline, ResultSlot<long> slot) = AdapterPipelines.CountingFeed(
+            "enumerable-severed",
+            AdapterVocabulary.SeverableFeed,
+            "enumerable-severed-seen",
+            signalAt: 1);
+
+        await using OrleansRunHandle handle = await cluster.Host.MaterializeAsync(pipeline, Token);
+
+        // One order has reached the sink and the next pull is parked inside the grain, so the shutdown
+        // below lands on a source with a call in flight rather than on one between calls.
+        await TestSignals.Reached("enumerable-severed-seen");
+        await TestSignals.Reached(AdapterFeedGrain.SeverableEntered(AdapterVocabulary.SeverableKey));
+
+        await handle.ShutdownAsync();
+
+        // And now that outstanding pull ends the way Orleans ends one whose grain-side enumerator it has
+        // taken away: cancelled rather than finished. The cancellation is the transport's — the run's own
+        // token is untouched, which is what a graceful shutdown means — so a run that reported it as a
+        // failure would be turning a drain into an abandonment on somebody else's cancellation.
+        TestSignals.Raise(AdapterFeedGrain.SeverableSever(AdapterVocabulary.SeverableKey));
+
+        await Deadline.Within(handle.Completion, "the run to drain and complete");
+
+        // The whole claim: the run completes, and what it had already admitted is what its result reports.
+        Assert.Equal(TaskStatus.RanToCompletion, handle.Completion.Status);
+        Assert.True(await handle.GetValueAsync(slot, Token) >= 1L);
+    }
+
+    [Fact]
+    public async Task AnEnumerationSeveredWhileTheRunIsStillPullingItStillFailsTheRun()
+    {
+        AdapterObservations.Reset();
+
+        (PipelineDefinition pipeline, ResultSlot<long> _) = AdapterPipelines.CountingFeed(
+            "enumerable-severed-running",
+            AdapterVocabulary.SeverableRunningFeed,
+            "enumerable-severed-running-seen",
+            signalAt: 1);
+
+        await using OrleansRunHandle handle = await cluster.Host.MaterializeAsync(pipeline, Token);
+
+        await TestSignals.Reached("enumerable-severed-running-seen");
+        await TestSignals.Reached(AdapterFeedGrain.SeverableEntered(AdapterVocabulary.SeverableRunningKey));
+
+        // The other side of the window, and the reason the conversion above is written against the stop
+        // token rather than against cancellation in general: nobody has asked this run to stop, so an
+        // enumeration that vanishes underneath it is a stream that was lost rather than one that ended, and
+        // the run says so instead of reporting a success it cannot vouch for.
+        TestSignals.Raise(AdapterFeedGrain.SeverableSever(AdapterVocabulary.SeverableRunningKey));
+
+        PipelineRunFailedException failed = await Assert.ThrowsAsync<PipelineRunFailedException>(
+            () => Deadline.Within(handle.Completion, "the run to report the severed enumeration"));
+
+        Assert.Equal(typeof(OperationCanceledException).FullName, failed.FailureType);
     }
 }

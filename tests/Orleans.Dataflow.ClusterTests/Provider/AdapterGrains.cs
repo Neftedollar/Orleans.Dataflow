@@ -453,6 +453,20 @@ public sealed class AdapterFeedGrain : Grain, IAdapterFeedGrain
     /// <summary>The signal the endless feed raises once it has yielded its first order.</summary>
     internal const string EndlessSignal = "adapter-endless-started";
 
+    /// <summary>Names the signal a severable feed raises when a pull of it is outstanding.</summary>
+    /// <param name="key">The feed grain's key.</param>
+    /// <returns>The signal's name.</returns>
+    /// <remarks>
+    /// Per key rather than per grain type, because a signal is raised once and stays raised: two tests that
+    /// both sever an enumeration need two enumerations to sever, and the key is what tells them apart.
+    /// </remarks>
+    internal static string SeverableEntered(string key) => $"adapter-severable-entered-{key}";
+
+    /// <summary>Names the signal that ends a pull of a severable feed with a cancellation.</summary>
+    /// <param name="key">The feed grain's key.</param>
+    /// <returns>The signal's name.</returns>
+    internal static string SeverableSever(string key) => $"adapter-severable-sever-{key}";
+
     /// <inheritdoc/>
     public async IAsyncEnumerable<AdapterOrder> EnumerateAsync(
         int count,
@@ -462,7 +476,7 @@ public sealed class AdapterFeedGrain : Grain, IAdapterFeedGrain
 
         try
         {
-            for (long index = 1; count == 0 || index <= count; index++)
+            for (long index = 1; count <= 0 || index <= count; index++)
             {
                 cancellationToken.ThrowIfCancellationRequested();
 
@@ -480,6 +494,23 @@ public sealed class AdapterFeedGrain : Grain, IAdapterFeedGrain
                     // An endless feed that spun would starve the silo. Yielding the thread between elements
                     // keeps it cooperative and keeps the token the only thing that stops it.
                     await Task.Yield();
+                }
+
+                if (count < 0)
+                {
+                    // The severable feed. Its second pull parks, so a test can ask for a shutdown at the one
+                    // moment where a pull is provably outstanding, and then end that pull the way Orleans
+                    // ends one whose grain-side enumerator it has cancelled: with an
+                    // OperationCanceledException carried back to the caller, rather than with a sequence
+                    // that simply finished. Nothing here touches the run's own token — the cancellation is
+                    // the transport's, not the run's, which is exactly the case under test.
+                    string key = this.GetPrimaryKeyString();
+
+                    TestSignals.Raise(SeverableEntered(key));
+
+                    await TestSignals.Reached(SeverableSever(key));
+
+                    throw new OperationCanceledException();
                 }
             }
         }

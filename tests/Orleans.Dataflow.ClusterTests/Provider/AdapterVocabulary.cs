@@ -212,6 +212,35 @@ internal static class AdapterVocabulary
             static (grains, cancellationToken) =>
                 grains.GetGrain<IAdapterFeedGrain>("endless").EnumerateAsync(0, cancellationToken));
 
+    /// <summary>The enumeration whose second pull parks until a test ends it with a cancellation.</summary>
+    /// <remarks>
+    /// The instrument for one claim and no other: what a run does when the enumeration behind its source is
+    /// cancelled by something that is not the run. Orleans does exactly that to a grain-side enumerator it
+    /// disposes — the caller's outstanding pull comes back as an
+    /// <see cref="OperationCanceledException"/> rather than as a sequence that ended — and no binding that
+    /// only ever runs to completion can put a run in that position.
+    /// </remarks>
+    internal static GrainEnumerableBinding<AdapterOrder> SeverableFeed { get; } =
+        GrainEnumerableBinding.Create(
+            "orders-severable",
+            OrderContract,
+            static (grains, cancellationToken) =>
+                grains.GetGrain<IAdapterFeedGrain>(SeverableKey).EnumerateAsync(-1, cancellationToken));
+
+    /// <summary>The key of the feed <see cref="SeverableFeed"/> reads.</summary>
+    internal const string SeverableKey = "severable";
+
+    /// <summary>The second severable enumeration, so that two tests may each sever one.</summary>
+    internal static GrainEnumerableBinding<AdapterOrder> SeverableRunningFeed { get; } =
+        GrainEnumerableBinding.Create(
+            "orders-severable-running",
+            OrderContract,
+            static (grains, cancellationToken) =>
+                grains.GetGrain<IAdapterFeedGrain>(SeverableRunningKey).EnumerateAsync(-1, cancellationToken));
+
+    /// <summary>The key of the feed <see cref="SeverableRunningFeed"/> reads.</summary>
+    internal const string SeverableRunningKey = "severable-running";
+
     /// <summary>The name the awaiting broadcast channel provider is registered under.</summary>
     internal const string BroadcastProvider = "dataflow-test-broadcast";
 

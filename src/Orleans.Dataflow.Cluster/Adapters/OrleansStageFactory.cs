@@ -455,10 +455,77 @@ internal sealed class OrleansStageFactory(
             throw Unregistered(node, "grain enumerable", declaration.Source);
         }
 
-        // The run token and not the stop token: a shutdown drains, and a cancelled enumeration would raise
-        // where the engine expects a sequence that simply ended. The engine stops pulling between elements
-        // when a shutdown is requested, which is what makes a drain work without cancelling the grain.
-        return DataflowStageRuntime.Source(tokens => source!.Open(grains, tokens.RunToken));
+        // The grain is opened under the run token and never under the stop token: a shutdown drains, and an
+        // enumeration cancelled by one would raise where the engine expects a sequence that simply ended.
+        // The engine stops pulling between elements when a shutdown is requested, which is what makes a
+        // drain work without cancelling the grain. The stop token is read below and nowhere else, for the
+        // one case that rule does not cover: a pull already in flight when the shutdown landed.
+        return DataflowStageRuntime.Source(tokens => Enumerate(source!, grains, tokens));
+    }
+
+    /// <summary>Reads one grain enumeration, ending it rather than raising when a shutdown severs it.</summary>
+    /// <param name="source">The registered enumeration binding.</param>
+    /// <param name="grains">The silo's grain factory.</param>
+    /// <param name="tokens">The run's tokens.</param>
+    /// <returns>The sequence the run pulls.</returns>
+    /// <remarks>
+    /// <para>
+    /// <b>The pull in flight when a shutdown lands is what this exists for.</b> The engine observes a
+    /// shutdown between elements, so a source is asked to stop only once the pull it is inside has answered
+    /// — and a grain enumeration's pull is a call across a hop, which Orleans may answer with a
+    /// cancellation rather than with an element. It does so whenever it has taken the grain-side enumerator
+    /// away underneath a caller that is still pulling: an activation that goes, an enumerator disposed or
+    /// expired by <c>AsyncEnumerableGrainExtension</c>, a step it reports as cancelled. None of those is the
+    /// run's own cancellation, so <see cref="DataflowRunTokens.RunToken"/> is never signalled and the
+    /// engine's rule — an <see cref="OperationCanceledException"/> is the cancellation the run asked for
+    /// only while the run's token is cancelled — reports it as a failure instead.
+    /// </para>
+    /// <para>
+    /// That turns a graceful shutdown into a failed run, which is the one thing a shutdown promises not to
+    /// be. The conversion here is narrow on purpose and reads as the contract does: after the stop token has
+    /// been signalled and while the run's token has not, this source has been asked to stop producing, so a
+    /// pull that comes back cancelled <em>is</em> the end of the sequence. Nothing already admitted is
+    /// touched — a shutdown had stopped production before this point — and outside that window a
+    /// cancellation is still a failure the run reports, because there a lost enumeration really is one.
+    /// </para>
+    /// </remarks>
+    private static async IAsyncEnumerable<object?> Enumerate(
+        IGrainEnumerableEntry source,
+        IGrainFactory grains,
+        DataflowRunTokens tokens)
+    {
+        IAsyncEnumerator<object?> elements = source
+            .Open(grains, tokens.RunToken)
+            .GetAsyncEnumerator(tokens.RunToken);
+
+        try
+        {
+            while (true)
+            {
+                object? element;
+
+                try
+                {
+                    if (!await elements.MoveNextAsync().ConfigureAwait(false))
+                    {
+                        yield break;
+                    }
+
+                    element = elements.Current;
+                }
+                catch (OperationCanceledException) when (
+                    tokens.StopToken.IsCancellationRequested && !tokens.RunToken.IsCancellationRequested)
+                {
+                    yield break;
+                }
+
+                yield return element;
+            }
+        }
+        finally
+        {
+            await elements.DisposeAsync().ConfigureAwait(false);
+        }
     }
 
     /// <summary>Builds the reminder trigger source.</summary>
