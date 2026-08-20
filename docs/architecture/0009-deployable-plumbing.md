@@ -50,16 +50,22 @@ construction.
 
 ## What is and is not publishable
 
-Counted rather than estimated, over the twenty-one delegate-free constructions:
+Counted rather than estimated. Twenty-one constructions in `LocalStageDescriptor`
+pass `behavior: null`, and they produce **twenty-four kinds**, because `Timed`
+serves four of them from one line. The counts below add to twenty-four, and a
+reader who gets a different number has found either a mistake here or a kind
+added since.
 
-| Kind | Publishable through the existing seam? |
-|---|---|
-| `Empty`, `Never`, `Range`, `Tick` | yes — `DataflowStageRuntime.Source` |
-| `Broadcast`, `Balance` | yes — fan-out |
-| `Merge`, `Concat`, `Interleave` | yes — fan-in |
-| `Ignore`, `First`, `Count`, `Last` | yes — `Terminal` |
-| `FirstOrDefault(d)`, `LastOrDefault(d)` | no — `d` is an arbitrary CLR value with no payload spelling |
-| `Take`, `Skip`, `Buffer`, `Delay`, `TakeWithin`, `SkipWithin`, `Valve` | **no — there is no runtime shape for them** |
+| Kinds | Count | Publishable through the existing seam? |
+|---|---|---|
+| `Empty`, `Never`, `Range`, `Tick` | 4 | yes — `DataflowStageRuntime.Source` |
+| `Broadcast`, `Balance` | 2 | yes — fan-out |
+| `Merge`, `Concat`, `Interleave` | 3 | yes — fan-in |
+| `Ignore`, `First`, `Count`, `Last` | 4 | yes — `Terminal` |
+| `FirstOrDefault(d)`, `LastOrDefault(d)` | 2 | no — `d` is an arbitrary CLR value with no payload spelling |
+| `Take`, `Skip`, `Buffer`, `Valve`, `Delay`, `InitialDelay`, `Timeout`, `TakeWithin`, `SkipWithin` | 9 | **no — there is no runtime shape for them** |
+
+Thirteen publishable, eleven not.
 
 The second "no" is the important one, and it is the reason this ADR exists
 rather than a pull request that registers a `local` factory. `DataflowStageRuntime`
@@ -157,7 +163,9 @@ different document, because it says something different about itself.
 
 **It does not cover `FirstOrDefault` and `LastOrDefault`.** Their default is a
 CLR value with no canonical spelling. They keep `nondeployable` and the refusal
-names them.
+names them. Whether any other kind smuggles a CLR value through the seed the same
+way is a question for the implementation to settle in code: these two were found
+by reading, and reading is how the first list of anything is wrong.
 
 **It does not claim the deployable and local paths run identically.** They run
 the same planner over the same payloads, which is a much stronger start than two
