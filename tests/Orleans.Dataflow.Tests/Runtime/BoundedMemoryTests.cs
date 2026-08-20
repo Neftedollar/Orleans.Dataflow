@@ -121,11 +121,29 @@ public sealed class BoundedMemoryTests
 
     /// <summary>How many times each measurement is taken.</summary>
     /// <remarks>
-    /// Two, and the minimum of the two is used. A third would buy a little more protection from a badly
-    /// timed neighbour and would cost a third more of the suite's slowest tests; two already turns a
-    /// single unlucky run from a failure into a discarded reading.
+    /// <para>
+    /// Three, and the minimum of the three is used. It was two, with the note that a third would buy a
+    /// little more protection from a badly timed neighbour at a third more of the suite's slowest tests.
+    /// The third is now bought, because the protection stopped being hypothetical: the <c>broadcast</c>
+    /// shape failed in continuous integration reading 26,432 bytes over twenty thousand elements and
+    /// 3,819,056 over two hundred thousand — a growth of ten times the allowance, on a build that passed
+    /// the same assertion locally and passed it again on a re-run of the same commit.
+    /// </para>
+    /// <para>
+    /// <b>Why more repetitions and not a wider threshold.</b> The reading was not near the line; it was
+    /// ten times over it, and a band wide enough to admit 3.8 MB would also admit the collecting control's
+    /// 10.5 MB divided by three — the assertion would stop being able to say no, which this file's own
+    /// instruction forbids. The defect is in the statistic rather than in the bound.
+    /// <see cref="Instrument.PeakBytes"/> is a <em>range</em> over a fixed number of samples, so one sample
+    /// landing at an unlucky moment moves it by whatever that moment cost. Both runs take the same number
+    /// of samples, but the longer one is spread over ten times the wall-clock, so it is exposed to a shared
+    /// machine's other work for ten times as long — a length-dependent exposure the sample count does not
+    /// equalise, and this assertion is precisely about length. Taking the minimum of a third run is the
+    /// cheapest thing that attacks that: interference only ever adds, so more draws can only lower the
+    /// number this test believes.
+    /// </para>
     /// </remarks>
-    private const int Repetitions = 2;
+    private const int Repetitions = 3;
 
     /// <summary>What the elements the longer run adds would weigh if the graph kept every one of them.</summary>
     /// <remarks>
