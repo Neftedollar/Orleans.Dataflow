@@ -303,6 +303,7 @@ TYPE interface Orleans.Dataflow.Hosting.IOrleansDataflowBuilder
   method abstract Orleans.Dataflow.Hosting.IOrleansDataflowBuilder AddKeyedGrainCall<TIn, TOut>(Orleans.Dataflow.Adapters.KeyedGrainCallBinding<TIn, TOut> binding)
   method abstract Orleans.Dataflow.Hosting.IOrleansDataflowBuilder AddObservable<T>(Orleans.Dataflow.Adapters.ObservableBinding<T> source)
   method abstract Orleans.Dataflow.Hosting.IOrleansDataflowBuilder AddObserverBridge<T>(Orleans.Dataflow.Adapters.ObserverBridgeBinding<T> bridge)
+  method abstract Orleans.Dataflow.Hosting.IOrleansDataflowBuilder AddProvider(Orleans.Dataflow.Hosting.StageProvider provider)
   method abstract Orleans.Dataflow.Hosting.IOrleansDataflowBuilder AddStreamElement<T>(Orleans.Dataflow.Adapters.StreamElementBinding<T> element)
   method abstract Orleans.Dataflow.Hosting.IOrleansDataflowBuilder LimitResultSize(System.Int32 maximumBytes)
   method abstract Orleans.Dataflow.Hosting.IOrleansDataflowBuilder UseCheckpointStore(System.Func<System.IServiceProvider, Orleans.Dataflow.Hosting.ICheckpointStore> store)

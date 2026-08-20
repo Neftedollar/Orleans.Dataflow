@@ -1,5 +1,5 @@
 # assembly: Orleans.Dataflow
-# public types: 75
+# public types: 76
 TYPE enum Orleans.Dataflow.ActiveKeyOverflowPolicy
   IFACE System.IComparable
   IFACE System.IConvertible
@@ -278,6 +278,22 @@ TYPE interface Orleans.Dataflow.Hosting.ILocalDataflowBuilder
   method abstract Orleans.Dataflow.Hosting.ILocalDataflowBuilder AddDotnetStages()
   method abstract Orleans.Dataflow.Hosting.ILocalDataflowBuilder AddFactory(Orleans.Dataflow.Identity.ProviderId provider, Orleans.Dataflow.Hosting.IDataflowStageFactory factory)
   method abstract Orleans.Dataflow.Hosting.ILocalDataflowBuilder AddObservable<T>(Orleans.Dataflow.Adapters.ObservableBinding<T> source)
+  method abstract Orleans.Dataflow.Hosting.ILocalDataflowBuilder AddProvider(Orleans.Dataflow.Hosting.StageProvider provider)
+TYPE sealed class Orleans.Dataflow.Hosting.StageProvider
+  IFACE Orleans.Dataflow.Hosting.IDataflowStageFactory
+  method Orleans.Dataflow.Hosting.StageProvider Add(Orleans.Dataflow.Definition.StageSpecification specification, System.Func<Orleans.Dataflow.Hosting.DataflowStageRequest, Orleans.Dataflow.Hosting.DataflowStageRuntime> build)
+  method Orleans.Dataflow.Hosting.StageProvider Flow(Orleans.Dataflow.Identity.StageRef stage, Orleans.Dataflow.Identity.ContractReference parameterContract, Orleans.Dataflow.Definition.InputPortSpecification inputPort, Orleans.Dataflow.Definition.OutputPortSpecification outputPort, Orleans.Dataflow.Definition.IStageParameterValidator parameterValidator, System.Func<Orleans.Dataflow.Hosting.DataflowStageRequest, Orleans.Dataflow.Hosting.DataflowStageRuntime> build)
+  method Orleans.Dataflow.Hosting.StageProvider Flow(Orleans.Dataflow.Identity.StageRef stage, Orleans.Dataflow.Identity.ContractReference parameterContract, Orleans.Dataflow.Definition.InputPortSpecification inputPort, Orleans.Dataflow.Definition.OutputPortSpecification outputPort, System.Func<Orleans.Dataflow.Hosting.DataflowStageRequest, Orleans.Dataflow.Hosting.DataflowStageRuntime> build)
+  method Orleans.Dataflow.Hosting.StageProvider Sink(Orleans.Dataflow.Identity.StageRef stage, Orleans.Dataflow.Identity.ContractReference parameterContract, Orleans.Dataflow.Definition.InputPortSpecification inputPort, Orleans.Dataflow.Definition.IStageParameterValidator parameterValidator, System.Func<Orleans.Dataflow.Hosting.DataflowStageRequest, Orleans.Dataflow.Hosting.DataflowStageRuntime> build)
+  method Orleans.Dataflow.Hosting.StageProvider Sink(Orleans.Dataflow.Identity.StageRef stage, Orleans.Dataflow.Identity.ContractReference parameterContract, Orleans.Dataflow.Definition.InputPortSpecification inputPort, Orleans.Dataflow.Definition.ResultPortSpecification resultPort, Orleans.Dataflow.Definition.IStageParameterValidator parameterValidator, System.Func<Orleans.Dataflow.Hosting.DataflowStageRequest, Orleans.Dataflow.Hosting.DataflowStageRuntime> build)
+  method Orleans.Dataflow.Hosting.StageProvider Sink(Orleans.Dataflow.Identity.StageRef stage, Orleans.Dataflow.Identity.ContractReference parameterContract, Orleans.Dataflow.Definition.InputPortSpecification inputPort, Orleans.Dataflow.Definition.ResultPortSpecification resultPort, System.Func<Orleans.Dataflow.Hosting.DataflowStageRequest, Orleans.Dataflow.Hosting.DataflowStageRuntime> build)
+  method Orleans.Dataflow.Hosting.StageProvider Sink(Orleans.Dataflow.Identity.StageRef stage, Orleans.Dataflow.Identity.ContractReference parameterContract, Orleans.Dataflow.Definition.InputPortSpecification inputPort, System.Func<Orleans.Dataflow.Hosting.DataflowStageRequest, Orleans.Dataflow.Hosting.DataflowStageRuntime> build)
+  method Orleans.Dataflow.Hosting.StageProvider Source(Orleans.Dataflow.Identity.StageRef stage, Orleans.Dataflow.Identity.ContractReference parameterContract, Orleans.Dataflow.Definition.OutputPortSpecification outputPort, Orleans.Dataflow.Definition.IStageParameterValidator parameterValidator, System.Func<Orleans.Dataflow.Hosting.DataflowStageRequest, Orleans.Dataflow.Hosting.DataflowStageRuntime> build)
+  method Orleans.Dataflow.Hosting.StageProvider Source(Orleans.Dataflow.Identity.StageRef stage, Orleans.Dataflow.Identity.ContractReference parameterContract, Orleans.Dataflow.Definition.OutputPortSpecification outputPort, System.Func<Orleans.Dataflow.Hosting.DataflowStageRequest, Orleans.Dataflow.Hosting.DataflowStageRuntime> build)
+  method static Orleans.Dataflow.Hosting.StageProvider Create(Orleans.Dataflow.Identity.ProviderId provider)
+  method static Orleans.Dataflow.Hosting.StageProvider Create(System.String provider)
+  property Orleans.Dataflow.Definition.StageCatalog Catalog { get; }
+  property Orleans.Dataflow.Identity.ProviderId Provider { get; }
 TYPE struct Orleans.Dataflow.Hosting.StoredCheckpoint  [System.Runtime.CompilerServices.IsReadOnlyAttribute]
   BASE System.ValueType
   IFACE System.IEquatable<Orleans.Dataflow.Hosting.StoredCheckpoint>

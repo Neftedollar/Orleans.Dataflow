@@ -23,6 +23,42 @@ public sealed class StageRefTests
     }
 
     [Fact]
+    public void ForBuildsTheSameReferenceAsCreateFromTheTextOfItsIdentifiers()
+    {
+        // The short spelling is the long one with the identifier types written for the author, so what it
+        // produces has to be indistinguishable from what they would have produced by hand.
+        Assert.Equal(StageRef.Create(SampleProvider, SampleStage, 3), StageRef.For("orleans-core", "map-async", 3));
+        Assert.Equal(
+            StageRef.Create(SampleProvider, SampleStage, StageRef.FirstMajorVersion),
+            StageRef.For("orleans-core", "map-async"));
+    }
+
+    [Fact]
+    public void ForDefaultsToTheFirstMajorVersion() =>
+        Assert.Equal(StageRef.FirstMajorVersion, StageRef.For("orleans-core", "map-async").MajorVersion);
+
+    [Fact]
+    public void ForKeepsEveryCheckTheIdentifierTypesMake()
+    {
+        // What the short spelling drops is the obligation to name the types, never the validation they
+        // carry: the segment grammar, the version bound, and the null checks all still refuse, and each
+        // refusal names the argument the author actually wrote.
+        Assert.Contains(
+            "segment",
+            Assert.Throws<ArgumentException>("provider", () => StageRef.For("Orleans Core", "map-async")).Message,
+            StringComparison.Ordinal);
+        Assert.Contains(
+            "segment",
+            Assert.Throws<ArgumentException>("stage", () => StageRef.For("orleans-core", "Map Async")).Message,
+            StringComparison.Ordinal);
+        Assert.Throws<ArgumentOutOfRangeException>(
+            "majorVersion",
+            () => StageRef.For("orleans-core", "map-async", 0));
+        Assert.Throws<ArgumentNullException>("provider", () => StageRef.For(null!, "map-async"));
+        Assert.Throws<ArgumentNullException>("stage", () => StageRef.For("orleans-core", null!));
+    }
+
+    [Fact]
     public void ToStringUsesCanonicalFormat()
     {
         Assert.Equal("orleans-core/map-async@v3", StageRef.Create(SampleProvider, SampleStage, 3).ToString());

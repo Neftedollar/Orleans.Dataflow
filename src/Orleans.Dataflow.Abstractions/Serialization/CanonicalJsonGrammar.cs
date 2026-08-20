@@ -100,6 +100,20 @@ internal static class CanonicalJsonGrammar
         "The JSON text is not well-formed UTF-16: it contains an unpaired surrogate and therefore has no UTF-8 encoding. Canonical JSON is defined over UTF-8 bytes.";
 
     /// <summary>
+    /// Builds the message for a builder member whose name or value cannot be transcoded to UTF-8.
+    /// </summary>
+    /// <param name="part">What the offending text is, such as <c>member name</c> or <c>member value</c>.</param>
+    /// <returns>A message naming the same well-formedness rule the text overload reports.</returns>
+    /// <remarks>
+    /// The same rule as <see cref="FormatUntranscodableInput"/>, said about a piece of text handed over
+    /// directly rather than about a whole JSON document. It is refused rather than written, because the
+    /// underlying writer would substitute the replacement character and store text the author never wrote —
+    /// silently, and differently from the same value composed as JSON text.
+    /// </remarks>
+    internal static string FormatUntranscodableText(string part) =>
+        $"The {part} is not well-formed UTF-16: it contains an unpaired surrogate and therefore has no UTF-8 encoding. Canonical JSON is defined over UTF-8 bytes, and a canonical value never rewrites the text it was given.";
+
+    /// <summary>
     /// Builds the message for reading a value out of a default instance.
     /// </summary>
     /// <param name="typeName">The type name, such as <c>CanonicalJsonValue</c>.</param>

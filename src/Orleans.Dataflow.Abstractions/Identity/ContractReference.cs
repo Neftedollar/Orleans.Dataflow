@@ -102,6 +102,59 @@ public readonly record struct ContractReference : IComparable<ContractReference>
     }
 
     /// <summary>
+    /// Creates a <see cref="ContractReference"/> from the text of its identifier.
+    /// </summary>
+    /// <param name="contract">The contract identifier segment, such as <c>weather-parameters</c>.</param>
+    /// <param name="majorVersion">
+    /// The compatibility major version, which must be at least <see cref="FirstMajorVersion"/> and defaults
+    /// to it.
+    /// </param>
+    /// <returns>The validated contract reference.</returns>
+    /// <exception cref="ArgumentNullException"><paramref name="contract"/> is <see langword="null"/>.</exception>
+    /// <exception cref="ArgumentException">
+    /// <paramref name="contract"/> is not a valid identifier segment.
+    /// </exception>
+    /// <exception cref="ArgumentOutOfRangeException">
+    /// <paramref name="majorVersion"/> is less than <see cref="FirstMajorVersion"/>.
+    /// </exception>
+    /// <remarks>
+    /// <para>
+    /// The one-call spelling of what <see cref="Create(ContractId, int)"/> says in two, and the untyped
+    /// sibling of <c>ElementContract.For</c>: a parameter contract or a policy contract binds no CLR type,
+    /// so there is nothing for a typed declaration to assert about it and the reference is the whole
+    /// statement.
+    /// </para>
+    /// <para>
+    /// The version defaults to <see cref="FirstMajorVersion"/> for the reason a stage reference's does. A
+    /// caller that already holds a <see cref="ContractId"/> keeps using <see cref="Create(ContractId, int)"/>
+    /// rather than rendering it back to text.
+    /// </para>
+    /// <para>
+    /// <see cref="ContractId"/> owns the segment grammar and the diagnostic for breaking it, so the message
+    /// is reused verbatim and only the parameter name is corrected.
+    /// </para>
+    /// </remarks>
+    public static ContractReference For(string contract, int majorVersion = FirstMajorVersion)
+    {
+        ArgumentNullException.ThrowIfNull(contract);
+
+        ContractId named;
+
+        try
+        {
+            named = ContractId.Create(contract);
+        }
+        catch (ArgumentException failure)
+        {
+            throw new ArgumentException(failure.Message, nameof(contract), failure);
+        }
+
+        ArgumentOutOfRangeException.ThrowIfLessThan(majorVersion, FirstMajorVersion);
+
+        return new ContractReference(named, majorVersion);
+    }
+
+    /// <summary>
     /// Attempts to create a <see cref="ContractReference"/> from its components.
     /// </summary>
     /// <param name="contract">The candidate contract.</param>

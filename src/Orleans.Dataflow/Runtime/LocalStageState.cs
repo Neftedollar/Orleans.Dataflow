@@ -25,7 +25,7 @@ internal static class LocalStageState
     /// positional: every stage of the chain writes an entry, and "this one had nothing" is a value like any
     /// other rather than a gap a reader has to interpret.
     /// </remarks>
-    internal static readonly CanonicalJsonValue Nothing = CanonicalJsonValue.Parse("{}");
+    internal static readonly CanonicalJsonValue Nothing = CanonicalJsonValue.Empty;
 
     /// <summary>Writes the state of a stage that is counting down.</summary>
     /// <param name="remaining">How many elements are left, which is never negative.</param>

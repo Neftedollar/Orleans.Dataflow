@@ -50,6 +50,7 @@ TYPE sealed class Orleans.Dataflow.Testing.ProbeTerminatedException
 TYPE sealed class Orleans.Dataflow.Testing.ProviderConformance
   method System.Void Check(System.String check)
   method System.Void CheckAll()
+  method static Orleans.Dataflow.Testing.ProviderConformance Create(Orleans.Dataflow.Hosting.StageProvider provider, System.Collections.Generic.IEnumerable<Orleans.Dataflow.Testing.ProviderStageSample> samples)
   method static Orleans.Dataflow.Testing.ProviderConformance Create(Orleans.Dataflow.Identity.ProviderId provider, Orleans.Dataflow.Definition.IStageCatalog catalog, Orleans.Dataflow.Hosting.IDataflowStageFactory factory, System.Collections.Generic.IEnumerable<Orleans.Dataflow.Testing.ProviderStageSample> samples)
   method virtual System.String ToString()
   property static System.Collections.Generic.IReadOnlyList<System.String> Checks { get; }

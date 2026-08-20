@@ -200,6 +200,17 @@ Orleans.Dataflow.Serialization.GraphDocumentFormatException.GraphDocumentFormatE
 Orleans.Dataflow.Serialization.GraphDocumentFormatException.GraphDocumentFormatException(string! message, System.Exception! innerException) -> void
 Orleans.Dataflow.Serialization.GraphDocumentSerializer
 Orleans.Dataflow.Serialization.StageCatalogSerializer
+Orleans.Dataflow.Serialization.StageParameters
+Orleans.Dataflow.Serialization.StageParameters.Add(string! name, bool value) -> Orleans.Dataflow.Serialization.StageParameters!
+Orleans.Dataflow.Serialization.StageParameters.Add(string! name, long value) -> Orleans.Dataflow.Serialization.StageParameters!
+Orleans.Dataflow.Serialization.StageParameters.Add(string! name, Orleans.Dataflow.Serialization.CanonicalJsonValue value) -> Orleans.Dataflow.Serialization.StageParameters!
+Orleans.Dataflow.Serialization.StageParameters.Add(string! name, Orleans.Dataflow.Serialization.StageParameters! value) -> Orleans.Dataflow.Serialization.StageParameters!
+Orleans.Dataflow.Serialization.StageParameters.Add(string! name, string! value) -> Orleans.Dataflow.Serialization.StageParameters!
+Orleans.Dataflow.Serialization.StageParameters.Add(string! name, System.Collections.Generic.IEnumerable<long>! values) -> Orleans.Dataflow.Serialization.StageParameters!
+Orleans.Dataflow.Serialization.StageParameters.Add(string! name, System.Collections.Generic.IEnumerable<Orleans.Dataflow.Serialization.StageParameters!>! values) -> Orleans.Dataflow.Serialization.StageParameters!
+Orleans.Dataflow.Serialization.StageParameters.Add(string! name, System.Collections.Generic.IEnumerable<string!>! values) -> Orleans.Dataflow.Serialization.StageParameters!
+Orleans.Dataflow.Serialization.StageParameters.AddNull(string! name) -> Orleans.Dataflow.Serialization.StageParameters!
+Orleans.Dataflow.Serialization.StageParameters.Build() -> Orleans.Dataflow.Serialization.CanonicalJsonValue
 override Orleans.Dataflow.Compilation.GraphValidationDiagnostic.Equals(object? obj) -> bool
 override Orleans.Dataflow.Compilation.GraphValidationDiagnostic.GetHashCode() -> int
 override Orleans.Dataflow.Compilation.GraphValidationDiagnostic.ToString() -> string!
@@ -257,6 +268,7 @@ override Orleans.Dataflow.Identity.StageRef.GetHashCode() -> int
 override Orleans.Dataflow.Identity.StageRef.ToString() -> string!
 override Orleans.Dataflow.Serialization.CanonicalJsonValue.GetHashCode() -> int
 override Orleans.Dataflow.Serialization.CanonicalJsonValue.ToString() -> string!
+override Orleans.Dataflow.Serialization.StageParameters.ToString() -> string!
 static Orleans.Dataflow.Compilation.GraphCompiler.Validate(Orleans.Dataflow.Definition.GraphDocument! document, Orleans.Dataflow.Definition.IStageCatalog! catalog) -> Orleans.Dataflow.Compilation.GraphValidationReport!
 static Orleans.Dataflow.Compilation.GraphValidationDiagnostic.Create(string! rule, string! message) -> Orleans.Dataflow.Compilation.GraphValidationDiagnostic!
 static Orleans.Dataflow.Compilation.GraphValidationDiagnostic.Create(string! rule, string! message, string! subject) -> Orleans.Dataflow.Compilation.GraphValidationDiagnostic!
@@ -350,6 +362,7 @@ static Orleans.Dataflow.Identity.ContractId.operator >(Orleans.Dataflow.Identity
 static Orleans.Dataflow.Identity.ContractId.operator >=(Orleans.Dataflow.Identity.ContractId left, Orleans.Dataflow.Identity.ContractId right) -> bool
 static Orleans.Dataflow.Identity.ContractId.TryCreate(string? value, out Orleans.Dataflow.Identity.ContractId identifier) -> bool
 static Orleans.Dataflow.Identity.ContractReference.Create(Orleans.Dataflow.Identity.ContractId contract, int majorVersion) -> Orleans.Dataflow.Identity.ContractReference
+static Orleans.Dataflow.Identity.ContractReference.For(string! contract, int majorVersion = 1) -> Orleans.Dataflow.Identity.ContractReference
 static Orleans.Dataflow.Identity.ContractReference.operator !=(Orleans.Dataflow.Identity.ContractReference left, Orleans.Dataflow.Identity.ContractReference right) -> bool
 static Orleans.Dataflow.Identity.ContractReference.operator <(Orleans.Dataflow.Identity.ContractReference left, Orleans.Dataflow.Identity.ContractReference right) -> bool
 static Orleans.Dataflow.Identity.ContractReference.operator <=(Orleans.Dataflow.Identity.ContractReference left, Orleans.Dataflow.Identity.ContractReference right) -> bool
@@ -423,6 +436,7 @@ static Orleans.Dataflow.Identity.StageId.operator >(Orleans.Dataflow.Identity.St
 static Orleans.Dataflow.Identity.StageId.operator >=(Orleans.Dataflow.Identity.StageId left, Orleans.Dataflow.Identity.StageId right) -> bool
 static Orleans.Dataflow.Identity.StageId.TryCreate(string? value, out Orleans.Dataflow.Identity.StageId identifier) -> bool
 static Orleans.Dataflow.Identity.StageRef.Create(Orleans.Dataflow.Identity.ProviderId provider, Orleans.Dataflow.Identity.StageId stage, int majorVersion) -> Orleans.Dataflow.Identity.StageRef
+static Orleans.Dataflow.Identity.StageRef.For(string! provider, string! stage, int majorVersion = 1) -> Orleans.Dataflow.Identity.StageRef
 static Orleans.Dataflow.Identity.StageRef.operator !=(Orleans.Dataflow.Identity.StageRef left, Orleans.Dataflow.Identity.StageRef right) -> bool
 static Orleans.Dataflow.Identity.StageRef.operator <(Orleans.Dataflow.Identity.StageRef left, Orleans.Dataflow.Identity.StageRef right) -> bool
 static Orleans.Dataflow.Identity.StageRef.operator <=(Orleans.Dataflow.Identity.StageRef left, Orleans.Dataflow.Identity.StageRef right) -> bool
@@ -430,6 +444,7 @@ static Orleans.Dataflow.Identity.StageRef.operator ==(Orleans.Dataflow.Identity.
 static Orleans.Dataflow.Identity.StageRef.operator >(Orleans.Dataflow.Identity.StageRef left, Orleans.Dataflow.Identity.StageRef right) -> bool
 static Orleans.Dataflow.Identity.StageRef.operator >=(Orleans.Dataflow.Identity.StageRef left, Orleans.Dataflow.Identity.StageRef right) -> bool
 static Orleans.Dataflow.Identity.StageRef.TryCreate(Orleans.Dataflow.Identity.ProviderId provider, Orleans.Dataflow.Identity.StageId stage, int majorVersion, out Orleans.Dataflow.Identity.StageRef stageRef) -> bool
+static Orleans.Dataflow.Serialization.CanonicalJsonValue.Empty.get -> Orleans.Dataflow.Serialization.CanonicalJsonValue
 static Orleans.Dataflow.Serialization.CanonicalJsonValue.FromElement(System.Text.Json.JsonElement element) -> Orleans.Dataflow.Serialization.CanonicalJsonValue
 static Orleans.Dataflow.Serialization.CanonicalJsonValue.operator !=(Orleans.Dataflow.Serialization.CanonicalJsonValue left, Orleans.Dataflow.Serialization.CanonicalJsonValue right) -> bool
 static Orleans.Dataflow.Serialization.CanonicalJsonValue.operator ==(Orleans.Dataflow.Serialization.CanonicalJsonValue left, Orleans.Dataflow.Serialization.CanonicalJsonValue right) -> bool
@@ -442,6 +457,7 @@ static Orleans.Dataflow.Serialization.GraphDocumentSerializer.Fingerprint(Orlean
 static Orleans.Dataflow.Serialization.GraphDocumentSerializer.Serialize(Orleans.Dataflow.Definition.GraphDocument! document) -> byte[]!
 static Orleans.Dataflow.Serialization.StageCatalogSerializer.Fingerprint(Orleans.Dataflow.Definition.StageCatalog! catalog) -> Orleans.Dataflow.Definition.CatalogFingerprint
 static Orleans.Dataflow.Serialization.StageCatalogSerializer.Serialize(Orleans.Dataflow.Definition.StageCatalog! catalog) -> byte[]!
+static Orleans.Dataflow.Serialization.StageParameters.Create() -> Orleans.Dataflow.Serialization.StageParameters!
 ~override Orleans.Dataflow.Definition.CapabilityToken.Equals(object obj) -> bool
 ~override Orleans.Dataflow.Definition.CatalogFingerprint.Equals(object obj) -> bool
 ~override Orleans.Dataflow.Definition.GraphEdge.Equals(object obj) -> bool

@@ -1,3 +1,4 @@
+using Orleans.Dataflow.Adapters;
 using Orleans.Dataflow.Grains;
 using Orleans.Dataflow.Hosting;
 using Orleans.Dataflow.Identity;
@@ -141,13 +142,40 @@ public sealed class ClusterRefusalTests(DataflowCluster cluster)
     }
 
     [Fact]
-    public async Task ASiloRegisteringNoCatalogIsRefusedWhenItStarts()
+    public async Task ASiloPublishingNoVocabularyAtAllIsRefusedWhenItStarts()
     {
         string reported = await RefusedSilo(dataflow => dataflow.AddFactory(
             TestVocabulary.Provider,
             new TestStageFactory()));
 
-        Assert.Contains("at least one stage catalog", reported, StringComparison.Ordinal);
+        Assert.Contains("at least one vocabulary", reported, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task ASiloThatPublishesOnlyAShippedVocabularyStarts()
+    {
+        // What the vocabulary check is actually about is a silo that can resolve nothing, and a silo holding
+        // the ten Orleans adapter stages and their factory is not that silo. Requiring an AddCatalog call of
+        // it as well would have asked for a token, and the only tokens available were a shipped catalog
+        // registered without its factory — which is exactly the "accepts a document and refuses it at
+        // materialization" state the check exists to prevent.
+        await using Orleans.TestingHost.InProcessTestCluster cluster = Cluster(dataflow => dataflow
+            .AddStreamElement(StreamElementBinding.Create(ElementContract.For<long>("cluster-refusal-tick", 1))));
+
+        await cluster.DeployAsync();
+
+        Assert.NotNull(cluster.Client);
+    }
+
+    [Fact]
+    public async Task ASiloThatPublishesOnlyTheDotnetVocabularyStarts()
+    {
+        await using Orleans.TestingHost.InProcessTestCluster cluster = Cluster(
+            dataflow => dataflow.AddDotnetStages());
+
+        await cluster.DeployAsync();
+
+        Assert.NotNull(cluster.Client);
     }
 
     [Fact]
@@ -197,14 +225,26 @@ public sealed class ClusterRefusalTests(DataflowCluster cluster)
     /// </remarks>
     private static async Task<string> RefusedSilo(Action<IOrleansDataflowBuilder> configure)
     {
-        Orleans.TestingHost.InProcessTestClusterBuilder builder = new(initialSilosCount: 1);
-
-        builder.ConfigureSilo((siloOptions, silo) => _ = silo.AddOrleansDataflow(configure));
-
-        await using Orleans.TestingHost.InProcessTestCluster refused = builder.Build();
+        await using Orleans.TestingHost.InProcessTestCluster refused = Cluster(configure);
 
         Exception failure = await Assert.ThrowsAnyAsync<Exception>(refused.DeployAsync);
 
         return failure.ToString();
+    }
+
+    /// <summary>Builds a one-silo cluster carrying one dataflow registration and nothing else.</summary>
+    /// <param name="configure">The registration to make.</param>
+    /// <returns>The undeployed cluster.</returns>
+    /// <remarks>
+    /// Shared by the refusals and by the two registrations that are meant to succeed, so that "this starts"
+    /// and "this does not" are the same silo differing only in what was registered.
+    /// </remarks>
+    private static Orleans.TestingHost.InProcessTestCluster Cluster(Action<IOrleansDataflowBuilder> configure)
+    {
+        Orleans.TestingHost.InProcessTestClusterBuilder builder = new(initialSilosCount: 1);
+
+        builder.ConfigureSilo((siloOptions, silo) => _ = silo.AddOrleansDataflow(configure));
+
+        return builder.Build();
     }
 }

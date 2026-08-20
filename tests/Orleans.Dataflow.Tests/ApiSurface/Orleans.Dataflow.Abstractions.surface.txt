@@ -1,5 +1,5 @@
 # assembly: Orleans.Dataflow.Abstractions
-# public types: 33
+# public types: 34
 TYPE static class Orleans.Dataflow.Compilation.GraphCompiler
   method static Orleans.Dataflow.Compilation.GraphValidationReport Validate(Orleans.Dataflow.Definition.GraphDocument document, Orleans.Dataflow.Definition.IStageCatalog catalog)
 TYPE sealed class Orleans.Dataflow.Compilation.GraphValidationDiagnostic
@@ -285,6 +285,7 @@ TYPE struct Orleans.Dataflow.Identity.ContractReference  [System.Runtime.Compile
   method System.Boolean Equals(Orleans.Dataflow.Identity.ContractReference other)
   method System.Int32 CompareTo(Orleans.Dataflow.Identity.ContractReference other)
   method static Orleans.Dataflow.Identity.ContractReference Create(Orleans.Dataflow.Identity.ContractId contract, System.Int32 majorVersion)
+  method static Orleans.Dataflow.Identity.ContractReference For(System.String contract, System.Int32 majorVersion = 1)
   method static System.Boolean TryCreate(Orleans.Dataflow.Identity.ContractId contract, System.Int32 majorVersion, out Orleans.Dataflow.Identity.ContractReference& reference)
   method virtual System.Boolean Equals(System.Object obj)
   method virtual System.Int32 GetHashCode()
@@ -475,6 +476,7 @@ TYPE struct Orleans.Dataflow.Identity.StageRef  [System.Runtime.CompilerServices
   method System.Boolean Equals(Orleans.Dataflow.Identity.StageRef other)
   method System.Int32 CompareTo(Orleans.Dataflow.Identity.StageRef other)
   method static Orleans.Dataflow.Identity.StageRef Create(Orleans.Dataflow.Identity.ProviderId provider, Orleans.Dataflow.Identity.StageId stage, System.Int32 majorVersion)
+  method static Orleans.Dataflow.Identity.StageRef For(System.String provider, System.String stage, System.Int32 majorVersion = 1)
   method static System.Boolean TryCreate(Orleans.Dataflow.Identity.ProviderId provider, Orleans.Dataflow.Identity.StageId stage, System.Int32 majorVersion, out Orleans.Dataflow.Identity.StageRef& stageRef)
   method virtual System.Boolean Equals(System.Object obj)
   method virtual System.Int32 GetHashCode()
@@ -509,6 +511,7 @@ TYPE struct Orleans.Dataflow.Serialization.CanonicalJsonValue  [System.Runtime.C
   property System.Boolean IsDefault { get; }
   property System.Int32 ByteLength { get; }
   property System.ReadOnlyMemory<System.Byte> CanonicalUtf8Bytes { get; }
+  property static Orleans.Dataflow.Serialization.CanonicalJsonValue Empty { get; }
 TYPE sealed class Orleans.Dataflow.Serialization.GraphDocumentFormatException
   BASE System.Exception
   IFACE System.Runtime.Serialization.ISerializable
@@ -523,3 +526,16 @@ TYPE static class Orleans.Dataflow.Serialization.StageCatalogSerializer
   field static const System.Int32 CurrentFormatVersion = 1
   method static Orleans.Dataflow.Definition.CatalogFingerprint Fingerprint(Orleans.Dataflow.Definition.StageCatalog catalog)
   method static System.Byte[] Serialize(Orleans.Dataflow.Definition.StageCatalog catalog)
+TYPE sealed class Orleans.Dataflow.Serialization.StageParameters
+  method Orleans.Dataflow.Serialization.CanonicalJsonValue Build()
+  method Orleans.Dataflow.Serialization.StageParameters Add(System.String name, Orleans.Dataflow.Serialization.CanonicalJsonValue value)
+  method Orleans.Dataflow.Serialization.StageParameters Add(System.String name, Orleans.Dataflow.Serialization.StageParameters value)
+  method Orleans.Dataflow.Serialization.StageParameters Add(System.String name, System.Boolean value)
+  method Orleans.Dataflow.Serialization.StageParameters Add(System.String name, System.Collections.Generic.IEnumerable<Orleans.Dataflow.Serialization.StageParameters> values)
+  method Orleans.Dataflow.Serialization.StageParameters Add(System.String name, System.Collections.Generic.IEnumerable<System.Int64> values)
+  method Orleans.Dataflow.Serialization.StageParameters Add(System.String name, System.Collections.Generic.IEnumerable<System.String> values)
+  method Orleans.Dataflow.Serialization.StageParameters Add(System.String name, System.Int64 value)
+  method Orleans.Dataflow.Serialization.StageParameters Add(System.String name, System.String value)
+  method Orleans.Dataflow.Serialization.StageParameters AddNull(System.String name)
+  method static Orleans.Dataflow.Serialization.StageParameters Create()
+  method virtual System.String ToString()

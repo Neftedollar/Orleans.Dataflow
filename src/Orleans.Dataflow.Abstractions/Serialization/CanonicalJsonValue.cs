@@ -142,6 +142,25 @@ public readonly record struct CanonicalJsonValue
     private CanonicalJsonValue(byte[] canonicalUtf8) => _canonicalUtf8 = canonicalUtf8;
 
     /// <summary>
+    /// Gets the empty JSON object, which is the payload of a stage that takes no parameters.
+    /// </summary>
+    /// <value>The canonical value whose bytes are <c>{}</c>.</value>
+    /// <remarks>
+    /// <para>
+    /// A stage with nothing to configure still carries a payload, because a node's parameter member is not
+    /// optional and an absent object and an empty one would otherwise be two spellings of one fact. This is
+    /// that payload, named once so that no author writes <c>Parse("{}")</c> and no reader has to work out
+    /// what the two characters meant.
+    /// </para>
+    /// <para>
+    /// It is emphatically not the default value: <see cref="IsDefault"/> is <see langword="false"/> here, and
+    /// the default carries no JSON at all. "This stage has no parameters" and "nobody said what this stage's
+    /// parameters are" are different statements, and they have different values.
+    /// </para>
+    /// </remarks>
+    public static CanonicalJsonValue Empty => EmptyObject;
+
+    /// <summary>
     /// Gets a value indicating whether this instance is the uninitialized default value.
     /// </summary>
     /// <value><see langword="true"/> for the default value; otherwise <see langword="false"/>.</value>
@@ -509,4 +528,12 @@ public readonly record struct CanonicalJsonValue
     /// <summary>A UTF-8 encoding that throws instead of substituting the replacement character.</summary>
     private static UTF8Encoding StrictUtf8 { get; } =
         new(encoderShouldEmitUTF8Identifier: false, throwOnInvalidBytes: true);
+
+    /// <summary>The one canonical empty object, built once and shared.</summary>
+    /// <remarks>
+    /// A field rather than a property initializer so that <see cref="Empty"/> costs a field read: the value
+    /// is immutable and its bytes are never handed out mutably, so one instance serves every caller. It is
+    /// declared last, beside the other private statics, and read through <see cref="Empty"/>.
+    /// </remarks>
+    private static readonly CanonicalJsonValue EmptyObject = Parse("{}"u8);
 }

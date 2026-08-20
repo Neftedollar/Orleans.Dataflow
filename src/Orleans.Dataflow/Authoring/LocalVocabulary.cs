@@ -714,7 +714,7 @@ internal static class LocalVocabulary
     /// buffered, distinct, and asynchronous stages write real ones.
     /// <see cref="LocalStageDescriptor.Parameters"/> is what decides which a given occurrence carries.
     /// </remarks>
-    internal static readonly CanonicalJsonValue EmptyParameters = CanonicalJsonValue.Parse("{}");
+    internal static readonly CanonicalJsonValue EmptyParameters = CanonicalJsonValue.Empty;
 
     /// <summary>Every shape of this vocabulary by the text its stage reference renders as.</summary>
     /// <remarks>

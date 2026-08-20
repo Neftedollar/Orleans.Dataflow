@@ -121,6 +121,78 @@ public readonly record struct StageRef : IComparable<StageRef>, IComparable
     }
 
     /// <summary>
+    /// Creates a <see cref="StageRef"/> from the text of its two identifiers.
+    /// </summary>
+    /// <param name="provider">The provider identifier segment, such as <c>weather</c>.</param>
+    /// <param name="stage">The stage identifier segment, such as <c>reading-feed</c>.</param>
+    /// <param name="majorVersion">
+    /// The compatibility major version, which must be at least <see cref="FirstMajorVersion"/> and defaults
+    /// to it.
+    /// </param>
+    /// <returns>The validated stage reference.</returns>
+    /// <exception cref="ArgumentNullException">
+    /// <paramref name="provider"/> or <paramref name="stage"/> is <see langword="null"/>.
+    /// </exception>
+    /// <exception cref="ArgumentException">
+    /// <paramref name="provider"/> or <paramref name="stage"/> is not a valid identifier segment.
+    /// </exception>
+    /// <exception cref="ArgumentOutOfRangeException">
+    /// <paramref name="majorVersion"/> is less than <see cref="FirstMajorVersion"/>.
+    /// </exception>
+    /// <remarks>
+    /// <para>
+    /// The one-call spelling of what <see cref="Create(ProviderId, StageId, int)"/> says in three, and the
+    /// rule <c>ElementContract.For</c> already follows for a contract: an author who is naming a stage writes
+    /// the two names and, usually, nothing about versions. Every check the identity types make is still made
+    /// — the segments go through <see cref="ProviderId.Create"/> and <see cref="StageId.Create"/>, and the
+    /// version through the same bound — so what is gone is the obligation to name the types and not the
+    /// validation they carry.
+    /// </para>
+    /// <para>
+    /// The version defaults to <see cref="FirstMajorVersion"/> because a stage has exactly one first version
+    /// and most vocabularies never leave it, so requiring it of every author buys nothing and hides the ones
+    /// who genuinely mean something else. A caller that already holds a <see cref="ProviderId"/> and a
+    /// <see cref="StageId"/> keeps using <see cref="Create(ProviderId, StageId, int)"/> rather than
+    /// rendering them back to text.
+    /// </para>
+    /// <para>
+    /// <see cref="ProviderId"/> and <see cref="StageId"/> own the segment grammar and the diagnostic for
+    /// breaking it, so the message is reused verbatim and only the parameter name is corrected, because the
+    /// author wrote identifier text rather than an identifier value.
+    /// </para>
+    /// </remarks>
+    public static StageRef For(string provider, string stage, int majorVersion = FirstMajorVersion)
+    {
+        ArgumentNullException.ThrowIfNull(provider);
+        ArgumentNullException.ThrowIfNull(stage);
+
+        ProviderId owner;
+        StageId named;
+
+        try
+        {
+            owner = ProviderId.Create(provider);
+        }
+        catch (ArgumentException failure)
+        {
+            throw new ArgumentException(failure.Message, nameof(provider), failure);
+        }
+
+        try
+        {
+            named = StageId.Create(stage);
+        }
+        catch (ArgumentException failure)
+        {
+            throw new ArgumentException(failure.Message, nameof(stage), failure);
+        }
+
+        ArgumentOutOfRangeException.ThrowIfLessThan(majorVersion, FirstMajorVersion);
+
+        return new StageRef(owner, named, majorVersion);
+    }
+
+    /// <summary>
     /// Attempts to create a <see cref="StageRef"/> from its components.
     /// </summary>
     /// <param name="provider">The candidate provider.</param>

@@ -47,6 +47,20 @@ public interface IOrleansDataflowBuilder
     /// </remarks>
     IOrleansDataflowBuilder AddFactory(ProviderId provider, IDataflowStageFactory factory);
 
+    /// <summary>Registers both halves of one provider's vocabulary.</summary>
+    /// <param name="provider">The vocabulary, holding each stage's declaration and the code behind it.</param>
+    /// <returns>This builder, so registrations chain.</returns>
+    /// <exception cref="ArgumentNullException"><paramref name="provider"/> is <see langword="null"/>.</exception>
+    /// <remarks>
+    /// Exactly <see cref="AddCatalog"/> of the vocabulary's catalog followed by <see cref="AddFactory"/> of
+    /// the vocabulary itself, and nothing else: the common case, where one deployment declares and
+    /// implements the same stages, said in one line instead of two that can drift apart. It satisfies the
+    /// silo's requirement of at least one catalog for the same reason <see cref="AddCatalog"/> does, because
+    /// it is that call. A provider whose halves genuinely ship separately — a catalog in a contracts package,
+    /// a factory in the deployment that implements it — keeps registering them separately.
+    /// </remarks>
+    IOrleansDataflowBuilder AddProvider(StageProvider provider);
+
     /// <summary>Registers the CLR type that carries one element contract over this silo's streams.</summary>
     /// <typeparam name="T">The element type.</typeparam>
     /// <param name="element">The binding, declared once and handed to the authoring side as well.</param>

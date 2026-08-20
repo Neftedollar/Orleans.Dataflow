@@ -1,6 +1,5 @@
 namespace Orleans.Dataflow.Samples
 
-open System.Globalization
 open System.Text.Json
 open Orleans.Dataflow.Definition
 open Orleans.Dataflow.Identity
@@ -59,13 +58,17 @@ module SampleVocabulary =
     let TallyContract = Orleans.Dataflow.ResultContract.For<int64>("samples-tally", 1)
 
     /// <summary>The contract of the feed's payload.</summary>
-    let FeedParameterContract = ContractReference.Create(ContractId.Create "samples-order-feed-parameters", 1)
+    /// <remarks>
+    /// A parameter contract binds no CLR type, so there is nothing for a typed declaration to assert about it
+    /// and the reference from its name is the whole statement. The major version defaults to the first.
+    /// </remarks>
+    let FeedParameterContract = ContractReference.For "samples-order-feed-parameters"
 
     /// <summary>The contract of the discounting flow's payload.</summary>
-    let DiscountParameterContract = ContractReference.Create(ContractId.Create "samples-discount-parameters", 1)
+    let DiscountParameterContract = ContractReference.For "samples-discount-parameters"
 
     /// <summary>The contract of the tallying terminal's payload.</summary>
-    let TallyParameterContract = ContractReference.Create(ContractId.Create "samples-tally-parameters", 1)
+    let TallyParameterContract = ContractReference.For "samples-tally-parameters"
 
     /// <summary>The payload member holding how many orders the feed emits.</summary>
     let CountMember = "count"
@@ -129,34 +132,35 @@ module SampleVocabulary =
     /// <summary>Writes the feed's payload.</summary>
     /// <param name="count">How many orders to emit.</param>
     /// <returns>The canonical payload.</returns>
+    /// <remarks>
+    /// A member at a time rather than a JSON string composed with a format and an invariant culture. The
+    /// bytes are the same bytes — <c>Build</c> ends in the very canonicalizing parse the string spelling ended
+    /// in — and what is gone is the quoting, the escaping, and the chance of writing a payload that parses
+    /// and means something else.
+    /// </remarks>
     let FeedParameters (count: int) : CanonicalJsonValue =
-        CanonicalJsonValue.Parse(
-            System.String.Format(CultureInfo.InvariantCulture, "{{\"{0}\":{1}}}", CountMember, count)
-        )
+        StageParameters.Create().Add(CountMember, count).Build()
 
     /// <summary>Writes the discounting flow's payload.</summary>
     /// <param name="percent">The percentage taken off every order's amount.</param>
     /// <returns>The canonical payload.</returns>
     let DiscountParameters (percent: int) : CanonicalJsonValue =
-        CanonicalJsonValue.Parse(
-            System.String.Format(CultureInfo.InvariantCulture, "{{\"{0}\":{1}}}", PercentMember, percent)
-        )
+        StageParameters.Create().Add(PercentMember, percent).Build()
 
     /// <summary>Writes the tallying terminal's payload.</summary>
     /// <param name="label">What the terminal is counting, for whoever reads the document.</param>
     /// <param name="minimumAmount">The smallest amount a document has to be worth to be counted.</param>
     /// <returns>The canonical payload.</returns>
+    /// <remarks>
+    /// The label is handed over as text and escaped by the writer, so nothing here reaches for a serializer
+    /// to quote a string with.
+    /// </remarks>
     let TallyParameters (label: string) (minimumAmount: int) : CanonicalJsonValue =
-        CanonicalJsonValue.Parse(
-            System.String.Format(
-                CultureInfo.InvariantCulture,
-                "{{\"{0}\":{1},\"{2}\":{3}}}",
-                LabelMember,
-                JsonSerializer.Serialize label,
-                MinimumAmountMember,
-                minimumAmount
-            )
-        )
+        StageParameters
+            .Create()
+            .Add(LabelMember, label)
+            .Add(MinimumAmountMember, minimumAmount)
+            .Build()
 
     /// <summary>Opens a payload as the object every stage here declares.</summary>
     /// <param name="stage">What is being read, for the diagnostic.</param>

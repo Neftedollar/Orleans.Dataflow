@@ -25,8 +25,8 @@ public static class OrleansDataflowSiloBuilderExtensions
     /// <returns><paramref name="builder"/>, so calls chain.</returns>
     /// <exception cref="ArgumentNullException">Either argument is <see langword="null"/>.</exception>
     /// <exception cref="ArgumentException">
-    /// <paramref name="configure"/> registered no catalog, registered one stage reference twice, registered
-    /// one provider's factory twice, or registered one Orleans binding name twice.
+    /// <paramref name="configure"/> published no vocabulary at all, registered one stage reference twice,
+    /// registered one provider's factory twice, or registered one Orleans binding name twice.
     /// </exception>
     /// <remarks>
     /// <para>
@@ -142,6 +142,14 @@ public static class OrleansDataflowSiloBuilderExtensions
                 new DataflowStageFactoryAdapter(factory)));
 
             return this;
+        }
+
+        /// <inheritdoc/>
+        public IOrleansDataflowBuilder AddProvider(StageProvider provider)
+        {
+            ArgumentNullException.ThrowIfNull(provider);
+
+            return AddCatalog(provider.Catalog).AddFactory(provider.Provider, provider);
         }
 
         /// <inheritdoc/>
@@ -263,20 +271,32 @@ public static class OrleansDataflowSiloBuilderExtensions
 
         /// <summary>Checks everything registered, and remembers what the check produced.</summary>
         /// <exception cref="ArgumentException">
-        /// No catalog was registered, one stage reference was registered twice, one provider was, or one
+        /// Nothing at all was registered, one stage reference was registered twice, one provider was, or one
         /// Orleans binding name was.
         /// </exception>
         /// <remarks>
+        /// <para>
         /// Runs while the silo is being built, which is what makes a broken registration a failure to start.
         /// The provider keys are checked here against a placeholder factory, because the real Orleans
         /// factory is built from the container and the thing being checked is the key rather than the value.
+        /// </para>
+        /// <para>
+        /// What the first check refuses is a silo with <em>no vocabulary</em>, which is not the same as a
+        /// silo with no <see cref="IOrleansDataflowBuilder.AddCatalog"/> call. A deployment that registers an
+        /// Orleans binding gets all ten adapter stages and their factory, and a deployment that calls
+        /// <see cref="IOrleansDataflowBuilder.AddDotnetStages"/> gets the two push adapters and theirs; both
+        /// can resolve stage references and run documents made of them, so requiring a catalog call of them
+        /// as well asked for a token rather than a vocabulary — and the only tokens available were a shipped
+        /// catalog registered without its factory, which is precisely the "accepts a document and refuses it
+        /// at materialization" state this check exists to prevent.
+        /// </para>
         /// </remarks>
         internal void Validate()
         {
-            if (!_anyCatalog)
+            if (!_anyCatalog && !_adapters.Any && !_dotnet.Any)
             {
                 throw new ArgumentException(
-                    $"A silo running Orleans.Dataflow registers at least one stage catalog. Without one it can resolve no stage reference, so every document it is handed is refused; call {nameof(IOrleansDataflowBuilder.AddCatalog)} with the vocabulary this deployment publishes.");
+                    $"A silo running Orleans.Dataflow publishes at least one vocabulary. Without one it can resolve no stage reference, so every document it is handed is refused; call {nameof(IOrleansDataflowBuilder.AddProvider)} or {nameof(IOrleansDataflowBuilder.AddCatalog)} with the vocabulary this deployment publishes, or {nameof(IOrleansDataflowBuilder.AddDotnetStages)} or one of the Orleans binding registrations to publish a vocabulary this package ships.");
             }
 
             _registry = _adapters.Build();

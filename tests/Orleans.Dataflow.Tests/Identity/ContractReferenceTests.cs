@@ -21,6 +21,30 @@ public sealed class ContractReferenceTests
     }
 
     [Fact]
+    public void ForBuildsTheSameReferenceAsCreateFromTheTextOfItsIdentifier()
+    {
+        Assert.Equal(ContractReference.Create(SampleContract, 3), ContractReference.For("order-line", 3));
+        Assert.Equal(
+            ContractReference.Create(SampleContract, ContractReference.FirstMajorVersion),
+            ContractReference.For("order-line"));
+    }
+
+    [Fact]
+    public void ForDefaultsToTheFirstMajorVersion() =>
+        Assert.Equal(ContractReference.FirstMajorVersion, ContractReference.For("order-line").MajorVersion);
+
+    [Fact]
+    public void ForKeepsEveryCheckTheIdentifierTypeMakes()
+    {
+        Assert.Contains(
+            "segment",
+            Assert.Throws<ArgumentException>("contract", () => ContractReference.For("Order Line")).Message,
+            StringComparison.Ordinal);
+        Assert.Throws<ArgumentOutOfRangeException>("majorVersion", () => ContractReference.For("order-line", 0));
+        Assert.Throws<ArgumentNullException>("contract", () => ContractReference.For(null!));
+    }
+
+    [Fact]
     public void ToStringUsesCanonicalFormat()
     {
         Assert.Equal("order-line@v3", ContractReference.Create(SampleContract, 3).ToString());

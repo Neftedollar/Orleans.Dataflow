@@ -244,6 +244,32 @@ public sealed class ProviderConformance
         return new ProviderConformance(provider, catalog, factory, specifications, byStage);
     }
 
+    /// <summary>Points the kit at a vocabulary that carries both of its halves.</summary>
+    /// <param name="provider">The vocabulary under test.</param>
+    /// <param name="samples">One sample payload per stage it declares.</param>
+    /// <returns>The kit.</returns>
+    /// <exception cref="ArgumentNullException">
+    /// <paramref name="provider"/> or <paramref name="samples"/> is <see langword="null"/>.
+    /// </exception>
+    /// <exception cref="ArgumentException">
+    /// The vocabulary declares no stage, or the samples and the vocabulary do not describe the same set of
+    /// stages. The message is a numbered list of every violation found.
+    /// </exception>
+    /// <remarks>
+    /// The same kit, given the three arguments a <see cref="StageProvider"/> already holds: its provider, its
+    /// catalog, and itself as the factory. A vocabulary written in one place is checked in one call, and the
+    /// four-argument overload stays for a provider whose halves are genuinely separate values — which is the
+    /// case this kit was written for and still covers.
+    /// </remarks>
+    public static ProviderConformance Create(
+        StageProvider provider,
+        IEnumerable<ProviderStageSample> samples)
+    {
+        ArgumentNullException.ThrowIfNull(provider);
+
+        return Create(provider.Provider, provider.Catalog, provider, samples);
+    }
+
     /// <summary>Runs one check.</summary>
     /// <param name="check">One of the names <see cref="Checks"/> lists.</param>
     /// <exception cref="ArgumentNullException"><paramref name="check"/> is <see langword="null"/>.</exception>
@@ -1107,12 +1133,18 @@ public sealed class ProviderConformance
     /// half says anything. That is stated rather than hidden: the check is sharp for a provider in a package
     /// of its own, which is the case the criterion is about.
     /// </para>
+    /// <para>
+    /// <b>Where the provider's code is looked for.</b> Ordinarily the factory's own CLR type, because a
+    /// provider that writes an <see cref="IDataflowStageFactory"/> writes it in its own assembly. A
+    /// <see cref="StageProvider"/> is the exception and has to be treated as one: its factory type is this
+    /// library's, so measuring against it would compare the core packages with themselves and report every
+    /// core option naming an <c>Orleans.Dataflow.Hosting</c> type as the provider's. The code such a
+    /// vocabulary actually holds is the delegates it was declared with, so those are what is measured — one
+    /// scope per declaring type, and the check is the same check applied to each.
+    /// </para>
     /// </remarks>
     private void CheckCoreOptions(List<string> failures)
     {
-        Assembly provider = _factory.GetType().Assembly;
-        string? space = _factory.GetType().Namespace;
-
         foreach (Assembly core in (Assembly[])
             [typeof(LocalDataflowHost).Assembly, typeof(StageSpecification).Assembly])
         {
@@ -1121,18 +1153,38 @@ public sealed class ProviderConformance
             {
                 foreach (Type named in Named(option))
                 {
-                    if (named.Assembly == provider &&
-                        (provider != core ||
-                            (space is not null &&
-                                string.Equals(named.Namespace, space, StringComparison.Ordinal))))
+                    foreach (Type implementation in Implementations())
                     {
-                        failures.Add(
-                            $"the core option type {option.FullName} names {named.FullName}, which belongs to the provider '{_provider}', so a deployment configures this provider by setting a core option instead of by writing a payload");
+                        Assembly provider = implementation.Assembly;
+                        string? space = implementation.Namespace;
+
+                        if (named.Assembly == provider &&
+                            (provider != core ||
+                                (space is not null &&
+                                    string.Equals(named.Namespace, space, StringComparison.Ordinal))))
+                        {
+                            failures.Add(
+                                $"the core option type {option.FullName} names {named.FullName}, which belongs to the provider '{_provider}', so a deployment configures this provider by setting a core option instead of by writing a payload");
+                        }
                     }
                 }
             }
         }
     }
+
+    /// <summary>Lists the types that hold the provider's code.</summary>
+    /// <returns>
+    /// The declaring types of a <see cref="StageProvider"/>'s build delegates, or the factory's own type for
+    /// every other factory.
+    /// </returns>
+    /// <remarks>
+    /// A vocabulary that carries both halves has no CLR type of its own, so its factory type says nothing
+    /// about the provider and its delegates say everything. A vocabulary that declares no stage at all yields
+    /// nothing here and is caught long before this check, by the refusal that a catalog declaring no stage of
+    /// the provider is not a subject.
+    /// </remarks>
+    private IEnumerable<Type> Implementations() =>
+        _factory is StageProvider vocabulary ? vocabulary.ImplementationTypes : [_factory.GetType()];
 
     /// <summary>Lists every type one option type names on its public surface.</summary>
     /// <param name="option">The option type.</param>

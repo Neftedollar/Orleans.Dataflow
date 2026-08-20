@@ -57,6 +57,19 @@ public interface ILocalDataflowBuilder
     /// </remarks>
     ILocalDataflowBuilder AddFactory(ProviderId provider, IDataflowStageFactory factory);
 
+    /// <summary>Registers both halves of one provider's vocabulary.</summary>
+    /// <param name="provider">The vocabulary, holding each stage's declaration and the code behind it.</param>
+    /// <returns>This builder, so registrations chain.</returns>
+    /// <exception cref="ArgumentNullException"><paramref name="provider"/> is <see langword="null"/>.</exception>
+    /// <remarks>
+    /// Exactly <see cref="AddCatalog"/> of the vocabulary's catalog followed by <see cref="AddFactory"/> of
+    /// the vocabulary itself, and nothing else: the common case, where one deployment declares and
+    /// implements the same stages, said in one line instead of two that can drift apart. A provider whose
+    /// halves genuinely ship separately keeps registering them separately, which is why both of those
+    /// methods stay.
+    /// </remarks>
+    ILocalDataflowBuilder AddProvider(StageProvider provider);
+
     /// <summary>Publishes the .NET push-adapter vocabulary without registering a binding.</summary>
     /// <returns>This builder, so registrations chain.</returns>
     /// <remarks>
@@ -137,6 +150,14 @@ internal sealed class LocalRegistrations : ILocalDataflowBuilder
             new DataflowStageFactoryAdapter(factory)));
 
         return this;
+    }
+
+    /// <inheritdoc/>
+    public ILocalDataflowBuilder AddProvider(StageProvider provider)
+    {
+        ArgumentNullException.ThrowIfNull(provider);
+
+        return AddCatalog(provider.Catalog).AddFactory(provider.Provider, provider);
     }
 
     /// <inheritdoc/>

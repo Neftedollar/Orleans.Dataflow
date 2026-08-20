@@ -1,4 +1,6 @@
 #nullable enable
+const Orleans.Dataflow.Grains.OrleansDataflowStorage.CoordinatorProviderName = "orleans-dataflow-coordinator" -> string!
+const Orleans.Dataflow.Hosting.OrleansDataflowResults.DefaultMaximumResultBytes = 1048576 -> int
 Orleans.Dataflow.Adapters.BroadcastElementBinding
 Orleans.Dataflow.Adapters.BroadcastElementBinding<T>
 Orleans.Dataflow.Adapters.BroadcastElementBinding<T>.Element.get -> Orleans.Dataflow.ElementContract<T>
@@ -222,6 +224,7 @@ Orleans.Dataflow.Hosting.IOrleansDataflowBuilder.AddGrainEnumerable<T>(Orleans.D
 Orleans.Dataflow.Hosting.IOrleansDataflowBuilder.AddKeyedGrainCall<TIn, TOut>(Orleans.Dataflow.Adapters.KeyedGrainCallBinding<TIn, TOut>! binding) -> Orleans.Dataflow.Hosting.IOrleansDataflowBuilder!
 Orleans.Dataflow.Hosting.IOrleansDataflowBuilder.AddObservable<T>(Orleans.Dataflow.Adapters.ObservableBinding<T>! source) -> Orleans.Dataflow.Hosting.IOrleansDataflowBuilder!
 Orleans.Dataflow.Hosting.IOrleansDataflowBuilder.AddObserverBridge<T>(Orleans.Dataflow.Adapters.ObserverBridgeBinding<T>! bridge) -> Orleans.Dataflow.Hosting.IOrleansDataflowBuilder!
+Orleans.Dataflow.Hosting.IOrleansDataflowBuilder.AddProvider(Orleans.Dataflow.Hosting.StageProvider! provider) -> Orleans.Dataflow.Hosting.IOrleansDataflowBuilder!
 Orleans.Dataflow.Hosting.IOrleansDataflowBuilder.AddStreamElement<T>(Orleans.Dataflow.Adapters.StreamElementBinding<T>! element) -> Orleans.Dataflow.Hosting.IOrleansDataflowBuilder!
 Orleans.Dataflow.Hosting.IOrleansDataflowBuilder.LimitResultSize(int maximumBytes) -> Orleans.Dataflow.Hosting.IOrleansDataflowBuilder!
 Orleans.Dataflow.Hosting.IOrleansDataflowBuilder.UseCheckpointStore(System.Func<System.IServiceProvider!, Orleans.Dataflow.Hosting.ICheckpointStore!>! store) -> Orleans.Dataflow.Hosting.IOrleansDataflowBuilder!
@@ -250,8 +253,6 @@ Orleans.Dataflow.Hosting.OrleansRunHandle.ShutdownAsync() -> System.Threading.Ta
 Orleans.Dataflow.Hosting.OrleansRunHandle.SnapshotAsync(System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task<Orleans.Dataflow.RunSnapshot!>!
 Orleans.Dataflow.Hosting.OrleansRunHandle.Ticket.get -> Orleans.Dataflow.Grains.PipelineRunTicket!
 Orleans.Dataflow.Hosting.OrleansRunHandle.WatchTermination.get -> System.Threading.Tasks.Task<Orleans.Dataflow.RunEnding!>!
-const Orleans.Dataflow.Grains.OrleansDataflowStorage.CoordinatorProviderName = "orleans-dataflow-coordinator" -> string!
-const Orleans.Dataflow.Hosting.OrleansDataflowResults.DefaultMaximumResultBytes = 1048576 -> int
 override Orleans.Dataflow.Adapters.BroadcastElementBinding<T>.ToString() -> string!
 override Orleans.Dataflow.Adapters.GrainCallBinding<TIn, TOut>.ToString() -> string!
 override Orleans.Dataflow.Adapters.GrainCallSinkBinding<TIn>.ToString() -> string!
@@ -317,8 +318,8 @@ static Orleans.Dataflow.Adapters.OrleansStages.StreamSourceParameterContract.get
 static Orleans.Dataflow.Adapters.OrleansStages.StreamSourceParameters<T>(Orleans.Dataflow.Adapters.StreamElementBinding<T>! element, Orleans.Dataflow.Adapters.OrleansStreamAddress stream, Orleans.Dataflow.BufferOptions! ingress) -> Orleans.Dataflow.Serialization.CanonicalJsonValue
 static Orleans.Dataflow.Adapters.OrleansStages.StreamSourceStage.get -> Orleans.Dataflow.Identity.StageRef
 static Orleans.Dataflow.Adapters.OrleansStages.Tick.get -> Orleans.Dataflow.ElementContract<long>
-static Orleans.Dataflow.Adapters.OrleansStreamAddress.Create(string! provider, string! streamNamespace, System.Guid key) -> Orleans.Dataflow.Adapters.OrleansStreamAddress
 static Orleans.Dataflow.Adapters.OrleansStreamAddress.Create(string! provider, string! streamNamespace, string! key) -> Orleans.Dataflow.Adapters.OrleansStreamAddress
+static Orleans.Dataflow.Adapters.OrleansStreamAddress.Create(string! provider, string! streamNamespace, System.Guid key) -> Orleans.Dataflow.Adapters.OrleansStreamAddress
 static Orleans.Dataflow.Adapters.OrleansStreamAddress.operator !=(Orleans.Dataflow.Adapters.OrleansStreamAddress left, Orleans.Dataflow.Adapters.OrleansStreamAddress right) -> bool
 static Orleans.Dataflow.Adapters.OrleansStreamAddress.operator ==(Orleans.Dataflow.Adapters.OrleansStreamAddress left, Orleans.Dataflow.Adapters.OrleansStreamAddress right) -> bool
 static Orleans.Dataflow.Adapters.StreamElementBinding.Create<T>(Orleans.Dataflow.ElementContract<T> element) -> Orleans.Dataflow.Adapters.StreamElementBinding<T>!
