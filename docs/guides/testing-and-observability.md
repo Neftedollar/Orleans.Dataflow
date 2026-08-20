@@ -227,7 +227,9 @@ stopped being true. The full worked example is in
 **Then run the stage.** Register it on a `LocalDataflowHost` — the same
 `AddCatalog` and `AddFactory` calls a silo makes — and author an ordinary graph
 over it. No cluster is involved, so the test is fast and the failure messages are
-your own:
+your own. `SalesVocabulary` and `SalesStageFactory` below are the worked pair from
+[Writing a custom stage](custom-stages.md) — a catalog that names three stages and
+the factory that builds them; substitute your own:
 
 ```csharp
 LocalDataflowHost host = new(builder => builder

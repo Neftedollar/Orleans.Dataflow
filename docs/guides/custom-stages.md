@@ -458,7 +458,12 @@ reference twice, or one provider twice, is refused when the host is built, becau
 two specifications for one reference are two answers to one question rather than a
 merge.
 
-Authoring against it is ordinary:
+Authoring against it is ordinary — and this is `SalesVocabulary` from the top of
+this page, the three stages it publishes: `Feed` produces order events, `Discount`
+turns each into a document, and `Tally` counts the ones worth keeping. Each is a
+typed handle, so the chain below is checked the same way an ordinary pipeline is;
+what a registered stage adds is the occurrence name — your name for *this* use of
+it — and the parameters that use carries into the document.
 
 ```csharp
 (RunnableGraph graph, ResultSlot<long> accepted) = Source
