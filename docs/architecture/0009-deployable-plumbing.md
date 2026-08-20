@@ -123,8 +123,34 @@ And correspondingly:
 
 - `LocalStageCatalog` requires `nondeployable` on the kinds that have behaviour
   and not on the kinds that do not.
-- Every delegate-free operator takes an optional occurrence name, so an author
-  can drop `ephemeral-identity`.
+- An author can name any local occurrence, so `ephemeral-identity` can be
+  dropped.
+
+**The naming spelling, as built.** This ADR first proposed an optional name
+parameter on every operator. What shipped is a combinator, because forty-five
+parameters in C# and their curried F# equivalents buy nothing a single method
+does not:
+
+> `Named` names the occurrence a linear value ends at. A junction added by a call
+> that does **not** answer with a linear value takes its name as an argument of
+> that call.
+
+The second sentence is not an exception. Four closing fan-outs answer with a
+`RunnableGraph` and two fork spellings answer with two open ends, so in both
+cases there is no value left to write `Named` on — and taking the name as an
+argument is exactly how `FanOutTo(junction, occurrenceName, parameters, branches)`
+has always spelled a registered junction. Without those six a branching graph
+could never drop the token.
+
+`Named` names the occurrence at the shape's **open output**, which after an
+`AlsoTo` or a `DivertTo` is the tapping junction rather than the branch's
+terminal — the branch named its own. A `Fork` carries no `Named` at all: two open
+ends means the question has two answers, so it is refused at compile time.
+
+One limit found by building it: `Prepend(params T[])` and `Append(params T[])`
+synthesise a source occurrence the shorthand has nowhere to name, so a graph
+using them keeps the token. The longer form names it —
+`Prepend(Source.From(elements).Named("header"))`.
 
 ## The name is the author's, and the default is not a name
 

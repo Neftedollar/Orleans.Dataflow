@@ -130,6 +130,39 @@ internal sealed class LocalGraphShape
     /// <returns>A new shape; this one is unchanged.</returns>
     internal LocalGraphShape Append(StageOccurrence stage) => Concat(LocalStageChain.Of(stage));
 
+    /// <summary>Names the occurrence this shape's only open output belongs to.</summary>
+    /// <param name="name">The validated name.</param>
+    /// <returns>A new shape; this one is unchanged.</returns>
+    /// <exception cref="InvalidOperationException">
+    /// The shape does not have exactly one open output, or the occurrence at that output is already named.
+    /// </exception>
+    /// <remarks>
+    /// <para>
+    /// The occurrence at the open output rather than the last one added, and the difference is what makes
+    /// this rule work on a shape that is not a chain. After an operator the two are the same occurrence.
+    /// After a fan-in — a merge, a concat, an interleave, a zip, a fork's rejoin — the open output belongs to
+    /// the junction, which is the occurrence that call contributed. After a tap the last occurrence added is
+    /// the branch's terminal, which the branch already named where it was written, and the open output
+    /// belongs to the tapping junction — which is the one occurrence such a call contributes that has no
+    /// other spelling. So "the occurrence this value ends at" names exactly the stage the next operator would
+    /// attach to, in every shape a source can hold.
+    /// </para>
+    /// <para>
+    /// A shape with two open ends is a fork and has no answer here, which is why <see cref="Single"/> is what
+    /// asks. No authoring value reaches this method in that state: a fork is a type of its own and carries no
+    /// naming call, so the refusal is a defect check rather than a diagnostic an author can provoke.
+    /// </para>
+    /// </remarks>
+    internal LocalGraphShape Naming(NodeId name)
+    {
+        LocalOpenOutput only = Single();
+        StageOccurrence[] named = [.. Stages];
+
+        named[only.Stage] = LocalOccurrenceName.Rename(named[only.Stage], name);
+
+        return new LocalGraphShape(Array.AsReadOnly(named), Links, OpenOutputs, Slots);
+    }
+
     /// <summary>Extends this shape with a linear chain of occurrences at its only open output.</summary>
     /// <param name="stages">The occurrences to attach, in authoring order; possibly none.</param>
     /// <returns>A new shape; this one is unchanged.</returns>

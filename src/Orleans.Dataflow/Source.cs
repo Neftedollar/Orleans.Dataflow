@@ -25,12 +25,13 @@ namespace Orleans.Dataflow;
 /// document is fingerprinted. Nothing before that point has a position or an identity.
 /// </para>
 /// <para>
-/// Every lambda occurrence is automatically named, so a graph built only from lambdas declares
-/// <c>ephemeral-identity</c> as well as <c>nondeployable</c>, and is therefore rejected for durable
-/// pipelines by design. A lambda occurrence has no spelling for a name at all: a name
-/// on a delegate would promise an edit-stable identity the delegate behind it cannot honor. The registered
-/// overloads take one and require it, so what a closed document declares is a fact about what the chain
-/// actually holds.
+/// An occurrence the author did not name is numbered by its position at closure, and a graph holding one
+/// declares <c>ephemeral-identity</c>. <see cref="Named"/> is the spelling that gives one a name of its own,
+/// and it is one combinator rather than a parameter on every operator; the registered overloads take a name
+/// as an argument and require it, because a registered occurrence exists to be addressed. So what a closed
+/// document declares is a fact about what the chain actually holds: a fully named chain declares no
+/// <c>ephemeral-identity</c>, and a chain holding one lambda still declares <c>nondeployable</c>, because
+/// naming an occurrence says where its identity comes from and nothing about where it can run.
 /// </para>
 /// </remarks>
 public sealed class Source<T>
@@ -60,6 +61,50 @@ public sealed class Source<T>
 
     /// <summary>Gets the occurrences this source contributes to a graph, in authoring order.</summary>
     internal IReadOnlyList<StageOccurrence> Stages => Shape.Stages;
+
+    /// <summary>Gives the occurrence this source ends at an author-stable name.</summary>
+    /// <param name="occurrenceName">The name, which is one identifier segment.</param>
+    /// <returns>A new source; this one is unchanged.</returns>
+    /// <exception cref="ArgumentNullException"><paramref name="occurrenceName"/> is <see langword="null"/>.</exception>
+    /// <exception cref="ArgumentException">
+    /// <paramref name="occurrenceName"/> is not a valid single-segment node identifier.
+    /// </exception>
+    /// <exception cref="InvalidOperationException">
+    /// The occurrence this source ends at is already named, whether by an earlier <see cref="Named"/> or by
+    /// the registered attachment that created it. Renaming is refused rather than performed.
+    /// </exception>
+    /// <remarks>
+    /// <para>
+    /// One combinator instead of a name parameter on every operator, and it names <em>the occurrence this
+    /// source ends at</em> — the stage the next operator would attach to. After an operator that is the stage
+    /// the operator added; after a fan-in it is the junction; after <see cref="AlsoTo"/> or
+    /// <see cref="DivertTo"/> it is the tapping junction, which is the one occurrence such a call contributes
+    /// that has no other spelling, because the branch named its own stages where they were written.
+    /// </para>
+    /// <para>
+    /// A junction added by a call that does <em>not</em> answer with a source takes its name as an argument
+    /// of that call instead: the four closing fan-outs answer with a document, and the two fork spellings
+    /// answer with two open ends, so in both cases there is no value here to write a name on. That is how
+    /// the registered fan-out has always spelled it, and between the two spellings every local occurrence of
+    /// every shape can be named.
+    /// </para>
+    /// <para>
+    /// A name is the whole of what this changes. It is the node identifier the occurrence carries into the
+    /// document, so it replaces the positional <c>stage-0002</c> that closure would otherwise allocate — and
+    /// because a node identifier is document content, a named graph has a different fingerprint from the
+    /// unnamed one. That is the point rather than a cost: a positional identifier renames itself when a stage
+    /// is inserted above it, which is what <c>ephemeral-identity</c> warns about, and a graph whose
+    /// occurrences are all named declares that token no longer.
+    /// </para>
+    /// <para>
+    /// A name is an identity and not a label, which is why naming an occurrence twice is refused: a
+    /// checkpoint, a diagnostic, and a document reader all anchor to it. Two occurrences of one graph sharing
+    /// a name is refused too, when the graph is closed, by the fragment algebra that reports every collision
+    /// — the same rule and the same message two registered stages sharing a name meet.
+    /// </para>
+    /// </remarks>
+    public Source<T> Named(string occurrenceName) =>
+        new(Shape.Naming(LocalOccurrenceName.Parse(occurrenceName, nameof(occurrenceName))));
 
     /// <summary>Extends this source with a mapping stage.</summary>
     /// <typeparam name="TOut">The element type the mapping produces.</typeparam>
@@ -1375,6 +1420,37 @@ public sealed class Source<T>
         return new Fork<T1, T2>(Split(LocalStageDescriptor.Broadcast(), left.Stages, right.Stages));
     }
 
+    /// <summary>Sends every element down two flows at once through a named junction, to be rejoined.</summary>
+    /// <typeparam name="T1">The element type the first flow produces.</typeparam>
+    /// <typeparam name="T2">The element type the second flow produces.</typeparam>
+    /// <param name="occurrenceName">The author-stable name of the broadcasting junction occurrence.</param>
+    /// <param name="left">The first derivation, which is not modified.</param>
+    /// <param name="right">The second derivation, which is not modified.</param>
+    /// <returns>The fork, which is closed by rejoining it; no argument is changed.</returns>
+    /// <exception cref="ArgumentNullException">
+    /// <paramref name="occurrenceName"/>, <paramref name="left"/>, or <paramref name="right"/> is
+    /// <see langword="null"/>.
+    /// </exception>
+    /// <exception cref="ArgumentException">
+    /// <paramref name="occurrenceName"/> is not a valid single-segment node identifier.
+    /// </exception>
+    /// <remarks>
+    /// The name is an argument here for the reason it is one on a closing fan-out: <see cref="Named"/> names
+    /// the occurrence a value ends at, and a fork ends at two — so the junction it was split by has no other
+    /// spelling. The rejoin is a source again and is named with <see cref="Named"/> as usual, which is why
+    /// only one name is written here and not two.
+    /// </remarks>
+    public Fork<T1, T2> Fork<T1, T2>(string occurrenceName, Flow<T, T1> left, Flow<T, T2> right)
+    {
+        ArgumentNullException.ThrowIfNull(left);
+        ArgumentNullException.ThrowIfNull(right);
+
+        return new Fork<T1, T2>(Split(
+            Junction(LocalStageDescriptor.Broadcast(), occurrenceName),
+            left.Stages,
+            right.Stages));
+    }
+
     /// <summary>Sends every element down two flows at once and takes whichever result arrives first.</summary>
     /// <typeparam name="TOut">The element type both flows produce.</typeparam>
     /// <param name="left">The first derivation, which is not modified.</param>
@@ -1387,7 +1463,8 @@ public sealed class Source<T>
     /// The unordered rejoin, and the shape a race is written in: one element in produces two elements out —
     /// one per path — in whatever order the paths finish. That is a merge and not a zip, so the two
     /// derivations of one element are not paired and nothing waits for the slower path before emitting the
-    /// faster one. <see cref="Fork{T1, T2}"/> is the rejoin for when the two derivations belong together.
+    /// faster one. <see cref="Fork{T1, T2}(Flow{T, T1}, Flow{T, T2})"/> is the rejoin for when the two
+    /// derivations belong together.
     /// </remarks>
     public Source<TOut> ForkMerge<TOut>(Flow<T, TOut> left, Flow<T, TOut> right)
     {
@@ -1396,6 +1473,35 @@ public sealed class Source<T>
 
         return new Source<TOut>(Split(LocalStageDescriptor.Broadcast(), left.Stages, right.Stages)
             .Combine(LocalStageDescriptor.Merge(), LocalJunctionGuard.FanInPorts(LocalVocabulary.MinFanIn)));
+    }
+
+    /// <summary>Sends every element down two flows at once through a named junction, taking whichever arrives first.</summary>
+    /// <typeparam name="TOut">The element type both flows produce.</typeparam>
+    /// <param name="occurrenceName">The author-stable name of the broadcasting junction occurrence.</param>
+    /// <param name="left">The first derivation, which is not modified.</param>
+    /// <param name="right">The second derivation, which is not modified.</param>
+    /// <returns>A source of both derivations' elements; neither flow is changed.</returns>
+    /// <exception cref="ArgumentNullException">
+    /// <paramref name="occurrenceName"/>, <paramref name="left"/>, or <paramref name="right"/> is
+    /// <see langword="null"/>.
+    /// </exception>
+    /// <exception cref="ArgumentException">
+    /// <paramref name="occurrenceName"/> is not a valid single-segment node identifier.
+    /// </exception>
+    /// <remarks>
+    /// This call adds two junctions — the broadcast that splits and the merge that rejoins — and names one of
+    /// them. The merge is the occurrence the answering source ends at, so it is named with
+    /// <see cref="Named"/>; the broadcast is the one with no other spelling, which is why it is the one this
+    /// argument is for.
+    /// </remarks>
+    public Source<TOut> ForkMerge<TOut>(string occurrenceName, Flow<T, TOut> left, Flow<T, TOut> right)
+    {
+        ArgumentNullException.ThrowIfNull(left);
+        ArgumentNullException.ThrowIfNull(right);
+
+        return new Source<TOut>(
+            Split(Junction(LocalStageDescriptor.Broadcast(), occurrenceName), left.Stages, right.Stages)
+                .Combine(LocalStageDescriptor.Merge(), LocalJunctionGuard.FanInPorts(LocalVocabulary.MinFanIn)));
     }
 
     /// <summary>Emits another source's elements before this one's.</summary>
@@ -1848,6 +1954,30 @@ public sealed class Source<T>
     public RunnableGraph BroadcastTo(params Branch<T>[] branches) =>
         FanOut(LocalStageDescriptor.Broadcast(), branches, nameof(branches));
 
+    /// <summary>Closes this source by delivering every element to every branch, through a named junction.</summary>
+    /// <param name="occurrenceName">The author-stable name of the junction occurrence.</param>
+    /// <param name="branches">The branches, in the order they are wired to the junction's legs.</param>
+    /// <returns>The closed graph.</returns>
+    /// <exception cref="ArgumentNullException">
+    /// <paramref name="occurrenceName"/>, <paramref name="branches"/>, or one of its elements, is
+    /// <see langword="null"/>.
+    /// </exception>
+    /// <exception cref="ArgumentException">
+    /// <paramref name="occurrenceName"/> is not a valid single-segment node identifier, there are fewer than
+    /// two branches or more than the eight a local junction declares legs for, or two branches declare a
+    /// result under one name.
+    /// </exception>
+    /// <remarks>
+    /// The name is an argument here rather than a <see cref="Named"/> call, and the reason is the shape of
+    /// the call and not a second rule about junctions: this call adds a junction occurrence <em>and</em>
+    /// closes the graph, so it answers with a document and there is no value left to name it on. That is
+    /// exactly how <see cref="FanOutTo{TOut}(RegisteredFanOut{T, TOut}, string, CanonicalJsonValue, Branch{TOut}[])"/>
+    /// has always spelled it, and it is the one spelling that lets a branching graph of local stages be
+    /// named to the last occurrence.
+    /// </remarks>
+    public RunnableGraph BroadcastTo(string occurrenceName, params Branch<T>[] branches) =>
+        FanOut(Junction(LocalStageDescriptor.Broadcast(), occurrenceName), branches, nameof(branches));
+
     /// <summary>Closes this source by delivering each element to one branch that has room.</summary>
     /// <param name="branches">The branches, in the order they are wired to the junction's legs.</param>
     /// <returns>The closed graph.</returns>
@@ -1866,6 +1996,27 @@ public sealed class Source<T>
     /// </remarks>
     public RunnableGraph BalanceTo(params Branch<T>[] branches) =>
         FanOut(LocalStageDescriptor.Balance(), branches, nameof(branches));
+
+    /// <summary>Closes this source by delivering each element to one branch that has room, through a named junction.</summary>
+    /// <param name="occurrenceName">The author-stable name of the junction occurrence.</param>
+    /// <param name="branches">The branches, in the order they are wired to the junction's legs.</param>
+    /// <returns>The closed graph.</returns>
+    /// <exception cref="ArgumentNullException">
+    /// <paramref name="occurrenceName"/>, <paramref name="branches"/>, or one of its elements, is
+    /// <see langword="null"/>.
+    /// </exception>
+    /// <exception cref="ArgumentException">
+    /// <paramref name="occurrenceName"/> is not a valid single-segment node identifier, there are fewer than
+    /// two branches or more than the eight a local junction declares legs for, or two branches declare a
+    /// result under one name.
+    /// </exception>
+    /// <remarks>
+    /// The name is an argument for the reason it is one on <see cref="BroadcastTo(string, Branch{T}[])"/>:
+    /// the call adds a junction and closes the graph in one step, so it answers with a document and there is
+    /// no value left to name the junction on.
+    /// </remarks>
+    public RunnableGraph BalanceTo(string occurrenceName, params Branch<T>[] branches) =>
+        FanOut(Junction(LocalStageDescriptor.Balance(), occurrenceName), branches, nameof(branches));
 
     /// <summary>Closes this source by sending each element to the branch a function names.</summary>
     /// <param name="router">The function answering the zero-based position of the branch for an element.</param>
@@ -1900,6 +2051,40 @@ public sealed class Source<T>
         return FanOut(LocalStageDescriptor.Partition(router), branches, nameof(branches));
     }
 
+    /// <summary>Closes this source by sending each element to the branch a function names, through a named junction.</summary>
+    /// <param name="router">The function answering the zero-based position of the branch for an element.</param>
+    /// <param name="occurrenceName">The author-stable name of the junction occurrence.</param>
+    /// <param name="branches">The branches, in the order the router's answers index them.</param>
+    /// <returns>The closed graph.</returns>
+    /// <exception cref="ArgumentNullException">
+    /// <paramref name="router"/>, <paramref name="occurrenceName"/>, <paramref name="branches"/>, or one of
+    /// its elements, is <see langword="null"/>.
+    /// </exception>
+    /// <exception cref="ArgumentException">
+    /// <paramref name="occurrenceName"/> is not a valid single-segment node identifier, there are fewer than
+    /// two branches or more than the eight a local junction declares legs for, or two branches declare a
+    /// result under one name.
+    /// </exception>
+    /// <remarks>
+    /// The name comes after the router for the reason it comes after the junction handle on
+    /// <see cref="FanOutTo{TOut}(RegisteredFanOut{T, TOut}, string, CanonicalJsonValue, Branch{TOut}[])"/>:
+    /// what the stage is reads first, and what this occurrence of it is called reads second. Naming the
+    /// occurrence does not make the router a document's business — a function never enters one, so a
+    /// partitioned graph is <c>nondeployable</c> named or not.
+    /// </remarks>
+    public RunnableGraph PartitionTo(
+        Func<T, int> router,
+        string occurrenceName,
+        params Branch<T>[] branches)
+    {
+        ArgumentNullException.ThrowIfNull(router);
+
+        return FanOut(
+            Junction(LocalStageDescriptor.Partition(router), occurrenceName),
+            branches,
+            nameof(branches));
+    }
+
     /// <summary>Closes this source through one named occurrence of a registered junction and its branches.</summary>
     /// <typeparam name="TOut">The element type every leg of the junction carries.</typeparam>
     /// <param name="junction">The typed handle of the registered junction.</param>
@@ -1918,7 +2103,7 @@ public sealed class Source<T>
     /// </exception>
     /// <remarks>
     /// <para>
-    /// A terminal call, exactly as <see cref="BroadcastTo"/> is and for the same reason: the branches end in
+    /// A terminal call, exactly as <see cref="BroadcastTo(Branch{T}[])"/> is and for the same reason: the branches end in
     /// sinks, so nothing is left open and the graph is closed here. What differs is that every part of it is
     /// registered — the junction is named, its ports carry real contracts, and its behavior is resolved from
     /// a catalog — so this is the call that makes a branching pipeline deployable. A graph closed this way
@@ -2118,6 +2303,22 @@ public sealed class Source<T>
         IReadOnlyList<StageOccurrence> right) =>
         Shape.Split(junction, LocalJunctionGuard.FanOutPorts(LocalVocabulary.MinFanOut), [left, right]);
 
+    /// <summary>Names the junction occurrence a closing fan-out is about to add.</summary>
+    /// <param name="junction">The junction occurrence, freshly built and therefore unnamed.</param>
+    /// <param name="occurrenceName">The name the author wrote on the closing call.</param>
+    /// <returns>The named junction occurrence.</returns>
+    /// <exception cref="ArgumentNullException"><paramref name="occurrenceName"/> is <see langword="null"/>.</exception>
+    /// <exception cref="ArgumentException">
+    /// <paramref name="occurrenceName"/> is not a valid single-segment node identifier.
+    /// </exception>
+    /// <remarks>
+    /// The one place a name reaches a junction a closing call adds, so all four local fan-out closes check it
+    /// with the same rule as <see cref="Named"/> and report the same parameter — which is what makes
+    /// "an author can name any local occurrence" true of a branching graph as well as of a chain.
+    /// </remarks>
+    private static LocalStageDescriptor Junction(LocalStageDescriptor junction, string occurrenceName) =>
+        junction.Named(LocalOccurrenceName.Parse(occurrenceName, nameof(occurrenceName)));
+
     /// <summary>Closes this source into a graph through a fan-out junction and its branches.</summary>
     /// <param name="junction">The junction occurrence.</param>
     /// <param name="branches">The branches, unchecked.</param>
@@ -2126,8 +2327,8 @@ public sealed class Source<T>
     /// <remarks>
     /// Every fan-out terminal funnels through here, which is what makes them one operation with three
     /// junction stages rather than three implementations: what differs between a broadcast, a balance, and a
-    /// partition is the occurrence handed in, and everything else — the arity check, the leg order, the slot
-    /// each result-bearing branch asks for — is the same statement in all three.
+    /// partition is the occurrence handed in — named or not — and everything else, the arity check, the leg
+    /// order, the slot each result-bearing branch asks for, is the same statement in all of them.
     /// </remarks>
     private RunnableGraph FanOut(LocalStageDescriptor junction, Branch<T>[] branches, string parameterName)
     {
@@ -2398,7 +2599,8 @@ public sealed class Source<T>
 /// argument wherever it can be.
 /// </para>
 /// <para>
-/// <see cref="UnzipTo{TLeft, TRight}"/> lives here too, and is the one junction call on a source that is an
+/// <see cref="UnzipTo{TLeft, TRight}(Source{ValueTuple{TLeft, TRight}}, Branch{TLeft}, Branch{TRight})"/>
+/// lives here too, and is the one junction call on a source that is an
 /// extension method rather than an instance method. Every other one applies to a source of any element type
 /// and is therefore an instance method; an unzip applies only to a source of pairs,
 /// and a receiver constrained to one shape of element type is exactly what an instance method cannot say.
@@ -2896,14 +3098,85 @@ public static class Source
         Branch<TRight> right)
     {
         ArgumentNullException.ThrowIfNull(source);
+
+        return Unzipping(source, Unzip<TLeft, TRight>(), left, right);
+    }
+
+    /// <summary>Closes a source of pairs through a named unzip junction, one branch per half.</summary>
+    /// <typeparam name="TLeft">The element type of the left half.</typeparam>
+    /// <typeparam name="TRight">The element type of the right half.</typeparam>
+    /// <param name="source">The source of pairs to split.</param>
+    /// <param name="occurrenceName">The author-stable name of the junction occurrence.</param>
+    /// <param name="left">The branch the left halves take.</param>
+    /// <param name="right">The branch the right halves take.</param>
+    /// <returns>The closed graph.</returns>
+    /// <exception cref="ArgumentNullException">
+    /// <paramref name="source"/>, <paramref name="occurrenceName"/>, <paramref name="left"/>, or
+    /// <paramref name="right"/> is <see langword="null"/>.
+    /// </exception>
+    /// <exception cref="ArgumentException">
+    /// <paramref name="occurrenceName"/> is not a valid single-segment node identifier, or both branches
+    /// declare a result under one name.
+    /// </exception>
+    /// <remarks>
+    /// The name is an argument for the reason it is one on
+    /// <see cref="Source{T}.BroadcastTo(string, Branch{T}[])"/>: the call adds a junction and closes the
+    /// graph in one step, so it answers with a document and there is no value left to name the junction on.
+    /// The two projections still never enter the document, so an unzipped graph stays <c>nondeployable</c>
+    /// whether or not its junction is named.
+    /// </remarks>
+    public static RunnableGraph UnzipTo<TLeft, TRight>(
+        this Source<(TLeft Left, TRight Right)> source,
+        string occurrenceName,
+        Branch<TLeft> left,
+        Branch<TRight> right)
+    {
+        ArgumentNullException.ThrowIfNull(source);
+
+        return Unzipping(
+            source,
+            Unzip<TLeft, TRight>().Named(
+                LocalOccurrenceName.Parse(occurrenceName, nameof(occurrenceName))),
+            left,
+            right);
+    }
+
+    /// <summary>Builds the unzip junction occurrence for one pair type.</summary>
+    /// <typeparam name="TLeft">The element type of the left half.</typeparam>
+    /// <typeparam name="TRight">The element type of the right half.</typeparam>
+    /// <returns>The occurrence, unnamed.</returns>
+    private static LocalStageDescriptor Unzip<TLeft, TRight>() =>
+        LocalStageDescriptor.Unzip(
+            (Func<(TLeft Left, TRight Right), TLeft>)(row => row.Left),
+            (Func<(TLeft Left, TRight Right), TRight>)(row => row.Right));
+
+    /// <summary>Splits a source of pairs across two branches and closes the graph.</summary>
+    /// <typeparam name="TLeft">The element type of the left half.</typeparam>
+    /// <typeparam name="TRight">The element type of the right half.</typeparam>
+    /// <param name="source">The source of pairs, already known to be non-null.</param>
+    /// <param name="junction">The unzip occurrence, named or not.</param>
+    /// <param name="left">The branch the left halves take.</param>
+    /// <param name="right">The branch the right halves take.</param>
+    /// <returns>The closed graph.</returns>
+    /// <exception cref="ArgumentNullException">
+    /// <paramref name="left"/> or <paramref name="right"/> is <see langword="null"/>.
+    /// </exception>
+    /// <remarks>
+    /// Both unzip spellings funnel through here, which is what makes the named one produce the document the
+    /// unnamed one produces with one identifier replaced and nothing else moved.
+    /// </remarks>
+    private static RunnableGraph Unzipping<TLeft, TRight>(
+        Source<(TLeft Left, TRight Right)> source,
+        LocalStageDescriptor junction,
+        Branch<TLeft> left,
+        Branch<TRight> right)
+    {
         ArgumentNullException.ThrowIfNull(left);
         ArgumentNullException.ThrowIfNull(right);
 
         int position = source.Shape.Stages.Count;
         LocalGraphShape shape = source.Shape.Split(
-            LocalStageDescriptor.Unzip(
-                (Func<(TLeft Left, TRight Right), TLeft>)(row => row.Left),
-                (Func<(TLeft Left, TRight Right), TRight>)(row => row.Right)),
+            junction,
             [LocalVocabulary.LeftPort, LocalVocabulary.RightPort],
             [left.Stages, right.Stages]);
 

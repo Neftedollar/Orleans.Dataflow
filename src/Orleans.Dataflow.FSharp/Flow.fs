@@ -42,6 +42,45 @@ module Flow =
     [<GeneralizableValue>]
     let identity<'T> : Flow<'T, 'T> = Flow<'T, 'T>(LocalStageChain.Empty)
 
+    /// <summary>Gives the occurrence a flow ends at an author-stable name.</summary>
+    /// <param name="occurrenceName">The name, which is one identifier segment.</param>
+    /// <param name="flow">The flow being named, which is unchanged.</param>
+    /// <returns>The named flow.</returns>
+    /// <exception cref="T:System.ArgumentException">
+    /// <paramref name="occurrenceName"/> is not a valid single-segment node identifier.
+    /// </exception>
+    /// <exception cref="T:System.InvalidOperationException">
+    /// <paramref name="flow"/> carries no occurrence at all, which is
+    /// <see cref="P:Orleans.Dataflow.FSharp.Flow.identity``1"/> and has nothing standing in a document to
+    /// carry a name; or the occurrence it ends at is already named, and renaming is refused rather than
+    /// performed.
+    /// </exception>
+    /// <remarks>
+    /// <para>
+    /// One combinator instead of a name on every operator, which is what makes naming compose here at all: a
+    /// name is written where the stage was written, under <c>|&gt;</c> like everything else, and no operator
+    /// grows an argument nobody usually supplies. It names the last occurrence, which is the stage elements
+    /// leave the flow through.
+    /// </para>
+    /// <para>
+    /// A name is the node identifier the occurrence carries into the document, so it replaces the positional
+    /// <c>stage-0002</c> closure would otherwise allocate — and because a node identifier is document
+    /// content, a named flow changes the fingerprint of every graph it is composed into. That is the point:
+    /// a positional identifier renames itself when a stage is inserted above it, and a graph whose
+    /// occurrences are all named declares <c>ephemeral-identity</c> no longer.
+    /// </para>
+    /// <para>
+    /// A named occurrence is refused inside a group flow and inside a supervision or a durable scope, by
+    /// name: those chains are fused into their owner's payload and are not nodes of the document, so a name
+    /// written on one would name nothing.
+    /// </para>
+    /// </remarks>
+    let named (occurrenceName: string) (flow: Flow<'In, 'Out>) : Flow<'In, 'Out> =
+        Flow<'In, 'Out>(
+            LocalStageChain.Naming(
+                flow.Stages,
+                LocalOccurrenceName.Parse(occurrenceName, nameof occurrenceName)))
+
     /// <summary>Transforms every element through a function.</summary>
     /// <param name="mapping">The function applied to each element.</param>
     /// <returns>The flow.</returns>

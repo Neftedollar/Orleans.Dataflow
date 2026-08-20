@@ -28,9 +28,10 @@ internal static class RegisteredAttachment
     /// <para>
     /// A name is a single segment rather than a path: an occurrence names itself, and the path structure of
     /// a <see cref="NodeId"/> exists for import scoping, which is the fragment algebra's business and not
-    /// the author's. <see cref="NodeId.Create(string)"/> owns the grammar and the diagnostic for breaking
-    /// it, so the message is reused verbatim and only the parameter name is corrected, because the author
-    /// wrote an occurrence name and not a <see cref="NodeId"/> value.
+    /// the author's. <see cref="LocalOccurrenceName.Parse"/> is what applies that rule, and it is the very
+    /// check the <c>Named</c> combinator applies to a local occurrence's name: both spellings mean the same
+    /// thing by a name, so both are refused in the same words for the same text, and only the reported
+    /// parameter differs because each names the one its own author wrote.
     /// </para>
     /// <para>
     /// Two occurrences of one graph sharing a name is deliberately not checked here. It is a property of
@@ -42,21 +43,6 @@ internal static class RegisteredAttachment
     internal static RegisteredStageOccurrence Occurrence(
         StageSpecification specification,
         string occurrenceName,
-        CanonicalJsonValue parameters)
-    {
-        ArgumentNullException.ThrowIfNull(occurrenceName);
-
-        NodeId name;
-
-        try
-        {
-            name = NodeId.Create(occurrenceName);
-        }
-        catch (ArgumentException failure)
-        {
-            throw new ArgumentException(failure.Message, nameof(occurrenceName), failure);
-        }
-
-        return new RegisteredStageOccurrence(specification, name, parameters);
-    }
+        CanonicalJsonValue parameters) =>
+        new(specification, LocalOccurrenceName.Parse(occurrenceName, nameof(occurrenceName)), parameters);
 }

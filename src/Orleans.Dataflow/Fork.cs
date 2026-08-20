@@ -19,7 +19,8 @@ namespace Orleans.Dataflow;
 /// <para>
 /// The rejoin is positional and total: <see cref="Zip()"/> pairs the two derived streams element by element,
 /// which is legal without a buffer between them exactly because both sides descend from one broadcast and
-/// therefore advance together. <see cref="Source{T}.ForkMerge"/> is the other rejoin, for when the two paths
+/// therefore advance together. <see cref="Source{T}.ForkMerge{TOut}(Flow{T, TOut}, Flow{T, TOut})"/> is the
+/// other rejoin, for when the two paths
 /// produce the same element type and the answer wanted is whichever arrives first.
 /// </para>
 /// <para>

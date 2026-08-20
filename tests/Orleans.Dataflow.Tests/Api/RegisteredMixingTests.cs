@@ -102,14 +102,24 @@ public sealed class RegisteredMixingTests
     }
 
     [Fact]
-    public void EphemeralIdentityCanOnlyComeFromALambdaStageBecauseARegisteredOneMustBeNamed()
+    public void TheTwoTokensAreOrthogonalAndANamedLocalGraphShowsIt()
     {
-        // Every registered attachment takes a name and requires it, and no lambda attachment takes one at
-        // all. So through this surface the two tokens have exactly one cause between them — the presence
-        // of a lambda stage — and therefore always appear together or not at all. They stay orthogonal in
-        // the model (ADR 0004 section 6): a document with registered stages and machine-made names is
-        // writable by hand and readable by the compiler, it is simply not authorable here. This is what
-        // would fail if a later checkpoint gave lambda stages a name or registered ones a default one.
+        // The tokens were always orthogonal in the model (ADR 0004 section 6) and used to be inseparable
+        // through this surface, because a registered attachment required a name and no local one could take
+        // one. `Named` is the spelling that separates them: a graph of local stages with every occurrence
+        // named declares 'nondeployable' — its behavior is still bound in this process — and no longer
+        // declares 'ephemeral-identity', because its identifiers are no longer positions.
+        RunnableGraph named = Source.From(OrderEvents)
+            .Named("orders-in")
+            .Select(OrderDocument.FromEvent)
+            .Named("normalize")
+            .To(Sink.Ignore<OrderDocument>().Named("index-out"));
+
+        Assert.Equal(["nondeployable"], Capabilities(named.Document));
+        Assert.Equal(["index-out", "normalize", "orders-in"], NodeIds(named.Document));
+
+        // The other three corners of the square are the sweep's, and every one of them still reports its own
+        // cause: an unnamed occurrence anywhere brings the token back, whatever kind of stage it is.
         foreach ((string name, RunnableGraph graph) in MixedGraphs())
         {
             bool ephemeral = graph.Document.Capabilities.Contains(CapabilityToken.EphemeralIdentity);

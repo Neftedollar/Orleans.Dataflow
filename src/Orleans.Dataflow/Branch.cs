@@ -13,8 +13,9 @@ namespace Orleans.Dataflow;
 /// <para>
 /// A branch is a value and starts nothing, like every other authoring value. It is built by the <c>To</c>
 /// family on <see cref="Flow{TIn, TOut}"/> and consumed by a junction call on <see cref="Source{T}"/> —
-/// <see cref="Source{T}.BroadcastTo"/>, <see cref="Source{T}.BalanceTo"/>,
-/// <see cref="Source{T}.PartitionTo"/>, <see cref="Source.UnzipTo{TLeft, TRight}"/>, or
+/// <see cref="Source{T}.BroadcastTo(Branch{T}[])"/>, <see cref="Source{T}.BalanceTo(Branch{T}[])"/>,
+/// <see cref="Source{T}.PartitionTo(Func{T, int}, Branch{T}[])"/>,
+/// <see cref="Source.UnzipTo{TLeft, TRight}(Source{ValueTuple{TLeft, TRight}}, Branch{TLeft}, Branch{TRight})"/>, or
 /// <see cref="Source{T}.AlsoTo"/> — and it exists as a type because a leg has no receiver to hang off:
 /// type information flows left to right from sources, and a leg is built right to left from its sink.
 /// <see cref="Flow.For{T}"/> is the anchor that fixes the element type, and a leg cannot be written

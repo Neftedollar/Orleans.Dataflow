@@ -309,11 +309,16 @@ internal static class LocalOptionGuard
             }
         }
 
-        return refused.Count == 0
-            ? group
-            : throw new ArgumentException(
+        if (refused.Count > 0)
+        {
+            throw new ArgumentException(
                 $"A group flow runs fused per key, so it holds element stages only: {string.Join(", ", refused)}. An asynchronous stage, a buffer, a junction, and a stage that reads the clock each want a segment, a channel, or a run of their own, and one per key is not something a fused stage can hold. A flattening stage, a nested group-by, a supervision scope, and a fault point are refused for this operator's own reasons, which are stated in the documentation.",
                 parameterName);
+        }
+
+        Anonymous(stages, "A group flow", "the keyed occurrence that runs the flow", parameterName);
+
+        return group;
     }
 
     /// <summary>Checks the durable options a run was started under.</summary>
@@ -422,11 +427,16 @@ internal static class LocalOptionGuard
                 parameterName);
         }
 
-        return named.Count == 0
-            ? scope
-            : throw new ArgumentException(
+        if (named.Count > 0)
+        {
+            throw new ArgumentException(
                 $"A durable scope's stages are not nodes of the document, so nothing could resolve a runtime control declared on one: {string.Join(", ", named)}. Place the control-bearing spelling before or after the scope, or use the spelling that declares no control inside it.",
                 parameterName);
+        }
+
+        Anonymous(stages, "A durable scope", "the occurrence that carries the scope", parameterName);
+
+        return scope;
     }
 
     /// <summary>Checks that every stage of a supervision scope is one the scope can own the execution of.</summary>
@@ -486,11 +496,63 @@ internal static class LocalOptionGuard
                 parameterName);
         }
 
-        return named.Count == 0
-            ? scope
-            : throw new ArgumentException(
+        if (named.Count > 0)
+        {
+            throw new ArgumentException(
                 $"A supervision scope's stages are not nodes of the document, so nothing could resolve a runtime control declared on one: {string.Join(", ", named)}. Place the control-bearing spelling before or after the scope, or use the spelling that declares no control inside it.",
                 parameterName);
+        }
+
+        Anonymous(stages, "A supervision scope", "the occurrence that carries the scope", parameterName);
+
+        return scope;
+    }
+
+    /// <summary>Checks that no stage of an inner chain carries a name the author wrote.</summary>
+    /// <param name="stages">The occurrences the author's flow contributes, in flow order.</param>
+    /// <param name="owner">What the owner is called, read as the subject of a sentence.</param>
+    /// <param name="remedy">What to name instead, read after "Name".</param>
+    /// <param name="parameterName">The name of the operator's parameter the flow arrived in.</param>
+    /// <exception cref="ArgumentException">At least one stage of the chain is named.</exception>
+    /// <remarks>
+    /// <para>
+    /// The runtime-control refusal read over identity instead of over a slot, and it is the same sentence
+    /// because it is the same fact: the stages of an inner chain are fused into their owner's payload and
+    /// are not nodes, so a name written on one names nothing a checkpoint, a diagnostic, or a document reader
+    /// could resolve. Silently dropping it would be worse than refusing it — an author would have written a
+    /// durable identity, watched the graph accept it, and got a document that still declares
+    /// <c>ephemeral-identity</c> with no statement of why.
+    /// </para>
+    /// <para>
+    /// Every offending stage is named rather than the first, for the reason the other two checks name every
+    /// one: an inner chain is written as one expression, and fixing them one per compile is running the same
+    /// call several times to learn what one message could have said.
+    /// </para>
+    /// </remarks>
+    private static void Anonymous(
+        IReadOnlyList<StageOccurrence> stages,
+        string owner,
+        string remedy,
+        string parameterName)
+    {
+        List<string> named = [];
+
+        for (int stage = 0; stage < stages.Count; stage++)
+        {
+            if (stages[stage].Name is { } name)
+            {
+                named.Add(string.Create(
+                    CultureInfo.InvariantCulture,
+                    $"'{stages[stage].Stage}' at position {stage + 1} named '{name}'"));
+            }
+        }
+
+        if (named.Count > 0)
+        {
+            throw new ArgumentException(
+                $"{owner}'s stages are not nodes of the document, so a name written on one names nothing: {string.Join(", ", named)}. Name {remedy} instead, which is the node this chain stands at.",
+                parameterName);
+        }
     }
 
     /// <summary>Checks the options of a supervision scope.</summary>

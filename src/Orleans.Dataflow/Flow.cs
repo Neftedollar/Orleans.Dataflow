@@ -43,6 +43,43 @@ public sealed class Flow<TIn, TOut>
     /// </value>
     internal IReadOnlyList<StageOccurrence> Stages { get; }
 
+    /// <summary>Gives the occurrence this flow ends at an author-stable name.</summary>
+    /// <param name="occurrenceName">The name, which is one identifier segment.</param>
+    /// <returns>A new flow; this one is unchanged.</returns>
+    /// <exception cref="ArgumentNullException"><paramref name="occurrenceName"/> is <see langword="null"/>.</exception>
+    /// <exception cref="ArgumentException">
+    /// <paramref name="occurrenceName"/> is not a valid single-segment node identifier.
+    /// </exception>
+    /// <exception cref="InvalidOperationException">
+    /// This flow carries no occurrence at all, which is the identity <see cref="Flow.For{T}"/> and has
+    /// nothing standing in a document to carry a name; or the occurrence it ends at is already named, and
+    /// renaming is refused rather than performed.
+    /// </exception>
+    /// <remarks>
+    /// <para>
+    /// <see cref="Source{T}.Named"/> read over a chain: it names the last occurrence, which is the stage the
+    /// elements leave this flow through. Everything that page states holds here — a name is the node
+    /// identifier the occurrence carries into the document, so a named flow changes the fingerprint of every
+    /// graph it is composed into, and a graph whose occurrences are all named declares no
+    /// <c>ephemeral-identity</c>.
+    /// </para>
+    /// <para>
+    /// What it does not change is reuse: a flow is a value, so naming one produces a second value and leaves
+    /// the first alone. It does change what composing it twice into <em>one</em> graph means — a name is an
+    /// identity rather than a position, so the two occurrences collide and the collision is reported when
+    /// the graph is closed, exactly as it is for a flow carrying a registered stage.
+    /// </para>
+    /// <para>
+    /// A named occurrence is refused inside a group flow and inside a supervision or durable scope, by name.
+    /// Those chains are fused into their owner's payload and are not nodes of the document, so a name written
+    /// on one would name nothing.
+    /// </para>
+    /// </remarks>
+    public Flow<TIn, TOut> Named(string occurrenceName) =>
+        new(LocalStageChain.Naming(
+            Stages,
+            LocalOccurrenceName.Parse(occurrenceName, nameof(occurrenceName))));
+
     /// <summary>Extends this flow with a mapping stage.</summary>
     /// <typeparam name="TNext">The element type the mapping produces.</typeparam>
     /// <param name="selector">The function applied to every element.</param>

@@ -1,3 +1,5 @@
+using Orleans.Dataflow.Identity;
+
 namespace Orleans.Dataflow.Authoring;
 
 /// <summary>
@@ -47,4 +49,33 @@ internal static class LocalStageChain
         IReadOnlyList<StageOccurrence> left,
         IReadOnlyList<StageOccurrence> right) =>
         Array.AsReadOnly<StageOccurrence>([.. left, .. right]);
+
+    /// <summary>Creates the chain that is <paramref name="stages"/> with its last occurrence named.</summary>
+    /// <param name="stages">The chain to name in, which is not modified.</param>
+    /// <param name="name">The validated name.</param>
+    /// <returns>The new chain.</returns>
+    /// <exception cref="InvalidOperationException">
+    /// The chain is empty, so there is no occurrence for the name to belong to; or its last occurrence is
+    /// already named.
+    /// </exception>
+    /// <remarks>
+    /// The last occurrence and not an arbitrary one, because a chain is written left to right and the name an
+    /// author writes belongs to the stage they just added. For a flow that is the stage the elements leave
+    /// through, and for a terminal it is the terminal itself — the two are the same rule read at the two ends
+    /// a chain-shaped value can have.
+    /// </remarks>
+    internal static IReadOnlyList<StageOccurrence> Naming(IReadOnlyList<StageOccurrence> stages, NodeId name)
+    {
+        if (stages.Count == 0)
+        {
+            throw new InvalidOperationException(
+                $"There is no occurrence for '{name}' to name: this value contributes no stage to a graph at all. The identity flow is the one value of that shape — it does nothing to the elements, so there is nothing standing in the document to carry a name. Name a stage on a value that adds one.");
+        }
+
+        StageOccurrence[] named = [.. stages];
+
+        named[^1] = LocalOccurrenceName.Rename(named[^1], name);
+
+        return Array.AsReadOnly(named);
+    }
 }

@@ -18,9 +18,11 @@ namespace Orleans.Dataflow;
 /// this type only explicitly, so a result is never dropped by accident.
 /// </para>
 /// <para>
-/// The type has no members of its own on purpose. Everything an author does with a sink is done by the
+/// The type carries no operators on purpose. Everything an author <em>does</em> with a sink is done by the
 /// source it is attached to, and a sink with operators on it would invite a second, mirror-image way to
-/// build the same graph.
+/// build the same graph. <see cref="Named"/> is not one: it adds no stage and changes no element, it gives
+/// the terminal this value already holds the identity it will carry into the document, and there is nowhere
+/// else to write that — a chain's closing call names a result slot, not the occurrence that produces it.
 /// </para>
 /// </remarks>
 public sealed class Sink<T>
@@ -31,6 +33,28 @@ public sealed class Sink<T>
 
     /// <summary>Gets the occurrences this sink contributes to a graph, in authoring order.</summary>
     internal IReadOnlyList<StageOccurrence> Stages { get; }
+
+    /// <summary>Gives this sink's terminal occurrence an author-stable name.</summary>
+    /// <param name="occurrenceName">The name, which is one identifier segment.</param>
+    /// <returns>A new sink; this one is unchanged.</returns>
+    /// <exception cref="ArgumentNullException"><paramref name="occurrenceName"/> is <see langword="null"/>.</exception>
+    /// <exception cref="ArgumentException">
+    /// <paramref name="occurrenceName"/> is not a valid single-segment node identifier.
+    /// </exception>
+    /// <exception cref="InvalidOperationException">
+    /// The terminal is already named, and renaming is refused rather than performed.
+    /// </exception>
+    /// <remarks>
+    /// <see cref="Source{T}.Named"/> read at the end of a chain, and it is what a fully named local graph
+    /// needs: a terminal is an occurrence like any other, so a graph whose every stage but its sink is named
+    /// still declares <c>ephemeral-identity</c>. The name is the node's, and is not the slot name a
+    /// result-bearing close asks for — the two are different questions, and a sink that declares no result
+    /// has an answer to only one of them.
+    /// </remarks>
+    public Sink<T> Named(string occurrenceName) =>
+        new(LocalStageChain.Naming(
+            Stages,
+            LocalOccurrenceName.Parse(occurrenceName, nameof(occurrenceName))));
 
     /// <summary>Returns a one-line diagnostic summary of this sink.</summary>
     /// <returns>Text of the form <c>sink (1 stage)</c>, plural for any other count.</returns>

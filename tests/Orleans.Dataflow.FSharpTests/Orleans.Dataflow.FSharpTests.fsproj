@@ -9,6 +9,7 @@
     <Compile Include="Fixtures.fs" />
     <Compile Include="RegisteredVocabulary.fs" />
     <Compile Include="AuthoringParityTests.fs" />
+    <Compile Include="NamingParityTests.fs" />
     <Compile Include="MaterializationTests.fs" />
     <Compile Include="OperatorParityTests.fs" />
     <Compile Include="OperatorBehaviorTests.fs" />

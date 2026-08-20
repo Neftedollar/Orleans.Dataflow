@@ -84,6 +84,7 @@ Orleans.Dataflow.Flow<TIn, TOut>.GroupedWithin(int maxElements, System.TimeSpan 
 Orleans.Dataflow.Flow<TIn, TOut>.InitialDelay(System.TimeSpan delay) -> Orleans.Dataflow.Flow<TIn, TOut>!
 Orleans.Dataflow.Flow<TIn, TOut>.MergeMap<TNext>(Orleans.Dataflow.ParallelismOptions! options, System.Func<TOut, System.Collections.Generic.IAsyncEnumerable<TNext>!>! selector) -> Orleans.Dataflow.Flow<TIn, TNext>!
 Orleans.Dataflow.Flow<TIn, TOut>.MergeMap<TNext>(Orleans.Dataflow.ParallelismOptions! options, System.Func<TOut, System.Collections.Generic.IEnumerable<TNext>!>! selector) -> Orleans.Dataflow.Flow<TIn, TNext>!
+Orleans.Dataflow.Flow<TIn, TOut>.Named(string! occurrenceName) -> Orleans.Dataflow.Flow<TIn, TOut>!
 Orleans.Dataflow.Flow<TIn, TOut>.Scan<TState>(TState seed, System.Func<TState, TOut, TState>! folder) -> Orleans.Dataflow.Flow<TIn, TState>!
 Orleans.Dataflow.Flow<TIn, TOut>.Scan<TState>(TState seed, System.Func<TState, TOut, TState>! folder, System.Func<TState, Orleans.Dataflow.Serialization.CanonicalJsonValue>! export, System.Func<Orleans.Dataflow.Serialization.CanonicalJsonValue, TState>! restore) -> Orleans.Dataflow.Flow<TIn, TState>!
 Orleans.Dataflow.Flow<TIn, TOut>.ScanAsync<TState>(TState seed, System.Func<TState, TOut, System.Threading.CancellationToken, System.Threading.Tasks.Task<TState>!>! folder) -> Orleans.Dataflow.Flow<TIn, TState>!
@@ -347,6 +348,7 @@ Orleans.Dataflow.RunSnapshotStatus.Failed = 2 -> Orleans.Dataflow.RunSnapshotSta
 Orleans.Dataflow.RunSnapshotStatus.Running = 0 -> Orleans.Dataflow.RunSnapshotStatus
 Orleans.Dataflow.Sink
 Orleans.Dataflow.Sink<T>
+Orleans.Dataflow.Sink<T>.Named(string! occurrenceName) -> Orleans.Dataflow.Sink<T>!
 Orleans.Dataflow.SinkFactory<T>
 Orleans.Dataflow.SinkFactory<T>.Aggregate<TState>(TState seed, System.Func<TState, T, TState>! folder) -> Orleans.Dataflow.SinkWithResult<T, TState>!
 Orleans.Dataflow.SinkFactory<T>.AggregateAsync<TState>(TState seed, System.Func<TState, T, System.Threading.CancellationToken, System.Threading.Tasks.Task<TState>!>! folder) -> Orleans.Dataflow.SinkWithResult<T, TState>!
@@ -361,6 +363,7 @@ Orleans.Dataflow.SinkFactory<T>.Last() -> Orleans.Dataflow.SinkWithResult<T, T>!
 Orleans.Dataflow.SinkFactory<T>.LastOrDefault() -> Orleans.Dataflow.SinkWithResult<T, T?>!
 Orleans.Dataflow.SinkFactory<T>.ToChannel(System.Threading.Channels.ChannelWriter<T>! writer) -> Orleans.Dataflow.Sink<T>!
 Orleans.Dataflow.SinkWithResult<TIn, TResult>
+Orleans.Dataflow.SinkWithResult<TIn, TResult>.Named(string! occurrenceName) -> Orleans.Dataflow.SinkWithResult<TIn, TResult>!
 Orleans.Dataflow.SinkWithResult<TIn, TResult>.ToSink() -> Orleans.Dataflow.Sink<TIn>!
 Orleans.Dataflow.Source
 Orleans.Dataflow.Source<T>
@@ -368,7 +371,9 @@ Orleans.Dataflow.Source<T>.AlsoTo(Orleans.Dataflow.Branch<T>! side) -> Orleans.D
 Orleans.Dataflow.Source<T>.Append(Orleans.Dataflow.Source<T>! tail) -> Orleans.Dataflow.Source<T>!
 Orleans.Dataflow.Source<T>.Append(params T[]! elements) -> Orleans.Dataflow.Source<T>!
 Orleans.Dataflow.Source<T>.BalanceTo(params Orleans.Dataflow.Branch<T>![]! branches) -> Orleans.Dataflow.RunnableGraph!
+Orleans.Dataflow.Source<T>.BalanceTo(string! occurrenceName, params Orleans.Dataflow.Branch<T>![]! branches) -> Orleans.Dataflow.RunnableGraph!
 Orleans.Dataflow.Source<T>.BroadcastTo(params Orleans.Dataflow.Branch<T>![]! branches) -> Orleans.Dataflow.RunnableGraph!
+Orleans.Dataflow.Source<T>.BroadcastTo(string! occurrenceName, params Orleans.Dataflow.Branch<T>![]! branches) -> Orleans.Dataflow.RunnableGraph!
 Orleans.Dataflow.Source<T>.Buffer(Orleans.Dataflow.BufferOptions! options) -> Orleans.Dataflow.Source<T>!
 Orleans.Dataflow.Source<T>.CombineLatest<T2, TOut>(Orleans.Dataflow.Source<T2>! other, System.Func<T, T2, TOut>! combine) -> Orleans.Dataflow.Source<TOut>!
 Orleans.Dataflow.Source<T>.Concat(Orleans.Dataflow.Source<T>! next) -> Orleans.Dataflow.Source<T>!
@@ -382,7 +387,9 @@ Orleans.Dataflow.Source<T>.FanIn<TSecond, TOut>(Orleans.Dataflow.RegisteredFanIn
 Orleans.Dataflow.Source<T>.FanOutTo<TLeft, TRight>(Orleans.Dataflow.RegisteredFanOut<T, TLeft, TRight>! junction, string! occurrenceName, Orleans.Dataflow.Serialization.CanonicalJsonValue parameters, Orleans.Dataflow.Branch<TLeft>! left, Orleans.Dataflow.Branch<TRight>! right) -> Orleans.Dataflow.RunnableGraph!
 Orleans.Dataflow.Source<T>.FanOutTo<TOut>(Orleans.Dataflow.RegisteredFanOut<T, TOut>! junction, string! occurrenceName, Orleans.Dataflow.Serialization.CanonicalJsonValue parameters, params Orleans.Dataflow.Branch<TOut>![]! branches) -> Orleans.Dataflow.RunnableGraph!
 Orleans.Dataflow.Source<T>.Fork<T1, T2>(Orleans.Dataflow.Flow<T, T1>! left, Orleans.Dataflow.Flow<T, T2>! right) -> Orleans.Dataflow.Fork<T1, T2>!
+Orleans.Dataflow.Source<T>.Fork<T1, T2>(string! occurrenceName, Orleans.Dataflow.Flow<T, T1>! left, Orleans.Dataflow.Flow<T, T2>! right) -> Orleans.Dataflow.Fork<T1, T2>!
 Orleans.Dataflow.Source<T>.ForkMerge<TOut>(Orleans.Dataflow.Flow<T, TOut>! left, Orleans.Dataflow.Flow<T, TOut>! right) -> Orleans.Dataflow.Source<TOut>!
+Orleans.Dataflow.Source<T>.ForkMerge<TOut>(string! occurrenceName, Orleans.Dataflow.Flow<T, TOut>! left, Orleans.Dataflow.Flow<T, TOut>! right) -> Orleans.Dataflow.Source<TOut>!
 Orleans.Dataflow.Source<T>.GroupBy<TKey, TOut>(Orleans.Dataflow.GroupByOptions! options, System.Func<T, TKey>! keySelector, Orleans.Dataflow.Flow<T, TOut>! group) -> Orleans.Dataflow.Source<TOut>!
 Orleans.Dataflow.Source<T>.Grouped(int size) -> Orleans.Dataflow.Source<System.Collections.Generic.IReadOnlyList<T>!>!
 Orleans.Dataflow.Source<T>.GroupedWithin(int maxElements, int maxWeight, System.TimeSpan window, System.Func<T, int>! cost) -> Orleans.Dataflow.Source<System.Collections.Generic.IReadOnlyList<T>!>!
@@ -393,7 +400,9 @@ Orleans.Dataflow.Source<T>.Merge(Orleans.Dataflow.Source<T>! other) -> Orleans.D
 Orleans.Dataflow.Source<T>.Merge(Orleans.Dataflow.Source<T>! second, Orleans.Dataflow.Source<T>! third) -> Orleans.Dataflow.Source<T>!
 Orleans.Dataflow.Source<T>.MergeMap<TNext>(Orleans.Dataflow.ParallelismOptions! options, System.Func<T, System.Collections.Generic.IAsyncEnumerable<TNext>!>! selector) -> Orleans.Dataflow.Source<TNext>!
 Orleans.Dataflow.Source<T>.MergeMap<TNext>(Orleans.Dataflow.ParallelismOptions! options, System.Func<T, System.Collections.Generic.IEnumerable<TNext>!>! selector) -> Orleans.Dataflow.Source<TNext>!
+Orleans.Dataflow.Source<T>.Named(string! occurrenceName) -> Orleans.Dataflow.Source<T>!
 Orleans.Dataflow.Source<T>.PartitionTo(System.Func<T, int>! router, params Orleans.Dataflow.Branch<T>![]! branches) -> Orleans.Dataflow.RunnableGraph!
+Orleans.Dataflow.Source<T>.PartitionTo(System.Func<T, int>! router, string! occurrenceName, params Orleans.Dataflow.Branch<T>![]! branches) -> Orleans.Dataflow.RunnableGraph!
 Orleans.Dataflow.Source<T>.Prepend(Orleans.Dataflow.Source<T>! head) -> Orleans.Dataflow.Source<T>!
 Orleans.Dataflow.Source<T>.Prepend(params T[]! elements) -> Orleans.Dataflow.Source<T>!
 Orleans.Dataflow.Source<T>.Scan<TState>(TState seed, System.Func<TState, T, TState>! folder) -> Orleans.Dataflow.Source<TState>!
@@ -669,6 +678,7 @@ static Orleans.Dataflow.Source.Tick(System.TimeSpan initialDelay, System.TimeSpa
 static Orleans.Dataflow.Source.Unfold<TState, T>(TState seed, Orleans.Dataflow.UnfoldGenerator<TState, T>! generator) -> Orleans.Dataflow.Source<T>!
 static Orleans.Dataflow.Source.UnfoldAsync<TState, T>(TState seed, Orleans.Dataflow.AsyncUnfoldGenerator<TState, T>! generator) -> Orleans.Dataflow.Source<T>!
 static Orleans.Dataflow.Source.UnzipTo<TLeft, TRight>(this Orleans.Dataflow.Source<(TLeft Left, TRight Right)>! source, Orleans.Dataflow.Branch<TLeft>! left, Orleans.Dataflow.Branch<TRight>! right) -> Orleans.Dataflow.RunnableGraph!
+static Orleans.Dataflow.Source.UnzipTo<TLeft, TRight>(this Orleans.Dataflow.Source<(TLeft Left, TRight Right)>! source, string! occurrenceName, Orleans.Dataflow.Branch<TLeft>! left, Orleans.Dataflow.Branch<TRight>! right) -> Orleans.Dataflow.RunnableGraph!
 static Orleans.Dataflow.SupervisionOptions.operator !=(Orleans.Dataflow.SupervisionOptions? left, Orleans.Dataflow.SupervisionOptions? right) -> bool
 static Orleans.Dataflow.SupervisionOptions.operator ==(Orleans.Dataflow.SupervisionOptions? left, Orleans.Dataflow.SupervisionOptions? right) -> bool
 static Orleans.Dataflow.ThrottleOptions.operator !=(Orleans.Dataflow.ThrottleOptions? left, Orleans.Dataflow.ThrottleOptions? right) -> bool

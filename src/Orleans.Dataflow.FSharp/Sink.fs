@@ -31,6 +31,56 @@ module Sink =
     [<GeneralizableValue>]
     let ignore<'T> : Sink<'T> = Sink<'T>(LocalStageChain.Of(LocalStageDescriptor.Ignore()))
 
+    /// <summary>Gives a terminal's occurrence an author-stable name.</summary>
+    /// <param name="occurrenceName">The name, which is one identifier segment.</param>
+    /// <param name="sink">The terminal being named, which is unchanged.</param>
+    /// <returns>The named terminal.</returns>
+    /// <exception cref="T:System.ArgumentException">
+    /// <paramref name="occurrenceName"/> is not a valid single-segment node identifier.
+    /// </exception>
+    /// <exception cref="T:System.InvalidOperationException">
+    /// The terminal is already named, and renaming is refused rather than performed.
+    /// </exception>
+    /// <remarks>
+    /// <see cref="M:Orleans.Dataflow.FSharp.Flow.named``2"/> read at the end of a graph, and it is what a
+    /// fully named local graph needs: a terminal is an occurrence like any other, so a graph whose every
+    /// stage but its terminal is named still declares <c>ephemeral-identity</c>. This name is the node's and
+    /// is not the slot name a result-bearing close asks for; a terminal that declares no result has an answer
+    /// to only one of the two questions.
+    /// </remarks>
+    let named (occurrenceName: string) (sink: Sink<'T>) : Sink<'T> =
+        Sink<'T>(
+            LocalStageChain.Naming(
+                sink.Stages,
+                LocalOccurrenceName.Parse(occurrenceName, nameof occurrenceName)))
+
+    /// <summary>Gives a result-bearing terminal's occurrence an author-stable name.</summary>
+    /// <param name="occurrenceName">The name, which is one identifier segment.</param>
+    /// <param name="sink">The terminal being named, which is unchanged.</param>
+    /// <returns>The named terminal.</returns>
+    /// <exception cref="T:System.ArgumentException">
+    /// <paramref name="occurrenceName"/> is not a valid single-segment node identifier.
+    /// </exception>
+    /// <exception cref="T:System.InvalidOperationException">
+    /// The terminal is already named, and renaming is refused rather than performed.
+    /// </exception>
+    /// <remarks>
+    /// A second name rather than an overload, for the reason every result-bearing spelling in this package is
+    /// a second name: the two terminals are two types, and a module function that took either would have to
+    /// give back the weaker one. The distinction it makes is the one the two types exist for — the occurrence
+    /// name is the node's identity in the document, and the slot name
+    /// <see cref="M:Orleans.Dataflow.FSharp.Source.toResult``2"/> asks for is what a run handle resolves the
+    /// result under. Neither is derivable from the other and both are the author's.
+    /// </remarks>
+    let namedResult
+        (occurrenceName: string)
+        (sink: SinkWithResult<'T, 'Result>)
+        : SinkWithResult<'T, 'Result> =
+        SinkWithResult<'T, 'Result>(
+            LocalStageChain.Naming(
+                sink.Stages,
+                LocalOccurrenceName.Parse(occurrenceName, nameof occurrenceName)))
+
     /// <summary>Creates a sink that hands every element to a synchronous callback.</summary>
     /// <param name="action">The callback receiving each element in order.</param>
     /// <returns>The sink.</returns>

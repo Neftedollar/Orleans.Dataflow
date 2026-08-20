@@ -172,6 +172,7 @@ TYPE sealed class Orleans.Dataflow.Flow<TIn, TOut>
   method Orleans.Dataflow.Flow<TIn, TOut> Delay(System.TimeSpan delay, Orleans.Dataflow.BufferOptions holdback)
   method Orleans.Dataflow.Flow<TIn, TOut> Distinct(Orleans.Dataflow.DistinctOptions options)
   method Orleans.Dataflow.Flow<TIn, TOut> InitialDelay(System.TimeSpan delay)
+  method Orleans.Dataflow.Flow<TIn, TOut> Named(System.String occurrenceName)
   method Orleans.Dataflow.Flow<TIn, TOut> Skip(System.Int32 count)
   method Orleans.Dataflow.Flow<TIn, TOut> SkipWhile(System.Func<TOut, System.Boolean> predicate)
   method Orleans.Dataflow.Flow<TIn, TOut> SkipWithin(System.TimeSpan window)
@@ -548,6 +549,7 @@ TYPE static class Orleans.Dataflow.Sink
   method static Orleans.Dataflow.SinkWithResult<T, TState> Aggregate<T, TState>(TState seed, System.Func<TState, T, TState> folder)
   method static Orleans.Dataflow.SinkWithResult<T, TState> AggregateAsync<T, TState>(TState seed, System.Func<TState, T, System.Threading.CancellationToken, System.Threading.Tasks.Task<TState>> folder)
 TYPE sealed class Orleans.Dataflow.Sink<T>
+  method Orleans.Dataflow.Sink<T> Named(System.String occurrenceName)
   method virtual System.String ToString()
 TYPE sealed class Orleans.Dataflow.SinkFactory<T>
   method Orleans.Dataflow.Sink<T> ForEach(System.Action<T> callback)
@@ -565,10 +567,12 @@ TYPE sealed class Orleans.Dataflow.SinkFactory<T>
   method virtual System.String ToString()
 TYPE sealed class Orleans.Dataflow.SinkWithResult<TIn, TResult>
   method Orleans.Dataflow.Sink<TIn> ToSink()
+  method Orleans.Dataflow.SinkWithResult<TIn, TResult> Named(System.String occurrenceName)
   method virtual System.String ToString()
   operator static Orleans.Dataflow.Sink<TIn> op_Explicit(Orleans.Dataflow.SinkWithResult<TIn, TResult> sink)
 TYPE static class Orleans.Dataflow.Source  [System.Runtime.CompilerServices.ExtensionAttribute]
   method static Orleans.Dataflow.RunnableGraph UnzipTo<TLeft, TRight>(Orleans.Dataflow.Source<System.ValueTuple<TLeft, TRight>> source, Orleans.Dataflow.Branch<TLeft> left, Orleans.Dataflow.Branch<TRight> right)  [System.Runtime.CompilerServices.ExtensionAttribute]
+  method static Orleans.Dataflow.RunnableGraph UnzipTo<TLeft, TRight>(Orleans.Dataflow.Source<System.ValueTuple<TLeft, TRight>> source, System.String occurrenceName, Orleans.Dataflow.Branch<TLeft> left, Orleans.Dataflow.Branch<TRight> right)  [System.Runtime.CompilerServices.ExtensionAttribute]
   method static Orleans.Dataflow.Source<System.Int32> Range(System.Int32 start, System.Int32 count)
   method static Orleans.Dataflow.Source<System.Int64> Tick(System.TimeSpan initialDelay, System.TimeSpan interval)
   method static Orleans.Dataflow.Source<T> Cycle<T>(System.Collections.Generic.IEnumerable<T> elements)
@@ -589,11 +593,15 @@ TYPE static class Orleans.Dataflow.Source  [System.Runtime.CompilerServices.Exte
   method static Orleans.Dataflow.Source<T> UnfoldAsync<TState, T>(TState seed, Orleans.Dataflow.AsyncUnfoldGenerator<TState, T> generator)
 TYPE sealed class Orleans.Dataflow.Source<T>
   method Orleans.Dataflow.Fork<T1, T2> Fork<T1, T2>(Orleans.Dataflow.Flow<T, T1> left, Orleans.Dataflow.Flow<T, T2> right)
+  method Orleans.Dataflow.Fork<T1, T2> Fork<T1, T2>(System.String occurrenceName, Orleans.Dataflow.Flow<T, T1> left, Orleans.Dataflow.Flow<T, T2> right)
   method Orleans.Dataflow.RunnableGraph BalanceTo(Orleans.Dataflow.Branch<T>[] branches)
+  method Orleans.Dataflow.RunnableGraph BalanceTo(System.String occurrenceName, Orleans.Dataflow.Branch<T>[] branches)
   method Orleans.Dataflow.RunnableGraph BroadcastTo(Orleans.Dataflow.Branch<T>[] branches)
+  method Orleans.Dataflow.RunnableGraph BroadcastTo(System.String occurrenceName, Orleans.Dataflow.Branch<T>[] branches)
   method Orleans.Dataflow.RunnableGraph FanOutTo<TLeft, TRight>(Orleans.Dataflow.RegisteredFanOut<T, TLeft, TRight> junction, System.String occurrenceName, Orleans.Dataflow.Serialization.CanonicalJsonValue parameters, Orleans.Dataflow.Branch<TLeft> left, Orleans.Dataflow.Branch<TRight> right)
   method Orleans.Dataflow.RunnableGraph FanOutTo<TOut>(Orleans.Dataflow.RegisteredFanOut<T, TOut> junction, System.String occurrenceName, Orleans.Dataflow.Serialization.CanonicalJsonValue parameters, Orleans.Dataflow.Branch<TOut>[] branches)
   method Orleans.Dataflow.RunnableGraph PartitionTo(System.Func<T, System.Int32> router, Orleans.Dataflow.Branch<T>[] branches)
+  method Orleans.Dataflow.RunnableGraph PartitionTo(System.Func<T, System.Int32> router, System.String occurrenceName, Orleans.Dataflow.Branch<T>[] branches)
   method Orleans.Dataflow.RunnableGraph To(Orleans.Dataflow.RegisteredSink<T> sink, System.String occurrenceName, Orleans.Dataflow.Serialization.CanonicalJsonValue parameters)
   method Orleans.Dataflow.RunnableGraph To(Orleans.Dataflow.Sink<T> sink)
   method Orleans.Dataflow.RunnableGraph To(System.Func<Orleans.Dataflow.SinkFactory<T>, Orleans.Dataflow.Sink<T>> sink)
@@ -620,6 +628,7 @@ TYPE sealed class Orleans.Dataflow.Source<T>
   method Orleans.Dataflow.Source<T> Interleave(Orleans.Dataflow.Source<T> other, System.Int32 segmentSize)
   method Orleans.Dataflow.Source<T> Merge(Orleans.Dataflow.Source<T> other)
   method Orleans.Dataflow.Source<T> Merge(Orleans.Dataflow.Source<T> second, Orleans.Dataflow.Source<T> third)
+  method Orleans.Dataflow.Source<T> Named(System.String occurrenceName)
   method Orleans.Dataflow.Source<T> Prepend(Orleans.Dataflow.Source<T> head)
   method Orleans.Dataflow.Source<T> Prepend(T[] elements)
   method Orleans.Dataflow.Source<T> Skip(System.Int32 count)
@@ -642,6 +651,7 @@ TYPE sealed class Orleans.Dataflow.Source<T>
   method Orleans.Dataflow.Source<TOut> FanIn<TOut>(Orleans.Dataflow.RegisteredFanIn<T, TOut> junction, System.String occurrenceName, Orleans.Dataflow.Serialization.CanonicalJsonValue parameters, Orleans.Dataflow.Source<T>[] others)
   method Orleans.Dataflow.Source<TOut> FanIn<TSecond, TOut>(Orleans.Dataflow.RegisteredFanIn<T, TSecond, TOut> junction, System.String occurrenceName, Orleans.Dataflow.Serialization.CanonicalJsonValue parameters, Orleans.Dataflow.Source<TSecond> other)
   method Orleans.Dataflow.Source<TOut> ForkMerge<TOut>(Orleans.Dataflow.Flow<T, TOut> left, Orleans.Dataflow.Flow<T, TOut> right)
+  method Orleans.Dataflow.Source<TOut> ForkMerge<TOut>(System.String occurrenceName, Orleans.Dataflow.Flow<T, TOut> left, Orleans.Dataflow.Flow<T, TOut> right)
   method Orleans.Dataflow.Source<TOut> GroupBy<TKey, TOut>(Orleans.Dataflow.GroupByOptions options, System.Func<T, TKey> keySelector, Orleans.Dataflow.Flow<T, TOut> group)
   method Orleans.Dataflow.Source<TOut> Select<TOut>(System.Func<T, TOut> selector)
   method Orleans.Dataflow.Source<TOut> SelectAsync<TOut>(Orleans.Dataflow.ParallelismOptions options, System.Func<T, System.Threading.CancellationToken, System.Threading.Tasks.Task<TOut>> selector)

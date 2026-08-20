@@ -393,6 +393,42 @@ module Source =
     let via (flow: Flow<'In, 'Out>) (source: Source<'In>) : Source<'Out> =
         Source<'Out>(source.State.Concat flow.Stages)
 
+    /// <summary>Gives the occurrence a source ends at an author-stable name.</summary>
+    /// <param name="occurrenceName">The name, which is one identifier segment.</param>
+    /// <param name="source">The source being named, which is unchanged.</param>
+    /// <returns>The named source.</returns>
+    /// <exception cref="T:System.ArgumentException">
+    /// <paramref name="occurrenceName"/> is not a valid single-segment node identifier.
+    /// </exception>
+    /// <exception cref="T:System.InvalidOperationException">
+    /// The occurrence the source ends at is already named, whether by an earlier
+    /// <see cref="M:Orleans.Dataflow.FSharp.Source.named``1"/> or by the registered attachment that created
+    /// it. Renaming is refused rather than performed.
+    /// </exception>
+    /// <remarks>
+    /// <para>
+    /// It names <em>the occurrence this source ends at</em> — the stage the next function in the pipeline
+    /// would attach to. After an operator that is the stage the operator added; after a fan-in it is the
+    /// junction; after <see cref="M:Orleans.Dataflow.FSharp.Source.alsoTo``1"/> or
+    /// <see cref="M:Orleans.Dataflow.FSharp.Source.divertTo``1"/> it is the tapping junction, which is the
+    /// one occurrence such a call contributes that has no other spelling, because the branch named its own
+    /// stages where they were written.
+    /// </para>
+    /// <para>
+    /// A closing fan-out takes its junction's name as an argument instead, for the reason a registered one
+    /// always has: the call answers with a document, so there is no value left to name the junction on.
+    /// </para>
+    /// <para>
+    /// Everything <see cref="M:Orleans.Dataflow.FSharp.Flow.named``2"/> states about what a name is holds
+    /// here: it is the node identifier the occurrence carries into the document, a named graph therefore has
+    /// a different fingerprint from the unnamed one, and a graph whose occurrences are all named declares
+    /// <c>ephemeral-identity</c> no longer. Two occurrences of one graph sharing a name is refused when the
+    /// graph is closed, by the algebra that reports every collision.
+    /// </para>
+    /// </remarks>
+    let named (occurrenceName: string) (source: Source<'T>) : Source<'T> =
+        Source<'T>(source.State.Naming(LocalOccurrenceName.Parse(occurrenceName, nameof occurrenceName)))
+
     /// <summary>Extends a source with one named occurrence of a registered stage.</summary>
     /// <param name="stage">The typed handle of the registered stage, resolved from a catalog.</param>
     /// <param name="occurrenceName">The author-stable name of this occurrence.</param>
@@ -974,12 +1010,36 @@ module Source =
 
         Source<'Out>(placed.Combine(occurrence, LocalJunctionGuard.PortsOf specification.InputPorts))
 
+    /// <summary>Builds the unzip junction occurrence for one pair type.</summary>
+    /// <remarks>
+    /// Both unzip spellings read the projections from here, so the named one writes the document the unnamed
+    /// one writes with a single identifier replaced and nothing else moved.
+    /// </remarks>
+    let private unzipping<'Left, 'Right> () : LocalStageDescriptor =
+        LocalStageDescriptor.Unzip(
+            Func<struct ('Left * 'Right), 'Left>(fun struct (first, _) -> first),
+            Func<struct ('Left * 'Right), 'Right>(fun struct (_, second) -> second))
+
+    /// <summary>Names the junction occurrence a closing fan-out is about to add.</summary>
+    /// <remarks>
+    /// The one place a name reaches a junction a closing call adds, so all four local fan-out closes check it
+    /// with the rule <see cref="M:Orleans.Dataflow.FSharp.Source.named``1"/> uses and report the caller's own
+    /// parameter. The caller's parameter name is passed rather than inferred, exactly as it is for a slot
+    /// name: inferring it would name this function's parameter and the author wrote the closing call's.
+    /// </remarks>
+    let private junctionNamed
+        (parameterName: string)
+        (occurrenceName: string)
+        (junction: LocalStageDescriptor)
+        : LocalStageDescriptor =
+        junction.Named(LocalOccurrenceName.Parse(occurrenceName, parameterName))
+
     /// <summary>Closes a source into a graph through a fan-out junction and its legs.</summary>
     /// <remarks>
     /// Every terminal fan-out funnels through here, which is what makes a broadcast, a balance, a partition,
     /// and an unzip one operation with four junction stages rather than four implementations: what differs is
-    /// the occurrence and the leg ports, and the slot each result-bearing leg asks for is the same arithmetic
-    /// in all of them. That arithmetic is the shared guard's, not this package's.
+    /// the occurrence — named or not — and the leg ports, and the slot each result-bearing leg asks for is the
+    /// same arithmetic in all of them. That arithmetic is the shared guard's, not this package's.
     /// </remarks>
     let private fanOutTo
         (junction: LocalStageDescriptor)
@@ -1283,6 +1343,34 @@ module Source =
     let fork (left: Flow<'T, 'T1>) (right: Flow<'T, 'T2>) (source: Source<'T>) : Fork<'T1, 'T2> =
         Fork<'T1, 'T2>(splitInto (LocalStageDescriptor.Broadcast()) left.Stages right.Stages source)
 
+    /// <summary>Sends every element down two flows at once through a named junction, to be rejoined.</summary>
+    /// <param name="occurrenceName">The author-stable name of the broadcasting junction occurrence.</param>
+    /// <param name="left">The first derivation, which is unchanged.</param>
+    /// <param name="right">The second derivation, which is unchanged.</param>
+    /// <param name="source">The source being forked, which is unchanged.</param>
+    /// <returns>The fork, which is closed by one of the <c>Fork</c> module's own functions.</returns>
+    /// <exception cref="T:System.ArgumentException">
+    /// <paramref name="occurrenceName"/> is not a valid single-segment node identifier.
+    /// </exception>
+    /// <remarks>
+    /// The name is an argument here for the reason it is one on a closing fan-out:
+    /// <see cref="M:Orleans.Dataflow.FSharp.Source.named``1"/> names the occurrence a source ends at, and a
+    /// fork ends at two — so the junction it was split by has no other spelling. The rejoin is a source again
+    /// and is named the usual way, which is why one name is written here and not two.
+    /// </remarks>
+    let forkNamed
+        (occurrenceName: string)
+        (left: Flow<'T, 'T1>)
+        (right: Flow<'T, 'T2>)
+        (source: Source<'T>)
+        : Fork<'T1, 'T2> =
+        Fork<'T1, 'T2>(
+            splitInto
+                (junctionNamed (nameof occurrenceName) occurrenceName (LocalStageDescriptor.Broadcast()))
+                left.Stages
+                right.Stages
+                source)
+
     /// <summary>Sends every element down two flows at once and takes whichever result arrives first.</summary>
     /// <param name="left">The first derivation, which is unchanged.</param>
     /// <param name="right">The second derivation, which is unchanged.</param>
@@ -1297,6 +1385,37 @@ module Source =
     /// </remarks>
     let forkMerge (left: Flow<'T, 'Out>) (right: Flow<'T, 'Out>) (source: Source<'T>) : Source<'Out> =
         let diamond = splitInto (LocalStageDescriptor.Broadcast()) left.Stages right.Stages source
+
+        Source<'Out>(
+            diamond.Combine(LocalStageDescriptor.Merge(), LocalJunctionGuard.FanInPorts LocalVocabulary.MinFanIn))
+
+    /// <summary>Sends every element down two flows at once through a named junction, taking whichever arrives first.</summary>
+    /// <param name="occurrenceName">The author-stable name of the broadcasting junction occurrence.</param>
+    /// <param name="left">The first derivation, which is unchanged.</param>
+    /// <param name="right">The second derivation, which is unchanged.</param>
+    /// <param name="source">The source being forked, which is unchanged.</param>
+    /// <returns>A source of both derivations' elements.</returns>
+    /// <exception cref="T:System.ArgumentException">
+    /// <paramref name="occurrenceName"/> is not a valid single-segment node identifier.
+    /// </exception>
+    /// <remarks>
+    /// This function adds two junctions — the broadcast that splits and the merge that rejoins — and names
+    /// one of them. The merge is the occurrence the answering source ends at, so it is named with
+    /// <see cref="M:Orleans.Dataflow.FSharp.Source.named``1"/>; the broadcast is the one with no other
+    /// spelling, which is why it is the one this argument is for.
+    /// </remarks>
+    let forkMergeNamed
+        (occurrenceName: string)
+        (left: Flow<'T, 'Out>)
+        (right: Flow<'T, 'Out>)
+        (source: Source<'T>)
+        : Source<'Out> =
+        let diamond =
+            splitInto
+                (junctionNamed (nameof occurrenceName) occurrenceName (LocalStageDescriptor.Broadcast()))
+                left.Stages
+                right.Stages
+                source
 
         Source<'Out>(
             diamond.Combine(LocalStageDescriptor.Merge(), LocalJunctionGuard.FanInPorts LocalVocabulary.MinFanIn))
@@ -1439,6 +1558,37 @@ module Source =
 
         fanOutTo (LocalStageDescriptor.Broadcast()) (LocalJunctionGuard.FanOutPorts legs.Count) legs source
 
+    /// <summary>Closes a source by delivering every element to every branch, through a named junction.</summary>
+    /// <param name="occurrenceName">The author-stable name of the junction occurrence.</param>
+    /// <param name="branches">The branches, in the order they are wired to the junction's legs.</param>
+    /// <param name="source">The source being closed, which is unchanged.</param>
+    /// <returns>The closed graph, ready to materialize.</returns>
+    /// <exception cref="T:System.ArgumentException">
+    /// <paramref name="occurrenceName"/> is not a valid single-segment node identifier, there are fewer than
+    /// two branches or more than the eight a local junction declares legs for, or two branches declare a
+    /// result under one name.
+    /// </exception>
+    /// <remarks>
+    /// The name is an argument here rather than an <see cref="M:Orleans.Dataflow.FSharp.Source.named``1"/>
+    /// call, and the reason is the shape of the call rather than a second rule about junctions: this function
+    /// adds a junction occurrence <em>and</em> closes the graph, so it answers with a document and there is no
+    /// value left to name it on. That is how
+    /// <see cref="M:Orleans.Dataflow.FSharp.Source.fanOutToRegistered``2"/> has always spelled it, and it is
+    /// the one spelling that lets a branching graph of local stages be named to its last occurrence.
+    /// </remarks>
+    let broadcastToNamed
+        (occurrenceName: string)
+        (branches: Branch<'T> list)
+        (source: Source<'T>)
+        : Orleans.Dataflow.RunnableGraph =
+        let legs = legsOf (nameof branches) branches
+
+        fanOutTo
+            (junctionNamed (nameof occurrenceName) occurrenceName (LocalStageDescriptor.Broadcast()))
+            (LocalJunctionGuard.FanOutPorts legs.Count)
+            legs
+            source
+
     /// <summary>Closes a source by delivering each element to one branch that has room.</summary>
     /// <param name="branches">The branches, in the order they are wired to the junction's legs.</param>
     /// <param name="source">The source being closed, which is unchanged.</param>
@@ -1457,6 +1607,35 @@ module Source =
         let legs = legsOf (nameof branches) branches
 
         fanOutTo (LocalStageDescriptor.Balance()) (LocalJunctionGuard.FanOutPorts legs.Count) legs source
+
+    /// <summary>Closes a source by delivering each element to one branch that has room, through a named junction.</summary>
+    /// <param name="occurrenceName">The author-stable name of the junction occurrence.</param>
+    /// <param name="branches">The branches, in the order they are wired to the junction's legs.</param>
+    /// <param name="source">The source being closed, which is unchanged.</param>
+    /// <returns>The closed graph, ready to materialize.</returns>
+    /// <exception cref="T:System.ArgumentException">
+    /// <paramref name="occurrenceName"/> is not a valid single-segment node identifier, there are fewer than
+    /// two branches or more than the eight a local junction declares legs for, or two branches declare a
+    /// result under one name.
+    /// </exception>
+    /// <remarks>
+    /// The name is an argument for the reason it is one on
+    /// <see cref="M:Orleans.Dataflow.FSharp.Source.broadcastToNamed``1"/>: the call adds a junction and closes
+    /// the graph in one step, so it answers with a document and there is no value left to name the junction
+    /// on.
+    /// </remarks>
+    let balanceToNamed
+        (occurrenceName: string)
+        (branches: Branch<'T> list)
+        (source: Source<'T>)
+        : Orleans.Dataflow.RunnableGraph =
+        let legs = legsOf (nameof branches) branches
+
+        fanOutTo
+            (junctionNamed (nameof occurrenceName) occurrenceName (LocalStageDescriptor.Balance()))
+            (LocalJunctionGuard.FanOutPorts legs.Count)
+            legs
+            source
 
     /// <summary>Closes a source by sending each element to the branch a function names.</summary>
     /// <param name="router">The function answering the zero-based position of the branch for an element.</param>
@@ -1494,6 +1673,41 @@ module Source =
             legs
             source
 
+    /// <summary>Closes a source by sending each element to the branch a function names, through a named junction.</summary>
+    /// <param name="router">The function answering the zero-based position of the branch for an element.</param>
+    /// <param name="occurrenceName">The author-stable name of the junction occurrence.</param>
+    /// <param name="branches">The branches, in the order the router's answers index them.</param>
+    /// <param name="source">The source being closed, which is unchanged.</param>
+    /// <returns>The closed graph, ready to materialize.</returns>
+    /// <exception cref="T:System.ArgumentException">
+    /// <paramref name="occurrenceName"/> is not a valid single-segment node identifier, there are fewer than
+    /// two branches or more than the eight a local junction declares legs for, or two branches declare a
+    /// result under one name.
+    /// </exception>
+    /// <remarks>
+    /// The name comes after the router for the reason it comes after the junction handle on
+    /// <see cref="M:Orleans.Dataflow.FSharp.Source.fanOutToRegistered``2"/>: what the stage is reads first,
+    /// and what this occurrence of it is called reads second. Naming the occurrence does not make the router
+    /// a document's business — a function never enters one, so a partitioned graph is <c>nondeployable</c>
+    /// named or not.
+    /// </remarks>
+    let partitionToNamed
+        (router: 'T -> int)
+        (occurrenceName: string)
+        (branches: Branch<'T> list)
+        (source: Source<'T>)
+        : Orleans.Dataflow.RunnableGraph =
+        let legs = legsOf (nameof branches) branches
+
+        fanOutTo
+            (junctionNamed
+                (nameof occurrenceName)
+                occurrenceName
+                (LocalStageDescriptor.Partition(Func<'T, int> router)))
+            (LocalJunctionGuard.FanOutPorts legs.Count)
+            legs
+            source
+
     /// <summary>Closes a source of pairs by sending each half of every pair to a branch of its own.</summary>
     /// <param name="left">The branch the left halves take, which is unchanged.</param>
     /// <param name="right">The branch the right halves take, which is unchanged.</param>
@@ -1527,9 +1741,38 @@ module Source =
         let legs = [| legOf left; legOf right |] :> IReadOnlyList<BranchLeg>
 
         fanOutTo
-            (LocalStageDescriptor.Unzip(
-                Func<struct ('Left * 'Right), 'Left>(fun struct (first, _) -> first),
-                Func<struct ('Left * 'Right), 'Right>(fun struct (_, second) -> second)))
+            (unzipping<'Left, 'Right> ())
+            [| LocalVocabulary.LeftPort; LocalVocabulary.RightPort |]
+            legs
+            source
+
+    /// <summary>Closes a source of pairs through a named unzip junction, one branch per half.</summary>
+    /// <param name="occurrenceName">The author-stable name of the junction occurrence.</param>
+    /// <param name="left">The branch the left halves take, which is unchanged.</param>
+    /// <param name="right">The branch the right halves take, which is unchanged.</param>
+    /// <param name="source">The source of pairs being closed, which is unchanged.</param>
+    /// <returns>The closed graph, ready to materialize.</returns>
+    /// <exception cref="T:System.ArgumentException">
+    /// <paramref name="occurrenceName"/> is not a valid single-segment node identifier, or both branches
+    /// declare a result under one name.
+    /// </exception>
+    /// <remarks>
+    /// The name is an argument for the reason it is one on
+    /// <see cref="M:Orleans.Dataflow.FSharp.Source.broadcastToNamed``1"/>: the call adds a junction and closes
+    /// the graph in one step, so it answers with a document and there is no value left to name the junction
+    /// on. The two projections still never enter the document, so an unzipped graph stays
+    /// <c>nondeployable</c> whether or not its junction is named.
+    /// </remarks>
+    let unzipToNamed
+        (occurrenceName: string)
+        (left: Branch<'Left>)
+        (right: Branch<'Right>)
+        (source: Source<struct ('Left * 'Right)>)
+        : Orleans.Dataflow.RunnableGraph =
+        let legs = [| legOf left; legOf right |] :> IReadOnlyList<BranchLeg>
+
+        fanOutTo
+            (junctionNamed (nameof occurrenceName) occurrenceName (unzipping<'Left, 'Right> ()))
             [| LocalVocabulary.LeftPort; LocalVocabulary.RightPort |]
             legs
             source

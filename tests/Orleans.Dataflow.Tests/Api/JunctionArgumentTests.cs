@@ -56,9 +56,40 @@ public sealed class JunctionArgumentTests
         Branch<int> discard = Flow.For<int>().To(Sink.Ignore<int>());
         Flow<int, int> identity = Flow.For<int>();
 
-        Assert.Throws<ArgumentNullException>(() => numbers.BroadcastTo(null!));
+        // Every null here is cast rather than written bare, because a fan-out close has two overloads that a
+        // bare null fits — the branch array of the unnamed one and the occurrence name of the named one.
+        // Overload resolution reports that as a compile error and never as a wrong call, which is the price
+        // of the one spelling that lets a closing junction be named at all; a real call writes a string
+        // literal or a list and is unambiguous.
+        Assert.Throws<ArgumentNullException>(() => numbers.BroadcastTo((Branch<int>[])null!));
+        Assert.Throws<ArgumentNullException>(() => numbers.BalanceTo((Branch<int>[])null!));
+        Assert.Throws<ArgumentNullException>(() => numbers.BroadcastTo("tee", (Branch<int>[])null!));
+        Assert.Throws<ArgumentNullException>(() => numbers.BalanceTo("tee", (Branch<int>[])null!));
         Assert.Throws<ArgumentNullException>(() => numbers.BroadcastTo(discard, null!));
         Assert.Throws<ArgumentNullException>(() => numbers.PartitionTo(null!, discard, discard));
+        Assert.Throws<ArgumentNullException>(() => numbers.PartitionTo(null!, "route", discard, discard));
+
+        // A null occurrence name is refused by the same guard a null slot name is, and names its own
+        // parameter rather than the array that follows it.
+        Assert.Equal(
+            "occurrenceName",
+            Assert.Throws<ArgumentNullException>(
+                () => numbers.BroadcastTo((string)null!, discard, discard)).ParamName);
+        Assert.Equal(
+            "occurrenceName",
+            Assert.Throws<ArgumentNullException>(
+                () => numbers.BalanceTo((string)null!, discard, discard)).ParamName);
+        Assert.Equal(
+            "occurrenceName",
+            Assert.Throws<ArgumentNullException>(
+                () => numbers.PartitionTo(static value => value, (string)null!, discard, discard)).ParamName);
+        Assert.Equal(
+            "occurrenceName",
+            Assert.Throws<ArgumentNullException>(
+                () => Source.From<(int Left, int Right)>([]).UnzipTo((string)null!, discard, discard)).ParamName);
+        Assert.Equal(
+            "occurrenceName",
+            Assert.Throws<ArgumentNullException>(() => numbers.Named(null!)).ParamName);
         Assert.Throws<ArgumentNullException>(() => numbers.AlsoTo(null!));
         Assert.Throws<ArgumentNullException>(() => numbers.Merge(null!));
         Assert.Throws<ArgumentNullException>(() => numbers.Merge(numbers, null!));

@@ -18,10 +18,13 @@ namespace Orleans.Dataflow.Authoring;
 /// document exactly once, at <c>To</c>.
 /// </para>
 /// <para>
-/// <see cref="Name"/> is therefore always <see langword="null"/> here, and that is not an omission: a name
-/// on a lambda stage would promise an edit-stable identity the delegate behind it cannot honor, so a graph
-/// holding one declares <see cref="CapabilityToken.EphemeralIdentity"/>. Explicit names are the
-/// registered surface's, where the behavior is in the catalog and the identity means something.
+/// <see cref="Name"/> is <see langword="null"/> until an author writes one with the <c>Named</c>
+/// combinator, and a graph holding one unnamed occurrence declares
+/// <see cref="CapabilityToken.EphemeralIdentity"/>. The default is deliberately not a derived or a
+/// generated name (ADR 0009): a random one differs between two runs of the same program, and a positional
+/// one renames itself when a stage is inserted above it, which is the anchoring failure the token exists to
+/// warn about. So an author who wants a durable identity writes one, and an author who does not gets a
+/// document that says so.
 /// </para>
 /// <para>
 /// <see cref="Behavior"/> and <see cref="Seed"/> are the two halves of the authoring-side binding, and
@@ -65,6 +68,26 @@ internal sealed class LocalStageDescriptor : StageOccurrence
         ControlType = controlType;
     }
 
+    /// <summary>Initializes a named copy of an existing descriptor.</summary>
+    /// <param name="source">The descriptor to copy, which is unchanged.</param>
+    /// <param name="name">The name the author wrote for this occurrence.</param>
+    /// <remarks>
+    /// Every other member is carried over verbatim, which is what makes naming an occurrence change its
+    /// identity and nothing else: the stage reference, the payload, the binding, and the control declaration
+    /// are the same values, so the node this occurrence writes differs from the unnamed one in its identifier
+    /// alone.
+    /// </remarks>
+    private LocalStageDescriptor(LocalStageDescriptor source, NodeId name)
+    {
+        Kind = source.Kind;
+        Behavior = source.Behavior;
+        Seed = source.Seed;
+        Parameters = source.Parameters;
+        ControlSlot = source.ControlSlot;
+        ControlType = source.ControlType;
+        Name = name;
+    }
+
     /// <summary>Gets the stage shape.</summary>
     internal LocalStageKind Kind { get; }
 
@@ -100,10 +123,10 @@ internal sealed class LocalStageDescriptor : StageOccurrence
 
     /// <inheritdoc/>
     /// <value>
-    /// Always <see langword="null"/>: this surface has no spelling for naming a lambda occurrence, and
-    /// deliberately so.
+    /// The name the author wrote with the <c>Named</c> combinator, or <see langword="null"/> for an
+    /// occurrence they left to be numbered by its position at closure.
     /// </value>
-    internal override NodeId? Name => null;
+    internal override NodeId? Name { get; }
 
     /// <inheritdoc/>
     internal override StageRef Stage => LocalVocabulary.StageOf(Kind);
@@ -162,6 +185,17 @@ internal sealed class LocalStageDescriptor : StageOccurrence
     /// </value>
     internal override IReadOnlyList<CapabilityToken> RequiredCapabilities =>
         LocalVocabulary.RequiredCapabilitiesOf(Kind);
+
+    /// <summary>Returns this occurrence under the name an author wrote for it.</summary>
+    /// <param name="name">The validated name.</param>
+    /// <returns>A named copy; this descriptor is unchanged.</returns>
+    /// <remarks>
+    /// A copy rather than a mutation, because an authoring value that has been composed into a graph must be
+    /// byte-for-byte the value it was before. Whether naming is allowed at all is
+    /// <see cref="LocalOccurrenceName.Rename"/>'s question, which is the one place that refuses a rename;
+    /// this method is the copy it performs once the answer is yes.
+    /// </remarks>
+    internal LocalStageDescriptor Named(NodeId name) => new(this, name);
 
     /// <summary>Creates a source over an in-memory sequence.</summary>
     /// <param name="elements">The sequence, as the authoring value received it.</param>
@@ -951,7 +985,12 @@ internal sealed class LocalStageDescriptor : StageOccurrence
             controlType);
 
     /// <summary>Returns a one-line diagnostic summary of this occurrence.</summary>
-    /// <returns>The stage reference text, such as <c>local:select@1</c>.</returns>
+    /// <returns>
+    /// The stage reference text, such as <c>local:select@1</c>, or <c>intake [local:buffer@1]</c> for an
+    /// occurrence the author named — which is the form
+    /// <see cref="RegisteredStageOccurrence.ToString"/> renders, because a named occurrence of either kind is
+    /// the same thing to a reader.
+    /// </returns>
     /// <remarks>The bound behavior is deliberately not rendered: a closure has no useful text form.</remarks>
-    public override string ToString() => Stage.ToString();
+    public override string ToString() => Name is { } name ? $"{name} [{Stage}]" : Stage.ToString();
 }

@@ -37,6 +37,28 @@ public sealed class SinkWithResult<TIn, TResult>
     /// <summary>Gets the occurrences this sink contributes to a graph, in authoring order.</summary>
     internal IReadOnlyList<StageOccurrence> Stages { get; }
 
+    /// <summary>Gives this sink's terminal occurrence an author-stable name.</summary>
+    /// <param name="occurrenceName">The name, which is one identifier segment.</param>
+    /// <returns>A new sink; this one is unchanged.</returns>
+    /// <exception cref="ArgumentNullException"><paramref name="occurrenceName"/> is <see langword="null"/>.</exception>
+    /// <exception cref="ArgumentException">
+    /// <paramref name="occurrenceName"/> is not a valid single-segment node identifier.
+    /// </exception>
+    /// <exception cref="InvalidOperationException">
+    /// The terminal is already named, and renaming is refused rather than performed.
+    /// </exception>
+    /// <remarks>
+    /// <see cref="Sink{T}.Named"/> on the result-bearing carrier, and the distinction it makes is the one
+    /// this type exists for. The occurrence name is the node's identity in the document; the slot name the
+    /// closing <c>To</c> asks for is what a run handle resolves the result under. Neither is derivable from
+    /// the other, both are the author's, and a graph needs the first to drop <c>ephemeral-identity</c> and
+    /// the second to hand anything back.
+    /// </remarks>
+    public SinkWithResult<TIn, TResult> Named(string occurrenceName) =>
+        new(LocalStageChain.Naming(
+            Stages,
+            LocalOccurrenceName.Parse(occurrenceName, nameof(occurrenceName))));
+
     /// <summary>Converts a result-bearing sink into a plain one, discarding the result declaration.</summary>
     /// <param name="sink">The sink to convert, which may be <see langword="null"/>.</param>
     /// <returns>
