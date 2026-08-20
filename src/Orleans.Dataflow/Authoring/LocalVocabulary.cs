@@ -736,19 +736,28 @@ internal static class LocalVocabulary
     /// </remarks>
     internal static readonly CapabilityToken EphemeralIdentity = CapabilityToken.EphemeralIdentity;
 
-    /// <summary>The capabilities every local stage requires of the document that contains it.</summary>
+    /// <summary>The capabilities a local stage whose behavior is bound in this process requires.</summary>
     /// <remarks>
     /// One list, read both by <see cref="Orleans.Dataflow.LocalStageCatalog"/> when it declares what each
     /// local stage requires and by <see cref="LocalStageDescriptor"/> when an occurrence states what its
     /// document must declare. They have to agree exactly — the graph compiler's
     /// <c>undeclared-capability</c> rule rejects a document that declares less than its stages require —
     /// and one list is how they agree by construction rather than by two constants that happen to match.
-    /// This is also the whole of "nondeployable if and only if the graph holds a lambda stage": every
-    /// local stage requires the token and no registered one does, so the closed document's tokens are a
-    /// fact derived from its occurrences.
+    /// Which shapes carry it is <see cref="RequiredCapabilitiesOf"/>'s answer and is derived from
+    /// <see cref="RunsFromTheDocumentAlone"/> rather than listed (ADR 0009).
     /// </remarks>
     internal static readonly IReadOnlyList<CapabilityToken> RequiredCapabilities =
         Array.AsReadOnly<CapabilityToken>([CapabilityToken.Nondeployable]);
+
+    /// <summary>The capabilities a local stage a document states completely requires, which are none.</summary>
+    /// <remarks>
+    /// The empty list is the whole of ADR 0009 as a specification sees it: a shape with no behavior to bind
+    /// asks nothing of its host beyond an engine, and this engine is what every host of this library has.
+    /// It is a shared instance for the reason the other two lists are — a specification holds what the
+    /// vocabulary answered, and two empty arrays would be two answers to one question.
+    /// </remarks>
+    private static readonly IReadOnlyList<CapabilityToken> NoCapabilities =
+        Array.AsReadOnly<CapabilityToken>([]);
 
     /// <summary>The token a graph declaring state that survives a resume carries.</summary>
     /// <remarks>
@@ -792,12 +801,180 @@ internal static class LocalVocabulary
     /// <param name="kind">The stage shape.</param>
     /// <returns>The tokens the containing document has to declare.</returns>
     /// <remarks>
-    /// <c>nondeployable</c> for every shape without exception, and <c>durable-state</c> for the one shape
-    /// that asks a host to keep state across a process. A document's tokens stay a fact derived from its
-    /// occurrences rather than something an author remembers to write.
+    /// <c>nondeployable</c> for every shape a document cannot state completely, <c>durable-state</c> as
+    /// well for the one shape that asks a host to keep state across a process, and nothing at all for the
+    /// shapes <see cref="RunsFromTheDocumentAlone"/> admits. A document's tokens stay a fact derived from
+    /// its occurrences rather than something an author remembers to write, and the derivation is the
+    /// predicate rather than a list kept beside it: a shape that grows a delegate stops being deployable in
+    /// the same edit that gives it one.
     /// </remarks>
-    internal static IReadOnlyList<CapabilityToken> RequiredCapabilitiesOf(LocalStageKind kind) =>
-        kind is LocalStageKind.Durable ? DurableCapabilities : RequiredCapabilities;
+    internal static IReadOnlyList<CapabilityToken> RequiredCapabilitiesOf(LocalStageKind kind) => kind switch
+    {
+        LocalStageKind.Durable => DurableCapabilities,
+        _ when RunsFromTheDocumentAlone(kind) => NoCapabilities,
+        _ => RequiredCapabilities,
+    };
+
+    /// <summary>Reports whether an occurrence of <paramref name="kind"/> binds behavior at all.</summary>
+    /// <param name="kind">The stage shape.</param>
+    /// <returns>
+    /// <see langword="true"/> for every shape whose <see cref="LocalStageDescriptor.Behavior"/> is a
+    /// delegate, a sequence, a comparer, a projection, a facade, or a value of an element type.
+    /// </returns>
+    /// <exception cref="ArgumentOutOfRangeException"><paramref name="kind"/> is not a declared member.</exception>
+    /// <remarks>
+    /// <para>
+    /// The single statement of "this shape has nothing a binding could say", and the one
+    /// <see cref="LocalStageDescriptor"/>'s constructor checks every occurrence against: a shape named here
+    /// as behavior-free that is constructed with a behavior is a defect this assembly refuses to build,
+    /// which is what keeps the answer true rather than merely written down. A list of delegate-free kinds
+    /// kept beside the factories would go stale the first time a shape grew a delegate; this one cannot.
+    /// </para>
+    /// <para>
+    /// It is a statement about the binding and deliberately not about deployability.
+    /// <see cref="LocalStageKind.FirstOrDefault"/> and <see cref="LocalStageKind.LastOrDefault"/> bind no
+    /// behavior and are still not rehydratable, because their <em>seed</em> is a CLR value of the author's
+    /// with no canonical spelling; <see cref="LocalStageKind.Valve"/> binds none either and produces a
+    /// control instead. <see cref="RunsFromTheDocumentAlone"/> is where those two further facts are read.
+    /// </para>
+    /// </remarks>
+    internal static bool CarriesBehavior(LocalStageKind kind) => kind switch
+    {
+        LocalStageKind.Empty or
+            LocalStageKind.Range or
+            LocalStageKind.Never or
+            LocalStageKind.Tick or
+            LocalStageKind.Take or
+            LocalStageKind.Skip or
+            LocalStageKind.Buffer or
+            LocalStageKind.Delay or
+            LocalStageKind.InitialDelay or
+            LocalStageKind.Timeout or
+            LocalStageKind.TakeWithin or
+            LocalStageKind.SkipWithin or
+            LocalStageKind.Valve or
+            LocalStageKind.Broadcast or
+            LocalStageKind.Balance or
+            LocalStageKind.Merge or
+            LocalStageKind.Concat or
+            LocalStageKind.Interleave or
+            LocalStageKind.Ignore or
+            LocalStageKind.First or
+            LocalStageKind.FirstOrDefault or
+            LocalStageKind.Count or
+            LocalStageKind.Last or
+            LocalStageKind.LastOrDefault => false,
+        LocalStageKind.FromEnumerable or
+            LocalStageKind.Single or
+            LocalStageKind.Repeat or
+            LocalStageKind.FromTask or
+            LocalStageKind.Failed or
+            LocalStageKind.Unfold or
+            LocalStageKind.FromAsyncEnumerable or
+            LocalStageKind.FromFactory or
+            LocalStageKind.FromAsyncFactory or
+            LocalStageKind.Cycle or
+            LocalStageKind.UnfoldAsync or
+            LocalStageKind.Queue or
+            LocalStageKind.FromChannel or
+            LocalStageKind.Select or
+            LocalStageKind.Where or
+            LocalStageKind.Scan or
+            LocalStageKind.TakeWhile or
+            LocalStageKind.TakeThrough or
+            LocalStageKind.SkipWhile or
+            LocalStageKind.Distinct or
+            LocalStageKind.DeduplicateConsecutive or
+            LocalStageKind.SelectMany or
+            LocalStageKind.MergeMap or
+            LocalStageKind.ScanAsync or
+            LocalStageKind.Grouped or
+            LocalStageKind.Sliding or
+            LocalStageKind.GroupedWithin or
+            LocalStageKind.GroupedWeightedWithin or
+            LocalStageKind.GroupBy or
+            LocalStageKind.SelectAsync or
+            LocalStageKind.SelectAsyncUnordered or
+            LocalStageKind.SelectValueTaskAsync or
+            LocalStageKind.SelectValueTaskAsyncUnordered or
+            LocalStageKind.Throttle or
+            LocalStageKind.Partition or
+            LocalStageKind.Unzip or
+            LocalStageKind.Zip or
+            LocalStageKind.CombineLatest or
+            LocalStageKind.Fold or
+            LocalStageKind.FoldAsync or
+            LocalStageKind.ForEach or
+            LocalStageKind.ForEachAsync or
+            LocalStageKind.Collect or
+            LocalStageKind.ToChannel or
+            LocalStageKind.SinkProbe or
+            LocalStageKind.FaultPoint or
+            LocalStageKind.Supervised or
+            LocalStageKind.Durable or
+            LocalStageKind.MarkingSink => true,
+        _ => throw new ArgumentOutOfRangeException(nameof(kind)),
+    };
+
+    /// <summary>Returns the initial state an occurrence of <paramref name="kind"/> starts every run from.</summary>
+    /// <param name="kind">The stage shape, which must be one <see cref="CarriesBehavior"/> denies.</param>
+    /// <returns>The seed, which is <see langword="null"/> for every shape but the counting sink.</returns>
+    /// <exception cref="ArgumentOutOfRangeException"><paramref name="kind"/> is not a declared member.</exception>
+    /// <remarks>
+    /// The seed of a behavior-free shape belongs to the <em>shape</em> rather than to the occurrence, which
+    /// is exactly what makes such an occurrence recoverable from a document: a counting sink starts from
+    /// zero in every graph that ever holds one, and the number is this vocabulary's rather than an author's.
+    /// The two shapes whose seed is an author's — <see cref="LocalStageKind.FirstOrDefault"/> and
+    /// <see cref="LocalStageKind.LastOrDefault"/>, which carry <c>default(T)</c> boxed by the caller — are
+    /// refused by <see cref="RunsFromTheDocumentAlone"/> for that reason and never reach here.
+    /// </remarks>
+    internal static object? SeedOf(LocalStageKind kind) => kind switch
+    {
+        LocalStageKind.Count => 0L,
+        _ when !CarriesBehavior(kind) => null,
+        _ => throw new ArgumentOutOfRangeException(
+            nameof(kind),
+            kind,
+            "A shape that binds behavior has no seed of its own; its seed is the author's and is part of the binding."),
+    };
+
+    /// <summary>Reports whether an occurrence of <paramref name="kind"/> is recoverable from a document.</summary>
+    /// <param name="kind">The stage shape.</param>
+    /// <returns>
+    /// <see langword="true"/> for the shapes a node alone states completely, which are the shapes a
+    /// deployable run rehydrates and the shapes whose specification requires no capability.
+    /// </returns>
+    /// <exception cref="ArgumentOutOfRangeException"><paramref name="kind"/> is not a declared member.</exception>
+    /// <remarks>
+    /// <para>
+    /// ADR 0009's predicate, and three clauses rather than one, because "carries no delegate" turned out not
+    /// to be the whole question.
+    /// </para>
+    /// <para>
+    /// <b>It binds no behavior.</b> <see cref="CarriesBehavior"/> is that clause, and it is the reason the
+    /// answer cannot go stale: a shape that grows a delegate is classified there, in the same edit.
+    /// </para>
+    /// <para>
+    /// <b>Its seed is the shape's own.</b> <see cref="LocalStageKind.FirstOrDefault"/> and
+    /// <see cref="LocalStageKind.LastOrDefault"/> bind nothing and are still refused: the value they resolve
+    /// when they saw no element is <c>default(T)</c> for an element type no document names, so a rehydrated
+    /// occurrence would resolve <see langword="null"/> where the author's graph resolved zero. The clause is
+    /// spelled as the two shapes rather than as "carries a seed", because <see cref="LocalStageKind.Count"/>
+    /// carries one too and its seed is the number zero in every graph that ever holds one.
+    /// </para>
+    /// <para>
+    /// <b>It produces no runtime control.</b> <see cref="LocalStageKind.Valve"/> is the one behavior-free
+    /// shape that does, and a control is an object an author reaches <em>by name inside the process that
+    /// built the graph</em>. A deployable document has no such author: the run is on a silo, the handle is a
+    /// grain, and nothing crosses that boundary — so a rehydrated valve would be built holding a control
+    /// nobody could ever flip, which is a stage that either does nothing or stops the stream for good. It is
+    /// refused by name instead, and the refusal says which of the two it is.
+    /// </para>
+    /// </remarks>
+    internal static bool RunsFromTheDocumentAlone(LocalStageKind kind) =>
+        !CarriesBehavior(kind) &&
+        kind is not (LocalStageKind.FirstOrDefault or LocalStageKind.LastOrDefault) &&
+        (ResultPortOf(kind) is not { } declared || declared.Id != ControlPort);
 
     /// <summary>Returns the stage reference an occurrence of <paramref name="kind"/> declares.</summary>
     /// <param name="kind">The stage shape.</param>
@@ -1362,6 +1539,28 @@ internal static class LocalVocabulary
             _ => null,
         };
     }
+
+    /// <summary>Builds the catalog specification an occurrence of <paramref name="kind"/> validates against.</summary>
+    /// <param name="kind">The stage shape.</param>
+    /// <returns>The specification, derived entirely from this type's other answers.</returns>
+    /// <exception cref="ArgumentOutOfRangeException"><paramref name="kind"/> is not a declared member.</exception>
+    /// <remarks>
+    /// The one place a local stage becomes a specification, read by
+    /// <see cref="Orleans.Dataflow.LocalStageCatalog"/> for the whole vocabulary and by
+    /// <see cref="Orleans.Dataflow.Runtime.LocalPlumbing"/> for the part of it a silo publishes. Two
+    /// builders would be two chances for a deployment's catalog and an author's to disagree about one stage,
+    /// which is precisely the disagreement a catalog fingerprint exists to detect and precisely the one it
+    /// would be unable to explain.
+    /// </remarks>
+    internal static StageSpecification SpecificationOf(LocalStageKind kind) =>
+        StageSpecification.Create(
+            StageOf(kind),
+            ParameterContractOf(kind),
+            InputPortsOf(kind),
+            OutputPortsOf(kind),
+            ResultPortOf(kind) is { } result ? [result] : [],
+            RequiredCapabilitiesOf(kind),
+            ParameterValidatorOf(kind));
 
     /// <summary>Builds the node identifier of the occurrence at one position of an authoring chain.</summary>
     /// <param name="position">

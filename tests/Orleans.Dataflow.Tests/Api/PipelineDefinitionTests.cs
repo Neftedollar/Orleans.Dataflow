@@ -185,20 +185,27 @@ public sealed class PipelineDefinitionTests
     }
 
     [Fact]
-    public void ABufferedGraphIsRefusedEvenThoughItsWholeBehaviorIsInTheDocument()
+    public void ABufferedGraphIsRefusedForItsIdentityAloneBecauseItsWholeBehaviorIsInTheDocument()
     {
-        // The tempting exception, refused: a buffer carries no delegate, so its node says everything about
-        // it, and it is still nondeployable — 'local/buffer@v1' resolves in the local provider and nowhere
-        // else. A pipeline whose stages are half-resolvable is not a pipeline.
+        // The exception that used to be refused and is not any more (ADR 0009). A buffer carries no
+        // delegate, so its node says everything about it and every host of this library can execute one;
+        // 'local/buffer@v1' therefore requires no capability, and this graph declares 'nondeployable'
+        // nowhere. What is left is the buffer's identity: this surface has no spelling for naming a local
+        // occurrence, so the token that remains is the one about node identifiers being positions, and the
+        // refusal names exactly it and nothing else.
         RunnableGraph graph = Source.FromRegistered(OrderSource, "orders-in", SourceParameters)
             .Buffer(new BufferOptions { Capacity = 4 })
             .Via(Normalize, "normalize", NormalizeParameters)
             .To(IndexSink, "index-out", IndexParameters);
 
+        Assert.Equal(["ephemeral-identity"], Capabilities(graph.Document));
+
         ArgumentException rejected = Assert.Throws<ArgumentException>(
             () => graph.AsPipeline(GraphId.Create("orders"), GraphRevision.Create(1)));
 
-        Assert.Contains("'nondeployable'", rejected.Message, StringComparison.Ordinal);
+        Assert.Contains("breaks 1 deployability invariant", rejected.Message, StringComparison.Ordinal);
+        Assert.Contains("'ephemeral-identity'", rejected.Message, StringComparison.Ordinal);
+        Assert.DoesNotContain("'nondeployable'", rejected.Message, StringComparison.Ordinal);
     }
 
     [Fact]

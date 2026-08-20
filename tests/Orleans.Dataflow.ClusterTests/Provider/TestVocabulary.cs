@@ -39,6 +39,29 @@ internal static class TestVocabulary
     /// <summary>The sink that sums every element into a result.</summary>
     internal static StageRef Sum { get; } = StageRef.Create(Provider, StageId.Create("sum"), 1);
 
+    /// <summary>The source of <see cref="Range"/> with the opaque element contract on its output.</summary>
+    /// <remarks>
+    /// <para>
+    /// The same numbers under a different declaration, and it exists for one reason: local plumbing declares
+    /// <c>local-opaque@v1</c> on every port, a registered stage declares whatever its provider registered,
+    /// and the graph compiler's element rule compares the two for equality. So a document with a buffer
+    /// between two stages carrying <see cref="Number"/> does not validate anywhere, and a deployable
+    /// document with plumbing in it can only be written today by a provider that types its elements in the
+    /// CLR rather than in the document — which is what declaring the opaque contract says.
+    /// </para>
+    /// <para>
+    /// That limit is ADR 0009's rather than this fixture's, and
+    /// <c>DeployablePlumbingTests.PlumbingBetweenTwoStagesThatTypeTheirElementsIsStillRefusedByTheElementRule</c>
+    /// measures it directly. This pair is what lets the cluster prove the rest of the ADR meanwhile.
+    /// </para>
+    /// </remarks>
+    internal static StageRef OpaqueRange { get; } =
+        StageRef.Create(Provider, StageId.Create("opaque-range"), 1);
+
+    /// <summary>The sink of <see cref="Sum"/> with the opaque element contract on its input.</summary>
+    internal static StageRef OpaqueSum { get; } =
+        StageRef.Create(Provider, StageId.Create("opaque-sum"), 1);
+
     /// <summary>The flow that doubles every element through an awaited callback.</summary>
     /// <remarks>
     /// The asynchronous shape of the seam, which is a different code path from the synchronous one: it
@@ -92,6 +115,14 @@ internal static class TestVocabulary
     /// <summary>The contract of the total a summing sink yields.</summary>
     internal static ResultContract<long> Total { get; } = ResultContract.For<long>("test-total", 1);
 
+    /// <summary>The contract every local port declares, borrowed by the two opaque stages.</summary>
+    /// <remarks>
+    /// The identity is the local vocabulary's own, and reusing it is the point rather than a shortcut: a
+    /// provider that declares it is saying "my elements are typed by the CLR and not by this document",
+    /// which is exactly what a stage carrying boxed <see cref="long"/> values through this seam is doing.
+    /// </remarks>
+    internal static ElementContract<long> Opaque { get; } = ElementContract.For<long>("local-opaque", 1);
+
     /// <summary>The contract of the block of bytes the bulk sink yields.</summary>
     internal static ResultContract<byte[]> Block { get; } = ResultContract.For<byte[]>("test-block", 1);
 
@@ -135,6 +166,16 @@ internal static class TestVocabulary
             StageSpecification.Flow(Double, NoParameters, Port.In("in", Number), Port.Out("out", Number)),
             StageSpecification.Flow(Fail, FailParameters, Port.In("in", Number), Port.Out("out", Number)),
             StageSpecification.Sink(Sum, NoParameters, Port.In("in", Number), Port.Result("total", Total)),
+            StageSpecification.Source(
+                OpaqueRange,
+                RangeParameters,
+                Port.Out("out", Opaque),
+                TestRangeParameters.Validator),
+            StageSpecification.Sink(
+                OpaqueSum,
+                NoParameters,
+                Port.In("in", Opaque),
+                Port.Result("total", Total)),
             StageSpecification.Flow(DoubleAsync, NoParameters, Port.In("in", Number), Port.Out("out", Number)),
             StageSpecification.Sink(Collected, NoParameters, Port.In("in", Number), Port.Result("total", Total)),
             StageSpecification.Flow(Misplaced, NoParameters, Port.In("in", Number), Port.Out("out", Number)),

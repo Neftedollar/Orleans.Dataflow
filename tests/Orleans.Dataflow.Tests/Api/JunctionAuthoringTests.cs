@@ -237,16 +237,17 @@ public sealed class JunctionAuthoringTests
     }
 
     [Fact]
-    public void AFanOutOfRegisteredStagesDeclaresBothTokensTheJunctionBringsWithIt()
+    public void AFanOutOfRegisteredStagesDeclaresTheOneTokenTheJunctionBringsWithIt()
     {
         // The same stages in a chain declare nothing: a registered occurrence carries its identity and its
         // parameters in the document, and a named one is edit-stable, so a fully registered chain is a
-        // pipeline candidate. Adding a junction between them adds one local, unnamed occurrence, and the two
-        // tokens that occurrence brings are the whole difference.
+        // pipeline candidate. Adding a junction between them adds one local, unnamed occurrence, and the
+        // token that occurrence brings is the whole difference.
         //
-        // 'nondeployable' because every local stage requires it, and 'ephemeral-identity' because this
-        // surface has no spelling for naming a local junction occurrence — there is nothing durable for the
-        // name to identify. Its sibling is
+        // One token and not two, since ADR 0009. A broadcast has no delegate at all — how many legs it has
+        // is stated by the edges and the elements pass through untouched — so its specification requires no
+        // capability, and what is left is 'ephemeral-identity': this surface has no spelling for naming a
+        // local junction occurrence. Its sibling is
         // RegisteredJunctionTests.AFullyRegisteredFanOutDeclaresNeitherToken, which asserts the absence of
         // both on the same shape once the junction itself is a registered stage.
         RunnableGraph chain = Source.FromRegistered(
@@ -259,9 +260,7 @@ public sealed class JunctionAuthoringTests
         RunnableGraph fanOut = RegisteredFanOut(out ResultSlot<long> _);
 
         Assert.Empty(Capabilities(chain.Document));
-        Assert.Equal(
-            ["ephemeral-identity", "nondeployable"],
-            Capabilities(fanOut.Document).Order(StringComparer.Ordinal));
+        Assert.Equal(["ephemeral-identity"], Capabilities(fanOut.Document));
         Assert.Equal(
             ["stage-0003"],
             NodeIds(fanOut.Document).Where(id => id.StartsWith("stage-", StringComparison.Ordinal)));
